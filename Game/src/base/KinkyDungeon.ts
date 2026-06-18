@@ -90,6 +90,8 @@ let KDClipboardDisabled = window.location.host.includes('itch.zone');
 let CanvasWidth = 2000;
 let CanvasHeight = 1000;
 let KDStartTime = 0;
+// Cosmetic startup flag — rolled once at bundle init, before KDRandom is
+// initialized (see line ~7275). Intentionally unseeded; not part of simulation.
 let KDEasterEgg = Math.random() < 0.01;
 
 /** These languages have characters which are rendered bigger than English. */
@@ -1975,9 +1977,16 @@ function KinkyDungeonRun() {
 				KDOptionFilter = "";
 				return true;
 			}, true, 1000-350/2, 600, 350, 64, TextGet("GameToggles"), KDBaseWhite, "");
-			
 
-			let ii = 680;
+			DrawButtonKDEx("MultiplayerButton", () => {
+				KinkyDungeonState = "Multiplayer";
+				KDLobbyView = 'menu';
+				KDLobbyStatus = { phase: 'idle' };
+				return true;
+			}, true, 1000-350/2, 680, 350, 64, TextGet("LobbyTitle"), KDBaseWhite, "");
+
+
+			let ii = 760;
 			if (KDExitButton) {
 				DrawButtonKDEx("KDExitButton", () => {
 					//@ts-ignore
@@ -2710,9 +2719,9 @@ function KinkyDungeonRun() {
 
 			let name = "Ada";
 
-			let nameList = KDDefaultNames[Math.floor(Math.random() * KDDefaultNames.length)];
+			let nameList = KDRandomChoice(KDDefaultNames);
 			if (nameList && KDNameList[nameList]) {
-				name = KDNameList[nameList][Math.floor(Math.random() * KDNameList[nameList].length)];
+				name = KDRandomChoice(KDNameList[nameList]);
 			}
 			ElementValue("PlayerNameField", name);
 			return true;
@@ -3232,6 +3241,8 @@ function KinkyDungeonRun() {
 	} else if (KinkyDungeonState == "LoadSlots") {
 		KDUpdateDiscordName()
 		KDDrawLoadMenu();
+	} else if (KinkyDungeonState == "Multiplayer") {
+		KDDrawLobbyPanel();
 	}
 
 
@@ -6868,6 +6879,9 @@ function KinkyDungeonGenerateSaveData(): KinkyDungeonSave {
 	save.inventory = newInv;
 	save.KDGameData = KDGameData;
 	KDMapData.RandomPathablePoints = {};
+	// Stamp co-op players' appearance onto their entities so it rides
+	// KDMapData through save/load + state_sync (the Character lives in a side map).
+	if (typeof KDStampCoopAppearance === 'function') KDStampCoopAppearance();
 	save.KDMapData = KDMapData;
 	KinkyDungeonGenNavMap();
 	save.KDEventData = KDEventData;
@@ -6878,6 +6892,10 @@ function KinkyDungeonGenerateSaveData(): KinkyDungeonSave {
 	save.KDPersonalAlt = JSON.stringify(KDPersonalAlt);
 	save.KDPersistentNPCs = JSON.stringify(KDPersistentNPCs);
 	save.KDDeletedIDs = JSON.stringify(KDDeletedIDs);
+
+	// Record the loaded mod fingerprint so load-time mod-compat warnings
+	// are possible. Additive + ignored by older loaders; harmless in single-player.
+	if (typeof KDGetLocalModList === 'function') save.modList = KDGetLocalModList();
 
 
 	save.picks = KinkyDungeonItemCount("Pick");
@@ -7199,10 +7217,19 @@ function KinkyDungeonLoadGame(String: string = "", kdloadconsent = false) {
 
 			KDUnPackEnemies(KDMapData);
 			for (let en of KDMapData.Entities) {
-				if (en.id == -1 || en.player) {
+				// Bind the global only to the slot-0 player. A co-op P2
+				// (playerSlot:1) also carries player:true but must NOT hijack the
+				// singular player global.
+				if (en.id == -1 || (en.player && (en as any).playerSlot !== 1)) {
 					KinkyDungeonPlayerEntity = en;
 				}
 			}
+			// The load above reassigned the player global; re-point slot 0
+			// at it and re-bind the co-op slots (P2) from the loaded world.
+			if (typeof KDSyncLocalPlayerSlot === 'function') KDSyncLocalPlayerSlot();
+			// Rebuild co-op players' render Characters from the appearance
+			// stamped on their entities (the Character is never serialized).
+			if (typeof KDRestoreCoopCharacters === 'function') KDRestoreCoopCharacters();
 			KinkyDungeonLeashingEnemy();
 			KinkyDungeonJailGuard();
 			if (saveData.KDCommanderRoles) KDCommanderRoles = new Map(saveData.KDCommanderRoles);
@@ -7307,6 +7334,59 @@ function KDsetSeed(str: string) {
 	for (let i = 0; i < 1000; i++) {
 		KDRandom();
 	}
+}
+
+/* =========================================================================
+ * Seeded RNG helpers
+ *
+ * Wrap KDRandom (the sfc32 PRNG seeded by KinkyDungeonSeed) with the small
+ * surface that gameplay code actually needs. Gameplay should call these
+ * instead of bare Math.random() so the simulation is deterministic given a
+ * seed — required for multiplayer lockstep, and useful for replays and seed
+ * sharing.
+ *
+ * UI/cosmetic randomness (particles, button jitter, etc.) intentionally
+ * stays on Math.random().
+ *
+ * Each helper references KDRandom at call time, so reseeding via KDsetSeed
+ * or KDrandomizeSeed is honoured.
+ * ========================================================================= */
+
+/**
+ * Returns a seeded random integer in `[0, maxExclusive)`.
+ * `maxExclusive <= 0` returns `0` (defensive; never throws).
+ */
+function KDRandomInt(maxExclusive: number): number {
+	if (maxExclusive <= 0) return 0;
+	return Math.floor(KDRandom() * maxExclusive);
+}
+
+/**
+ * Returns a seeded random integer in `[min, maxInclusive]`.
+ * `min > maxInclusive` returns `min` (defensive; never throws).
+ */
+function KDRandomIntRange(min: number, maxInclusive: number): number {
+	if (maxInclusive < min) return min;
+	return min + Math.floor(KDRandom() * (maxInclusive - min + 1));
+}
+
+/**
+ * Returns a seeded random element of `arr`, or `undefined` for an empty array.
+ * Matches the pre-migration behaviour of `arr[Math.floor(rand * arr.length)]`
+ * on an empty array (which evaluates to `arr[0]` → `undefined`).
+ */
+function KDRandomChoice<T>(arr: T[]): T | undefined {
+	if (!arr || arr.length === 0) return undefined;
+	return arr[Math.floor(KDRandom() * arr.length)];
+}
+
+/**
+ * Returns `true` with probability `p` (range `[0, 1]`), `false` otherwise.
+ * `KDRandom()` is in `[0, 1)`, so `KDRandomChance(0)` is always `false` and
+ * `KDRandomChance(1)` is always `true`.
+ */
+function KDRandomChance(p: number): boolean {
+	return KDRandom() < p;
 }
 
 /**

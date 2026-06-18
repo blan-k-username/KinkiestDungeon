@@ -638,34 +638,37 @@ function KDStaggerEnemy(enemy: entity) {
 
 
 function KDMovePlayer(moveX: number, moveY: number, willing: boolean, sprint?: boolean, forceHitBullets?: boolean, suppressNoise?: boolean, noEvent?: boolean): boolean {
-	KinkyDungeonPlayerEntity.lastx = KinkyDungeonPlayerEntity.x;
-	KinkyDungeonPlayerEntity.lasty = KinkyDungeonPlayerEntity.y;
+	// Act on the local-player slot (== KinkyDungeonPlayerEntity in
+	// single-player; the guest's own slot under multiplayer).
+	const player = KDLocalPlayer();
+	player.lastx = player.x;
+	player.lasty = player.y;
 
 
-	KinkyDungeonPlayerEntity.lastx_avg = ((KinkyDungeonPlayerEntity.lastx_avg || 0) + KinkyDungeonPlayerEntity.x)*0.5;
-	KinkyDungeonPlayerEntity.lasty_avg = ((KinkyDungeonPlayerEntity.lasty_avg || 0) + KinkyDungeonPlayerEntity.y)*0.5;
-	if (Math.abs(KinkyDungeonPlayerEntity.lastx_avg - KinkyDungeonPlayerEntity.x) < 0.05) KinkyDungeonPlayerEntity.lastx_avg = KinkyDungeonPlayerEntity.x;
-	if (Math.abs(KinkyDungeonPlayerEntity.lasty_avg - KinkyDungeonPlayerEntity.y) < 0.05) KinkyDungeonPlayerEntity.lasty_avg = KinkyDungeonPlayerEntity.y;
+	player.lastx_avg = ((player.lastx_avg || 0) + player.x)*0.5;
+	player.lasty_avg = ((player.lasty_avg || 0) + player.y)*0.5;
+	if (Math.abs(player.lastx_avg - player.x) < 0.05) player.lastx_avg = player.x;
+	if (Math.abs(player.lasty_avg - player.y) < 0.05) player.lasty_avg = player.y;
 
-	KinkyDungeonPlayerEntity.lastmove = KinkyDungeonCurrentTick;
+	player.lastmove = KinkyDungeonCurrentTick;
 	let cancel = {cancelmove: false, returnvalue: false};
 	for (let newTile of Object.values(KDGetEffectTiles(moveX, moveY))) {
 		if (newTile.duration > 0 && KDEffectTileMoveOnFunctions[newTile.name]) {
-			cancel = KDEffectTileMoveOnFunctions[newTile.name](KinkyDungeonPlayerEntity, newTile, willing, {x: moveX - KinkyDungeonPlayerEntity.x, y: moveY - KinkyDungeonPlayerEntity.y}, sprint);
+			cancel = KDEffectTileMoveOnFunctions[newTile.name](player, newTile, willing, {x: moveX - player.x, y: moveY - player.y}, sprint);
 		}
 	}
 	if (!cancel.cancelmove) {
 		if (willing) {
-			if (moveX > KinkyDungeonPlayerEntity.x) {
+			if (moveX > player.x) {
 				KDFlipPlayer = true;
-			} else if (moveX < KinkyDungeonPlayerEntity.x) {
+			} else if (moveX < player.x) {
 				KDFlipPlayer = false;
 			}
 		} else {
 			KinkyDungeonSetFlag("forceMoved", 1);
 		}
-		KinkyDungeonPlayerEntity.x = moveX;
-		KinkyDungeonPlayerEntity.y = moveY;
+		player.x = moveX;
+		player.y = moveY;
 
 	}
 	let data = {
@@ -673,12 +676,12 @@ function KDMovePlayer(moveX: number, moveY: number, willing: boolean, sprint?: b
 		returnvalue: cancel.returnvalue, // Returns this
 		willing: willing, // True if the player triggers it, false if yoinked by tether
 		sprint: sprint, // True if faster than usual
-		lastX: KinkyDungeonPlayerEntity.lastx,
-		lastY: KinkyDungeonPlayerEntity.lasty,
+		lastX: player.lastx,
+		lastY: player.lasty,
 		moveX: moveX,
 		moveY: moveY,
 		sound: (sprint && !suppressNoise) ? (4): 0,
-		dist: KDistChebyshev(KinkyDungeonPlayerEntity.lastx - moveX, KinkyDungeonPlayerEntity.lasty - moveY),
+		dist: KDistChebyshev(player.lastx - moveX, player.lasty - moveY),
 	};
 	if (!noEvent)
 		KinkyDungeonSendEvent("playerMove", data);
@@ -686,8 +689,8 @@ function KDMovePlayer(moveX: number, moveY: number, willing: boolean, sprint?: b
 		KinkyDungeonMakeNoise(data.sound, data.moveX, data.moveY);
 	}
 	if (!cancel.cancelmove) {
-		KDCheckCollideableBullets(KinkyDungeonPlayerEntity, forceHitBullets);
-		KinkyDungeonHandleTraps(KinkyDungeonPlayerEntity, KinkyDungeonPlayerEntity.x, KinkyDungeonPlayerEntity.y, KinkyDungeonTrapMoved);
+		KDCheckCollideableBullets(player, forceHitBullets);
+		KinkyDungeonHandleTraps(player, player.x, player.y, KinkyDungeonTrapMoved);
 	}
 	return cancel.returnvalue;
 }

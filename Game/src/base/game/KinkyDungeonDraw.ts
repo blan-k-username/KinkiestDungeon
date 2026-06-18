@@ -1146,26 +1146,34 @@ function KinkyDungeonDrawGame() {
 	}
 
 	if (KinkyDungeonDrawState == "Game") {
+		// Keep the local-player slot (KDPlayers[KDLocalPlayerId]) in lockstep
+		// with the singular global each frame, covering every reassignment site
+		// (map placement, load, editor) from one chokepoint. No-op in single-player
+		// beyond a cheap reference assignment.
+		if (typeof KDSyncLocalPlayerSlot === 'function') KDSyncLocalPlayerSlot();
 		let tooltip = "";
 		if ((KinkyDungeonIsPlayer() || (KinkyDungeonGameData && CommonTime() < KinkyDungeonNextDataLastTimeReceived + KinkyDungeonNextDataLastTimeReceivedTimeout))) {
 
 
-			KinkyDungeonUpdateVisualPosition(KinkyDungeonPlayerEntity, KinkyDungeonDrawDelta);
+			KinkyDungeonUpdateVisualPosition(KDLocalPlayer(), KinkyDungeonDrawDelta);
 
+			// Center the camera on the LOCAL player's avatar — slot 0 (== the
+			// global) for the host/single-player, slot 1 (P2) for the guest.
+			const camPlayer = (typeof KDLocalPlayer === 'function') ? KDLocalPlayer() : KinkyDungeonPlayerEntity;
 			if (!KinkyDungeonInspect) {
-				KDInspectCamera.x = KinkyDungeonPlayerEntity.x;
-				KDInspectCamera.y = KinkyDungeonPlayerEntity.y;
+				KDInspectCamera.x = camPlayer.x;
+				KDInspectCamera.y = camPlayer.y;
 			}
-			let OX = KDInspectCamera.x - (KinkyDungeonPlayerEntity.x||0);
-			let OY = KDInspectCamera.y - (KinkyDungeonPlayerEntity.y||0);
+			let OX = KDInspectCamera.x - (camPlayer.x||0);
+			let OY = KDInspectCamera.y - (camPlayer.y||0);
 
-			let CamX = KinkyDungeonPlayerEntity.x - (KDToggles.Center ? 0 : Math.ceil(KinkyDungeonGridWidthDisplay/36)) - Math.floor(KinkyDungeonGridWidthDisplay/2) + OX;//Math.max(0, Math.min(KDMapData.GridWidth - KinkyDungeonGridWidthDisplay, KinkyDungeonPlayerEntity.x - Math.floor(KinkyDungeonGridWidthDisplay/2)));
-			let CamY = KinkyDungeonPlayerEntity.y - Math.floor(KinkyDungeonGridHeightDisplay/2) + OY;// Math.max(0, Math.min(KDMapData.GridHeight - KinkyDungeonGridHeightDisplay, KinkyDungeonPlayerEntity.y - Math.floor(KinkyDungeonGridHeightDisplay/2)));
+			let CamX = camPlayer.x - (KDToggles.Center ? 0 : Math.ceil(KinkyDungeonGridWidthDisplay/36)) - Math.floor(KinkyDungeonGridWidthDisplay/2) + OX;//Math.max(0, Math.min(KDMapData.GridWidth - KinkyDungeonGridWidthDisplay, KinkyDungeonPlayerEntity.x - Math.floor(KinkyDungeonGridWidthDisplay/2)));
+			let CamY = camPlayer.y - Math.floor(KinkyDungeonGridHeightDisplay/2) + OY;// Math.max(0, Math.min(KDMapData.GridHeight - KinkyDungeonGridHeightDisplay, KinkyDungeonPlayerEntity.y - Math.floor(KinkyDungeonGridHeightDisplay/2)));
 
 
-			let CamX_offsetVis = (KinkyDungeonInspect ? KDInspectCamera.x : KinkyDungeonPlayerEntity.visual_x)
+			let CamX_offsetVis = (KinkyDungeonInspect ? KDInspectCamera.x : (camPlayer.visual_x != null ? camPlayer.visual_x : camPlayer.x))
 				- (KDToggles.Center ? 0 : Math.ceil(KinkyDungeonGridWidthDisplay/36)) - Math.floor(KinkyDungeonGridWidthDisplay/2) - CamX;//Math.max(0, Math.min(KDMapData.GridWidth - KinkyDungeonGridWidthDisplay, KinkyDungeonPlayerEntity.visual_x - Math.floor(KinkyDungeonGridWidthDisplay/2))) - CamX;
-			let CamY_offsetVis = (KinkyDungeonInspect ? KDInspectCamera.y : KinkyDungeonPlayerEntity.visual_y) - Math.floor(KinkyDungeonGridHeightDisplay/2) - CamY;//Math.max(0, Math.min(KDMapData.GridHeight - KinkyDungeonGridHeightDisplay, KinkyDungeonPlayerEntity.visual_y - Math.floor(KinkyDungeonGridHeightDisplay/2))) - CamY;
+			let CamY_offsetVis = (KinkyDungeonInspect ? KDInspectCamera.y : (camPlayer.visual_y != null ? camPlayer.visual_y : camPlayer.y)) - Math.floor(KinkyDungeonGridHeightDisplay/2) - CamY;//Math.max(0, Math.min(KDMapData.GridHeight - KinkyDungeonGridHeightDisplay, KinkyDungeonPlayerEntity.visual_y - Math.floor(KinkyDungeonGridHeightDisplay/2))) - CamY;
 
 
 			if (KinkyDungeonFlags.get("Hypnosis") && KDToggles.HypnoOverlay) {
@@ -1786,6 +1794,11 @@ function KinkyDungeonDrawGame() {
 						+ (KinkyDungeonGridSizeDisplay/6),
 						zoom);
 
+			// Draw co-op second player(s) via the same player Character pipeline
+			// (their placeholder enemy sprite is suppressed in KinkyDungeonDrawEnemies).
+			if (KDDrawPlayer && typeof KDDrawCoopPlayers === 'function')
+				KDDrawCoopPlayers(canvasOffsetX, canvasOffsetY, CamX, CamY, CamX_offsetVis, CamY_offsetVis);
+
 			if ((KDToggles.ShowFacing || KDGetInertia(KDPlayer()) > 0)
 					&& (KinkyDungeonPlayerEntity.facing_y || KinkyDungeonPlayerEntity.facing_x)) {
 				KDDraw(kdstatusboard, kdpixisprites, "ui_playerfacing", KinkyDungeonRootDirectory + "UI/PlayerFacing.png",
@@ -2301,6 +2314,8 @@ function KinkyDungeonDrawGame() {
 	}
 
 	if (KinkyDungeonDrawState == "Game") {
+		// Multiplayer session overlay (waiting / peer-lost / desync).
+		if (typeof MPState !== 'undefined' && MPState.active && typeof KDDrawMPOverlay === 'function') KDDrawMPOverlay();
 		if (KinkyDungeonFlags.get("PlayerOrgasmFilter")) {
 			/*if (KDToggles.IntenseOrgasm) {
 				if (!KDIntenseFilter) {

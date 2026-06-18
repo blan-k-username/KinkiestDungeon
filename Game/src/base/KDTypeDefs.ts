@@ -3004,6 +3004,9 @@ interface KinkyDungeonSave {
 	progressionmode?: string,
 
 	faction: Record<string, Record<string, number>>;
+
+	// Ordered loaded-mod fingerprint (name+version), for mod-compat warnings.
+	modList?: { name: string; version: string }[];
 }
 
 interface KDWorldSlot {

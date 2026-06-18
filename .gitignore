@@ -31,8 +31,17 @@
 !/tsconfig.json
 !/README.md
 !/style.css
-!/tools/*
+!/tools/**/*
 /tools/*.cache
+
+# test infrastructure
+!/tests/**/*
+!/playwright.config.ts
+!/vitest.config.ts
+# ...but exclude generated test artifacts from tracking
+/tests/_artifacts/
+/playwright-report/
+/test-results/
 
 *.wav
 

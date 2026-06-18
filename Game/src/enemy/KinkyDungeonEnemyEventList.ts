@@ -559,7 +559,7 @@ let KDIntentEvents: Record<string, EnemyEvent> = {
 			if ((aiData as KDAIData).domMe) enemy.playWithPlayer = Math.floor(enemy.playWithPlayer * 0.7);
 			KDAddThought(enemy.id, "Play", 4, enemy.playWithPlayer);
 
-			let index = Math.floor(Math.random() * 3);
+			let index = KDRandomInt(3);
 			let suff = (KDGetEnemyPlayLine(enemy) ? KDGetEnemyPlayLine(enemy) : "");
 			if ((aiData as KDAIData).domMe) {
 				if (KDIsBrat(enemy))
@@ -776,7 +776,7 @@ let KDIntentEvents: Record<string, EnemyEvent> = {
 			enemy.IntentAction = 'ToyWithPlayer';
 			KinkyDungeonSetFlag("ToyedWith", 100);
 
-			KinkyDungeonSendDialogue(enemy, TextGet("KDCombatLine_YoureFinished_" + KDJailPersonality(enemy) + Math.floor(Math.random() * 3),
+			KinkyDungeonSendDialogue(enemy, TextGet("KDCombatLine_YoureFinished_" + KDJailPersonality(enemy) + KDRandomInt(3),
 									KDGetGenericDialogueParams(KDPlayer(), enemy)), KDGetColor(enemy), 9, 10);
 
 		},

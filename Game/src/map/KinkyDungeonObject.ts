@@ -485,10 +485,10 @@ function KinkyDungeonGhostMessage(): boolean {
 			msg = TextGet("KinkyDungeonGhostHelpful" + KinkyDungeonTargetTile.GhostDecision);
 		} else {
 			let BoundType = "Generic";
-			if (!KinkyDungeonCanTalk() && Math.random() < 0.33) BoundType = "Gag";
-			if ((KinkyDungeonIsHandsBound() || KinkyDungeonIsArmsBound()) && Math.random() < 0.33) BoundType = "Arms";
-			if (KinkyDungeonSlowLevel > 0 && Math.random() < 0.33) BoundType = "Feet";
-			if (KinkyDungeonChastityMult() > 0 && Math.random() < 0.33) BoundType = "Chaste";
+			if (!KinkyDungeonCanTalk() && KDRandomChance(0.33)) BoundType = "Gag";
+			if ((KinkyDungeonIsHandsBound() || KinkyDungeonIsArmsBound()) && KDRandomChance(0.33)) BoundType = "Arms";
+			if (KinkyDungeonSlowLevel > 0 && KDRandomChance(0.33)) BoundType = "Feet";
+			if (KinkyDungeonChastityMult() > 0 && KDRandomChance(0.33)) BoundType = "Chaste";
 
 			msg = TextGet("KinkyDungeonGhostUnhelpful" + BoundType + KinkyDungeonTargetTile.GhostDecision,
 				KDGetGenericDialogueParams(KDPlayer())

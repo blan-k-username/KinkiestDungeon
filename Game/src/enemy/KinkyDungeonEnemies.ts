@@ -470,6 +470,10 @@ function KinkyDungeonNearestPlayer(enemy: entity, _requireVision?: boolean, deco
 		}
 		if (nearestVisible) return nearestVisible;
 	}
+	// Equal-aggro — in an active co-op session the enemy targets the
+	// nearer of the two players (ties → P1). Single-player / no P2 returns the
+	// singular player unchanged (KDResolveAggroTarget is gated on MPState.active).
+	if (typeof KDResolveAggroTarget === 'function') return KDResolveAggroTarget(enemy);
 	return KinkyDungeonPlayerEntity;
 }
 
@@ -799,6 +803,11 @@ function KinkyDungeonDrawEnemies(_canvasOffsetX: number, _canvasOffsetY: number,
 	for (let enemy of nearby) {
 		let sprite = enemy.Enemy.name;
 		KinkyDungeonUpdateVisualPosition(enemy, KinkyDungeonDrawDelta);
+		// The co-op second player renders via the player Character pipeline
+		// (KDDrawCoopPlayers), not as an enemy sprite. Keep its visual position
+		// interpolated (above) but skip all enemy-sprite / danger / auto-path handling.
+		// Gated on playerSlot ⇒ no effect in single-player.
+		if ((enemy as any).playerSlot != null) continue;
 		let tx = enemy.visual_x;
 		let ty = enemy.visual_y;
 		let playerDist = KDistChebyshev((enemy.x - KinkyDungeonPlayerEntity.x), (enemy.y - KinkyDungeonPlayerEntity.y));
@@ -4185,6 +4194,9 @@ function KinkyDungeonUpdateEnemies(maindelta: number, Allied: boolean) {
 	let timeDelta = KinkyDungeonFlags.get('TimeSlowTick') ? 1 : maindelta;
 	let enemyDelta = {};
 	for (let entity of KDMapData.Entities) {
+		// Co-op player avatars live in Entities (so they render/serialize/sync)
+		// but must NOT be driven by enemy AI. Skip any player-slot entity here.
+		if ((entity as any).player || (entity as any).playerSlot != null) continue;
 		if (!entity.Enemy?.maxhp)
 			KDUnPackEnemy(entity);
 		if (KDIsTimeImmune(entity)) {
@@ -4251,6 +4263,8 @@ function KinkyDungeonUpdateEnemies(maindelta: number, Allied: boolean) {
 
 	// Loop 1
 	for (let enemy of KDMapData.Entities) {
+		// Co-op player avatars are not AI-driven — skip player-slot entities.
+		if ((enemy as any).player || (enemy as any).playerSlot != null) continue;
 		let delta = enemyDelta[enemy.id] || maindelta;
 		if ((Allied && KDAllied(enemy)) || (!Allied && !KDAllied(enemy))) {
 			let tile = KinkyDungeonTilesGet(enemy.x + "," + enemy.y);
@@ -4906,7 +4920,7 @@ function KinkyDungeonUpdateEnemies(maindelta: number, Allied: boolean) {
 								(enemy.Enemy.tags.jail || enemy.Enemy.tags.jailer || KDGetEnemyPlayLine(enemy))) {
 								let h = f == (KDGetFaction(enemy)) ? "Defend" : "Honor";
 								let suff = KDGetEnemyPlayLine(enemy) ? KDGetEnemyPlayLine(enemy) + h : h;
-								let index = ("" + Math.floor(Math.random() * 3));
+								let index = ("" + KDRandomInt(3));
 
 								if ((!enemy.dialogue || !enemy.dialogueDuration) && !enemy.playWithPlayer)
 									KinkyDungeonSendDialogue(enemy, TextGet("KinkyDungeonRemindJailChase" + suff + index,
@@ -7057,7 +7071,43 @@ function KinkyDungeonEnemyLoop(enemy: entity, player: any, delta: number, vision
 						}
 					}
 					let dmgString = "";
-					if (player.player) {
+					if (player.player && (player as any).playerSlot != null) {
+						// Co-op P2 target — apply the player damage model to P2's own
+						// stats, never P1's globals. Gated on playerSlot ⇒ SP unaffected.
+						KinkyDungeonTickBuffTag(enemy, "hit", 1);
+						let stunTimeP2 = enemy.Enemy.stunTime ? enemy.Enemy.stunTime : 1;
+						let blindTimeP2 = enemy.Enemy.blindTime ? enemy.Enemy.blindTime : 1;
+						let doStunP2 = AIData.attack.includes("Stun");
+						let doBlindP2 = AIData.attack.includes("Blind");
+						let resP2 = (typeof KDApplyEnemyAttackToSlot === 'function')
+							? KDApplyEnemyAttackToSlot((player as any).playerSlot, {
+								damage: willpowerDamage, type: AIData.damage, staminaDamage: staminaDamage,
+								blind: doBlindP2 ? blindTimeP2 : 0, stun: doStunP2 ? stunTimeP2 : 0 })
+							: { happened: 0 };
+						if (doStunP2) Stun = true;
+						if (doBlindP2) Blind = true;
+						happened += (resP2 && resP2.happened) || 0;
+						// Bind P2 against its own worn set (gated on
+						// playerSlot ⇒ the SP path is untouched). The restraint lands,
+						// persists (Entities save/load), and renders via the co-op draw path.
+						if (restraintAdd && restraintAdd.length > 0 && typeof KDAddRestraintToSlot === 'function') {
+							let addedBound = KDAddRestraintToSlot((player as any).playerSlot, restraintAdd,
+								{enemy: enemy, faction: KDGetFaction(enemy)}).added * 2;
+							bound += addedBound;
+							happened += addedBound;
+							if (addedBound > 0) msgColor = "#ff8933";
+						}
+						dmgString = TextGet("KDNoDamage");
+						data = {
+							sfx: "", text: "", attack: AIData.attack, enemy: enemy, bound: bound,
+							damage: willpowerDamage, staminaDamage: staminaDamage, damagetype: AIData.damage,
+							restraintsAdded: restraintAdd, attacker: enemy, target: player, happened: happened,
+							player: player,
+						};
+						KinkyDungeonSendEvent("beforeDamage", data);
+						KinkyDungeonSetEnemyFlag(enemy, "touchedPlayer", 2);
+						replace.push({keyword:"DamageTaken", value: dmgString});
+					} else if (player.player) {
 						KinkyDungeonTickBuffTag(enemy, "hit", 1);
 						if (restraintAdd && restraintAdd.length > 0) {
 							msgColor = "#ff8933";
@@ -7102,7 +7152,10 @@ function KinkyDungeonEnemyLoop(enemy: entity, player: any, delta: number, vision
 							happened += 1;
 						}
 						if (AIData.attack.includes("Effect") && enemy.Enemy.effect) {
-							let affected = KinkyDungeonPlayerEffect(KinkyDungeonPlayerEntity, enemy.Enemy.effect.damage,
+							// Apply the effect to the actual target (`player`), not the
+							// hardcoded singular player — identical for P1 (player === PlayerEntity),
+							// and correct when the target is the co-op P2.
+							let affected = KinkyDungeonPlayerEffect(player, enemy.Enemy.effect.damage,
 								enemy.Enemy.effect.effect, enemy.Enemy.effect.spell, KDGetFaction(enemy),
 								undefined, enemy);
 							if (affected && enemy.usingSpecial && enemy.Enemy.specialAttack != undefined && enemy.Enemy.specialAttack.includes("Effect")) {
@@ -10980,16 +11033,16 @@ function KDQuickGenNPC(enemy: entity, force: boolean) {
 					if (KDModelStyles[enemyType?.style || enemyType.style]) {
 						let style = KDModelStyles[enemyType?.style || enemyType.style];
 						if (!value.bodystyle && style.Bodystyle) {
-							value.bodystyle = style.Bodystyle[Math.floor(Math.random() * style.Bodystyle.length)];
+							value.bodystyle = KDRandomChoice(style.Bodystyle);
 						}
 						if (!value.hairstyle && style.Hairstyle) {
-							value.hairstyle = style.Hairstyle[Math.floor(Math.random() * style.Hairstyle.length)];
+							value.hairstyle = KDRandomChoice(style.Hairstyle);
 						}
 						if (!value.facestyle && style.Facestyle) {
-							value.facestyle = style.Facestyle[Math.floor(Math.random() * style.Facestyle.length)];
+							value.facestyle = KDRandomChoice(style.Facestyle);
 						}
 						if (!value.cosplaystyle && style.Cosplay) {
-							value.cosplaystyle = style.Cosplay[Math.floor(Math.random() * style.Cosplay.length)];
+							value.cosplaystyle = KDRandomChoice(style.Cosplay);
 						}
 
 					}

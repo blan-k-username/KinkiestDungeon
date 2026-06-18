@@ -545,6 +545,10 @@ function KinkyDungeonInitialize(Level: number, Load?: any) {
 	KinkyDungeonDefaultStats(Load);
 	InitFacilities();
 
+	// Bind the local-player slot to the freshly-initialized player global
+	// so KDLocalPlayer()/KDPlayerById are correct before the first frame or input.
+	if (typeof KDSyncLocalPlayerSlot === 'function') KDSyncLocalPlayerSlot();
+
 	// Set up the first level
 	//KinkyDungeonCreateMap(KinkyDungeonMapParams[KinkyDungeonMapIndex[0]], 0);
 }

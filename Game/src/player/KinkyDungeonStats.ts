@@ -2418,7 +2418,7 @@ function KinkyDungeonDoTryOrgasm(Bonus?: number, Auto?: number) {
 	}
 
 	if (data.playMsg) {
-		let msgIndex = Math.min(KinkyDungeonMaxOrgasmStage, KDGameData.OrgasmStage) + Math.floor(Math.random() * KinkyDungeonOrgasmStageVariation);
+		let msgIndex = Math.min(KinkyDungeonMaxOrgasmStage, KDGameData.OrgasmStage) + KDRandomInt(KinkyDungeonOrgasmStageVariation);
 		KinkyDungeonSendActionMessage(10, TextGet(msg + ("" + msgIndex)), "#FF5BE9", msgTime);
 	}
 

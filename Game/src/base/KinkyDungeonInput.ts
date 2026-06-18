@@ -9,6 +9,17 @@ let KinkyDungeonInputQueue: {type: string, data: any}[] = [];
  */
 let KDInputTypes: Record<string, (data: any) => string> = {
 	"move": (data) => {
+		// A non-local player's move (the host applying the guest's action,
+		// tagged with _playerSlot in MPHandleTurn) acts on that player's slot entity
+		// via the enemy-move path, not the local player. The local/slot-0 path below
+		// is untouched (single-player + each client's own avatar).
+		if (data && data._playerSlot != null && data._playerSlot !== KDLocalPlayerId) {
+			const ent = (typeof KDPlayerById === 'function') ? KDPlayerById(data._playerSlot) : undefined;
+			if (ent && data.dir && typeof KDMoveEntity === 'function') {
+				return KDMoveEntity(ent, ent.x + data.dir.x, ent.y + data.dir.y, true) ? "move" : "nomove";
+			}
+			return "nomove";
+		}
 		KDInteracting = false;
 		KinkyDungeonToggleAutoPass = data.AutoPass;
 		KinkyDungeonToggleAutoSprint = data.sprint;
@@ -1591,6 +1602,14 @@ function KDSendInput(type: string, data: any, _frame?: boolean, noUpdate?: boole
 		KDGameData.LastMP = KinkyDungeonStatMana;
 		KDGameData.LastAP = KinkyDungeonStatDistraction;
 		KDGameData.LastWP = KinkyDungeonStatWill;
+	}
+
+	// Multiplayer intercept. When an MP session is active and connected,
+	// route the local action through the server (which holds it until the peer
+	// also submits, then broadcasts both atomically). Otherwise fall through
+	// to the single-player queue path.
+	if (typeof MPInterceptLocalInput === 'function' && MPInterceptLocalInput(type, data)) {
+		return "";
 	}
 
 	KinkyDungeonInputQueue.push({type: type, data: data});

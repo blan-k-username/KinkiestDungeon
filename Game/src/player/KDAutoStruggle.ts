@@ -144,8 +144,8 @@ let KDAutoStruggleActions: Record<string, {itemweight?: (player: entity, item: i
 				: ((KDAffinityList.some((affinity) => {return KinkyDungeonGetAffinity(false, affinity);})) ? 0.5 : (2 + Math.min(8, KDAutoStruggleData.overallDespair/10)));
 		},
 		action: (player) => {
-			let wigglePoints = KDAS_GetMovableWigglePoint(player, Math.random() < 0.5);
-			let point = wigglePoints[Math.floor(Math.random() * wigglePoints.length)] || {x: 0, y: 0};
+			let wigglePoints = KDAS_GetMovableWigglePoint(player, KDRandomChance(0.5));
+			let point = KDRandomChoice(wigglePoints) || {x: 0, y: 0};
 			KDSendInput("move", {dir: {x:point.x - player.x, y: point.y-player.y, delta: 0}, delta: 1, AllowInteract: true, AutoDoor: false, AutoPass: KinkyDungeonToggleAutoPass, sprint: KinkyDungeonToggleAutoSprint, SuppressSprint: KinkyDungeonSuppressSprint}, false, true);
 			KinkyDungeonSendActionMessage(6, TextGet("KDWiggle"), "#aaaaaa", 1);
 			if (KDAffinityList.some((affinity) => {return KinkyDungeonGetAffinity(false, affinity);})) {
@@ -345,7 +345,7 @@ function KDAutoStruggleMakeDecision(_player: entity) {
 			totalWeight += action.weight * (1 / (1 + 0.01 * (KDAutoStruggleData.totalDespair[action.action.id]||0)));
 			currentWeights.push({action: action.action, weight: totalWeight});
 		}
-		let selection = Math.random() * totalWeight;
+		let selection = KDRandom() * totalWeight;
 		for (let action of currentWeights) {
 			if (action.weight > selection) {
 				KDAutoStruggleData.decidedAction = action.action.action;

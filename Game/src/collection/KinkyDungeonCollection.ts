@@ -343,16 +343,16 @@ function KDAddCollection(enemy: entity, type?: string, status?: string, servantc
 			let style = KDModelStyles[enemy.style];
 			if (style) {
 				if (!entry.bodystyle && style.Bodystyle) {
-					entry.bodystyle = style.Bodystyle[Math.floor(Math.random() * style.Bodystyle.length)];
+					entry.bodystyle = KDRandomChoice(style.Bodystyle);
 				}
 				if (!entry.hairstyle && style.Hairstyle) {
-					entry.hairstyle = style.Hairstyle[Math.floor(Math.random() * style.Hairstyle.length)];
+					entry.hairstyle = KDRandomChoice(style.Hairstyle);
 				}
 				if (!entry.facestyle && style.Facestyle) {
-					entry.facestyle = style.Facestyle[Math.floor(Math.random() * style.Facestyle.length)];
+					entry.facestyle = KDRandomChoice(style.Facestyle);
 				}
 				if (!entry.cosplaystyle && style.Cosplay) {
-					entry.cosplaystyle = style.Cosplay[Math.floor(Math.random() * style.Cosplay.length)];
+					entry.cosplaystyle = KDRandomChoice(style.Cosplay);
 				}
 			}
 		}
@@ -854,16 +854,16 @@ function KDGetVirtualCollectionEntry(id: number): KDCollectionEntry {
 		let style = KDModelStyles[enemy.style];
 		if (style) {
 			if (!entry.bodystyle && style.Bodystyle) {
-				entry.bodystyle = style.Bodystyle[Math.floor(Math.random() * style.Bodystyle.length)];
+				entry.bodystyle = KDRandomChoice(style.Bodystyle);
 			}
 			if (!entry.hairstyle && style.Hairstyle) {
-				entry.hairstyle = style.Hairstyle[Math.floor(Math.random() * style.Hairstyle.length)];
+				entry.hairstyle = KDRandomChoice(style.Hairstyle);
 			}
 			if (!entry.facestyle && style.Facestyle) {
-				entry.facestyle = style.Facestyle[Math.floor(Math.random() * style.Facestyle.length)];
+				entry.facestyle = KDRandomChoice(style.Facestyle);
 			}
 			if (!entry.cosplaystyle && style.Cosplay) {
-				entry.cosplaystyle = style.Cosplay[Math.floor(Math.random() * style.Cosplay.length)];
+				entry.cosplaystyle = KDRandomChoice(style.Cosplay);
 			}
 		}
 	}
@@ -908,16 +908,16 @@ function KDGetVirtualCollectionEntryEntity(enemy: entity): KDCollectionEntry {
 		let style = KDModelStyles[enemy.style];
 		if (style) {
 			if (!entry.bodystyle && style.Bodystyle) {
-				entry.bodystyle = style.Bodystyle[Math.floor(Math.random() * style.Bodystyle.length)];
+				entry.bodystyle = KDRandomChoice(style.Bodystyle);
 			}
 			if (!entry.hairstyle && style.Hairstyle) {
-				entry.hairstyle = style.Hairstyle[Math.floor(Math.random() * style.Hairstyle.length)];
+				entry.hairstyle = KDRandomChoice(style.Hairstyle);
 			}
 			if (!entry.facestyle && style.Facestyle) {
-				entry.facestyle = style.Facestyle[Math.floor(Math.random() * style.Facestyle.length)];
+				entry.facestyle = KDRandomChoice(style.Facestyle);
 			}
 			if (!entry.cosplaystyle && style.Cosplay) {
-				entry.cosplaystyle = style.Cosplay[Math.floor(Math.random() * style.Cosplay.length)];
+				entry.cosplaystyle = KDRandomChoice(style.Cosplay);
 			}
 		}
 	}
@@ -1439,7 +1439,7 @@ function KDSortCollection() {
 function KDGenEnemyName(enemy: entity): string {
 	if (enemy?.Enemy?.nonHumanoid) return TextGet("Name" + enemy.Enemy.name);
 	let faction = KDGetFaction(enemy) || KDGetFactionOriginal(enemy);
-	let nameList = KDFactionProperties[faction]?.nameList ? KDFactionProperties[faction].nameList[Math.floor(Math.random() * KDFactionProperties[faction].nameList.length)] : faction;
+	let nameList = KDFactionProperties[faction]?.nameList ? KDRandomChoice(KDFactionProperties[faction].nameList) : faction;
 	if (enemy.Enemy?.nameList) nameList = enemy.Enemy?.nameList;
 	if (KDNameList[nameList]) return KDNameList[nameList][Math.floor(KDNameList[nameList].length * KDRandom())];
 	else return KDNameList.default[Math.floor(KDNameList.default.length * KDRandom())];
@@ -1941,25 +1941,25 @@ function KDGenCharForCollection(value: KDCollectionEntry, enemyType: enemy) {
 						value.bodystyle = oldstyle.bodystyle;
 					} else
 					if (!value.bodystyle && style.Bodystyle) {
-						value.bodystyle = style.Bodystyle[Math.floor(Math.random() * style.Bodystyle.length)];
+						value.bodystyle = KDRandomChoice(style.Bodystyle);
 					}
 					if (!value.hairstyle && oldstyle?.hairstyle) {
 						value.hairstyle = oldstyle.hairstyle;
 					} else
 					if (!value.hairstyle && style.Hairstyle) {
-						value.hairstyle = style.Hairstyle[Math.floor(Math.random() * style.Hairstyle.length)];
+						value.hairstyle = KDRandomChoice(style.Hairstyle);
 					}
 					if (!value.facestyle && oldstyle?.facestyle) {
 						value.facestyle = oldstyle.facestyle;
 					} else
 					if (!value.facestyle && style.Facestyle) {
-						value.facestyle = style.Facestyle[Math.floor(Math.random() * style.Facestyle.length)];
+						value.facestyle = KDRandomChoice(style.Facestyle);
 					}
 					if (!value.cosplaystyle && oldstyle?.cosplaystyle) {
 						value.cosplaystyle = oldstyle.cosplaystyle;
 					} else
 					if (!value.cosplaystyle && style.Cosplay) {
-						value.cosplaystyle = style.Cosplay[Math.floor(Math.random() * style.Cosplay.length)];
+						value.cosplaystyle = KDRandomChoice(style.Cosplay);
 					}
 
 				}

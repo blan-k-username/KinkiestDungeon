@@ -137,7 +137,7 @@ function KinkyDungeonPlayerIsVisibleToJailers() {
 			}
 		}
 	}
-	if (list.length > 0) return list[Math.floor(Math.random() * list.length)];
+	if (list.length > 0) return KDRandomChoice(list);
 	return null;
 }
 
@@ -351,7 +351,7 @@ function KinkyDungeonStartChase(enemy: entity, Type: string, faction?: string, f
 						(e.Enemy.tags.jail || e.Enemy.tags.jailer || KDGetEnemyPlayLine(e))) {
 						let h = KDGetFaction(e) == (faction ? faction : KDGetFaction(enemy)) ? "Defend" : "DefendHonor";
 						let suff = KDGetEnemyPlayLine(e) ? KDGetEnemyPlayLine(e) + h : h;
-						let index = ("" + Math.floor(Math.random() * 3));
+						let index = ("" + KDRandomInt(3));
 
 						if (!e.dialogue || !e.dialogueDuration)
 							KinkyDungeonSendDialogue(e, TextGet("KinkyDungeonRemindJailChase" + suff + index,
@@ -372,7 +372,7 @@ function KinkyDungeonStartChase(enemy: entity, Type: string, faction?: string, f
 	}
 	if (Type && enemy?.hostile && (enemy.Enemy.tags.jail || enemy.Enemy.tags.jailer || KDGetEnemyPlayLine(enemy))) {
 		let suff = KDGetEnemyPlayLine(enemy) ? KDGetEnemyPlayLine(enemy) + Type : Type;
-		let index = (Type == "Attack" || Type == "Spell") ? ("" + Math.floor(Math.random() * 3)) : "";
+		let index = (Type == "Attack" || Type == "Spell") ? ("" + KDRandomInt(3)) : "";
 
 		if (!enemy.dialogue || !enemy.dialogueDuration)
 			KinkyDungeonSendDialogue(enemy, TextGet("KinkyDungeonRemindJailChase" + suff + index,

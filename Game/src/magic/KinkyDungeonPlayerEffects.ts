@@ -2065,7 +2065,7 @@ let KDPlayerEffects: Record<string, (target: any, damage: string, playerEffect: 
 			} else {
 				let RopeDresses = ["Leotard", "Bikini", "Lingerie"];
 				if (!RopeDresses.includes(KinkyDungeonCurrentDress) && !KinkyDungeonStatsChoice.get("KeepOutfit")) {
-					KinkyDungeonSetDress(RopeDresses[Math.floor(Math.random() * RopeDresses.length)], "");
+					KinkyDungeonSetDress(KDRandomChoice(RopeDresses), "");
 					KinkyDungeonDressPlayer();
 					KinkyDungeonSendTextMessage(3, TextGet("KinkyDungeonRopeEngulfDress"), KDBaseRed, 3);
 					effect = true;
@@ -2141,7 +2141,7 @@ let KDPlayerEffects: Record<string, (target: any, damage: string, playerEffect: 
 			} else {
 				let RopeDresses = ["Leotard", "Bikini", "Lingerie"];
 				if (!RopeDresses.includes(KinkyDungeonCurrentDress) && !KinkyDungeonStatsChoice.get("KeepOutfit")) {
-					KinkyDungeonSetDress(RopeDresses[Math.floor(Math.random() * RopeDresses.length)], "");
+					KinkyDungeonSetDress(KDRandomChoice(RopeDresses), "");
 					KinkyDungeonDressPlayer();
 					KinkyDungeonSendTextMessage(3, TextGet("KinkyDungeonRopeEngulfDress"), KDBaseRed, 3);
 					effect = true;
@@ -2236,7 +2236,7 @@ let KDPlayerEffects: Record<string, (target: any, damage: string, playerEffect: 
 			} else {
 				let CharmDresses = ["Leotard", "Bikini", "Lingerie"];
 				if (!CharmDresses.includes(KinkyDungeonCurrentDress) && KinkyDungeonCurrentDress != "Prisoner" && !KinkyDungeonStatsChoice.get("KeepOutfit")) {
-					KinkyDungeonSetDress(CharmDresses[Math.floor(Math.random() * CharmDresses.length)], "");
+					KinkyDungeonSetDress(KDRandomChoice(CharmDresses), "");
 					KinkyDungeonDressPlayer();
 					KinkyDungeonSendTextMessage(3, TextGet("KinkyDungeonCharmWrapsDress"), KDBaseRed, 3);
 					effect = true;
@@ -2309,7 +2309,7 @@ let KDPlayerEffects: Record<string, (target: any, damage: string, playerEffect: 
 			} else {
 				let PossibleDresses = ["Leotard", "Bikini", "Lingerie"];
 				if (!PossibleDresses.includes(KinkyDungeonCurrentDress) && !KinkyDungeonStatsChoice.get("KeepOutfit")) {
-					KinkyDungeonSetDress(PossibleDresses[Math.floor(Math.random() * PossibleDresses.length)], "");
+					KinkyDungeonSetDress(KDRandomChoice(PossibleDresses), "");
 					KinkyDungeonDressPlayer();
 					KinkyDungeonSendTextMessage(3, TextGet("KinkyDungeonTrapBindingsDress").KDReplaceOrAddDmg( dmg.string), KDBaseRed, 3);
 					effect = true;

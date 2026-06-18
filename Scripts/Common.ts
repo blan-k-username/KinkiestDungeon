@@ -399,7 +399,7 @@ function UIItemFromList<T>(ItemPrevious: T, ItemList: T[]): T {
 	let NewItem = ItemPrevious;
 	if (!ItemList || ItemList.length == 0) return undefined;
 	while (NewItem == ItemPrevious)
-		NewItem = ItemList[Math.floor(Math.random() * ItemList.length)];
+		NewItem = KDRandomChoice(ItemList);
 	return NewItem;
 }
 

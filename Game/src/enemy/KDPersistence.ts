@@ -583,16 +583,16 @@ function KDGetPersistentNPC(id: number, entity?: entity, force: boolean = true, 
 				let style = KDModelStyles[enemy.style];
 				if (style) {
 					if (!entry.bodystyle && style.Bodystyle) {
-						entry.bodystyle = style.Bodystyle[Math.floor(Math.random() * style.Bodystyle.length)];
+						entry.bodystyle = KDRandomChoice(style.Bodystyle);
 					}
 					if (!entry.hairstyle && style.Hairstyle) {
-						entry.hairstyle = style.Hairstyle[Math.floor(Math.random() * style.Hairstyle.length)];
+						entry.hairstyle = KDRandomChoice(style.Hairstyle);
 					}
 					if (!entry.facestyle && style.Facestyle) {
-						entry.facestyle = style.Facestyle[Math.floor(Math.random() * style.Facestyle.length)];
+						entry.facestyle = KDRandomChoice(style.Facestyle);
 					}
 					if (!entry.cosplaystyle && style.Cosplay) {
-						entry.cosplaystyle = style.Cosplay[Math.floor(Math.random() * style.Cosplay.length)];
+						entry.cosplaystyle = KDRandomChoice(style.Cosplay);
 					}
 				}
 			}

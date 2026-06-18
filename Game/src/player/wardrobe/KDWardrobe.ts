@@ -2074,16 +2074,16 @@ function KDDrawWardrobe(_screen: string, Character: Character) {
 							if (KDModelStyles[enemyType?.style || KinkyDungeonGetEnemyByName(value.type)?.style]) {
 								let style = KDModelStyles[enemyType?.style || KinkyDungeonGetEnemyByName(value.type)?.style];
 								if (!value.bodystyle && style.Bodystyle) {
-									value.bodystyle = style.Bodystyle[Math.floor(Math.random() * style.Bodystyle.length)];
+									value.bodystyle = KDRandomChoice(style.Bodystyle);
 								}
 								if (!value.hairstyle && style.Hairstyle) {
-									value.hairstyle = style.Hairstyle[Math.floor(Math.random() * style.Hairstyle.length)];
+									value.hairstyle = KDRandomChoice(style.Hairstyle);
 								}
 								if (!value.facestyle && style.Facestyle) {
-									value.facestyle = style.Facestyle[Math.floor(Math.random() * style.Facestyle.length)];
+									value.facestyle = KDRandomChoice(style.Facestyle);
 								}
 								if (!value.cosplaystyle && style.Cosplay) {
-									value.cosplaystyle = style.Cosplay[Math.floor(Math.random() * style.Cosplay.length)];
+									value.cosplaystyle = KDRandomChoice(style.Cosplay);
 								}
 
 							}

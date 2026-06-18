@@ -40,7 +40,7 @@ function KinkyDungeonNewLore() {
 				availableLore.push(lore);
 		}
 
-		if (Math.random() < KinkyDungeonRepeatLoreChance) {
+		if (KDRandomChance(KinkyDungeonRepeatLoreChance)) {
 			for (let lore of Object.keys(KDLore.Default)) {
 				if (!KDLore.Default[lore].condition || KDLore.Default[lore].condition())
 					availableLore.push(lore);
@@ -53,7 +53,7 @@ function KinkyDungeonNewLore() {
 	let result = false;
 
 	if (availableLore.length > 0) {
-		KinkyDungeonCurrentLore = availableLore[Math.floor(Math.random() * availableLore.length)];
+		KinkyDungeonCurrentLore = KDRandomChoice(availableLore);
 		if (!exploredLore[KinkyDungeonCurrentLore]) {
 
 			KinkyDungeonSendActionMessage(5, TextGet("ItemPickupLore"), KDBaseWhite, 2, false, false, undefined, "Items");

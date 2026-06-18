@@ -11132,7 +11132,7 @@ let KDEventMapEnemy: Record<string, Record<string, (e: KinkyDungeonEvent, enemy:
 		},
 		"tauntMsg": (e, enemy, data) => {
 			if (data.enemy == enemy) {
-				KinkyDungeonSendDialogue(enemy, TextGet(e.msg + Math.floor(Math.random() * e.power), KDGetGenericDialogueParams(KDPlayer(), enemy)), KDGetColor(enemy), e.time || 6, 1, true, true);
+				KinkyDungeonSendDialogue(enemy, TextGet(e.msg + KDRandomInt(e.power), KDGetGenericDialogueParams(KDPlayer(), enemy)), KDGetColor(enemy), e.time || 6, 1, true, true);
 			}
 		},
 
