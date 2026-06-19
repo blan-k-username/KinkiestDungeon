@@ -120,6 +120,13 @@ let KDInputTypes: Record<string, (data: any) => string> = {
 	},
 	"struggle": (data) => {
 		KDDelayedActionPrune(["Action", "Struggle"]);
+		// A non-local player's struggle (host applying the guest's action, tagged with
+		// _playerSlot in MPHandleTurn) escapes that avatar's OWN restraints + stats. The
+		// local/slot-0 path below is untouched (single-player + each client's own avatar).
+		if (data && data._playerSlot != null && data._playerSlot !== KDLocalPlayerId
+			&& typeof KDStrugglePlayerSlot === 'function') {
+			return KDStrugglePlayerSlot(data._playerSlot, data.group, data.type, data.index);
+		}
 		return KinkyDungeonStruggle(data.group, data.type, data.index);
 	},
 	"struggleCurse": (data) => {

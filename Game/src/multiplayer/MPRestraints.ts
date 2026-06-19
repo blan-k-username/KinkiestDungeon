@@ -56,3 +56,71 @@ function KDInitPlayerRestraints(ent: any): void {
 	if (!ent) return;
 	if (!Array.isArray(ent.restraintList)) ent.restraintList = [];
 }
+
+/** Per-method escape-progress field on a worn item (mirrors the engine's fields). */
+function KDStruggleProgressKey(type: string): string {
+	switch (type) {
+		case 'Cut': return 'cutProgress';
+		case 'Pick': return 'pickProgress';
+		case 'Unlock': return 'unlockProgress';
+		default: return 'struggleProgress';   // Struggle / Remove
+	}
+}
+
+/**
+ * Let player `slot` attempt to escape the restraint worn on `group` — the per-slot
+ * analogue of KinkyDungeonStruggle, operating on that avatar's OWN restraints + stats.
+ *
+ * - Local/singular slot → defer to the unchanged engine `KinkyDungeonStruggle`
+ *   (single-player byte-identical; also the only path that handles linked/index>0 items).
+ * - Co-op slot → a faithful-but-minimal escape loop on P2's own state:
+ *     stamina-gate → roll the restraint's `escapeChance[type]` → accumulate the matching
+ *     progress field on the item → remove it from the slot's `restraintList` on success.
+ *   Progress lives on the worn item, so it rides Entities serialization (save/load +
+ *   state_sync); guest sends the input, host applies it (like movement).
+ *
+ * Deliberately a per-slot apply primitive, NOT a slot threaded through the ~570-line
+ * KinkyDungeonStruggle (global stats / PlayerEntity / delayed actions / perks). Returns
+ * the engine's result vocabulary: "Success" | "Fail".
+ */
+function KDStrugglePlayerSlot(slot: number, group: string, type: string, index?: number): string {
+	const isLocal = (typeof KDLocalPlayerId === 'number') ? slot === KDLocalPlayerId : slot === 0;
+	if (isLocal) {
+		return (typeof KinkyDungeonStruggle === 'function')
+			? KinkyDungeonStruggle(group, type, index || 0)
+			: 'Fail';
+	}
+	if (typeof KDGetPlayerStat !== 'function' || typeof KDSetPlayerStat !== 'function') return 'Fail';
+	const worn = KDGetWornRestraintsFor(slot);
+	if (!Array.isArray(worn)) return 'Fail';
+	// Top-level worn item for the group (P2's restraints are one-per-group, no dynamicLink).
+	const idx = worn.findIndex((it: any) => {
+		const def = (typeof KDRestraint === 'function') ? KDRestraint(it) : undefined;
+		return def && def.Group === group;
+	});
+	if (idx < 0) return 'Fail';
+	const item: any = worn[idx];
+	const def: any = (typeof KDRestraint === 'function') ? KDRestraint(item) : undefined;
+
+	// Stamina gate — an exhausted player can't act (mirrors KinkyDungeonHasStamina).
+	const cost = 1;
+	if (((KDGetPlayerStat(slot, 'stamina') as number) || 0) < cost) return 'Fail';
+
+	const chance = (def && def.escapeChance && typeof def.escapeChance[type] === 'number')
+		? def.escapeChance[type] : (type === 'Struggle' ? 0.1 : 0);
+
+	// Spend stamina on every genuine attempt.
+	KDSetPlayerStat(slot, 'stamina', Math.max(0, ((KDGetPlayerStat(slot, 'stamina') as number) || 0) - cost));
+
+	// Negative/zero chance → this method can't make headway (e.g. needs Cut/Remove/keys).
+	if (chance <= 0) return 'Fail';
+
+	const key = KDStruggleProgressKey(type);
+	const minSpeed = 0.05;
+	item[key] = ((typeof item[key] === 'number') ? item[key] : 0) + Math.max(minSpeed, chance);
+	if (item[key] >= 1) {
+		worn.splice(idx, 1);   // escaped — remove from the slot's own worn set
+		return 'Success';
+	}
+	return 'Fail';   // progress made, still bound
+}
