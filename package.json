@@ -10,17 +10,30 @@
         "buildTypes": "tsc --declaration --emitDeclarationOnly --removeComments false",
         "serve": "http-server",
         "pack": "python tools/pack.py",
-		"forcepack": "python tools/pack.py rc"
+        "forcepack": "python tools/pack.py rc",
+        "test": "tools/run-tests.sh all",
+        "test:unit": "tools/run-tests.sh unit",
+        "test:integration": "tools/run-tests.sh integration",
+        "test:e2e": "tools/run-tests.sh e2e",
+        "test:watch": "tools/run-tests.sh watch",
+        "test:in-container": "vitest run && playwright test"
     },
     "author": "Ada18980",
     "license": "All Rights Reserved",
     "private": true,
+    "overrides": {
+        "@types/node": "20.11.0"
+    },
     "devDependencies": {
+        "@playwright/test": "1.60.0",
         "@typescript/lib-dom": "npm:@types/web@^0.0.151",
         "http-server": "^14.1.1",
         "pixi-filters": "5.2.0",
         "pixi.js": "^7.2.1",
         "pixi.js-legacy": "^7.2.1",
-        "typescript": "^5.6.0"
+        "playwright": "1.60.0",
+        "tsx": "4.7.0",
+        "typescript": "^5.6.0",
+        "vitest": "1.6.0"
     }
 }
