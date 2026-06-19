@@ -188,8 +188,10 @@ test('add-routing: slot 0 routes to the global inventory (SP path)', async ({ kd
 	const r = await kdPage.evaluate(() => {
 		// @ts-ignore
 		const before = KinkyDungeonAllRestraint().length;
-		// @ts-ignore — pass the real restraint def so the global add path is satisfied
-		const res = KDAddRestraintToSlot(0, [{ r: KDRest('LeatherHood') }], {});
+		// @ts-ignore — pass a real restraint def (ScarfArms: no gag, so the add path
+		// doesn't hit the gag-particle/model code that flakes in headless) so the
+		// global add path is satisfied.
+		const res = KDAddRestraintToSlot(0, [{ r: KDRest('ScarfArms') }], {});
 		return {
 			added: res.added,
 			// @ts-ignore
@@ -199,4 +201,49 @@ test('add-routing: slot 0 routes to the global inventory (SP path)', async ({ kd
 	});
 	expect(r.added).toBe(1);
 	expect(r.after).toBe(r.before + 1);   // landed on the global worn set, not an entity list
+});
+
+/* ---------------------------------------------------------------------------
+ * Per-player restraint TAGS (058-B): KDGetPlayerTagsFor computes a co-op slot's
+ * restraint tags (ItemXFull / NameWorn / Blindfolded / Gagged / …) from its OWN
+ * worn set via the engine's customRestraints path, leaving P1's global
+ * KinkyDungeonPlayerTags untouched. Storage + accessor only — the ~197 global
+ * read-sites are NOT rerouted, so single-player is byte-identical.
+ * ------------------------------------------------------------------------- */
+
+test('058-B: a co-op slot computes its own restraint tags; P1 global tags untouched', async ({ kdPage }) => {
+	const r = await kdPage.evaluate(() => {
+		const p2: any = { id: 95, x: 1, y: 1, hp: 10, player: true, playerSlot: 1, Enemy: { name: 'Guard', tags: {} } };
+		// @ts-ignore
+		KDInitPlayerRestraints(p2);
+		// @ts-ignore
+		KDRegisterPlayer(1, p2);
+		// @ts-ignore — P1's global tag baseline (P2's hood must not change it)
+		const p1HeadFullBefore = (typeof KinkyDungeonPlayerTags !== 'undefined' && KinkyDungeonPlayerTags) ? !!KinkyDungeonPlayerTags.get('ItemHeadFull') : false;
+		// @ts-ignore — bind P2 with LeatherHood (Group ItemHead; blindfold + gag)
+		KDAddRestraintToSlot(1, [{ r: { name: 'LeatherHood', Group: 'ItemHead', power: 5 } }], {});
+		// @ts-ignore
+		const tags = KDGetPlayerTagsFor(1);
+		const out = {
+			headFull: !!tags.get('ItemHeadFull'),
+			hoodWorn: !!tags.get('LeatherHoodWorn'),
+			blindfolded: !!tags.get('Blindfolded'),
+			// @ts-ignore — the local accessor returns the live global map (same ref)
+			localIsGlobal: KDGetPlayerTagsFor(0) === KinkyDungeonPlayerTags,
+			// @ts-ignore
+			p1HeadFullAfter: (typeof KinkyDungeonPlayerTags !== 'undefined' && KinkyDungeonPlayerTags) ? !!KinkyDungeonPlayerTags.get('ItemHeadFull') : false,
+			p1HeadFullBefore,
+			// @ts-ignore
+			slotHasTag: KDSlotHasTag(1, 'Blindfolded'),
+		};
+		// @ts-ignore
+		KDUnregisterPlayer(1);
+		return out;
+	});
+	expect(r.headFull).toBe(true);                       // P2's own group is occupied
+	expect(r.hoodWorn).toBe(true);                       // P2's specific restraint is tagged worn
+	expect(r.blindfolded).toBe(true);                    // derived behaviour tag from the hood
+	expect(r.localIsGlobal).toBe(true);                  // slot 0 → the live global tags, unchanged
+	expect(r.p1HeadFullAfter).toBe(r.p1HeadFullBefore);  // computing P2's tags left P1's global untouched
+	expect(r.slotHasTag).toBe(true);
 });

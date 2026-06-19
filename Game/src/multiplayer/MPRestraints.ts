@@ -124,3 +124,33 @@ function KDStrugglePlayerSlot(slot: number, group: string, type: string, index?:
 	}
 	return 'Fail';   // progress made, still bound
 }
+
+/**
+ * Per-player restraint TAGS — the per-slot analogue of the global `KinkyDungeonPlayerTags`
+ * (`ItemXFull`, `<name>Worn`, `Blindfolded`, `Gagged`, `BoundArms`, group-`Empty`, …) that
+ * gate most restraint behaviour. Local/singular slot → the live global map (unchanged
+ * single-player path). A co-op slot → tags computed from that avatar's OWN worn set via
+ * the engine's `customRestraints` branch (`KinkyDungeonUpdateRestraints`), so they reflect
+ * P2's restraints, never P1's. Recomputed on demand (cheap; the engine does the same on
+ * every restraint change). Returns a fresh Map for the co-op slot — never reassigns the
+ * global, so the ~197 global read-sites and single-player are untouched.
+ */
+function KDGetPlayerTagsFor(slot: number): Map<string, boolean> {
+	const isLocal = (typeof KDLocalPlayerId === 'number') ? slot === KDLocalPlayerId : slot === 0;
+	if (isLocal) {
+		return (typeof KinkyDungeonPlayerTags !== 'undefined' && KinkyDungeonPlayerTags) ? KinkyDungeonPlayerTags : new Map();
+	}
+	const worn = KDGetWornRestraintsFor(slot);
+	if (typeof KinkyDungeonUpdateRestraints === 'function') {
+		// (C, id, delta, customRestraints) — passing customRestraints routes to the
+		// per-restraint-list branch that computes tags without reading the global worn set.
+		return KinkyDungeonUpdateRestraints(undefined, undefined, undefined, worn) || new Map();
+	}
+	return new Map();
+}
+
+/** Does player `slot` have restraint tag `tag`? (Per-slot analogue of KinkyDungeonPlayerTags.get.) */
+function KDSlotHasTag(slot: number, tag: string): boolean {
+	const tags = KDGetPlayerTagsFor(slot);
+	return !!(tags && tags.get(tag));
+}
