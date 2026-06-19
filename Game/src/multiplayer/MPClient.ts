@@ -88,6 +88,18 @@ function MPConnect(host: string, port: number, opts?: MPConnectOpts): Promise<vo
 					// Host full-state broadcast — guest adopts it.
 					MPApplyStateSync(msg as any);
 					return;
+				case 'player_character':
+					// Guest → host transfer of a guest-built character. Stash it by slot;
+					// KDSpawnPlayer2 installs it as the avatar (and if the avatar already
+					// exists, apply to it live so the next broadcast carries the look).
+					if (typeof msg.playerSlot === 'number' && msg.pkg && typeof KDCoopSlotConfig !== 'undefined') {
+						KDCoopSlotConfig[msg.playerSlot] = msg.pkg;
+						if (typeof KDFindPlayerSlotEntity === 'function' && KDFindPlayerSlotEntity(msg.playerSlot)
+							&& typeof KDApplyCoopCharacterPackage === 'function') {
+							KDApplyCoopCharacterPackage(msg.playerSlot, msg.pkg);
+						}
+					}
+					return;
 				case 'peer_connected':
 					MPState.peerConnected = true;
 					// Latch that a peer has been present (so a *later* drop arms the
@@ -124,4 +136,15 @@ function MPDisconnect(): void {
 function MPSendRaw(json: string): void {
 	if (!MPClientWS || MPClientWS.readyState !== 1 /* OPEN */) return;
 	try { MPClientWS.send(json); } catch (_) { /* swallow */ }
+}
+
+/**
+ * Guest → host: send a locally-built character package for the guest's slot (1). The
+ * host validates (server compliance check) and installs it as the avatar. No-op if the
+ * package isn't serializable.
+ */
+function KDSendPlayerCharacter(pkg: any, slot: number = 1): void {
+	if (typeof MPEncodePlayerCharacter !== 'function') return;
+	const wire = MPEncodePlayerCharacter(slot, pkg);
+	if (wire) MPSendRaw(wire);
 }

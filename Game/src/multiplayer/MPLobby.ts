@@ -11,7 +11,10 @@
  * the per-frame draw reads (no await in the draw loop).
  * ========================================================================= */
 
-let KDLobbyView: 'menu' | 'host' | 'join' = 'menu';
+let KDLobbyView: 'menu' | 'host' | 'join' | 'guestConfig' = 'menu';
+
+/** Guest's chosen outfit/dress for its co-op character (default = the current dress). */
+let KDGuestOutfitChoice: string = 'Default';
 
 interface KDLobbyStatusT {
 	// 'waiting'      — host waiting for a guest to join.
@@ -58,7 +61,13 @@ function KDLobbyHost(): Promise<void> {
 function KDLobbyJoin(host: string, code: string): Promise<void> {
 	KDLobbyStatus = { phase: 'connecting' };
 	return MPConnect(host || KDLobbyDefaultHost(), KDLobbyPort, { code })
-		.then(() => { KDLobbyStatus = { phase: 'waiting_host' }; })
+		.then(() => {
+			KDLobbyStatus = { phase: 'waiting_host' };
+			// Delegate character creation to the guest client: show the reduced
+			// (class + outfit) config screen before the waiting screen. The guest
+			// builds its character locally and transfers it to the host (KD-047).
+			KDLobbyView = 'guestConfig';
+		})
 		.catch((e) => {
 			const r = String((e && (e as Error).message) || e);
 			KDLobbyStatus = { phase: 'error', reason: r, message: KDLobbyErrText(r) };
@@ -72,6 +81,22 @@ function KDLobbyJoin(host: string, code: string): Promise<void> {
  */
 function KDLobbyGuestWaiting(): boolean {
 	return KDLobbyStatus.phase === 'waiting_host';
+}
+
+/**
+ * Guest confirms its reduced char-creation: realize the chosen outfit locally (core
+ * dress logic), package the built character (KDExtractLocalCharacterPackage), transfer
+ * it to the host (KDSendPlayerCharacter), then drop to the waiting-for-host screen.
+ */
+function KDGuestConfigConfirm(): void {
+	// Apply the chosen outfit through the core dress path so the local character (and
+	// thus the extracted package) reflects it.
+	if (KDGuestOutfitChoice && typeof KinkyDungeonSetDress === 'function') {
+		KinkyDungeonSetDress(KDGuestOutfitChoice, KDGuestOutfitChoice);
+	}
+	const pkg = (typeof KDExtractLocalCharacterPackage === 'function') ? KDExtractLocalCharacterPackage() : null;
+	if (pkg && typeof KDSendPlayerCharacter === 'function') KDSendPlayerCharacter(pkg, 1);
+	KDLobbyView = 'join';   // back to the existing "Waiting for host…" screen
 }
 
 function KDLobbyCancel(): void {
@@ -133,6 +158,38 @@ function MPHostStartSession(): void {
 	MPBroadcastHostState(0);
 }
 
+/**
+ * Host starts the shared session from an EXISTING save (Continue) instead of a fresh
+ * new game. Loads the host's localStorage save locally, then broadcasts the full state;
+ * the guest adopts it verbatim via the existing state_sync path (no guest-side change).
+ * The seed/date/id-counter reset mirrors MPStartSharedGame so any host-side post-load
+ * spawns stay reproducible, but the authoritative bytes come from the broadcast.
+ */
+function MPHostStartSessionFromSave(): void {
+	if (MPSessionStarted || MPState.playerId !== 0) return;
+	const seed = String(Math.floor(Math.random() * 4294967296));  // seed SOURCE only — not gameplay RNG
+	const todayDateMs = Date.now();
+	MPSendRaw(MPEncodeSessionInit(seed, todayDateMs));
+	if (typeof MPEncodeModList === 'function' && typeof KDGetLocalModList === 'function') {
+		MPSendRaw(MPEncodeModList(KDGetLocalModList()));
+	}
+	// Neutralize the cross-client divergence sources (as MPStartSharedGame does), then
+	// adopt the host's existing save via the SAME loader the guest uses for state_sync
+	// (KinkyDungeonLoadGame rebuilds the map from the save — no fresh KinkyDungeonCreateMap).
+	KinkyDungeonEnemyID = 1;
+	KinkyDungeonSpellID = 1;
+	if (todayDateMs > 0) KDTodayDate = new Date(todayDateMs);
+	KDsetSeed(seed);
+	const saveStr = (typeof localStorage !== 'undefined') ? localStorage.getItem('KinkyDungeonSave') : '';
+	if (saveStr && typeof KinkyDungeonLoadGame === 'function') {
+		KinkyDungeonLoadGame(saveStr, true);   // decompresses + loads (guest-adoption path)
+	}
+	MPSessionStarted = true;
+	KinkyDungeonState = 'Game';
+	KDLobbyStatus = { phase: 'idle' };
+	MPBroadcastHostState(0);
+}
+
 /* ── In-session overlay ──────────────────────────────────────────────────
  * Pure derivation from MPState. */
 
@@ -173,6 +230,11 @@ function KDLobbyRegisterText(): void {
 		['LobbyErr_missing_credentials', 'Missing host/code'],
 		['LobbyErr_locked_out', 'Too many wrong codes — locked out, try again shortly'],
 		['LobbyWaitingHost', 'Waiting for host to start the game…'],
+		['LobbyGuestJoined', 'Guest connected — choose how to start:'],
+		['LobbyStartNew', 'Start New Game'],
+		['LobbyStartContinue', 'Continue Save'],
+		['LobbyGuestConfigTitle', 'Create your character'],
+		['LobbyConfirm', 'Confirm'],
 		['LobbyDisconnectTitle', 'Opponent disconnected'],
 		['LobbyDisconnectBody', 'The co-op turn is paused. Wait for them to reconnect, or close the session and continue solo.'],
 		['LobbyWaitBtn', 'Wait for reconnect'],
@@ -202,15 +264,30 @@ function KDDrawLobbyPanel(): void {
 		if (KDLobbyStatus.phase === 'connecting') {
 			DrawTextKD(TextGet('LobbyConnecting'), 1000, 340, KDBaseWhite, KDTextGray2);
 		} else if (KDLobbyStatus.phase === 'waiting') {
-			DrawTextKD(TextGet('LobbyCode'), 1000, 300, KDBaseWhite, KDTextGray2, 36);
-			DrawTextKD(MPState.joinCode || '----', 1000, 390, '#fff6bc', KDTextGray2, 96);
-			DrawTextKD(TextGet('LobbyWaiting'), 1000, 490, KDBaseWhite, KDTextGray2);
-			KDLobbyEnterGameIfReady();
+			if (MPState.peerConnected) {
+				// Guest connected — the host chooses how to begin the shared session
+				// (instead of auto-starting). New Game = the deterministic path; Continue
+				// = load the host's existing save and broadcast it.
+				DrawTextKD(TextGet('LobbyGuestJoined'), 1000, 300, KDBaseWhite, KDTextGray2, 36);
+				DrawButtonKDEx('KDLobbyStartNew', () => { MPHostStartSession(); return true; },
+					true, 1000 - 175, 380, 350, 64, TextGet('LobbyStartNew'), KDBaseWhite, '');
+				DrawButtonKDEx('KDLobbyStartContinue', () => { MPHostStartSessionFromSave(); return true; },
+					true, 1000 - 175, 460, 350, 64, TextGet('LobbyStartContinue'), KDBaseWhite, '');
+			} else {
+				DrawTextKD(TextGet('LobbyCode'), 1000, 300, KDBaseWhite, KDTextGray2, 36);
+				DrawTextKD(MPState.joinCode || '----', 1000, 390, '#fff6bc', KDTextGray2, 96);
+				DrawTextKD(TextGet('LobbyWaiting'), 1000, 490, KDBaseWhite, KDTextGray2);
+			}
 		} else if (KDLobbyStatus.phase === 'error') {
 			DrawTextKD(KDLobbyStatus.message || TextGet('LobbyError'), 1000, 340, '#ff8888', KDTextGray2);
 		}
 		DrawButtonKDEx('KDLobbyCancelBtn', () => { KDLobbyCancel(); return true; },
 			true, 1000 - 175, 700, 350, 64, TextGet('LobbyCancel'), KDBaseWhite, '');
+		return;
+	}
+
+	if (KDLobbyView === 'guestConfig') {
+		KDDrawGuestConfigPanel();
 		return;
 	}
 
@@ -248,6 +325,21 @@ function KDDrawLobbyPanel(): void {
 		if (typeof ElementRemove === 'function') { ElementRemove('KDLobbyIP'); ElementRemove('KDLobbyCode'); }
 		return true;
 	}, true, 1000 - 175, 700, 350, 64, TextGet('LobbyBack'), KDBaseWhite, '');
+}
+
+/**
+ * Reduced guest character-creation screen: class (the core KDDrawClasses picker, reused
+ * verbatim) + outfit, with host-only new-game options hidden. Confirm transfers the
+ * built character to the host; Cancel leaves the session. The canvas draw + click
+ * hit-testing is the thin manual/e2e layer; KDGuestConfigConfirm holds the logic.
+ */
+function KDDrawGuestConfigPanel(): void {
+	DrawTextKD(TextGet('LobbyGuestConfigTitle'), 1000, 200, KDBaseWhite, KDTextGray2, 36);
+	if (typeof KDDrawClasses === 'function') KDDrawClasses(1000 - 400, 260);
+	DrawButtonKDEx('KDGuestConfigConfirm', () => { KDGuestConfigConfirm(); return true; },
+		true, 1000 - 175, 760, 350, 64, TextGet('LobbyConfirm'), KDBaseWhite, '');
+	DrawButtonKDEx('KDGuestConfigCancel', () => { KDLobbyCancel(); return true; },
+		true, 1000 - 175, 840, 350, 64, TextGet('LobbyCancel'), KDBaseWhite, '');
 }
 
 function KDDrawMPOverlay(): void {

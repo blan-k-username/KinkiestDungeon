@@ -368,6 +368,24 @@ function onConnection(ws, verdict, intent, req) {
 				session.lastState = msg;
 				return;
 			}
+			case 'player_character': {
+				// Guest → host transfer of a guest-built character. The backend is the
+				// authority for compliance: validate the package shape/size before
+				// relaying, so a tampered or oversized client can't push junk to the peer.
+				const pkg = msg.pkg;
+				const slotOk = msg.playerSlot === 0 || msg.playerSlot === 1;
+				const pkgOk = pkg && typeof pkg === 'object' && !Array.isArray(pkg)
+					&& (pkg.class === undefined || (typeof pkg.class === 'string' && pkg.class.length <= 64))
+					&& (pkg.dress === undefined || (typeof pkg.dress === 'string' && pkg.dress.length <= 64));
+				let sizeOk = false;
+				try { sizeOk = JSON.stringify(msg).length <= 256 * 1024; } catch (_) { sizeOk = false; }
+				if (!slotOk || !pkgOk || !sizeOk) {
+					return send(client, { type: 'error', code: 'bad_player_config' });
+				}
+				const other = slotId === 0 ? 1 : 0;
+				if (session.clients[other]) send(session.clients[other], msg);
+				return;
+			}
 			case 'ping':
 				return send(client, { type: 'pong' });
 			default:

@@ -59,6 +59,68 @@ function KDReleasePlayerCharacter(slot: number): void {
 }
 
 /**
+ * Host-side stash of each co-op slot's guest-built character package (keyed by slot),
+ * received via the `player_character` message. Consumed by KDSpawnPlayer2 when the
+ * avatar spawns (and re-applied to a live avatar if it already exists). A standalone
+ * global — NOT a field on MPState, which MPApplyStateSync reassigns on the guest.
+ */
+let KDCoopSlotConfig: Record<number, any> = {};
+
+/**
+ * Extract the local player's freshly-created character into a plain, serializable
+ * package to transfer to the host as a co-op avatar: class (`KinkyDungeonClassMode`),
+ * outfit (`KinkyDungeonCurrentDress`), the appearance fields (mirrors KDStampCoopAppearance,
+ * read from the singular player Character), and the starting stat block (KDStatNames).
+ * Pure read — mutates nothing.
+ */
+function KDExtractLocalCharacterPackage(): any {
+	const pkg: any = {
+		class: (typeof KinkyDungeonClassMode === 'string') ? KinkyDungeonClassMode : undefined,
+		dress: (typeof KinkyDungeonCurrentDress !== 'undefined') ? KinkyDungeonCurrentDress : undefined,
+	};
+	const c: any = (typeof KinkyDungeonPlayer !== 'undefined') ? KinkyDungeonPlayer : null;
+	if (c && c.Appearance) {
+		try {
+			pkg.charAppearance = JSON.parse(JSON.stringify(c.Appearance));
+			const model: any = (typeof KDCurrentModels !== 'undefined' && KDCurrentModels) ? KDCurrentModels.get(c) : null;
+			pkg.charPoses = (model && model.Poses) ? JSON.parse(JSON.stringify(model.Poses)) : undefined;
+			pkg.charPalette = c.Palette;
+			pkg.charMetadata = c.metadata;
+		} catch (_) { /* appearance not serializable — omit */ }
+	}
+	const stats: Record<string, number> = {};
+	if (typeof KDGetPlayerStat === 'function' && typeof KDStatNames !== 'undefined' && Array.isArray(KDStatNames)) {
+		for (const k of KDStatNames) stats[k] = KDGetPlayerStat(0, k) as number;
+	}
+	pkg.stats = stats;
+	return pkg;
+}
+
+/**
+ * Install a guest-built character package onto co-op slot `slot`'s entity: stamp the
+ * appearance fields + dress + class onto the entity (so KDDressPlayerSlot / the
+ * KD-061 restore pipeline reflect it) and route the stat block to the slot's own block
+ * (KD-056/064 accessor — never P1's globals). Idempotent; safe on a live or fresh avatar.
+ */
+function KDApplyCoopCharacterPackage(slot: number, pkg: any): void {
+	if (!pkg) return;
+	const ent: any = (typeof KDPlayerById === 'function') ? KDPlayerById(slot) : undefined;
+	if (!ent) return;
+	if (pkg.dress) ent.dress = pkg.dress;
+	if (pkg.class) ent.class = pkg.class;
+	if (pkg.charAppearance !== undefined) ent.charAppearance = pkg.charAppearance;
+	if (pkg.charPoses !== undefined) ent.charPoses = pkg.charPoses;
+	if (pkg.charPalette !== undefined) ent.charPalette = pkg.charPalette;
+	if (pkg.charMetadata !== undefined) ent.charMetadata = pkg.charMetadata;
+	if (pkg.stats && typeof pkg.stats === 'object' && typeof KDSetPlayerStat === 'function') {
+		for (const k of Object.keys(pkg.stats)) KDSetPlayerStat(slot, k, pkg.stats[k]);
+	}
+	// Rebuild the slot's render Character from the transferred appearance + dress.
+	if (pkg.charAppearance !== undefined && typeof KDRestoreCoopCharacters === 'function') KDRestoreCoopCharacters();
+	if (typeof KDDressPlayerSlot === 'function') KDDressPlayerSlot(slot);
+}
+
+/**
  * Stamp each co-op slot entity with its Character's appearance fields
  * (`{charAppearance, charPoses, charPalette, charMetadata}`) so they ride the
  * entity through `save.KDMapData` + state_sync. The Character itself stays

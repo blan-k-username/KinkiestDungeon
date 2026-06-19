@@ -177,11 +177,16 @@ function KDSpawnPlayer2(): entity | undefined {
 	// Build P2's render Character in the side map (NOT on the entity, to keep the
 	// circular-ref Character out of the entity's JSON save).
 	if (typeof KDEnsurePlayerCharacter === 'function') KDEnsurePlayerCharacter(1, 'P2');
-	// Compose P2's appearance (base body/dress + its own worn restraints) so it
-	// is ready to render. Re-run when P2's restraints change.
-	if (typeof KDDressPlayerSlot === 'function') KDDressPlayerSlot(1);
 	KDAddEntity(ent, false, false, true);
-	KDRegisterPlayer(1, ent);
+	KDRegisterPlayer(1, ent);   // register + add before dressing so the appearance-restore finds the entity
+	// If the guest transferred a built character, install it (class/outfit/appearance/
+	// stats) onto P2; else compose the default appearance (unchanged co-op-new-game path).
+	const cfg = (typeof KDCoopSlotConfig !== 'undefined' && KDCoopSlotConfig) ? KDCoopSlotConfig[1] : undefined;
+	if (cfg && typeof KDApplyCoopCharacterPackage === 'function') {
+		KDApplyCoopCharacterPackage(1, cfg);
+	} else if (typeof KDDressPlayerSlot === 'function') {
+		KDDressPlayerSlot(1);
+	}
 	return ent;
 }
 

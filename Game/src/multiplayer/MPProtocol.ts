@@ -66,6 +66,21 @@ function MPEncodeStateSync(turn: number, state: string): string {
 	return JSON.stringify({ type: 'state_sync', turn, state });
 }
 
+/**
+ * Build a `player_character` envelope: guest → host transfer of a guest-built
+ * character package (`{class, dress, charAppearance, charPoses, charPalette,
+ * charMetadata, stats}`). The guest client runs the core character-creation locally
+ * and ships the result; the host validates (server-side compliance check) and installs
+ * it as the slot's avatar. Returns `null` if the package isn't JSON-serializable.
+ */
+function MPEncodePlayerCharacter(playerSlot: number, pkg: any): string | null {
+	try {
+		return JSON.stringify({ type: 'player_character', playerSlot, pkg });
+	} catch (_) {
+		return null;
+	}
+}
+
 /** Parse a wire message. Returns `null` on malformed input. */
 function MPParseMessage(raw: string): { type: string;[k: string]: any } | null {
 	try {
