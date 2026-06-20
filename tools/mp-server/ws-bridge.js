@@ -1,28 +1,31 @@
 /**
- * tools/mp-server/ws-bridge.js  (KD-071, epic mp-mvp / KD-066)
+ * tools/mp-server/ws-bridge.js  (KD-071/KD-085, epic mp-server / KD-066)
  *
  * Minimal, dependency-free local WebSocket bridge between browser thin-clients and
- * a server-side CoopSession. A browser can't do in-process/worker IPC, so even on
- * localhost the client↔server link is a WebSocket. We hand-roll a tiny RFC6455
- * server on Node's built-in http+crypto (no `ws` dependency) — text frames only,
- * which is all the protocol needs.
+ * the server-side SwapSession (the live SWAP-model session — KD-085). A browser can't
+ * do in-process/worker IPC, so even on localhost the client↔server link is a
+ * WebSocket. We hand-roll a tiny RFC6455 server on Node's built-in http+crypto (no
+ * `ws` dependency) — text frames only, which is all the protocol needs.
  *
  * Protocol (JSON text frames):
  *   client → server : { type:'join', clientId }            register a player
- *                      { type:'input', action:{dx,dy} }     submit this turn's action
+ *                      { type:'input', action }             this turn's action —
+ *                          KD's real input { kdType, data } (default-control path)
+ *                          or a built-in helper { kind:'move'|'wait', dx, dy }
  *   server → client : { type:'joined', clientId, started }  ack
  *                      { type:'state', tick, snapshot }      this client's render-state
  *                      { type:'waiting', waitingOn:[...] }    barrier still open
  *
- * On every player's input the session advances one turn (KD-069 barrier) and the
- * server pushes each client its own player instance's render-state snapshot
- * (KD-067) — exactly what KDRenderClient.apply() consumes in the browser.
+ * The turn advances only when EVERY player has submitted (R8 lockstep). On advance the
+ * server composes each client's render-state from the ONE authoritative world + that
+ * client's state bundle (SwapSession.snapshotFor) — exactly what KDRenderClient.apply()
+ * consumes in the browser. `tick` is the session turn counter (+1 per resolved turn).
  */
 'use strict';
 
 const http = require('http');
 const crypto = require('crypto');
-const { CoopSession } = require('./coop-session');
+const { SwapSession } = require('./swap-session');
 
 const WS_MAGIC = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 
@@ -84,7 +87,7 @@ function decodeFrames(buf) {
 class WSBridge {
 	/** @param {object} opts { requiredPlayers=2, seed, enemyType } */
 	constructor(opts = {}) {
-		this.session = new CoopSession(opts);
+		this.session = new SwapSession(opts);
 		this.sockets = new Map();          // clientId -> socket
 		this._server = null;
 		this.port = null;
@@ -157,7 +160,7 @@ class WSBridge {
 				// player's move advances the turn (easy to validate sync solo).
 				if (!res.advanced && this.autoAdvance) {
 					for (const pid of res.waitingOn || []) {
-						res = this.session.submit(pid, { dx: 0, dy: 0 });
+						res = this.session.submit(pid, { kind: 'wait' });
 						if (res.advanced) break;
 					}
 				}
@@ -171,30 +174,16 @@ class WSBridge {
 	}
 
 	/**
-	 * Push each client a render-state composed from:
-	 *  - the WORLD's authoritative map (ALL enemies + every player's avatar) so all
-	 *    clients see the SAME entities at the SAME positions (no per-instance desync),
-	 *    minus THIS client's own avatar (they're their own global player, not an avatar);
-	 *  - this client's own player position + stats from its player instance.
-	 * The world is serialized ONCE per turn; only the Entities list is filtered per client.
+	 * Push each client its render-state, composed by SwapSession.snapshotFor from the
+	 * ONE authoritative world + that client's state bundle: the shared world map (all
+	 * enemies + every OTHER player's avatar) plus this client's own player + stats,
+	 * minus this client's own avatar (they're their own global player, not an avatar).
+	 * `tick` is the session turn counter (+1 per resolved turn — lockstep marker).
 	 */
 	_broadcastState() {
-		const orch = this.session.orch;
-		const recon = this.session.reconciler;
-		const worldSnap = orch.world.serializeRenderState();
-		const worldMap = worldSnap.map || {};
-		const allEntities = worldMap.Entities || [];
-		const tick = orch.ticks().world;
-
+		const tick = this.session.turn;
 		for (const [cid, sock] of this.sockets) {
-			const inst = this.session.instanceOf(cid);
-			if (!inst) continue;
-			const snapshot = inst.serializeRenderState();         // own player + stats
-			const ownAvatar = recon ? recon.worldAvatar.get(cid) : null;
-			// adopt the world's authoritative entities, minus this client's own avatar
-			snapshot.map = Object.assign({}, worldMap, {
-				Entities: allEntities.filter((e) => e.id !== ownAvatar),
-			});
+			const snapshot = this.session.snapshotFor(cid);
 			this._send(sock, { type: 'state', tick, snapshot });
 		}
 	}

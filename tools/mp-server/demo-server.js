@@ -4,7 +4,7 @@
  * One Node process that lets you PLAY the co-op MVP in two real browser windows:
  *   - serves the stock game statically from the repo root (index.html + out/main.js
  *     + all runtime assets), and
- *   - runs the local WebSocket bridge (WSBridge → CoopSession) on the SAME port, so
+ *   - runs the local WebSocket bridge (WSBridge → SwapSession) on the SAME port, so
  *     the browser client connects same-origin (ws://<host>/).
  *
  * It injects two scripts into index.html on the fly (the stock index.html is left

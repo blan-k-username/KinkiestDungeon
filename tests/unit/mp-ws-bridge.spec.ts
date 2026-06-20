@@ -1,13 +1,14 @@
 /**
- * Node-layer (Vitest) test for the local WebSocket bridge — KD-071.
+ * Node-layer (Vitest) test for the local WebSocket bridge — KD-071/KD-085.
  *
- * Drives the hand-rolled RFC6455 bridge (tools/mp-server/ws-bridge.js) with TWO
- * REAL WebSocket clients (Node's built-in global WebSocket) to prove the full
- * browser↔server protocol server-side: both clients join → the shared world
- * starts → each receives its OWN player instance's render-state snapshot (KD-067)
- * → inputs are barrier-gated → on completion both receive a new snapshot with the
- * world tick advanced in lockstep. This is exactly what KDRenderClient.apply()
- * consumes in the browser (proven render-able by the e2e spike).
+ * Drives the hand-rolled RFC6455 bridge (tools/mp-server/ws-bridge.js, now fronting
+ * the SWAP-model SwapSession) with TWO REAL WebSocket clients (Node's built-in global
+ * WebSocket) to prove the full browser↔server protocol server-side: both clients join
+ * → the shared world starts → each receives its render-state snapshot composed from the
+ * ONE authoritative world + its state bundle (SwapSession.snapshotFor) → inputs are
+ * barrier-gated (R8) → on completion both receive a new snapshot with the session turn
+ * advanced in lockstep. This is exactly what KDRenderClient.apply() consumes in the
+ * browser (proven render-able by the e2e spike).
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -92,16 +93,16 @@ describe('WSBridge — local WebSocket render+input round-trip (KD-071)', () => 
 	}, BOOT_TIMEOUT);
 
 	it('barrier-gates input and advances the turn in lockstep on completion', async () => {
-		const t0 = bridge.session.orch.ticks().world;
+		const t0 = bridge.session.turn;
 
 		// A submits first → A gets a 'waiting' (barrier still open), no advance
-		A.send({ type: 'input', action: { dx: 0, dy: 0 } });
+		A.send({ type: 'input', action: { kind: 'wait' } });
 		const waiting = await A.next((m) => m.type === 'waiting');
 		expect(waiting.waitingOn).toContain('B');
-		expect(bridge.session.orch.ticks().world).toBe(t0);
+		expect(bridge.session.turn).toBe(t0);
 
 		// B submits → barrier completes → both receive a new state, tick advanced
-		B.send({ type: 'input', action: { dx: 0, dy: 0 } });
+		B.send({ type: 'input', action: { kind: 'wait' } });
 		const sa = await A.next((m) => m.type === 'state');
 		const sb = await B.next((m) => m.type === 'state');
 		expect(sa.tick).toBe(t0 + 1);

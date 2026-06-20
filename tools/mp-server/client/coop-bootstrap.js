@@ -8,7 +8,8 @@
  *
  * It: waits for the bundle, brings up render structures, marks the tab render-only,
  * opens a same-origin WebSocket to the bridge, applies each server render-state
- * snapshot, and forwards arrow/WASD keys as one move per turn (lockstep — both
+ * snapshot, and lets KD's DEFAULT controls drive — the routed KDSendInput wrapper
+ * (render-client) forwards each turn-consuming action to the server (lockstep — both
  * players must act to advance). Exposes window.__coop for the e2e harness.
  */
 (function () {
@@ -24,8 +25,13 @@
 
 	var coop = window.__coop = {
 		id: id, connected: false, started: false, submitted: false,
-		lastTick: null, peers: [], status: 'init',
-		sendMove: function (dx, dy) { submit(actionForDir(dx | 0, dy | 0)); },
+		lastTick: null, peers: [], status: 'init', route: null,
+		// Test hooks (deterministic). Real play uses KD's default controls → the routed
+		// KDSendInput wrapper → submit(). These build the same {kdType,data} actions.
+		sendMove: function (dx, dy) {
+			submit({ kdType: 'move', data: { dir: { x: dx | 0, y: dy | 0 }, delta: 1, AllowInteract: true } });
+		},
+		sendAction: function (action) { submit(action); },
 	};
 
 	var ws = null;
@@ -60,8 +66,55 @@
 		// assets ready → bring up the dungeon and go render-only
 		forceGameScreen();
 		window.KDRenderClient.disableLocalSim();
+		// KD's default controls drive: the routed KDSendInput wrapper hands each
+		// turn-consuming action to this callback, which forwards it to the server.
+		window.KDRenderClient.onInput(function (action) { submit(action); });
+		installRouteDriver();
 		connect();
-		installInput();
+	}
+
+	/**
+	 * Click-to-move routes (KD's "FastMove") are normally drained by KD's per-frame
+	 * loop (KinkyDungeon.ts ~3077) — incompatible with lockstep: under the thin client
+	 * each KDSendInput('move') is routed to the server and returns without changing
+	 * local MovePoints, so KD splices the WHOLE path within a few frames while the
+	 * per-turn submit gate drops all but the first step → the route is "forgotten"
+	 * after one tile. Fix: keep KD's real pathfinding (KDFastMoveTo), but capture the
+	 * path and advance it ONE step per resolved server turn (driven from each 'state'),
+	 * disabling KD's local drainer.
+	 */
+	function installRouteDriver() {
+		coop._stepRoute = stepRoute;   // test hook (deterministic e2e route driving)
+		if (typeof KDFastMoveTo !== 'function' || KDFastMoveTo.__coopWrapped) return;
+		var _origFast = KDFastMoveTo;
+		KDFastMoveTo = function () {
+			var r = _origFast.apply(this, arguments);   // computes KinkyDungeonFastMovePath
+			var path = (typeof KinkyDungeonFastMovePath !== 'undefined' && KinkyDungeonFastMovePath)
+				? KinkyDungeonFastMovePath.slice() : [];
+			KinkyDungeonFastMovePath = [];               // stop KD's own per-frame drainer
+			coop.route = path.length ? path : null;
+			stepRoute();                                 // submit the first step this turn
+			return r;
+		};
+		KDFastMoveTo.__coopWrapped = true;
+	}
+
+	/**
+	 * Submit the next route step toward the goal — one per lockstep turn (called from
+	 * each server 'state'). Terminates on arrival/empty path, on displacement (the
+	 * server moved us off the path), or when an enemy appears (KD's fast-move does the
+	 * same via KinkyDungeonInDanger).
+	 */
+	function stepRoute() {
+		if (coop.submitted) return;   // already acted this turn — don't consume a route step
+		if (!coop.route || !coop.route.length) { coop.route = null; return; }
+		if (typeof KinkyDungeonInDanger === 'function' && KinkyDungeonInDanger()) { coop.route = null; return; }
+		var p = KinkyDungeonPlayerEntity;
+		var next = coop.route[0];
+		var dx = next.x - p.x, dy = next.y - p.y;
+		if (Math.max(Math.abs(dx), Math.abs(dy)) > 1.5) { coop.route = null; return; }  // displaced/blocked
+		coop.route.shift();
+		submit({ kdType: 'move', data: { dir: { x: dx, y: dy }, delta: 1, AllowInteract: true } }, true);
 	}
 
 	/** Start a game ONCE to bring up dungeon structures, then pin to the Game screen. */
@@ -102,6 +155,7 @@
 				coop.lastTick = m.tick;
 				window.KDRenderClient.apply(m.snapshot);
 				pinGameScreen();   // keep the dungeon on screen (don't let the menu steal it)
+				if (coop.route) stepRoute();   // advance a click-to-move route by one tile this turn
 				setStatus('Co-op ' + id + '  turn ' + m.tick + '\n[arrows/WASD] move · [space] wait');
 			} else if (m.type === 'waiting') {
 				setStatus('Co-op ' + id + ': submitted, waiting for ' + (m.waitingOn || []).join(', ') + '…');
@@ -112,48 +166,11 @@
 		ws.onclose = function () { coop.connected = false; setStatus('Co-op ' + id + ': disconnected'); };
 	}
 
-	function submit(action) {
+	function submit(action, fromRoute) {
 		if (!ws || ws.readyState !== 1 || !coop.started || coop.submitted) return;
+		if (!fromRoute) coop.route = null;   // a manual action cancels an in-progress route
 		coop.submitted = true;
 		ws.send(JSON.stringify({ type: 'input', action: action }));
-	}
-
-	/** A directional key → a structured action: bump an adjacent enemy = attack; else move. */
-	function actionForDir(dx, dy) {
-		if (dx === 0 && dy === 0) return { kind: 'wait' };
-		try {
-			var p = KinkyDungeonPlayerEntity;
-			var nx = p.x + dx, ny = p.y + dy;
-			var enemy = (KDMapData.Entities || []).find(function (e) {
-				return e.x === nx && e.y === ny && e.Enemy && KDGetFaction(e) !== 'Player';
-			});
-			if (enemy) return { kind: 'attack', tx: nx, ty: ny };
-		} catch (e) { /* fall through to move */ }
-		return { kind: 'move', dx: dx, dy: dy };
-	}
-
-	coop.sendAction = function (action) { submit(action); };
-
-	var MOVES = {
-		ArrowLeft: [-1, 0], a: [-1, 0], A: [-1, 0],
-		ArrowRight: [1, 0], d: [1, 0], D: [1, 0],
-		ArrowUp: [0, -1], w: [0, -1], W: [0, -1],
-		ArrowDown: [0, 1], s: [0, 1], S: [0, 1],
-		' ': [0, 0], '.': [0, 0],
-	};
-
-	function installInput() {
-		// Capture-phase on window → intercept BEFORE the bundle's own key handler,
-		// so no local turn/simulation runs; the server is authoritative. Arrows/WASD =
-		// move-or-bump-attack; space/'.' = wait. (Other gameplay keys are swallowed by
-		// the KDSendInput guard in render-client; local-only menus still work.)
-		window.addEventListener('keydown', function (ev) {
-			var mv = MOVES[ev.key];
-			if (!mv) return;
-			ev.preventDefault();
-			ev.stopImmediatePropagation();
-			submit(actionForDir(mv[0], mv[1]));
-		}, true);
 	}
 
 	boot();

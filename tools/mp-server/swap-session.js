@@ -150,6 +150,29 @@ class SwapSession {
 	enemyView() {
 		return this.world.listEntities().find((e) => e.id === this.enemyId) || null;
 	}
+
+	/**
+	 * Compose a client's render-state snapshot from the ONE authoritative world plus
+	 * that client's state bundle: swap the client in (so player entity + stats are
+	 * theirs), serialize the world's render-state, then drop the client's OWN avatar
+	 * from the Entities list — they render as the global player, not as an avatar
+	 * (the other players' avatars stay). Re-park the global player afterwards so the
+	 * world is clean between turns. Snapshot shape === HeadlessHost.serializeRenderState
+	 * (render-state v1) — exactly what KDRenderClient.apply() consumes in the browser.
+	 */
+	snapshotFor(clientId) {
+		if (!this.started) throw new Error('session not started');
+		const bundle = this.bundles.get(clientId);
+		if (!bundle) throw new Error(`unknown player ${clientId}`);
+		this.world.restorePlayer(bundle);
+		const snap = this.world.serializeRenderState();
+		const ownAvatar = this.avatars.get(clientId);
+		if (snap.map && Array.isArray(snap.map.Entities) && ownAvatar != null) {
+			snap.map.Entities = snap.map.Entities.filter((e) => e.id !== ownAvatar);
+		}
+		this.world.parkGlobalPlayer(PARK.x, PARK.y);
+		return snap;
+	}
 }
 
 module.exports = { SwapSession };

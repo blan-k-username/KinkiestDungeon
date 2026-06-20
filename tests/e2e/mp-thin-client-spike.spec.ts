@@ -75,8 +75,9 @@ test('stock renderer is driven purely from an applied render-state snapshot (no 
 	// NO simulation happened: the turn counter did not move during apply
 	expect(c.tickAfter).toBe(c.tickBefore);
 
-	// the client marked itself render-only
-	expect(c.role).toBe('client');
+	// the client marked itself render-only (disableLocalSim returns the flag — KD-085
+	// reverted the KDServerRole game-source flag; the client is pure monkey-patch).
+	expect(c.role).toBe(true);
 
 	// the CANVAS reflects the applied snapshot: frame C (A's map) differs from frame
 	// B (B's map), and is a real non-empty render.

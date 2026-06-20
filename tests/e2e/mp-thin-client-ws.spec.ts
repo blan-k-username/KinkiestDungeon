@@ -65,13 +65,14 @@ test('a browser thin-client renders server snapshots and rounds input over a Web
 				stateGrid: w.__states[0].grid,
 				// @ts-ignore — the render globals now reflect the server snapshot
 				liveGrid: KDMapData.Grid,
-				// @ts-ignore — KDServerRole is a bundle `let` global (not on window)
-				role: (typeof KDServerRole !== 'undefined') ? KDServerRole : null,
+				// render-only flag lives on KDRenderClient now (KD-085 reverted the
+				// KDServerRole game-source flag; the client is pure monkey-patch).
+				clientMode: (window as any).KDRenderClient.isLocalSimDisabled(),
 			};
 		});
 		// the browser's live render globals match the snapshot the server pushed
 		expect(first.liveGrid).toBe(first.stateGrid);
-		expect(first.role).toBe('client');
+		expect(first.clientMode).toBe(true);
 
 		// canvas renders a real frame of the server's world
 		await kdPage.waitForTimeout(300);

@@ -16,7 +16,8 @@
  * Exposes `window.KDRenderClient`:
  *   serialize()            → a render-state snapshot of the current globals
  *   apply(snap)            → adopt a snapshot onto the render globals (NO sim)
- *   disableLocalSim()      → mark this instance render-only (KDServerRole='client')
+ *   disableLocalSim()      → mark this instance render-only (route input, block local sim)
+ *   isLocalSimDisabled()   → whether disableLocalSim() has been applied
  *   onInput(cb) / sendInput(action) → input forwarding plumbing (transport-agnostic)
  */
 (function () {
@@ -35,6 +36,39 @@
 	}
 
 	var inputCb = null;
+	var clientMode = false;   // closure flag — NOT the game-source KDServerRole (reverted, KD-085)
+
+	// Turn-consuming gameplay inputs are ROUTED to the server (the authoritative world
+	// runs them through KD's REAL dispatcher). Everything else (menu/choice/toggle:
+	// spellChoice, itemChoice, select, dialogue, toggleSpell, setMoveDirection, …) keeps
+	// running LOCALLY so local-only UI stays responsive (R6). The KinkyDungeonAdvanceTime
+	// guard backstops any un-classified type from advancing the local turn (R1).
+	var ROUTED_INPUTS = {
+		move: 1, movestairs: 1, doattack: 1, dospecial: 1, doaggro: 1,
+		tick: 1, struggle: 1, interact: 1,
+	};
+
+	/**
+	 * Best-effort JSON-safe clone of an input's data: drops circular refs and maps
+	 * entity refs (objects carrying an `id`/`Enemy`) down to `{id}` (or `{x,y}` if no
+	 * id) so the wire payload stays small + serializable. Targeted actions/spells carry
+	 * live entity object refs that JSON can't ship verbatim.
+	 */
+	function sanitizeInputData(data) {
+		if (data == null || typeof data !== 'object') return data;
+		var seen = [];
+		function repl(key, val) {
+			if (val && typeof val === 'object') {
+				if (seen.indexOf(val) >= 0) return undefined;          // drop cycles
+				if (val.Enemy || (val.id !== undefined && val.hp !== undefined)) {
+					return (val.id !== undefined) ? { id: val.id } : { x: val.x, y: val.y };
+				}
+				seen.push(val);
+			}
+			return val;
+		}
+		try { return JSON.parse(JSON.stringify(data, repl)); } catch (e) { return {}; }
+	}
 
 	/**
 	 * Ensure the `RemotePlayer` avatar enemy-def exists in THIS browser. The server
@@ -133,32 +167,43 @@
 
 		/**
 		 * Mark this browser instance as render-only: it must not simulate gameplay.
-		 * Sets KDServerRole='client' (the reserved KD-068 role) so any in-engine
-		 * client guards are active. The client simply never calls KinkyDungeonAdvanceTime.
+		 * Uses a closure flag (NOT the game-source KDServerRole — that source edit was
+		 * reverted in KD-085; the client is pure monkey-patch). The server is
+		 * authoritative; the client never resolves an action or advances a turn locally.
 		 */
 		disableLocalSim: function () {
-			if (typeof KDServerRole !== 'undefined') KDServerRole = 'client';
-			// Block ALL local simulation (KD-085): nothing the player does may advance
-			// the turn or resolve an action locally — the server is authoritative. Any
-			// un-routed input would otherwise drift this client into its "own world".
+			clientMode = true;
+			// Belt-and-suspenders (R1): block ALL local turn advance — nothing the player
+			// does may advance the turn locally, so an un-routed gameplay input can't drift
+			// this client into its "own world".
 			if (typeof KinkyDungeonAdvanceTime === 'function' && !KinkyDungeonAdvanceTime.__kdClientGuard) {
 				var _origAdvance = KinkyDungeonAdvanceTime;
 				KinkyDungeonAdvanceTime = function (delta) {
-					if ((delta | 0) > 0 && KDServerRole === 'client') return; // no local turn advance
+					if (clientMode && (delta | 0) > 0) return; // no local turn advance
 					return _origAdvance.apply(this, arguments);
 				};
 				KinkyDungeonAdvanceTime.__kdClientGuard = true;
 			}
 			if (typeof KDSendInput === 'function' && !KDSendInput.__kdClientGuard) {
-				// Swallow the bundle's own action dispatch — the co-op client routes the
-				// supported actions (move/attack) to the server itself; everything else is
-				// simply not simulated locally (no divergence). Local-only UI (inventory/
-				// journal/settings) is handled in the key handler, not via KDSendInput.
-				KDSendInput = function () { return ''; };
+				var _origSend = KDSendInput;
+				// ROUTE the real dispatcher (KD-085): KD's own key/click handlers call
+				// KDSendInput(type,data) for the default controls — for turn-consuming
+				// gameplay we forward {kdType,data} to the server (authoritative) and DON'T
+				// run it locally. Local-only UI (menus/choices) still dispatches locally (R6).
+				KDSendInput = function (type, data) {
+					if (clientMode && ROUTED_INPUTS[type]) {
+						KDRenderClient.sendInput({ kdType: type, data: sanitizeInputData(data) });
+						return '';
+					}
+					return _origSend.apply(this, arguments);
+				};
 				KDSendInput.__kdClientGuard = true;
 			}
-			return (typeof KDServerRole !== 'undefined') ? KDServerRole : null;
+			return clientMode;
 		},
+
+		/** True once disableLocalSim() has marked this browser render-only (KD-085). */
+		isLocalSimDisabled: function () { return clientMode; },
 
 		/** Register a callback invoked when local input should be sent to the server. */
 		onInput: function (cb) { inputCb = cb; },

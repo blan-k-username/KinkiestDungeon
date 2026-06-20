@@ -123,9 +123,37 @@ class HeadlessHost {
 
 		this._booted = true;
 		this._neuterRendering();
-		// serverMode (KD-068) is now a real engine flag (KDServerRole) — no need to
-		// capture/restore KinkyDungeonUpdateEnemies as the PoC did.
+		this._installServerRoleShim();
 		return this;
+	}
+
+	/**
+	 * Server-authoritative role flag + shared-entity AI suppression — installed as a
+	 * RUNTIME monkey-patch (mod-style reassignment, same pattern as _neuterRendering),
+	 * NOT a game-source edit (KD-085 restored zero source edits; KD-068's source flag
+	 * was reverted). Roles:
+	 *   ""       → single-player / offline (default; AI runs normally — byte-identical).
+	 *   "world"  → this instance OWNS + simulates the shared entities (full AI).
+	 *   "player" → remote-player view; shared-entity AI suppressed (driven by the world).
+	 *   "client" → thin render-only browser client (set browser-side, never here).
+	 * Set at runtime via setServerMode; the offline game never sets it, so it stays "".
+	 */
+	_installServerRoleShim() {
+		this.eval(`(function(){
+			// Create the role global as a globalThis property (the source 'let' was
+			// reverted) so later bare reads/assignments (setServerMode) resolve in the
+			// bundle's strict realm instead of throwing ReferenceError.
+			if (typeof KDServerRole === 'undefined') globalThis.KDServerRole = '';
+			if (typeof KinkyDungeonUpdateEnemies === 'function' && !KinkyDungeonUpdateEnemies.__kdRoleShim) {
+				var _u = KinkyDungeonUpdateEnemies;
+				KinkyDungeonUpdateEnemies = function(){
+					// player-role instances do not own shared entities — skip the local AI.
+					if (KDServerRole === 'player') return;
+					return _u.apply(this, arguments);
+				};
+				KinkyDungeonUpdateEnemies.__kdRoleShim = true;
+			}
+		})()`);
 	}
 
 	/**
