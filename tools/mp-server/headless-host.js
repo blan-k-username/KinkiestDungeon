@@ -308,6 +308,57 @@ class HeadlessHost {
 		return this.avatars[avatarId] || null;
 	}
 
+	// ----- features: PvP + server-side mods (KD-080) ---------------------------
+
+	/**
+	 * Load a mod's code into this instance — the same path the production loader
+	 * uses (`eval(res)` at KDMods.ts:483) and the test mod-injector
+	 * (tests/helpers/mod-injector.ts). Runs in the bundle's scope via the bridge,
+	 * so the mod can push to KD globals (e.g. KinkyDungeonEnemies). No source edit.
+	 */
+	loadMod(code) {
+		this.eval(code);
+		return { ok: true };
+	}
+
+	/** Look up an enemy definition by name (used to verify a mod took effect). */
+	getEnemyByName(name) {
+		return this.eval(`(function(){
+			var e = (typeof KinkyDungeonGetEnemyByName === 'function') ? KinkyDungeonGetEnemyByName(${JSON.stringify(name)}) : null;
+			return e ? { name: e.name } : null;
+		})()`);
+	}
+
+	/**
+	 * The PvP observation surface. Player `hp` is cosmetic; real effects land on
+	 * the stat globals (Will/Stamina/Distraction) and the restraint list.
+	 */
+	getVitals() {
+		return this.eval(`(function(){ return {
+			hp: KinkyDungeonPlayerEntity ? KinkyDungeonPlayerEntity.hp : null,
+			stamina: (typeof KinkyDungeonStatStamina !== 'undefined') ? KinkyDungeonStatStamina : null,
+			will: (typeof KinkyDungeonStatWill !== 'undefined') ? KinkyDungeonStatWill : null,
+			distraction: (typeof KinkyDungeonStatDistraction !== 'undefined') ? KinkyDungeonStatDistraction : null,
+			restraints: (typeof KinkyDungeonAllRestraint === 'function') ? KinkyDungeonAllRestraint().length : null,
+		}; })()`);
+	}
+
+	/** Deal damage to THIS instance's player (a PvP hit landing on this instance). */
+	dealDamage(amount, type = 'pain') {
+		this.eval(`KinkyDungeonDealDamage({ damage: ${Number(amount) || 0}, type: ${JSON.stringify(type)} })`);
+		return this.getVitals();
+	}
+
+	/** Add a named restraint to THIS instance's player. Returns {added, count}. */
+	addRestraint(name) {
+		return this.eval(`(function(){
+			var def = KinkyDungeonGetRestraintByName(${JSON.stringify(name)});
+			if (!def) return { added: 0, count: KinkyDungeonAllRestraint().length, error: 'no restraint def: ' + ${JSON.stringify(name)} };
+			var added = KinkyDungeonAddRestraint(def, 0, true);
+			return { added: added, count: KinkyDungeonAllRestraint().length };
+		})()`);
+	}
+
 	/** Serialize full game state via the bundle's own save path. */
 	serialize() {
 		return this.eval('KinkyDungeonGenerateSaveData()');

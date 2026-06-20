@@ -59,6 +59,12 @@ async function dispatch(state, msg) {
 		case 'runsEnemyAI':    return { value: h.runsEnemyAI() };
 		case 'step':           return { tick: h.step(a.n || 1) };
 		case 'tick':           return { tick: h.tick() };
+		// --- KD-080 features: PvP + server-side mods ---
+		case 'loadMod':        return h.loadMod(a.code);
+		case 'getEnemyByName': return h.getEnemyByName(a.name);
+		case 'getVitals':      return h.getVitals();
+		case 'dealDamage':     return h.dealDamage(a.amount, a.type);
+		case 'addRestraint':   return h.addRestraint(a.name);
 		default:
 			throw new Error(`unknown protocol cmd: ${JSON.stringify(cmd)}`);
 	}
@@ -69,6 +75,7 @@ const COMMANDS = [
 	'init', 'ping', 'pid', 'findOpenTile', 'placePlayer', 'applyMove', 'summonEnemy',
 	'getRealEnemy', 'setEnemyTarget', 'injectEnemyState', 'upsertAvatar', 'getAvatar',
 	'getPlayerPos', 'getEnemyView', 'setServerMode', 'runsEnemyAI', 'step', 'tick',
+	'loadMod', 'getEnemyByName', 'getVitals', 'dealDamage', 'addRestraint',
 ];
 
 module.exports = { createState, dispatch, COMMANDS };

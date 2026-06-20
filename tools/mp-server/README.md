@@ -16,6 +16,7 @@ KD-069 (orchestrator), KD-070 (reconciler).
 | `headless-host.js` | `HeadlessHost` — boots the bundle in an **isolated `vm.Context` per instance** and bridges into its script scope via an appended `__KDEVAL`. Exposes `init/step/getState/eval` + scenario & reconciler helpers. |
 | `orchestrator.js` | `Orchestrator` — 1 world + 2 player hosts, global turn clock (`submitMove`), and the minimal reconciler. **In-process direct calls** (KD-079 baseline, no serialization). |
 | `mp-session.js` | `MPSession` — async port of the orchestrator that drives instances over a **pluggable transport** (serialized messages). KD-081. |
+| `lobby.js` | `Lobby` — generalized **N-player (2–4)** session over the transport: join flow, N-player turn clock + reconciler, **PvP**, and **server-side mod loading**. KD-080. |
 | `transport/` | Transport boundary (KD-081): `protocol.js` (commands + `dispatch`), `in-process.js`, `worker-thread.js` (+`worker-entry.js`), `socket.js` (+`child-entry.js`), `index.js` (registry). |
 | `TRANSPORTS.md` | Measured comparison of the three transports (pros/cons + game-code-change count). |
 | `smoke-boot.js` / `bench-transports.js` | Manual smoke driver / transport benchmark. |
@@ -64,6 +65,27 @@ The headline result: **transport choice costs zero game-code change** — only t
 differs; the orchestrator and game bundle are untouched. Full comparison + measurements in
 `TRANSPORTS.md`. Tests: `tests/unit/mp-transport.spec.ts` (4 ACs over each transport + a
 separate-OS-process assertion for `socket`).
+
+## Feature pillars (KD-080)
+
+`lobby.js` adds the three concept pillars on top of the host + transport, still with **zero
+game-source edits**:
+
+- **Lobby join (2–4)** — `lobby.start()` boots the world + enemy; `lobby.join(id)` assigns a fresh
+  player instance to each stub client (2–4). The turn clock advances only when *all* joined clients
+  submit; the reconciler injects the enemy into every player and each player's avatar into every
+  other.
+- **PvP** — `lobby.pvp(attacker, target, {restraint, damage})` applies the effect to the **target's
+  instance only** (e.g. `addRestraint('DuctTapeHands')`, `dealDamage(3,'pain')`). The target's
+  restraint count rises and `Will` drops; the attacker is byte-for-byte unchanged — proving
+  per-instance state isolation.
+- **Server-side mod** — `lobby.loadMod()` reads a real mod file (default `Mods/example_enemy/init.ks`)
+  and evals it into the instances via the host bridge — the same path as the production loader
+  (`Scripts/KDMods.ts:483`) and `tests/helpers/mod-injector.ts`. The modded enemy (`AngrySkeleton`)
+  then resolves via `KinkyDungeonGetEnemyByName` in every instance (and is absent in a control).
+
+Tests: `tests/unit/mp-lobby.spec.ts` (lobby 2/3/4, PvP isolation, mod load). Default in-process
+transport; the lobby is transport-agnostic (any registered transport works).
 
 ## Known limitations (PoC)
 
