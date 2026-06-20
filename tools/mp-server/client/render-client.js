@@ -138,6 +138,25 @@
 		 */
 		disableLocalSim: function () {
 			if (typeof KDServerRole !== 'undefined') KDServerRole = 'client';
+			// Block ALL local simulation (KD-085): nothing the player does may advance
+			// the turn or resolve an action locally — the server is authoritative. Any
+			// un-routed input would otherwise drift this client into its "own world".
+			if (typeof KinkyDungeonAdvanceTime === 'function' && !KinkyDungeonAdvanceTime.__kdClientGuard) {
+				var _origAdvance = KinkyDungeonAdvanceTime;
+				KinkyDungeonAdvanceTime = function (delta) {
+					if ((delta | 0) > 0 && KDServerRole === 'client') return; // no local turn advance
+					return _origAdvance.apply(this, arguments);
+				};
+				KinkyDungeonAdvanceTime.__kdClientGuard = true;
+			}
+			if (typeof KDSendInput === 'function' && !KDSendInput.__kdClientGuard) {
+				// Swallow the bundle's own action dispatch — the co-op client routes the
+				// supported actions (move/attack) to the server itself; everything else is
+				// simply not simulated locally (no divergence). Local-only UI (inventory/
+				// journal/settings) is handled in the key handler, not via KDSendInput.
+				KDSendInput = function () { return ''; };
+				KDSendInput.__kdClientGuard = true;
+			}
 			return (typeof KDServerRole !== 'undefined') ? KDServerRole : null;
 		},
 

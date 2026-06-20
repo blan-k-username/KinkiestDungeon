@@ -77,9 +77,11 @@ function serveStatic(req, res) {
 }
 
 function start(port = PORT) {
-	// autoAdvance: a single player's move advances the turn (the other auto-waits),
-	// so co-op sync is easy to validate solo across two windows.
-	const bridge = new WSBridge({ requiredPlayers: 2, seed: 'coop-demo-seed', autoAdvance: true });
+	// True lockstep (KD-085 R8): the shared turn advances only when BOTH players have
+	// acted — required for random conflict resolution (need all actions in hand). So
+	// act in BOTH windows each turn (move/attack/wait). (autoAdvance is left available
+	// on WSBridge as a no-conflict solo-testing shortcut, but off here.)
+	const bridge = new WSBridge({ requiredPlayers: 2, seed: 'coop-demo-seed' });
 	const server = http.createServer(serveStatic);
 	bridge.attach(server);
 	return new Promise((resolve) => {

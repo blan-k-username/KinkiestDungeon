@@ -70,25 +70,39 @@ test('two browser windows play one shared co-op dungeon via the demo server', as
 		// @ts-ignore — KDServerRole is a bundle `let` global, not on window
 		expect(await A.evaluate(() => (typeof KDServerRole !== 'undefined' ? KDServerRole : null))).toBe('client');
 
-		// demo runs autoAdvance: ONE player's move advances the shared turn, and the
-		// move is reflected in the OTHER window (B sees A's avatar move).
-		const t0 = await A.evaluate(() => (window as any).__coop.lastTick);
-		const peerBefore = await B.evaluate(() => {
+		const peerOfA = () => B.evaluate(() => {
 			// @ts-ignore
 			const a = (KDMapData.Entities || []).find((e: any) => e.Enemy && e.Enemy.name === 'RemotePlayer');
 			return a ? { x: a.x, y: a.y } : null;
 		});
-		await A.evaluate(() => (window as any).__coop.sendMove(1, 0)); // only A moves
+
+		// --- true lockstep move (R8): turn advances only when BOTH act; B sees A move ---
+		const t0 = await A.evaluate(() => (window as any).__coop.lastTick);
+		const peerBefore = await peerOfA();
+		await A.evaluate(() => (window as any).__coop.sendMove(1, 0)); // A moves...
+		await B.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' })); // ...B waits → turn advances
 		await A.waitForFunction((prev) => (window as any).__coop.lastTick === prev + 1, t0, { timeout: 30_000 });
 		await B.waitForFunction((prev) => (window as any).__coop.lastTick === prev + 1, t0, { timeout: 30_000 });
 		const aPos = await A.evaluate(() => ({ /* @ts-ignore */ x: KinkyDungeonPlayerEntity.x, /* @ts-ignore */ y: KinkyDungeonPlayerEntity.y }));
-		const peerAfter = await B.evaluate(() => {
-			// @ts-ignore
-			const a = (KDMapData.Entities || []).find((e: any) => e.Enemy && e.Enemy.name === 'RemotePlayer');
-			return a ? { x: a.x, y: a.y } : null;
-		});
-		expect(peerAfter).toEqual({ x: aPos.x, y: aPos.y });            // B's view of A is in sync
-		expect(peerAfter!.x !== peerBefore!.x || peerAfter!.y !== peerBefore!.y).toBe(true); // it moved
+		const peerAfter = await peerOfA();
+		expect(peerAfter).toEqual({ x: aPos.x, y: aPos.y });            // B's view of A in sync
+		expect(peerAfter!.x !== peerBefore!.x || peerAfter!.y !== peerBefore!.y).toBe(true);
+
+		// --- routed attack (KD-085): A attacks the shared enemy → both see it damaged ---
+		const recon = bridge.session.reconciler;
+		const world = bridge.session.orch.world;
+		// put the world enemy adjacent to A's avatar so the attack is in range
+		const avId = recon.worldAvatar.get('A');
+		const av = world.listEntities().find((e: any) => e.id === avId);
+		world.moveAvatar(recon.worldEnemyId, av.x, av.y + 1);
+		const enemyHp0 = recon.enemyView(bridge.session.orch)?.hp;
+		const tAtk = await A.evaluate(() => (window as any).__coop.lastTick);
+		await A.evaluate((tgt) => (window as any).__coop.sendAction({ kind: 'attack', tx: tgt.x, ty: tgt.y }), { x: av.x, y: av.y + 1 });
+		await B.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
+		await A.waitForFunction((prev) => (window as any).__coop.lastTick === prev + 1, tAtk, { timeout: 30_000 });
+		// the world's authoritative enemy took damage (HP dropped or it was killed)
+		const enemyAfter = recon.enemyView(bridge.session.orch);
+		expect(enemyAfter == null || enemyAfter.hp < enemyHp0).toBe(true);
 
 		// real rendered frames in both windows
 		const shotA = await A.locator('#MainCanvas').screenshot();

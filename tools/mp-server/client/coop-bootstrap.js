@@ -25,7 +25,7 @@
 	var coop = window.__coop = {
 		id: id, connected: false, started: false, submitted: false,
 		lastTick: null, peers: [], status: 'init',
-		sendMove: function (dx, dy) { submit({ dx: dx | 0, dy: dy | 0 }); },
+		sendMove: function (dx, dy) { submit(actionForDir(dx | 0, dy | 0)); },
 	};
 
 	var ws = null;
@@ -118,6 +118,22 @@
 		ws.send(JSON.stringify({ type: 'input', action: action }));
 	}
 
+	/** A directional key → a structured action: bump an adjacent enemy = attack; else move. */
+	function actionForDir(dx, dy) {
+		if (dx === 0 && dy === 0) return { kind: 'wait' };
+		try {
+			var p = KinkyDungeonPlayerEntity;
+			var nx = p.x + dx, ny = p.y + dy;
+			var enemy = (KDMapData.Entities || []).find(function (e) {
+				return e.x === nx && e.y === ny && e.Enemy && KDGetFaction(e) !== 'Player';
+			});
+			if (enemy) return { kind: 'attack', tx: nx, ty: ny };
+		} catch (e) { /* fall through to move */ }
+		return { kind: 'move', dx: dx, dy: dy };
+	}
+
+	coop.sendAction = function (action) { submit(action); };
+
 	var MOVES = {
 		ArrowLeft: [-1, 0], a: [-1, 0], A: [-1, 0],
 		ArrowRight: [1, 0], d: [1, 0], D: [1, 0],
@@ -128,13 +144,15 @@
 
 	function installInput() {
 		// Capture-phase on window → intercept BEFORE the bundle's own key handler,
-		// so no local turn/simulation runs; the server is authoritative.
+		// so no local turn/simulation runs; the server is authoritative. Arrows/WASD =
+		// move-or-bump-attack; space/'.' = wait. (Other gameplay keys are swallowed by
+		// the KDSendInput guard in render-client; local-only menus still work.)
 		window.addEventListener('keydown', function (ev) {
 			var mv = MOVES[ev.key];
 			if (!mv) return;
 			ev.preventDefault();
 			ev.stopImmediatePropagation();
-			submit({ dx: mv[0], dy: mv[1] });
+			submit(actionForDir(mv[0], mv[1]));
 		}, true);
 	}
 
