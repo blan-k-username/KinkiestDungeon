@@ -401,7 +401,10 @@ class HeadlessHost {
 			// CustomName + style on the entity → client renders it as a full character
 			// (the NPC sprite path), so the other player is visible (not just an HP bar).
 			var ent = { id: KinkyDungeonGetEnemyID(), Enemy: def, x: ${x | 0}, y: ${y | 0}, hp: 100,
-				movePoints: 0, attackPoints: 0, CustomName: ${JSON.stringify(label)}, style: 'BlueHair' };
+				movePoints: 0, attackPoints: 0,
+				// CustomName needs CustomNameColor — the HP/name draw calls string2hex on
+				// it (KinkyDungeonEnemies.ts:2356); undefined crashes the whole render.
+				CustomName: ${JSON.stringify(label)}, CustomNameColor: '#88bbff', style: 'BlueHair' };
 			KDAddNewEntity(ent);
 			KDUpdateEnemyCache = true;
 			return { entityId: ent.id, x: ent.x, y: ent.y };
