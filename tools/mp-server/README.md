@@ -20,6 +20,7 @@ KD-069 (orchestrator), KD-070 (reconciler).
 | `integration.js` | `IntegratedSession` (extends `Lobby`) — **real in-game integration**: players injected as real KD entities, enemy AI attacks routed to the target's instance, world-adjudicated P2P, independent params. KD-082. |
 | `transport/` | Transport boundary (KD-081): `protocol.js` (commands + `dispatch`), `in-process.js`, `worker-thread.js` (+`worker-entry.js`), `socket.js` (+`child-entry.js`), `index.js` (registry). |
 | `TRANSPORTS.md` | Measured comparison of the three transports (pros/cons + game-code-change count). |
+| `demo.js` | **Capstone** (KD-075) — one scripted end-to-end run touching every pillar (lobby + shared world + reacting enemy + routed PvP + server mod + independent params), printing a human-readable report. |
 | `smoke-boot.js` / `bench-transports.js` | Manual smoke driver / transport benchmark. |
 
 ## How it works
@@ -43,8 +44,12 @@ All commands run **inside Docker** (per project rules — no host runtimes).
 docker run --rm -v "$PWD":/usr/src/app -w /usr/src/app node:23-slim \
   node -e "setTimeout(()=>process.exit(2),120000).unref(); require('./tools/mp-server/smoke-boot.js')"
 
+# Capstone end-to-end demo (prints the full report → '✓ CAPSTONE OK')
+docker run --rm -v "$PWD":/usr/src/app -w /usr/src/app node:23-slim \
+  node -e "setTimeout(()=>process.exit(2),200000).unref(); require('./tools/mp-server/demo.js')"
+
 # Automated tests (node-layer Vitest, no Chromium)
-tools/run-tests.sh unit     # includes tests/unit/mp-headless-host.spec.ts + mp-orchestrator.spec.ts
+tools/run-tests.sh unit     # includes the full mp-*.spec.ts suite (host, transport, lobby, integration, capstone)
 ```
 
 > Build `out/main.js` first with `npx tsc` in Docker (NOT `npm run build` — no
