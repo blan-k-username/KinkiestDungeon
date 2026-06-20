@@ -739,6 +739,80 @@ class HeadlessHost {
 		})()`);
 	}
 
+	// ----- per-player state swap (KD-085 uniform action model) -----------------
+
+	/**
+	 * Capture the CURRENT player's state bundle (everything that defines a player,
+	 * EXCLUDING the shared world map + render-derived poses/appearance). Mirrors the
+	 * player portion of KinkyDungeonGenerateSaveData. Used by the swap model: one
+	 * authoritative world, players swapped in/out per turn. JSON-safe.
+	 */
+	capturePlayer() {
+		return this.eval(`(function(){
+			function clone(o){ try{ return o===undefined?undefined:JSON.parse(JSON.stringify(o)); }catch(e){ return null; } }
+			function m2o(m){ var o={}; if(m&&m.forEach) m.forEach(function(v,k){ o[k]=(v&&v.forEach)?m2o(v):clone(v); }); return o; }
+			return {
+				v: 1,
+				player: clone(KinkyDungeonPlayerEntity),
+				stats: {
+					stamina: KinkyDungeonStatStamina, staminaMax: KinkyDungeonStatStaminaMax,
+					mana: KinkyDungeonStatMana, manaMax: KinkyDungeonStatManaMax, manaPool: KinkyDungeonStatManaPool,
+					will: KinkyDungeonStatWill, willMax: KinkyDungeonStatWillMax,
+					distraction: KinkyDungeonStatDistraction, distractionMax: KinkyDungeonStatDistractionMax, distractionLower: KinkyDungeonStatDistractionLower,
+				},
+				buffs: clone(KinkyDungeonPlayerBuffs),
+				inventory: m2o(KinkyDungeonInventory),
+				flags: (typeof KinkyDungeonFlags !== 'undefined' && KinkyDungeonFlags.forEach) ? Array.from(KinkyDungeonFlags) : [],
+				perks: (typeof KinkyDungeonStatsChoice !== 'undefined' && KinkyDungeonStatsChoice.forEach) ? Array.from(KinkyDungeonStatsChoice) : [],
+				gold: (typeof KinkyDungeonGold !== 'undefined') ? KinkyDungeonGold : 0,
+				points: (typeof KinkyDungeonSpellPoints !== 'undefined') ? KinkyDungeonSpellPoints : 0,
+				weapon: (typeof KinkyDungeonPlayerWeapon !== 'undefined') ? KinkyDungeonPlayerWeapon : undefined,
+				spellChoices: (typeof KinkyDungeonSpellChoices !== 'undefined') ? clone(KinkyDungeonSpellChoices) : undefined,
+			};
+		})()`);
+	}
+
+	/** Restore a player-state bundle into the world's player globals (swap-in). */
+	restorePlayer(bundle) {
+		this._context.__KD_PB = bundle;
+		return this.eval(`(function(){
+			var b = globalThis.__KD_PB; if (!b) return false;
+			if (b.player) KinkyDungeonPlayerEntity = JSON.parse(JSON.stringify(b.player));
+			var s = b.stats || {};
+			KinkyDungeonStatStamina = s.stamina; KinkyDungeonStatStaminaMax = s.staminaMax;
+			KinkyDungeonStatMana = s.mana; KinkyDungeonStatManaMax = s.manaMax; KinkyDungeonStatManaPool = s.manaPool;
+			KinkyDungeonStatWill = s.will; KinkyDungeonStatWillMax = s.willMax;
+			KinkyDungeonStatDistraction = s.distraction; KinkyDungeonStatDistractionMax = s.distractionMax; KinkyDungeonStatDistractionLower = s.distractionLower;
+			KinkyDungeonPlayerBuffs = b.buffs ? JSON.parse(JSON.stringify(b.buffs)) : {};
+			var inv = new Map(); var io = b.inventory || {};
+			for (var t in io) { var sub = new Map(); var st = io[t]; for (var n in st) sub.set(n, JSON.parse(JSON.stringify(st[n]))); inv.set(t, sub); }
+			KinkyDungeonInventory = inv;
+			if (b.flags && typeof KinkyDungeonFlags !== 'undefined') KinkyDungeonFlags = new Map(b.flags);
+			if (b.perks && typeof KinkyDungeonStatsChoice !== 'undefined') KinkyDungeonStatsChoice = new Map(b.perks);
+			if (typeof KinkyDungeonGold !== 'undefined') KinkyDungeonGold = b.gold;
+			if (typeof KinkyDungeonSpellPoints !== 'undefined') KinkyDungeonSpellPoints = b.points;
+			if (b.weapon !== undefined && typeof KinkyDungeonPlayerWeapon !== 'undefined') KinkyDungeonPlayerWeapon = b.weapon;
+			if (b.spellChoices !== undefined && typeof KinkyDungeonSpellChoices !== 'undefined') KinkyDungeonSpellChoices = JSON.parse(JSON.stringify(b.spellChoices));
+			if (typeof KDUpdateEnemyCache !== 'undefined') KDUpdateEnemyCache = true;
+			return true;
+		})()`);
+	}
+
+	/**
+	 * Run a player input through KD's REAL dispatcher (the swap model's uniform action
+	 * path). `type`/`data` are KD's own input types (move/doattack/struggle/…). The
+	 * acting player must be swapped in first (restorePlayer). Returns the dispatcher result.
+	 */
+	applyInput(type, data) {
+		this._context.__KD_INDATA = (data === undefined) ? {} : data;
+		return this.eval(`(function(){
+			var d = globalThis.__KD_INDATA;
+			if (typeof KDSendInput === 'function') return KDSendInput(${JSON.stringify(type)}, d);
+			if (typeof KDProcessInput === 'function') return KDProcessInput(${JSON.stringify(type)}, d);
+			return null;
+		})()`);
+	}
+
 	/** Serialize full game state via the bundle's own save path. */
 	serialize() {
 		return this.eval('KinkyDungeonGenerateSaveData()');
