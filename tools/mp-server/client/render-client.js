@@ -38,31 +38,57 @@
 	var inputCb = null;
 	var clientMode = false;   // closure flag — NOT the game-source KDServerRole (reverted, KD-085)
 
-	// Turn-consuming gameplay inputs are ROUTED to the server (the authoritative world
-	// runs them through KD's REAL dispatcher). Everything else (menu/choice/toggle:
-	// spellChoice, itemChoice, select, dialogue, toggleSpell, setMoveDirection, …) keeps
-	// running LOCALLY so local-only UI stays responsive (R6). The KinkyDungeonAdvanceTime
-	// guard backstops any un-classified type from advancing the local turn (R1).
+	// Input classification (KD-085/088). KD funnels every action through KDSendInput;
+	// under the thin client we split it three ways:
+	//   ROUTED    — turn-consuming gameplay: forward {kdType,data} to the authoritative
+	//               server (it replays through KD's REAL dispatcher). NOT run locally.
+	//   LOCAL_UI  — menus/choices/toggles that don't advance the shared turn: run LOCALLY
+	//               so UI stays responsive (R6).
+	//   (other)   — unknown type: SWALLOW (don't run locally, don't send) — no divergence.
+	// The KinkyDungeonAdvanceTime guard backstops anything that slips through (R1).
 	var ROUTED_INPUTS = {
-		move: 1, movestairs: 1, doattack: 1, dospecial: 1, doaggro: 1,
-		tick: 1, struggle: 1, interact: 1,
+		// movement / combat
+		move: 1, movestairs: 1, doattack: 1, dospecial: 1, doaggro: 1, docapture: 1, swipe: 1,
+		tick: 1, crouch: 1, noise: 1, sleep: 1, scan: 1,
+		// restraints / struggle
+		struggle: 1, struggleCurse: 1, curseUnlock: 1, quickRestraint: 1,
+		equip: 1, equipRestraintGeneric: 1, dress: 1,
+		// items / weapons
+		consumable: 1, drop: 1, switchWeapon: 1, unequipWeapon: 1, offhandswitch: 1,
+		// world / locks / interact
+		interact: 1, pick: 1, unlock: 1, commandunlock: 1, hack: 1, closeDoor: 1,
+		shrineBuy: 1, shrineUse: 1, shrineQuest: 1, shrineDevote: 1, shrinePray: 1, shrineDrink: 1, shrineBottle: 1,
+		tabletInteract: 1, foodInteract: 1, chargerInteract: 1, recycleBuild: 1, recycle: 1,
+		// self / play
+		tryOrgasm: 1, tryPlay: 1, aid: 1, rescue: 1, penance: 1,
+		// NPC management
+		releaseNPC: 1, removeGuest: 1, ransomNPC: 1, freeNPCRestraint: 1, addNPCRestraint: 1, tightenNPCRestraint: 1,
+		// spells (targeted-entity re-resolution handled server-side via __kdEnt tags) — see KD-089
+		tryCastSpell: 1, spellCastFromBook: 1, upcast: 1,
+	};
+	var LOCAL_UI_INPUTS = {
+		setMoveDirection: 1, toggleSpell: 1, buffclick: 1, inventoryAction: 1, focusControlToggle: 1,
+		upcastcancel: 1, select: 1, selectOnly: 1, cancelParty: 1, onMe: 1, spellChoice: 1, itemChoice: 1,
+		spellRemove: 1, spellLearn: 1, perkorb: 1, orb: 1, heart: 1, champion: 1, renamenpc: 1,
+		changeAutorelease: 1, autoprune: 1, ghostNegotiate: 1, dialogue: 1, talk: 1, safeword: 1,
 	};
 
 	/**
-	 * Best-effort JSON-safe clone of an input's data: drops circular refs and maps
-	 * entity refs (objects carrying an `id`/`Enemy`) down to `{id}` (or `{x,y}` if no
-	 * id) so the wire payload stays small + serializable. Targeted actions/spells carry
-	 * live entity object refs that JSON can't ship verbatim.
+	 * Best-effort JSON-safe clone of an input's data so it can ship over the wire.
+	 * Drops circular refs and replaces live entity object refs (e.g. spell `enemy`/
+	 * `player`/`bullet`) with a tagged placeholder `{__kdEnt:id}` (or `{__kdEnt:'player'}`
+	 * for the player entity). The server re-resolves these to its OWN authoritative
+	 * entities before replaying the action (HeadlessHost.applyInput, KD-088).
 	 */
 	function sanitizeInputData(data) {
 		if (data == null || typeof data !== 'object') return data;
+		var player = (typeof KinkyDungeonPlayerEntity !== 'undefined') ? KinkyDungeonPlayerEntity : null;
 		var seen = [];
 		function repl(key, val) {
 			if (val && typeof val === 'object') {
-				if (seen.indexOf(val) >= 0) return undefined;          // drop cycles
-				if (val.Enemy || (val.id !== undefined && val.hp !== undefined)) {
-					return (val.id !== undefined) ? { id: val.id } : { x: val.x, y: val.y };
-				}
+				if (val === player) return { __kdEnt: 'player' };
+				if (val.Enemy && val.id !== undefined) return { __kdEnt: val.id };
+				if (seen.indexOf(val) >= 0) return undefined;          // drop other cycles
 				seen.push(val);
 			}
 			return val;
@@ -191,9 +217,14 @@
 				// gameplay we forward {kdType,data} to the server (authoritative) and DON'T
 				// run it locally. Local-only UI (menus/choices) still dispatches locally (R6).
 				KDSendInput = function (type, data) {
-					if (clientMode && ROUTED_INPUTS[type]) {
-						KDRenderClient.sendInput({ kdType: type, data: sanitizeInputData(data) });
-						return '';
+					if (clientMode) {
+						if (ROUTED_INPUTS[type]) {
+							KDRenderClient.sendInput({ kdType: type, data: sanitizeInputData(data) });
+							return '';
+						}
+						// unknown (non-UI) type → swallow: never simulate locally (no divergence)
+						if (!LOCAL_UI_INPUTS[type]) return '';
+						// LOCAL_UI types fall through to run locally (menus stay responsive, R6)
 					}
 					return _origSend.apply(this, arguments);
 				};

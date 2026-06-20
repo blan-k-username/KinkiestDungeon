@@ -137,6 +137,9 @@ class SwapSession {
 		return a;
 	}
 
+	/** Players who have NOT yet submitted an action for the current turn. */
+	waitingOn() { return this._joined.filter((id) => !this._pending.has(id)); }
+
 	/** Current world tick (lockstep marker). */
 	tick() { return this.world.tick(); }
 

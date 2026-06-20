@@ -95,6 +95,13 @@ class WSBridge {
 		// immediately (others auto-"wait"), instead of blocking on every player.
 		// Real lockstep (block until all submit) stays the default for actual co-op.
 		this.autoAdvance = !!opts.autoAdvance;
+		// Humane lockstep (KD-087): if the submit barrier stays open longer than this,
+		// the server auto-"wait"s the non-submitters so an idle/finished player doesn't
+		// deadlock a partner who is still acting (e.g. walking a longer click-to-move
+		// route). 0 = disabled (strict lockstep — block until ALL submit). A `wait` is
+		// never a contested action, so R9 conflict resolution is unaffected.
+		this.idleGraceMs = (opts.idleGraceMs != null) ? opts.idleGraceMs : 0;
+		this._graceTimer = null;
 	}
 
 	listen(port = 0) {
@@ -164,8 +171,17 @@ class WSBridge {
 						if (res.advanced) break;
 					}
 				}
-				if (res.advanced) this._broadcastState();
-				else this._send(socket, { type: 'waiting', waitingOn: res.waitingOn });
+				if (res.advanced) { this._clearGrace(); this._broadcastState(); }
+				else {
+					this._send(socket, { type: 'waiting', waitingOn: res.waitingOn });
+					// tell the awaited players they're holding up the turn (UI can show it
+					// or pass early); arm the idle-grace auto-wait so they can't deadlock us.
+					for (const pid of res.waitingOn || []) {
+						const s = this.sockets.get(pid);
+						if (s) this._send(s, { type: 'await', waitingOn: res.waitingOn, graceMs: this.idleGraceMs });
+					}
+					this._armGrace();
+				}
 			} catch (e) {
 				this._send(socket, { type: 'error', error: String(e && e.message || e) });
 			}
@@ -180,7 +196,29 @@ class WSBridge {
 	 * minus this client's own avatar (they're their own global player, not an avatar).
 	 * `tick` is the session turn counter (+1 per resolved turn — lockstep marker).
 	 */
+	_clearGrace() {
+		if (this._graceTimer) { clearTimeout(this._graceTimer); this._graceTimer = null; }
+	}
+
+	/** Arm the idle-grace timer: after idleGraceMs, auto-"wait" the non-submitters so a
+	 *  still-acting player isn't deadlocked by an idle/finished partner (KD-087). */
+	_armGrace() {
+		if (!(this.idleGraceMs > 0)) return;
+		this._clearGrace();
+		this._graceTimer = setTimeout(() => {
+			this._graceTimer = null;
+			let res = { advanced: false };
+			// submit a wait for each still-pending player until the turn resolves
+			for (const pid of this.session.waitingOn()) {
+				try { res = this.session.submit(pid, { kind: 'wait' }); } catch (e) { /* noop */ }
+				if (res.advanced) break;
+			}
+			if (res.advanced) this._broadcastState();
+		}, this.idleGraceMs);
+	}
+
 	_broadcastState() {
+		this._clearGrace();
 		const tick = this.session.turn;
 		for (const [cid, sock] of this.sockets) {
 			const snapshot = this.session.snapshotFor(cid);
@@ -189,6 +227,7 @@ class WSBridge {
 	}
 
 	close() {
+		this._clearGrace();
 		for (const s of this.sockets.values()) { try { s.end(); } catch (e) {} }
 		if (this._server) this._server.close();
 	}

@@ -834,7 +834,20 @@ class HeadlessHost {
 	applyInput(type, data) {
 		this._context.__KD_INDATA = (data === undefined) ? {} : data;
 		return this.eval(`(function(){
-			var d = globalThis.__KD_INDATA;
+			// Re-resolve client entity placeholders (KD-088): the thin client can't ship
+			// live entity object refs, so it sends {__kdEnt:id} (or {__kdEnt:'player'}).
+			// Replace them with THIS world's authoritative entities before dispatch.
+			function resolve(o){
+				if (!o || typeof o !== 'object') return o;
+				if (o.__kdEnt !== undefined) {
+					return (o.__kdEnt === 'player') ? KinkyDungeonPlayerEntity
+						: (typeof KinkyDungeonFindID === 'function' ? KinkyDungeonFindID(o.__kdEnt) : undefined);
+				}
+				if (Array.isArray(o)) { for (var i=0;i<o.length;i++) o[i] = resolve(o[i]); return o; }
+				for (var k in o) if (Object.prototype.hasOwnProperty.call(o,k)) o[k] = resolve(o[k]);
+				return o;
+			}
+			var d = resolve(globalThis.__KD_INDATA);
 			if (typeof KDSendInput === 'function') return KDSendInput(${JSON.stringify(type)}, d);
 			if (typeof KDProcessInput === 'function') return KDProcessInput(${JSON.stringify(type)}, d);
 			return null;

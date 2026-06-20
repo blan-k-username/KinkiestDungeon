@@ -159,6 +159,10 @@
 				setStatus('Co-op ' + id + '  turn ' + m.tick + '\n[arrows/WASD] move · [space] wait');
 			} else if (m.type === 'waiting') {
 				setStatus('Co-op ' + id + ': submitted, waiting for ' + (m.waitingOn || []).join(', ') + '…');
+			} else if (m.type === 'await') {
+				// a peer has acted and is waiting on US — act so the turn can resolve.
+				var g = m.graceMs ? ' (auto-pass in ' + (Math.round(m.graceMs / 100) / 10) + 's)' : '';
+				setStatus('Co-op ' + id + ': your move — others ready' + g + '\n[arrows/WASD] move · [space] wait');
 			} else if (m.type === 'error') {
 				setStatus('Co-op ' + id + ': error — ' + m.error);
 			}

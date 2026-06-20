@@ -81,7 +81,11 @@ function start(port = PORT) {
 	// acted — required for random conflict resolution (need all actions in hand). So
 	// act in BOTH windows each turn (move/attack/wait). (autoAdvance is left available
 	// on WSBridge as a no-conflict solo-testing shortcut, but off here.)
-	const bridge = new WSBridge({ requiredPlayers: 2, seed: 'coop-demo-seed' });
+	// idleGraceMs (KD-087): if a player is idle/finished (e.g. their click-to-move route
+	// ended) the server auto-"wait"s them after this delay so a partner who is still
+	// walking isn't deadlocked. A `wait` is never a contested action (R9 safe). Tune to
+	// taste; 0 = strict lockstep (block until ALL act).
+	const bridge = new WSBridge({ requiredPlayers: 2, seed: 'coop-demo-seed', idleGraceMs: 2000 });
 	const server = http.createServer(serveStatic);
 	bridge.attach(server);
 	return new Promise((resolve) => {
