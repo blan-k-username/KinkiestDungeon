@@ -12,8 +12,8 @@
  * (coop-bootstrap.js) that reads `#coop=<id>` from the URL and wires render + input.
  *
  * UAT flow (run in Docker, port mapped to your host — see tools/coop-demo.sh):
- *   1. window 1 → http://localhost:8080/#coop=A   (creates the session, waits)
- *   2. window 2 → http://localhost:8080/#coop=B   (both in → shared dungeon starts)
+ *   1. window 1 → http://localhost:8090/#coop=A   (creates the session, waits)
+ *   2. window 2 → http://localhost:8090/#coop=B   (both in → shared dungeon starts)
  *   3. arrow keys move; BOTH must move to advance a turn (lockstep co-op). You see
  *      the other player's avatar and a shared enemy the server owns.
  *
@@ -27,7 +27,8 @@ const path = require('path');
 const { WSBridge } = require('./ws-bridge');
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
-const PORT = parseInt(process.env.PORT || '8080', 10);
+// Default :8090 (not :8080 — that's the stock `npm run serve` / kdrunner port).
+const PORT = parseInt(process.env.PORT || '8090', 10);
 
 const MIME = {
 	'.html': 'text/html; charset=utf-8', '.js': 'application/javascript; charset=utf-8',
