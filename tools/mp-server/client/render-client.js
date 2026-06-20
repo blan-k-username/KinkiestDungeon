@@ -51,6 +51,7 @@
 			AI: 'guard', immobile: true, visionRadius: 0, maxhp: 100, minLevel: 0, weight: -1000,
 			movePoints: 1000, attackPoints: 0, attack: '', attackRange: 0,
 			evasion: -100, armor: 0, followRange: 100, lowpriority: true,
+			style: 'BlueHair', // render the peer as a full character (NPC sprite path)
 			terrainTags: {}, floors: KDMapInit([]),
 		});
 		if (typeof KinkyDungeonRefreshEnemiesCache === 'function') KinkyDungeonRefreshEnemiesCache();

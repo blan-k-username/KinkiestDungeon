@@ -377,6 +377,10 @@ class HeadlessHost {
 					AI: 'guard', immobile: true, visionRadius: 0, maxhp: 100, minLevel: 0, weight: -1000,
 					movePoints: 1000, attackPoints: 0, attack: '', attackRange: 0,
 					evasion: -100, armor: 0, followRange: 100, lowpriority: true,
+					// style → the client renders the avatar as a full character (NPC path,
+					// KDQuickGenNPC + DrawCharacter) so the other player is VISIBLE, not just
+					// an HP bar. Server never draws (rendering neutered) so this is client-only.
+					style: 'BlueHair',
 					terrainTags: {}, floors: KDMapInit([]),
 				});
 				if (typeof KinkyDungeonRefreshEnemiesCache === 'function') KinkyDungeonRefreshEnemiesCache();
@@ -389,11 +393,15 @@ class HeadlessHost {
 	 * Inject an avatar entity representing another player at (x,y). Returns the
 	 * real KD entity id (the engine now sees/targets/collides with it).
 	 */
-	spawnAvatar(x, y) {
+	spawnAvatar(x, y, name) {
 		this._ensureAvatarDef();
+		const label = name || 'Player';
 		return this.eval(`(function(){
 			var def = KinkyDungeonGetEnemyByName('RemotePlayer');
-			var ent = { id: KinkyDungeonGetEnemyID(), Enemy: def, x: ${x | 0}, y: ${y | 0}, hp: 100, movePoints: 0, attackPoints: 0 };
+			// CustomName + style on the entity → client renders it as a full character
+			// (the NPC sprite path), so the other player is visible (not just an HP bar).
+			var ent = { id: KinkyDungeonGetEnemyID(), Enemy: def, x: ${x | 0}, y: ${y | 0}, hp: 100,
+				movePoints: 0, attackPoints: 0, CustomName: ${JSON.stringify(label)}, style: 'BlueHair' };
 			KDAddNewEntity(ent);
 			KDUpdateEnemyCache = true;
 			return { entityId: ent.id, x: ent.x, y: ent.y };

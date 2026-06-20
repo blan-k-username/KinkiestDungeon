@@ -62,7 +62,7 @@ class CoopReconciler {
 		for (const id of ids) {
 			const pos = { x: base.x + i, y: base.y };
 			orch.players.get(id).placePlayer(pos.x, pos.y);
-			const av = world.spawnAvatar(pos.x, pos.y);
+			const av = world.spawnAvatar(pos.x, pos.y, 'Player ' + id);
 			this.worldAvatar.set(id, av.entityId);
 			this.startOf.set(id, pos);
 			i++;
