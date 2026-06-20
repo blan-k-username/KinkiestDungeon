@@ -1,0 +1,155 @@
+/**
+ * tools/mp-server/swap-session.js  (KD-085 — uniform action model)
+ *
+ * Server-authoritative co-op on the SWAP model (replaces the per-instance action
+ * routing): ONE authoritative world; each player is a STATE BUNDLE; per turn each
+ * player is swapped into the world's player globals, their action runs through KD's
+ * REAL dispatcher (applyInput → KDSendInput/KDProcessInput — full fidelity, ANY
+ * action incl. future ones), then swapped back out. The client uses KD's DEFAULT
+ * controls and just forwards `{kdType, data}`.
+ *
+ * Lockstep (R8): the turn advances only when every player has submitted.
+ * Conflict (R9): players are applied in RANDOM order on the shared world, so the
+ * first-mover wins a contested tile/target (KD's own collision blocks the rest) —
+ * random conflict resolution falls out of the model, no special-casing.
+ *
+ * Other players are shown as avatar entities (KD-082) for rendering; the acting
+ * player's avatar is parked while they're swapped in (they ARE the global player).
+ */
+'use strict';
+
+const { HeadlessHost } = require('./headless-host');
+
+const PARK = { x: 1, y: 1 };
+
+class SwapSession {
+	/** @param {object} opts { requiredPlayers=2, seed, enemyType='Rat' } */
+	constructor(opts = {}) {
+		this.required = opts.requiredPlayers || 2;
+		this.seed = opts.seed || 'swap-session-seed';
+		this.enemyType = opts.enemyType || 'Rat';
+		this.world = new HeadlessHost({ id: 'world' });
+		this.bundles = new Map();     // id -> player-state bundle
+		this.avatars = new Map();     // id -> world avatar entity id
+		this.startOf = new Map();     // id -> {x,y}
+		this._joined = [];
+		this._pending = new Map();    // id -> { kdType, data }
+		this.started = false;
+		this.turn = 0;
+		this.enemyId = null;
+		this.lastTurn = null;         // debug/assert record of the last resolution
+	}
+
+	get players() { return [...this._joined]; }
+
+	join(clientId) {
+		if (this.started) throw new Error(`session already started — cannot join ${clientId}`);
+		if (this._joined.includes(clientId)) throw new Error(`duplicate join: ${clientId}`);
+		this._joined.push(clientId);
+		if (this._joined.length >= this.required) this._start();
+		return { clientId, joined: [...this._joined], started: this.started };
+	}
+
+	_start() {
+		this.world.boot();
+		this.world.init({ seed: this.seed });
+		this.world.setServerMode('world');
+		const base = this.world.findOpenTile();
+		let i = 0;
+		for (const id of this._joined) {
+			const pos = { x: base.x + i, y: base.y };
+			// give each player a starting bundle at a distinct position
+			this.world.placePlayer(pos.x, pos.y);
+			this.bundles.set(id, this.world.capturePlayer());
+			const av = this.world.spawnAvatar(pos.x, pos.y, 'Player ' + id);
+			this.avatars.set(id, av.entityId);
+			this.startOf.set(id, pos);
+			i++;
+		}
+		// one shared enemy near the players; park the global player between turns
+		this.world.placePlayer(base.x, base.y);
+		const enemy = this.world.summonEnemy(base.x + this._joined.length, base.y, this.enemyType, { rad: 6 });
+		this.enemyId = enemy ? enemy.id : null;
+		this.world.parkGlobalPlayer(PARK.x, PARK.y);
+		this.started = true;
+	}
+
+	/**
+	 * Submit a player's action ({kdType, data} — KD's real input, or a {kind} for the
+	 * built-in move/wait helpers). Returns { advanced, waitingOn } / { advanced, turn }.
+	 */
+	submit(clientId, action = {}) {
+		if (!this.started) throw new Error('session not started');
+		if (!this._joined.includes(clientId)) throw new Error(`unknown player ${clientId}`);
+		this._pending.set(clientId, action);
+		const waitingOn = this._joined.filter((id) => !this._pending.has(id));
+		if (waitingOn.length > 0) return { advanced: false, waitingOn };
+		return { advanced: true, turn: this._advanceTurn() };
+	}
+
+	/** Apply every player's action on the shared world, in random order (R8/R9). */
+	_advanceTurn() {
+		const order = this._shuffle(this._joined.slice());
+		const applied = [];
+		for (const id of order) {
+			const action = this._pending.get(id) || { kind: 'wait' };
+			const { kdType, data } = this._toInput(id, action);
+			// swap this player in; park their avatar so it doesn't block their own move
+			this.world.restorePlayer(this.bundles.get(id));
+			const avId = this.avatars.get(id);
+			if (avId != null) this.world.moveAvatar(avId, PARK.x, PARK.y);
+			let result = null;
+			if (kdType) result = this.world.applyInput(kdType, data);
+			// swap out: persist this player's new state + move their avatar to its new spot
+			this.bundles.set(id, this.world.capturePlayer());
+			const p = this.world.getPlayerPos();
+			if (avId != null) this.world.moveAvatar(avId, p.x, p.y);
+			applied.push({ id, kdType, result, pos: p });
+		}
+		this.world.parkGlobalPlayer(PARK.x, PARK.y);
+		this.turn += 1;
+		this._pending.clear();
+		this.lastTurn = { order, applied };
+		return { turn: this.turn, applied };
+	}
+
+	/** Map a submitted action to a KD input {kdType, data}. */
+	_toInput(id, action) {
+		if (action.kdType) return { kdType: action.kdType, data: action.data || {} };
+		// built-in helpers
+		if (action.kind === 'move') {
+			return { kdType: 'move', data: { dir: { x: action.dx | 0, y: action.dy | 0 }, delta: 1, AllowInteract: true } };
+		}
+		if (action.kind === 'wait') return { kdType: 'tick', data: { delta: 1 } };
+		// legacy {dx,dy}
+		if ((action.dx | 0) !== 0 || (action.dy | 0) !== 0) {
+			return { kdType: 'move', data: { dir: { x: action.dx | 0, y: action.dy | 0 }, delta: 1, AllowInteract: true } };
+		}
+		return { kdType: 'tick', data: { delta: 1 } };
+	}
+
+	/** Fisher–Yates (plain Math.random — node side, not the bundle's seeded RNG). */
+	_shuffle(a) {
+		for (let i = a.length - 1; i > 0; i--) {
+			const j = Math.floor(Math.random() * (i + 1));
+			const t = a[i]; a[i] = a[j]; a[j] = t;
+		}
+		return a;
+	}
+
+	/** Current world tick (lockstep marker). */
+	tick() { return this.world.tick(); }
+
+	/** A player's current position (from their bundle's avatar in the world). */
+	posOf(id) {
+		const e = this.world.listEntities().find((x) => x.id === this.avatars.get(id));
+		return e ? { x: e.x, y: e.y } : null;
+	}
+
+	/** The shared enemy's authoritative state. */
+	enemyView() {
+		return this.world.listEntities().find((e) => e.id === this.enemyId) || null;
+	}
+}
+
+module.exports = { SwapSession };
