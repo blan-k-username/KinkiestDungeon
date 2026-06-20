@@ -524,8 +524,6 @@ class HeadlessHost {
 				var b = clone(e.buffs); if (b) o.buffs = b;
 				return o;
 			}
-			var M = KDMapData;
-			var X = (typeof KDMapExtraData !== 'undefined' && KDMapExtraData) ? KDMapExtraData : {};
 			var P = (typeof KinkyDungeonPlayerEntity !== 'undefined') ? KinkyDungeonPlayerEntity : null;
 			return {
 				version: 1,
@@ -547,17 +545,12 @@ class HeadlessHost {
 					distraction: KinkyDungeonStatDistraction, distractionMax: KinkyDungeonStatDistractionMax,
 					distractionLower: (typeof KinkyDungeonStatDistractionLower !== 'undefined') ? KinkyDungeonStatDistractionLower : 0,
 				},
-				map: {
-					Grid: M.Grid, GridWidth: M.GridWidth, GridHeight: M.GridHeight,
-					Tiles: clone(M.Tiles), TilesSkin: clone(M.TilesSkin), TilesMemory: clone(M.TilesMemory),
-					Traffic: clone(M.Traffic), FogGrid: clone(M.FogGrid), FogMemory: clone(M.FogMemory),
-					Labels: clone(M.Labels),
-					Entities: (M.Entities || []).map(entSnap),
-				},
-				mapExtra: {
-					VisionGrid: clone(X.VisionGrid), BrightnessGrid: clone(X.BrightnessGrid),
-					ColorGrid: clone(X.ColorGrid), ShadowGrid: clone(X.ShadowGrid),
-				},
+				// Full authoritative KDMapData (JSON-clones cleanly headless, ~10KB). The
+				// client adopts it WHOLESALE — a field-subset splice leaves a half-local/
+				// half-server map that renders broken. Entities carry their full Enemy
+				// defs in the clone, so no def re-link is needed client-side. Vision/light
+				// (KDMapExtraData) is NOT sent — the client recomputes it locally.
+				map: clone(KDMapData),
 				messages: {
 					log: clone(KinkyDungeonMessageLog) || [],
 					action: (typeof KinkyDungeonActionMessage !== 'undefined') ? KinkyDungeonActionMessage : '',
@@ -597,30 +590,9 @@ class HeadlessHost {
 			if (typeof KinkyDungeonStatManaPool !== 'undefined') KinkyDungeonStatManaPool = s.stats.manaPool;
 			KinkyDungeonStatDistraction = s.stats.distraction; KinkyDungeonStatDistractionMax = s.stats.distractionMax;
 			if (typeof KinkyDungeonStatDistractionLower !== 'undefined') KinkyDungeonStatDistractionLower = s.stats.distractionLower;
-			// map
-			KDMapData.Grid = s.map.Grid; KDMapData.GridWidth = s.map.GridWidth; KDMapData.GridHeight = s.map.GridHeight;
-			if (s.map.Tiles != null) KDMapData.Tiles = s.map.Tiles;
-			if (s.map.TilesSkin != null) KDMapData.TilesSkin = s.map.TilesSkin;
-			if (s.map.TilesMemory != null) KDMapData.TilesMemory = s.map.TilesMemory;
-			if (s.map.Traffic != null) KDMapData.Traffic = s.map.Traffic;
-			if (s.map.FogGrid != null) KDMapData.FogGrid = s.map.FogGrid;
-			if (s.map.FogMemory != null) KDMapData.FogMemory = s.map.FogMemory;
-			if (s.map.Labels != null) KDMapData.Labels = s.map.Labels;
-			// entities — rebuild plain objects, re-linking the Enemy def by name
-			KDMapData.Entities = (s.map.Entities || []).map(function(es){
-				var e = {};
-				for (var k in es) { if (k !== 'enemyName') e[k] = es[k]; }
-				if (es.enemyName) e.Enemy = KinkyDungeonGetEnemyByName(es.enemyName) || { name: es.enemyName };
-				return e;
-			});
+			// adopt the authoritative KDMapData WHOLESALE (internally consistent).
+			if (s.map) KDMapData = s.map;
 			if (typeof KDUpdateEnemyCache !== 'undefined') KDUpdateEnemyCache = true;
-			// vision / lighting
-			if (typeof KDMapExtraData !== 'undefined' && KDMapExtraData) {
-				if (s.mapExtra.VisionGrid != null) KDMapExtraData.VisionGrid = s.mapExtra.VisionGrid;
-				if (s.mapExtra.BrightnessGrid != null) KDMapExtraData.BrightnessGrid = s.mapExtra.BrightnessGrid;
-				if (s.mapExtra.ColorGrid != null) KDMapExtraData.ColorGrid = s.mapExtra.ColorGrid;
-				if (s.mapExtra.ShadowGrid != null) KDMapExtraData.ShadowGrid = s.mapExtra.ShadowGrid;
-			}
 			// player avatar (this instance's own global player object)
 			if (s.player && KinkyDungeonPlayerEntity) {
 				for (var k in s.player) { if (k !== 'enemyName' && k !== 'Enemy') KinkyDungeonPlayerEntity[k] = s.player[k]; }
@@ -658,7 +630,7 @@ class HeadlessHost {
 			if (s.map.FogGrid != null) KDMapData.FogGrid = s.map.FogGrid;
 			if (s.map.FogMemory != null) KDMapData.FogMemory = s.map.FogMemory;
 			if (s.map.Labels != null) KDMapData.Labels = s.map.Labels;
-			if (typeof KDMapExtraData !== 'undefined' && KDMapExtraData) {
+			if (s.mapExtra && typeof KDMapExtraData !== 'undefined' && KDMapExtraData) {
 				if (s.mapExtra.VisionGrid != null) KDMapExtraData.VisionGrid = s.mapExtra.VisionGrid;
 				if (s.mapExtra.BrightnessGrid != null) KDMapExtraData.BrightnessGrid = s.mapExtra.BrightnessGrid;
 				if (s.mapExtra.ColorGrid != null) KDMapExtraData.ColorGrid = s.mapExtra.ColorGrid;

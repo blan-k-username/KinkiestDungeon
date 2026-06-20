@@ -82,17 +82,8 @@
 					distraction: KinkyDungeonStatDistraction, distractionMax: KinkyDungeonStatDistractionMax,
 					distractionLower: (typeof KinkyDungeonStatDistractionLower !== 'undefined') ? KinkyDungeonStatDistractionLower : 0,
 				},
-				map: {
-					Grid: M.Grid, GridWidth: M.GridWidth, GridHeight: M.GridHeight,
-					Tiles: clone(M.Tiles), TilesSkin: clone(M.TilesSkin), TilesMemory: clone(M.TilesMemory),
-					Traffic: clone(M.Traffic), FogGrid: clone(M.FogGrid), FogMemory: clone(M.FogMemory),
-					Labels: clone(M.Labels),
-					Entities: (M.Entities || []).map(entSnap),
-				},
-				mapExtra: {
-					VisionGrid: clone(X.VisionGrid), BrightnessGrid: clone(X.BrightnessGrid),
-					ColorGrid: clone(X.ColorGrid), ShadowGrid: clone(X.ShadowGrid),
-				},
+				// full authoritative map (adopted wholesale on apply) — see headless-host
+				map: clone(KDMapData),
 				messages: {
 					log: clone(KinkyDungeonMessageLog) || [],
 					action: (typeof KinkyDungeonActionMessage !== 'undefined') ? KinkyDungeonActionMessage : '',
@@ -110,39 +101,23 @@
 		apply: function (s) {
 			if (!s) return { ok: false, error: 'no snapshot' };
 			ensureAvatarDef();   // so peer avatars (RemotePlayer) re-link to a real def
-			if (typeof KDZoomIndex !== 'undefined') KDZoomIndex = s.camera.zoomIndex;
-			if (typeof KinkyDungeonGridSizeDisplay !== 'undefined') KinkyDungeonGridSizeDisplay = s.camera.gridSizeDisplay;
-			if (typeof KinkyDungeonGridWidthDisplay !== 'undefined') KinkyDungeonGridWidthDisplay = s.camera.gridWidthDisplay;
-			if (typeof KinkyDungeonGridHeightDisplay !== 'undefined') KinkyDungeonGridHeightDisplay = s.camera.gridHeightDisplay;
-			if (typeof KinkyDungeonCamX !== 'undefined') KinkyDungeonCamX = s.camera.camX;
-			if (typeof KinkyDungeonCamY !== 'undefined') KinkyDungeonCamY = s.camera.camY;
+			// NOTE: deliberately IGNORE s.camera. The snapshot's camera/grid-size come
+			// from the HEADLESS server (no real screen → bogus scale), and adopting them
+			// distorts the client's rendering. The browser keeps its OWN window-based
+			// KinkyDungeonGridSizeDisplay and recomputes the camera each frame to centre
+			// on its player. (Camera stays in the snapshot for the node round-trip test.)
 			KinkyDungeonStatWill = s.stats.will; KinkyDungeonStatWillMax = s.stats.willMax;
 			KinkyDungeonStatStamina = s.stats.stamina; KinkyDungeonStatStaminaMax = s.stats.staminaMax;
 			KinkyDungeonStatMana = s.stats.mana; KinkyDungeonStatManaMax = s.stats.manaMax;
 			if (typeof KinkyDungeonStatManaPool !== 'undefined') KinkyDungeonStatManaPool = s.stats.manaPool;
 			KinkyDungeonStatDistraction = s.stats.distraction; KinkyDungeonStatDistractionMax = s.stats.distractionMax;
 			if (typeof KinkyDungeonStatDistractionLower !== 'undefined') KinkyDungeonStatDistractionLower = s.stats.distractionLower;
-			KDMapData.Grid = s.map.Grid; KDMapData.GridWidth = s.map.GridWidth; KDMapData.GridHeight = s.map.GridHeight;
-			if (s.map.Tiles != null) KDMapData.Tiles = s.map.Tiles;
-			if (s.map.TilesSkin != null) KDMapData.TilesSkin = s.map.TilesSkin;
-			if (s.map.TilesMemory != null) KDMapData.TilesMemory = s.map.TilesMemory;
-			if (s.map.Traffic != null) KDMapData.Traffic = s.map.Traffic;
-			if (s.map.FogGrid != null) KDMapData.FogGrid = s.map.FogGrid;
-			if (s.map.FogMemory != null) KDMapData.FogMemory = s.map.FogMemory;
-			if (s.map.Labels != null) KDMapData.Labels = s.map.Labels;
-			KDMapData.Entities = (s.map.Entities || []).map(function (es) {
-				var e = {};
-				for (var k in es) { if (k !== 'enemyName') e[k] = es[k]; }
-				if (es.enemyName) e.Enemy = KinkyDungeonGetEnemyByName(es.enemyName) || { name: es.enemyName };
-				return e;
-			});
+			// adopt the authoritative KDMapData WHOLESALE (internally consistent — a
+			// field-subset splice over the client's local map renders broken). Entities
+			// carry their full Enemy defs in the clone, so no def re-link is needed.
+			// Vision/light (KDMapExtraData) is recomputed locally (pinGameScreen flags it).
+			if (s.map) KDMapData = s.map;
 			if (typeof KDUpdateEnemyCache !== 'undefined') KDUpdateEnemyCache = true;
-			if (typeof KDMapExtraData !== 'undefined' && KDMapExtraData) {
-				if (s.mapExtra.VisionGrid != null) KDMapExtraData.VisionGrid = s.mapExtra.VisionGrid;
-				if (s.mapExtra.BrightnessGrid != null) KDMapExtraData.BrightnessGrid = s.mapExtra.BrightnessGrid;
-				if (s.mapExtra.ColorGrid != null) KDMapExtraData.ColorGrid = s.mapExtra.ColorGrid;
-				if (s.mapExtra.ShadowGrid != null) KDMapExtraData.ShadowGrid = s.mapExtra.ShadowGrid;
-			}
 			if (s.player && KinkyDungeonPlayerEntity) {
 				for (var k in s.player) { if (k !== 'enemyName' && k !== 'Enemy') KinkyDungeonPlayerEntity[k] = s.player[k]; }
 			}

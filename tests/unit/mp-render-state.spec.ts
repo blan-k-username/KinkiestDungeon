@@ -86,12 +86,13 @@ describe('render-state snapshot (KD-067)', () => {
 		expect(B.eval('KinkyDungeonStatDistraction')).toBe(snap.stats.distraction);
 	});
 
-	it('round-trips entities incl. the summoned enemy, re-linking Enemy defs', () => {
+	it('round-trips entities incl. the summoned enemy (full KDMapData adopt)', () => {
 		expect(Array.isArray(snap.map.Entities)).toBe(true);
-		expect(snap.map.Entities.some((e: any) => e.enemyName === 'Rat')).toBe(true);
+		// the full KDMapData clone carries entities WITH their Enemy defs (no re-link).
+		expect(snap.map.Entities.some((e: any) => e.Enemy && e.Enemy.name === 'Rat')).toBe(true);
 		const bEnt = B.listEntities();
 		expect(bEnt.length).toBe(snap.map.Entities.length);
-		// Enemy def re-linked by name → faction/name resolve on the fresh instance.
+		// the wholesale-adopted entity resolves name/faction on the fresh instance.
 		expect(bEnt.some((e: any) => e.name === 'Rat')).toBe(true);
 	});
 
