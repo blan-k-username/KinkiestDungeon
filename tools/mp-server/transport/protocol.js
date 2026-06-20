@@ -42,6 +42,7 @@ async function dispatch(state, msg) {
 			state.host.setServerMode(a.mode || 'world');
 			return { ok: true, mode: state.host.serverMode };
 		}
+		case 'ping':           return { pong: a.seq };   // no host work — isolates transport RTT
 		case 'pid':            return { pid: process.pid };
 		case 'findOpenTile':   return h.findOpenTile();
 		case 'placePlayer':    return h.placePlayer(a.x, a.y);
@@ -65,7 +66,7 @@ async function dispatch(state, msg) {
 
 // Commands whose result is a bare value vs an envelope — documented for adapters.
 const COMMANDS = [
-	'init', 'pid', 'findOpenTile', 'placePlayer', 'applyMove', 'summonEnemy',
+	'init', 'ping', 'pid', 'findOpenTile', 'placePlayer', 'applyMove', 'summonEnemy',
 	'getRealEnemy', 'setEnemyTarget', 'injectEnemyState', 'upsertAvatar', 'getAvatar',
 	'getPlayerPos', 'getEnemyView', 'setServerMode', 'runsEnemyAI', 'step', 'tick',
 ];

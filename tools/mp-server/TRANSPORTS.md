@@ -41,6 +41,37 @@ only — so bytes aren't perfectly apples-to-apples. The point: **identical mess
 the protocol traffic is transport-independent; only the pipe changes. Boot dominates; per-turn
 latency is negligible at this scale.
 
+## Per-message round-trip latency (does socket lose to worker/in-process?)
+
+Measured with a `ping` command that does **no game work** (isolates pure transport overhead) and a
+`tick` (one vm eval inside the instance), 2000 samples + 200 warmup, sequential, `node:23-slim` on
+Docker/loopback. Three runs — `ping` avg / p50 / p99 (ms):
+
+| Transport | avg | p50 | p99 | max (worst seen) |
+|---|---:|---:|---:|---:|
+| in-process | ~0.0010 | ~0.0009 | ~0.0020 | 0.04 |
+| worker_threads | ~0.012–0.027 | ~0.007–0.036 | ~0.05 | 0.43 |
+| socket (TCP loopback) | ~0.016–0.039 | ~0.012–0.017 | ~0.05–0.6 | 6.8 |
+
+**Findings:**
+- **in-process is ~15–40× faster** per message (~1 µs) and rock-stable — it's a function call, no
+  scheduling boundary.
+- **worker vs socket are roughly comparable on the median** on loopback (both tens of µs). Socket is
+  **not systematically slower** — in some runs its median beat worker's. What socket *does* have is a
+  **fatter tail**: occasional ms-scale spikes (TCP + cross-process scheduling), p99/max worse than
+  worker.
+- **At turn scale this is noise.** A full turn is ~2–3.5 ms (dominated by the game `step`, identical
+  on every transport). Transport overhead of tens of µs is **<1 % of a turn** — for a turn-based game
+  on one host, the transport choice does **not** change perceived latency.
+
+**The caveat that actually matters — these are all localhost.** Socket's *point* is **remote**: over
+a real network it adds real RTT (≈0.1 ms LAN to 10s–100s ms WAN), which dwarfs every number above.
+in-process and worker **cannot span machines at all**. So:
+- For **one-host** deployments (MVP/localhost, many-sessions): in-process wins on latency, worker is a
+  close second with isolation. Socket buys you nothing here and costs the tail.
+- For **true remote** (the only place socket is required): latency is dominated by the **network**,
+  not the transport implementation — and that cost is unavoidable for *any* cross-machine design.
+
 ## Pros / cons
 
 | Axis | in-process (JSON) | worker_threads | child_process + socket |
@@ -51,6 +82,8 @@ latency is negligible at this scale.
 | Boot / mem per instance | lowest | +thread + bundle copy | +process + bundle copy (highest) |
 | Debuggability | easiest (one stack) | medium | hardest (cross-process) |
 | Serialization realism | real (JSON round-trip) | real (clone) | **real + wire bytes** |
+| Per-msg latency (loopback) | ~1 µs (best) | tens of µs | tens of µs + fatter tail |
+| Latency when remote | n/a (same process) | n/a (same host) | **network RTT dominates** |
 | Path to "remote world" | needs a real transport later | same-machine only | **already a server other hosts can dial** |
 | Adapter cost | 47 LoC | 86 LoC | 155 LoC |
 
