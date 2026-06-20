@@ -359,6 +359,145 @@ class HeadlessHost {
 		})()`);
 	}
 
+	// ----- real in-game integration: players-as-entities (KD-082) ---------------
+
+	/**
+	 * Ensure the `RemotePlayer` enemy-def exists (pushed mod-style, once) — an
+	 * ally-faction, inert avatar definition used to represent another player as a
+	 * real KD entity. faction 'Player' = ally; noAttack falsy so a hostile enemy
+	 * still treats it as a valid target; immobile + visionRadius 0 so it never
+	 * acts on its own (the reconciler drives its position).
+	 */
+	_ensureAvatarDef() {
+		this.eval(`(function(){
+			if (!KinkyDungeonGetEnemyByName('RemotePlayer')) {
+				KinkyDungeonEnemies.push({
+					name: 'RemotePlayer', faction: 'Player', tags: KDMapInit(['peaceful']),
+					AI: 'guard', immobile: true, visionRadius: 0, maxhp: 100, minLevel: 0, weight: -1000,
+					movePoints: 1000, attackPoints: 0, attack: '', attackRange: 0,
+					evasion: -100, armor: 0, followRange: 100, lowpriority: true,
+					terrainTags: {}, floors: KDMapInit([]),
+				});
+				if (typeof KinkyDungeonRefreshEnemiesCache === 'function') KinkyDungeonRefreshEnemiesCache();
+			}
+			return true;
+		})()`);
+	}
+
+	/**
+	 * Inject an avatar entity representing another player at (x,y). Returns the
+	 * real KD entity id (the engine now sees/targets/collides with it).
+	 */
+	spawnAvatar(x, y) {
+		this._ensureAvatarDef();
+		return this.eval(`(function(){
+			var def = KinkyDungeonGetEnemyByName('RemotePlayer');
+			var ent = { id: KinkyDungeonGetEnemyID(), Enemy: def, x: ${x | 0}, y: ${y | 0}, hp: 100, movePoints: 0, attackPoints: 0 };
+			KDAddNewEntity(ent);
+			KDUpdateEnemyCache = true;
+			return { entityId: ent.id, x: ent.x, y: ent.y };
+		})()`);
+	}
+
+	/** Move an injected avatar entity (by entity id) and refresh the entity cache. */
+	moveAvatar(entityId, x, y) {
+		return this.eval(`(function(){
+			var e = KDMapData.Entities.find(function(en){ return en.id === ${entityId | 0}; });
+			if (!e) return null;
+			e.x = ${x | 0}; e.y = ${y | 0}; e.visual_x = ${x | 0}; e.visual_y = ${y | 0};
+			KDUpdateEnemyCache = true;
+			return { entityId: e.id, x: e.x, y: e.y };
+		})()`);
+	}
+
+	/** List entities in this instance (proves injected avatars are real). */
+	listEntities() {
+		return this.eval(`KDMapData.Entities.map(function(e){
+			return { id: e.id, x: e.x, y: e.y, hp: e.hp, name: e.Enemy && e.Enemy.name, faction: KDGetFaction(e) };
+		})`);
+	}
+
+	/** What the engine reports is present at (x,y) — avatar/enemy/player. */
+	entityAt(x, y) {
+		return this.eval(`(function(){
+			var e = KinkyDungeonEntityAt(${x | 0}, ${y | 0});
+			return e ? { id: e.id, name: e.Enemy && e.Enemy.name, player: !!e.player, x: e.x, y: e.y } : null;
+		})()`);
+	}
+
+	/** Park THIS instance's global player off-field (so the world enemy targets avatars). */
+	parkGlobalPlayer(x = 1, y = 1) {
+		this.eval(`(function(){
+			KinkyDungeonPlayerEntity.x = ${x | 0}; KinkyDungeonPlayerEntity.y = ${y | 0};
+			KinkyDungeonTargetX = ${x | 0}; KinkyDungeonTargetY = ${y | 0}; KDUpdateEnemyCache = true;
+		})()`);
+		return this.getPlayerPos();
+	}
+
+	/**
+	 * Report which entity the world enemy is currently targeting + its pose, so
+	 * the reconciler can route the attack to the right player (authority read).
+	 */
+	worldEnemyTarget(index = 0) {
+		return this.eval(`(function(){
+			var e = KDMapData.Entities.find(function(en){ return en.Enemy && !en.Enemy.noAttack && KDGetFaction(en) !== 'Player'; });
+			if (!e) return null;
+			return { enemyId: e.id, target: e.target, tx: e.tx, ty: e.ty, ex: e.x, ey: e.y, aware: !!e.aware, hp: e.hp, name: e.Enemy && e.Enemy.name };
+		})()`);
+	}
+
+	/**
+	 * Apply an enemy's attack outcome to THIS instance's global player via the
+	 * engine's real damage/restraint functions (the routed hit lands here).
+	 */
+	applyEnemyHit(profile = {}) {
+		const dmg = Number(profile.damage) || 0;
+		const type = profile.type || 'pain';
+		const restraint = profile.restraint || null;
+		return this.eval(`(function(){
+			if (${dmg} > 0) KinkyDungeonDealDamage({ damage: ${dmg}, type: ${JSON.stringify(type)} });
+			if (${JSON.stringify(restraint)}) {
+				var def = KinkyDungeonGetRestraintByName(${JSON.stringify(restraint)});
+				if (def) KinkyDungeonAddRestraint(def, 0, true);
+			}
+			return {
+				will: KinkyDungeonStatWill, stamina: KinkyDungeonStatStamina,
+				distraction: KinkyDungeonStatDistraction, restraints: KinkyDungeonAllRestraint().length,
+			};
+		})()`);
+	}
+
+	/** Distance (Chebyshev) between two entities by id, in this instance. */
+	entityDistance(idA, idB) {
+		return this.eval(`(function(){
+			var a = KDMapData.Entities.find(function(e){return e.id===${idA | 0};});
+			var b = KDMapData.Entities.find(function(e){return e.id===${idB | 0};});
+			if (!a || !b) return null;
+			return Math.max(Math.abs(a.x-b.x), Math.abs(a.y-b.y));
+		})()`);
+	}
+
+	/** The ~20-global per-player independence snapshot (KD-082 gap #4). */
+	getParams() {
+		return this.eval(`(function(){
+			return {
+				stamina: KinkyDungeonStatStamina, staminaMax: KinkyDungeonStatStaminaMax,
+				mana: KinkyDungeonStatMana, manaMax: KinkyDungeonStatManaMax,
+				will: KinkyDungeonStatWill, willMax: KinkyDungeonStatWillMax,
+				distraction: KinkyDungeonStatDistraction, distractionMax: KinkyDungeonStatDistractionMax,
+				x: KinkyDungeonPlayerEntity.x, y: KinkyDungeonPlayerEntity.y, hp: KinkyDungeonPlayerEntity.hp,
+				level: (typeof MiniGameKinkyDungeonLevel !== 'undefined') ? MiniGameKinkyDungeonLevel : null,
+				gold: (typeof KinkyDungeonGold !== 'undefined') ? KinkyDungeonGold : null,
+				restraints: KinkyDungeonAllRestraint().length,
+				inventoryKeys: (typeof KinkyDungeonInventory !== 'undefined' && KinkyDungeonInventory) ? Array.from(KinkyDungeonInventory.keys()).length : null,
+				perks: (typeof KinkyDungeonStatsChoice !== 'undefined' && KinkyDungeonStatsChoice) ? Array.from(KinkyDungeonStatsChoice.keys()).filter(function(k){return KinkyDungeonStatsChoice.get(k);}).length : null,
+				movePoints: (typeof KDGameData !== 'undefined' && KDGameData) ? KDGameData.MovePoints : null,
+				tick: KinkyDungeonCurrentTick,
+				seed: (typeof KinkyDungeonSeed !== 'undefined') ? KinkyDungeonSeed : null,
+			};
+		})()`);
+	}
+
 	/** Serialize full game state via the bundle's own save path. */
 	serialize() {
 		return this.eval('KinkyDungeonGenerateSaveData()');

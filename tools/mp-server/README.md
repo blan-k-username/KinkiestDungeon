@@ -17,6 +17,7 @@ KD-069 (orchestrator), KD-070 (reconciler).
 | `orchestrator.js` | `Orchestrator` — 1 world + 2 player hosts, global turn clock (`submitMove`), and the minimal reconciler. **In-process direct calls** (KD-079 baseline, no serialization). |
 | `mp-session.js` | `MPSession` — async port of the orchestrator that drives instances over a **pluggable transport** (serialized messages). KD-081. |
 | `lobby.js` | `Lobby` — generalized **N-player (2–4)** session over the transport: join flow, N-player turn clock + reconciler, **PvP**, and **server-side mod loading**. KD-080. |
+| `integration.js` | `IntegratedSession` (extends `Lobby`) — **real in-game integration**: players injected as real KD entities, enemy AI attacks routed to the target's instance, world-adjudicated P2P, independent params. KD-082. |
 | `transport/` | Transport boundary (KD-081): `protocol.js` (commands + `dispatch`), `in-process.js`, `worker-thread.js` (+`worker-entry.js`), `socket.js` (+`child-entry.js`), `index.js` (registry). |
 | `TRANSPORTS.md` | Measured comparison of the three transports (pros/cons + game-code-change count). |
 | `smoke-boot.js` / `bench-transports.js` | Manual smoke driver / transport benchmark. |
@@ -86,6 +87,33 @@ game-source edits**:
 
 Tests: `tests/unit/mp-lobby.spec.ts` (lobby 2/3/4, PvP isolation, mod load). Default in-process
 transport; the lobby is transport-agnostic (any registered transport works).
+
+## Real in-game integration (KD-082)
+
+The earlier pillars were *synthetic* — the reconciler copied `{x,y,hp}` values, "PvP" was the harness
+reaching into B, and the enemy only moved toward a coordinate. `integration.js` proves the **real**
+gameplay integration, still with **zero game-source edits** (avatars use a runtime-pushed enemy def,
+mod-style):
+
+- **Players as real entities** — each player is injected into the world and into every other player's
+  instance as a real KD entity (`KDAddNewEntity`, an ally-faction `RemotePlayer` avatar). The engine
+  sees it for vision/targeting/collision (`KinkyDungeonEntityAt` finds it). Each player remains the
+  **global player of their own instance**, where real stats/damage/restraints live.
+- **Enemy AI attacks players (routed)** — the world's global player is parked off-field; the world
+  enemy's own AI then **targets the nearest avatar** (`KinkyDungeonNearestPlayer` decoy targeting),
+  pathfinds to it and attacks. The reconciler reads `enemy.target`, maps it to the player, and
+  **routes the hit into that player's instance** (real `KinkyDungeonDealDamage`); other players are
+  untouched.
+- **World-adjudicated P2P** — `routedPvp(A,B,effect)` is authorized by the **world** (checks the two
+  avatar entities are adjacent) and only then applied in B's instance; a non-adjacent attempt is
+  rejected. A is never affected.
+- **Independent params** — `getParams()` snapshots ~20 per-player globals (vitals, position, level,
+  gold, inventory, perks, restraints, seed); two instances diverge where acted on and agree on the
+  shared seed.
+
+Tests: `tests/unit/mp-integration.spec.ts`. Feasibility was confirmed by a spike first (enemy
+genuinely targets + damages an injected avatar; routed hit lands on the global player of a separate
+instance).
 
 ## Known limitations (PoC)
 

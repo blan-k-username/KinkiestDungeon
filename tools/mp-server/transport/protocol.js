@@ -65,6 +65,16 @@ async function dispatch(state, msg) {
 		case 'getVitals':      return h.getVitals();
 		case 'dealDamage':     return h.dealDamage(a.amount, a.type);
 		case 'addRestraint':   return h.addRestraint(a.name);
+		// --- KD-082 real in-game integration ---
+		case 'spawnAvatar':    return h.spawnAvatar(a.x, a.y);
+		case 'moveAvatar':     return h.moveAvatar(a.entityId, a.x, a.y);
+		case 'listEntities':   return h.listEntities();
+		case 'entityAt':       return h.entityAt(a.x, a.y);
+		case 'parkGlobalPlayer': return h.parkGlobalPlayer(a.x, a.y);
+		case 'worldEnemyTarget': return h.worldEnemyTarget(a.index || 0);
+		case 'applyEnemyHit':  return h.applyEnemyHit(a.profile || {});
+		case 'entityDistance': return h.entityDistance(a.idA, a.idB);
+		case 'getParams':      return h.getParams();
 		default:
 			throw new Error(`unknown protocol cmd: ${JSON.stringify(cmd)}`);
 	}
@@ -76,6 +86,8 @@ const COMMANDS = [
 	'getRealEnemy', 'setEnemyTarget', 'injectEnemyState', 'upsertAvatar', 'getAvatar',
 	'getPlayerPos', 'getEnemyView', 'setServerMode', 'runsEnemyAI', 'step', 'tick',
 	'loadMod', 'getEnemyByName', 'getVitals', 'dealDamage', 'addRestraint',
+	'spawnAvatar', 'moveAvatar', 'listEntities', 'entityAt', 'parkGlobalPlayer',
+	'worldEnemyTarget', 'applyEnemyHit', 'entityDistance', 'getParams',
 ];
 
 module.exports = { createState, dispatch, COMMANDS };
