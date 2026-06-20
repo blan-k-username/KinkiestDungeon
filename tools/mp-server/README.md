@@ -14,8 +14,11 @@ KD-069 (orchestrator), KD-070 (reconciler).
 |---|---|
 | `shims.js` | Headless shim layer — PIXI/DOM/WebGL/Audio/IndexedDB/`fetch` stubs so `out/main.js` boots with no browser. `fetch` is file-backed (local reads only). |
 | `headless-host.js` | `HeadlessHost` — boots the bundle in an **isolated `vm.Context` per instance** and bridges into its script scope via an appended `__KDEVAL`. Exposes `init/step/getState/eval` + scenario & reconciler helpers. |
-| `orchestrator.js` | `Orchestrator` — 1 world + 2 player hosts, global turn clock (`submitMove`), and the minimal reconciler. |
-| `smoke-boot.js` | Manual one-instance smoke driver (boot → init → step). |
+| `orchestrator.js` | `Orchestrator` — 1 world + 2 player hosts, global turn clock (`submitMove`), and the minimal reconciler. **In-process direct calls** (KD-079 baseline, no serialization). |
+| `mp-session.js` | `MPSession` — async port of the orchestrator that drives instances over a **pluggable transport** (serialized messages). KD-081. |
+| `transport/` | Transport boundary (KD-081): `protocol.js` (commands + `dispatch`), `in-process.js`, `worker-thread.js` (+`worker-entry.js`), `socket.js` (+`child-entry.js`), `index.js` (registry). |
+| `TRANSPORTS.md` | Measured comparison of the three transports (pros/cons + game-code-change count). |
+| `smoke-boot.js` / `bench-transports.js` | Manual smoke driver / transport benchmark. |
 
 ## How it works
 
@@ -44,6 +47,23 @@ tools/run-tests.sh unit     # includes tests/unit/mp-headless-host.spec.ts + mp-
 
 > Build `out/main.js` first with `npx tsc` in Docker (NOT `npm run build` — no
 > python in the image). `run-tests.sh` does this for you.
+
+## Transport boundary (KD-081)
+
+KD-079 wired instances together with **direct in-process calls** (no serialization). KD-081 adds a
+**pluggable transport** so the same `MPSession` runs the world + players over a real serialized
+boundary — three adapters, each for a different goal:
+
+| Transport | what it is | goal | game-code change |
+|---|---|---|---|
+| `in-process` | same process, JSON round-trip per message | MVP / localhost | **0** |
+| `worker` | `worker_threads` isolate per instance | smaller scale | **0** |
+| `socket` | `child_process` + TCP loopback, newline-JSON | true remote / lobby | **0** |
+
+The headline result: **transport choice costs zero game-code change** — only the injected transport
+differs; the orchestrator and game bundle are untouched. Full comparison + measurements in
+`TRANSPORTS.md`. Tests: `tests/unit/mp-transport.spec.ts` (4 ACs over each transport + a
+separate-OS-process assertion for `socket`).
 
 ## Known limitations (PoC)
 
