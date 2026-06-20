@@ -4176,7 +4176,26 @@ function KDGetBindEffectMult(enemy: entity) {
 }
 
 
+/**
+ * Server-authoritative multiplayer role flag (KD-068, epic mp-mvp / KD-066).
+ *
+ * "" (default)  → normal single-player / offline build. Behaviour is byte-identical
+ *                 to a build without this flag (every guard below is a no-op).
+ * "world"       → this headless instance OWNS the shared entities and simulates them.
+ * "player"      → this instance is a remote player's view; it must NOT simulate the
+ *                 shared entities (enemy/NPC AI) — they are received from the world
+ *                 instance each turn (KD-070 reconciler). Suppress the entity update.
+ * "client"      → reserved for the thin render-only browser client (KD-071).
+ *
+ * The flag is set at runtime by the headless host (HeadlessHost.setServerMode);
+ * the offline/single-player game never sets it, so it stays "".
+ */
+let KDServerRole: string = "";
+
 function KinkyDungeonUpdateEnemies(maindelta: number, Allied: boolean) {
+	// player-role instances do not own shared entities — the world instance drives
+	// them and the reconciler injects their state. Skip the local AI/update entirely.
+	if (KDServerRole === "player") return;
 	KDGameData.tickAlertTimer = false;
 	KDGameData.HostileFactions = [];
 	let visionMod = 1.0;

@@ -123,8 +123,8 @@ class HeadlessHost {
 
 		this._booted = true;
 		this._neuterRendering();
-		// Capture the stock enemy-AI tick so serverMode can toggle it on/off.
-		this.eval('globalThis.__KD_origUpdateEnemies = KinkyDungeonUpdateEnemies;');
+		// serverMode (KD-068) is now a real engine flag (KDServerRole) — no need to
+		// capture/restore KinkyDungeonUpdateEnemies as the PoC did.
 		return this;
 	}
 
@@ -192,24 +192,25 @@ class HeadlessHost {
 	// ----- serverMode (KD-068 PoC scope) ---------------------------------------
 
 	/**
-	 * Gate shared-entity (enemy) AI. 'world' instances run it; 'player' instances
-	 * suppress it. Implemented by toggling the reassignable KinkyDungeonUpdateEnemies
-	 * global (mod-style override, no source edit). This is the minimal flag the
-	 * production KD-068 will formalize.
+	 * Gate shared-entity (enemy) AI via the real KD-068 source flag `KDServerRole`.
+	 * 'world' instances run the AI; 'player' instances suppress it (the in-engine
+	 * guard at the top of KinkyDungeonUpdateEnemies returns early when role==='player').
+	 * This replaces the PoC's mod-style function-reassignment with the production flag.
 	 */
 	setServerMode(mode) {
 		this.serverMode = (mode === 'player') ? 'player' : 'world';
-		if (this.serverMode === 'player') {
-			this.eval('KinkyDungeonUpdateEnemies = function(){ return; };');
-		} else {
-			this.eval('KinkyDungeonUpdateEnemies = globalThis.__KD_origUpdateEnemies;');
-		}
+		this.eval(`KDServerRole = ${JSON.stringify(this.serverMode)};`);
 		return this.serverMode;
 	}
 
-	/** True if this instance runs shared-entity AI (world role). */
+	/** Current server role as the engine sees it. */
+	getServerRole() {
+		return this.eval('typeof KDServerRole !== "undefined" ? KDServerRole : null');
+	}
+
+	/** True if this instance runs shared-entity AI (world role; flag not 'player'). */
 	runsEnemyAI() {
-		return this.eval('KinkyDungeonUpdateEnemies !== (function(){return;}) && KinkyDungeonUpdateEnemies === globalThis.__KD_origUpdateEnemies');
+		return this.eval('typeof KDServerRole !== "undefined" && KDServerRole !== "player"');
 	}
 
 	// ----- scenario / gameplay helpers -----------------------------------------
@@ -494,6 +495,217 @@ class HeadlessHost {
 				movePoints: (typeof KDGameData !== 'undefined' && KDGameData) ? KDGameData.MovePoints : null,
 				tick: KinkyDungeonCurrentTick,
 				seed: (typeof KinkyDungeonSeed !== 'undefined') ? KinkyDungeonSeed : null,
+			};
+		})()`);
+	}
+
+	// ----- headless-safe render-state snapshot (KD-067) ------------------------
+
+	/**
+	 * Serialize a JSON-safe RENDER-STATE snapshot — the minimal set of globals the
+	 * stock per-frame render path reads, so a thin client (KD-071) can render it
+	 * without simulating. Built DIRECTLY from live globals, NOT from
+	 * KinkyDungeonGenerateSaveData() — that throws headless because it reads
+	 * render-derived model Poses (KinkyDungeon.ts:6840). This serializer never
+	 * touches model/pose data; it carries game state, not pixels.
+	 *
+	 * Shape is `version`-stamped for protocol evolution (shared with KD-070/071).
+	 * Per-entity `Enemy` defs are reduced to `enemyName` and re-linked on apply
+	 * (the client already has the shared defs) — see applyRenderState.
+	 */
+	serializeRenderState() {
+		return this.eval(`(function(){
+			function clone(o){ try { return (o === undefined) ? undefined : JSON.parse(JSON.stringify(o)); } catch(e){ return null; } }
+			var ENT_FIELDS = ['id','x','y','visual_x','visual_y','offX','offY','scaleX','scaleY','flip','hp','visual_hp','boundLevel','distraction','revealed','player','CustomSprite','CustomName','CustomNameColor','style','outfit','outfitBound'];
+			function entSnap(e){
+				var o = {};
+				for (var i=0;i<ENT_FIELDS.length;i++){ var k=ENT_FIELDS[i]; if (e[k] !== undefined) o[k] = e[k]; }
+				o.enemyName = (e.Enemy && e.Enemy.name) || undefined;
+				var b = clone(e.buffs); if (b) o.buffs = b;
+				return o;
+			}
+			var M = KDMapData;
+			var X = (typeof KDMapExtraData !== 'undefined' && KDMapExtraData) ? KDMapExtraData : {};
+			var P = (typeof KinkyDungeonPlayerEntity !== 'undefined') ? KinkyDungeonPlayerEntity : null;
+			return {
+				version: 1,
+				tick: KinkyDungeonCurrentTick,
+				camera: {
+					zoomIndex: (typeof KDZoomIndex !== 'undefined') ? KDZoomIndex : 0,
+					gridSizeDisplay: (typeof KinkyDungeonGridSizeDisplay !== 'undefined') ? KinkyDungeonGridSizeDisplay : 0,
+					gridWidthDisplay: (typeof KinkyDungeonGridWidthDisplay !== 'undefined') ? KinkyDungeonGridWidthDisplay : 0,
+					gridHeightDisplay: (typeof KinkyDungeonGridHeightDisplay !== 'undefined') ? KinkyDungeonGridHeightDisplay : 0,
+					camX: (typeof KinkyDungeonCamX !== 'undefined') ? KinkyDungeonCamX : 0,
+					camY: (typeof KinkyDungeonCamY !== 'undefined') ? KinkyDungeonCamY : 0,
+				},
+				player: P ? entSnap(P) : null,
+				stats: {
+					will: KinkyDungeonStatWill, willMax: KinkyDungeonStatWillMax,
+					stamina: KinkyDungeonStatStamina, staminaMax: KinkyDungeonStatStaminaMax,
+					mana: KinkyDungeonStatMana, manaMax: KinkyDungeonStatManaMax,
+					manaPool: (typeof KinkyDungeonStatManaPool !== 'undefined') ? KinkyDungeonStatManaPool : 0,
+					distraction: KinkyDungeonStatDistraction, distractionMax: KinkyDungeonStatDistractionMax,
+					distractionLower: (typeof KinkyDungeonStatDistractionLower !== 'undefined') ? KinkyDungeonStatDistractionLower : 0,
+				},
+				map: {
+					Grid: M.Grid, GridWidth: M.GridWidth, GridHeight: M.GridHeight,
+					Tiles: clone(M.Tiles), TilesSkin: clone(M.TilesSkin), TilesMemory: clone(M.TilesMemory),
+					Traffic: clone(M.Traffic), FogGrid: clone(M.FogGrid), FogMemory: clone(M.FogMemory),
+					Labels: clone(M.Labels),
+					Entities: (M.Entities || []).map(entSnap),
+				},
+				mapExtra: {
+					VisionGrid: clone(X.VisionGrid), BrightnessGrid: clone(X.BrightnessGrid),
+					ColorGrid: clone(X.ColorGrid), ShadowGrid: clone(X.ShadowGrid),
+				},
+				messages: {
+					log: clone(KinkyDungeonMessageLog) || [],
+					action: (typeof KinkyDungeonActionMessage !== 'undefined') ? KinkyDungeonActionMessage : '',
+					actionTime: (typeof KinkyDungeonActionMessageTime !== 'undefined') ? KinkyDungeonActionMessageTime : 0,
+					actionColor: (typeof KinkyDungeonActionMessageColor !== 'undefined') ? KinkyDungeonActionMessageColor : '#ffffff',
+				},
+				restraints: (typeof KinkyDungeonAllRestraint === 'function') ? KinkyDungeonAllRestraint().map(function(r){ return { name: r.name, id: r.id }; }) : [],
+				buffs: clone(typeof KinkyDungeonPlayerBuffs !== 'undefined' ? KinkyDungeonPlayerBuffs : {}),
+				level: (typeof MiniGameKinkyDungeonLevel !== 'undefined') ? MiniGameKinkyDungeonLevel : 1,
+			};
+		})()`);
+	}
+
+	/**
+	 * Adopt a render-state snapshot (from serializeRenderState) onto THIS instance —
+	 * the thin-client / reconciler apply path. Assigns the render globals and
+	 * re-links each entity's Enemy def by name. Does NOT simulate. Returns a small
+	 * summary for assertions.
+	 */
+	applyRenderState(snap) {
+		this._context.__KD_RENDER_IN = snap;
+		return this.eval(`(function(){
+			var s = globalThis.__KD_RENDER_IN;
+			if (!s) return { ok: false, error: 'no snapshot' };
+			// camera / viewport
+			if (typeof KDZoomIndex !== 'undefined') KDZoomIndex = s.camera.zoomIndex;
+			if (typeof KinkyDungeonGridSizeDisplay !== 'undefined') KinkyDungeonGridSizeDisplay = s.camera.gridSizeDisplay;
+			if (typeof KinkyDungeonGridWidthDisplay !== 'undefined') KinkyDungeonGridWidthDisplay = s.camera.gridWidthDisplay;
+			if (typeof KinkyDungeonGridHeightDisplay !== 'undefined') KinkyDungeonGridHeightDisplay = s.camera.gridHeightDisplay;
+			if (typeof KinkyDungeonCamX !== 'undefined') KinkyDungeonCamX = s.camera.camX;
+			if (typeof KinkyDungeonCamY !== 'undefined') KinkyDungeonCamY = s.camera.camY;
+			// HUD stats
+			KinkyDungeonStatWill = s.stats.will; KinkyDungeonStatWillMax = s.stats.willMax;
+			KinkyDungeonStatStamina = s.stats.stamina; KinkyDungeonStatStaminaMax = s.stats.staminaMax;
+			KinkyDungeonStatMana = s.stats.mana; KinkyDungeonStatManaMax = s.stats.manaMax;
+			if (typeof KinkyDungeonStatManaPool !== 'undefined') KinkyDungeonStatManaPool = s.stats.manaPool;
+			KinkyDungeonStatDistraction = s.stats.distraction; KinkyDungeonStatDistractionMax = s.stats.distractionMax;
+			if (typeof KinkyDungeonStatDistractionLower !== 'undefined') KinkyDungeonStatDistractionLower = s.stats.distractionLower;
+			// map
+			KDMapData.Grid = s.map.Grid; KDMapData.GridWidth = s.map.GridWidth; KDMapData.GridHeight = s.map.GridHeight;
+			if (s.map.Tiles != null) KDMapData.Tiles = s.map.Tiles;
+			if (s.map.TilesSkin != null) KDMapData.TilesSkin = s.map.TilesSkin;
+			if (s.map.TilesMemory != null) KDMapData.TilesMemory = s.map.TilesMemory;
+			if (s.map.Traffic != null) KDMapData.Traffic = s.map.Traffic;
+			if (s.map.FogGrid != null) KDMapData.FogGrid = s.map.FogGrid;
+			if (s.map.FogMemory != null) KDMapData.FogMemory = s.map.FogMemory;
+			if (s.map.Labels != null) KDMapData.Labels = s.map.Labels;
+			// entities — rebuild plain objects, re-linking the Enemy def by name
+			KDMapData.Entities = (s.map.Entities || []).map(function(es){
+				var e = {};
+				for (var k in es) { if (k !== 'enemyName') e[k] = es[k]; }
+				if (es.enemyName) e.Enemy = KinkyDungeonGetEnemyByName(es.enemyName) || { name: es.enemyName };
+				return e;
+			});
+			if (typeof KDUpdateEnemyCache !== 'undefined') KDUpdateEnemyCache = true;
+			// vision / lighting
+			if (typeof KDMapExtraData !== 'undefined' && KDMapExtraData) {
+				if (s.mapExtra.VisionGrid != null) KDMapExtraData.VisionGrid = s.mapExtra.VisionGrid;
+				if (s.mapExtra.BrightnessGrid != null) KDMapExtraData.BrightnessGrid = s.mapExtra.BrightnessGrid;
+				if (s.mapExtra.ColorGrid != null) KDMapExtraData.ColorGrid = s.mapExtra.ColorGrid;
+				if (s.mapExtra.ShadowGrid != null) KDMapExtraData.ShadowGrid = s.mapExtra.ShadowGrid;
+			}
+			// player avatar (this instance's own global player object)
+			if (s.player && KinkyDungeonPlayerEntity) {
+				for (var k in s.player) { if (k !== 'enemyName' && k !== 'Enemy') KinkyDungeonPlayerEntity[k] = s.player[k]; }
+			}
+			// messages / floor
+			KinkyDungeonMessageLog = s.messages.log || [];
+			if (typeof KinkyDungeonActionMessage !== 'undefined') KinkyDungeonActionMessage = s.messages.action;
+			if (typeof KinkyDungeonActionMessageTime !== 'undefined') KinkyDungeonActionMessageTime = s.messages.actionTime;
+			if (typeof KinkyDungeonActionMessageColor !== 'undefined') KinkyDungeonActionMessageColor = s.messages.actionColor;
+			if (typeof MiniGameKinkyDungeonLevel !== 'undefined') MiniGameKinkyDungeonLevel = s.level;
+			return { ok: true, entities: KDMapData.Entities.length, grid: KDMapData.Grid.length };
+		})()`);
+	}
+
+	/**
+	 * Adopt the WORLD's authoritative MAP (tiles + vision/lighting) onto THIS player
+	 * instance — KD-070 reconciler push. Map-ONLY by design: it does NOT touch this
+	 * instance's player/stats NOR its entity list. Shared entities (the world's
+	 * enemies + the other players' avatars) are managed separately as PROPER engine
+	 * entities (injectSharedEnemy / spawnAvatar+moveAvatar) so they stay well-formed
+	 * for the per-turn CheckHP/unpack pass — replacing Entities with re-linked plain
+	 * objects breaks that pass. Takes a snapshot from world.serializeRenderState().
+	 */
+	applyWorldMap(snap) {
+		this._context.__KD_WORLD_IN = snap;
+		return this.eval(`(function(){
+			var s = globalThis.__KD_WORLD_IN; if (!s) return { ok:false, error:'no snapshot' };
+			// authoritative map (adopt; the world OWNS it — players do not regen it)
+			KDMapData.Grid = s.map.Grid; KDMapData.GridWidth = s.map.GridWidth; KDMapData.GridHeight = s.map.GridHeight;
+			if (s.map.Tiles != null) KDMapData.Tiles = s.map.Tiles;
+			if (s.map.TilesSkin != null) KDMapData.TilesSkin = s.map.TilesSkin;
+			if (s.map.TilesMemory != null) KDMapData.TilesMemory = s.map.TilesMemory;
+			if (s.map.Traffic != null) KDMapData.Traffic = s.map.Traffic;
+			if (s.map.FogGrid != null) KDMapData.FogGrid = s.map.FogGrid;
+			if (s.map.FogMemory != null) KDMapData.FogMemory = s.map.FogMemory;
+			if (s.map.Labels != null) KDMapData.Labels = s.map.Labels;
+			if (typeof KDMapExtraData !== 'undefined' && KDMapExtraData) {
+				if (s.mapExtra.VisionGrid != null) KDMapExtraData.VisionGrid = s.mapExtra.VisionGrid;
+				if (s.mapExtra.BrightnessGrid != null) KDMapExtraData.BrightnessGrid = s.mapExtra.BrightnessGrid;
+				if (s.mapExtra.ColorGrid != null) KDMapExtraData.ColorGrid = s.mapExtra.ColorGrid;
+				if (s.mapExtra.ShadowGrid != null) KDMapExtraData.ShadowGrid = s.mapExtra.ShadowGrid;
+			}
+			return { ok:true, grid: KDMapData.Grid.length };
+		})()`);
+	}
+
+	/**
+	 * Inject the world's shared enemy as a PROPER, well-formed entity in THIS player
+	 * instance (KD-070) so it renders + survives the per-turn CheckHP pass. Uses the
+	 * real enemy def (KinkyDungeonGetEnemyByName) via the engine's KDAddNewEntity —
+	 * the same proven path as spawnAvatar. AI is suppressed here (role 'player'); the
+	 * reconciler keeps its position in sync with the world via moveAvatar(by id).
+	 * Returns the entity id (track it to reposition each turn).
+	 */
+	injectSharedEnemy(name, x, y, hp) {
+		return this.eval(`(function(){
+			var def = KinkyDungeonGetEnemyByName(${JSON.stringify(name)});
+			if (!def) return null;
+			var ent = { id: KinkyDungeonGetEnemyID(), Enemy: def, x: ${x | 0}, y: ${y | 0},
+				hp: ${Number(hp) || (def.maxhp || 1)}, movePoints: 0, attackPoints: 0 };
+			KDAddNewEntity(ent);
+			KDUpdateEnemyCache = true;
+			return { entityId: ent.id, x: ent.x, y: ent.y, name: def.name };
+		})()`);
+	}
+
+	/**
+	 * Read a world enemy's REAL attack descriptor from its def (KD-070 adjudication):
+	 * power/dmgType/attack/range come from the actual enemy data, not a fixed profile.
+	 * The reconciler routes this to the targeted player's instance via applyEnemyHit.
+	 * `isBind` flags bind/rope/lock attacks (so a restraint is applied, not just damage).
+	 */
+	getEnemyAttackProfile(entityId) {
+		return this.eval(`(function(){
+			var e = KDMapData.Entities.find(function(en){ return en.id === ${entityId | 0}; });
+			if (!e || !e.Enemy) return null;
+			var En = e.Enemy;
+			var atk = String(En.attack || '');
+			return {
+				attack: atk,
+				power: En.power || 0,
+				damage: En.power || 0,
+				type: En.dmgType || 'pain',
+				range: En.attackRange || 1,
+				width: En.attackWidth || 1,
+				isBind: /Bind|Lock|Rope|Engulf|Chain/.test(atk),
 			};
 		})()`);
 	}
