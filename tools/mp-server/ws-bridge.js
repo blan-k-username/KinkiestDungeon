@@ -93,12 +93,19 @@ class WSBridge {
 	listen(port = 0) {
 		return new Promise((resolve) => {
 			this._server = http.createServer((_req, res) => { res.writeHead(426); res.end('Upgrade Required'); });
-			this._server.on('upgrade', (req, socket) => this._onUpgrade(req, socket));
+			this.attach(this._server);
 			this._server.listen(port, '127.0.0.1', () => {
 				this.port = this._server.address().port;
 				resolve(this.port);
 			});
 		});
+	}
+
+	/** Attach the WS upgrade handler to an EXISTING http server (e.g. the demo
+	 *  static server) so client↔server share one port/origin. */
+	attach(server) {
+		server.on('upgrade', (req, socket) => this._onUpgrade(req, socket));
+		return this;
 	}
 
 	_onUpgrade(req, socket) {
@@ -128,11 +135,15 @@ class WSBridge {
 
 	_handle(socket, msg, clientId) {
 		if (msg.type === 'join') {
-			clientId = msg.clientId;
-			this.sockets.set(clientId, socket);
-			const r = this.session.join(clientId);
-			this._send(socket, { type: 'joined', clientId, started: r.started });
-			if (r.started) this._broadcastState();   // both in → push initial render-state
+			try {
+				clientId = msg.clientId;
+				this.sockets.set(clientId, socket);
+				const r = this.session.join(clientId);
+				this._send(socket, { type: 'joined', clientId, started: r.started, players: this.session.players });
+				if (r.started) this._broadcastState();   // both in → push initial render-state
+			} catch (e) {
+				this._send(socket, { type: 'error', error: String(e && e.message || e) });
+			}
 			return clientId;
 		}
 		if (msg.type === 'input' && clientId && this.session.started) {
