@@ -158,13 +158,32 @@ class WSBridge {
 		return clientId;
 	}
 
-	/** Push each connected client its OWN player instance's render-state snapshot. */
+	/**
+	 * Push each client a render-state composed from:
+	 *  - the WORLD's authoritative map (ALL enemies + every player's avatar) so all
+	 *    clients see the SAME entities at the SAME positions (no per-instance desync),
+	 *    minus THIS client's own avatar (they're their own global player, not an avatar);
+	 *  - this client's own player position + stats from its player instance.
+	 * The world is serialized ONCE per turn; only the Entities list is filtered per client.
+	 */
 	_broadcastState() {
+		const orch = this.session.orch;
+		const recon = this.session.reconciler;
+		const worldSnap = orch.world.serializeRenderState();
+		const worldMap = worldSnap.map || {};
+		const allEntities = worldMap.Entities || [];
+		const tick = orch.ticks().world;
+
 		for (const [cid, sock] of this.sockets) {
 			const inst = this.session.instanceOf(cid);
 			if (!inst) continue;
-			const snapshot = inst.serializeRenderState();
-			this._send(sock, { type: 'state', tick: this.session.orch.ticks().world, snapshot });
+			const snapshot = inst.serializeRenderState();         // own player + stats
+			const ownAvatar = recon ? recon.worldAvatar.get(cid) : null;
+			// adopt the world's authoritative entities, minus this client's own avatar
+			snapshot.map = Object.assign({}, worldMap, {
+				Entities: allEntities.filter((e) => e.id !== ownAvatar),
+			});
+			this._send(sock, { type: 'state', tick, snapshot });
 		}
 	}
 
