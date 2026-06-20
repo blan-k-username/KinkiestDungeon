@@ -76,6 +76,11 @@
 	function pinGameScreen() {
 		KinkyDungeonState = 'Game';
 		KinkyDungeonDrawState = 'Game';
+		// The client doesn't simulate, so vision/fog isn't recomputed after we adopt
+		// new state — the map stays dark and entities stay hidden. Flag a vision
+		// recompute so the draw lights the map around the (server-set) player position
+		// and reveals the shared enemy + the other player's avatar.
+		if (typeof KinkyDungeonUpdateLightGrid !== 'undefined') KinkyDungeonUpdateLightGrid = true;
 	}
 
 	function connect() {

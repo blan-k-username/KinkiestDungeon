@@ -49,6 +49,18 @@ test('two browser windows play one shared co-op dungeon via the demo server', as
 		// peer-avatar def must re-link, else KDEnemyRank reads `.tags` of undefined).
 		expect(errs.find((e) => /reading 'tags'/.test(e))).toBeUndefined();
 
+		// vision is recomputed client-side after adopting state → the player's own
+		// tile is lit (regression guard: without it the whole map stays black).
+		for (const P of [A, B]) {
+			const vis = await P.evaluate(() => {
+				// @ts-ignore bare let-globals
+				const p = KinkyDungeonPlayerEntity;
+				// @ts-ignore
+				return (typeof KinkyDungeonVisionGet === 'function') ? KinkyDungeonVisionGet(p.x, p.y) : -1;
+			});
+			expect(vis).toBeGreaterThan(0);
+		}
+
 		// both windows render the SAME shared, server-owned dungeon, render-only
 		const ga = await A.evaluate(() => (KDMapData as any).Grid);
 		const gb = await B.evaluate(() => (KDMapData as any).Grid);
