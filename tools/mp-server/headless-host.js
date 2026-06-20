@@ -695,6 +695,50 @@ class HeadlessHost {
 		})()`);
 	}
 
+	// ----- action routing (KD-085) --------------------------------------------
+
+	/** The acting player's current weapon attack profile (from their instance). */
+	getAttackProfile() {
+		return this.eval(`(function(){
+			var w = (typeof KinkyDungeonPlayerDamage !== 'undefined') ? KinkyDungeonPlayerDamage : null;
+			return {
+				damage: (w && typeof w.damage === 'number') ? w.damage : 1,
+				type: (w && w.type) ? w.type : 'unarmed',
+			};
+		})()`);
+	}
+
+	/**
+	 * Apply a damage profile to a WORLD enemy by id via the engine's real
+	 * KinkyDungeonDamageEnemy (KD-085 routed attack). Returns {hp, dealt, name} or null.
+	 * Run on the world instance (authoritative). The reconciler then re-broadcasts.
+	 */
+	damageEnemy(enemyId, profile = {}) {
+		const dmg = Number(profile.damage) || 0;
+		const type = profile.type || 'unarmed';
+		return this.eval(`(function(){
+			var e = KDMapData.Entities.find(function(en){ return en.id === ${enemyId | 0}; });
+			if (!e || !e.Enemy) return null;
+			var dealt = KinkyDungeonDamageEnemy(e, { damage: ${dmg}, type: ${JSON.stringify(type)} }, false, true);
+			KDUpdateEnemyCache = true;
+			return { hp: e.hp, dealt: dealt, name: e.Enemy && e.Enemy.name };
+		})()`);
+	}
+
+	/** The world enemy entity adjacent to (x,y) (Chebyshev ≤ range), or null. */
+	enemyAdjacentTo(x, y, range = 1) {
+		return this.eval(`(function(){
+			var best = null, bd = 1e9;
+			for (var i=0;i<KDMapData.Entities.length;i++){
+				var e = KDMapData.Entities[i];
+				if (!e.Enemy || KDGetFaction(e) === 'Player') continue;
+				var d = Math.max(Math.abs(e.x-${x|0}), Math.abs(e.y-${y|0}));
+				if (d <= ${range|0} && d < bd) { bd = d; best = e; }
+			}
+			return best ? { id: best.id, x: best.x, y: best.y, hp: best.hp, name: best.Enemy && best.Enemy.name } : null;
+		})()`);
+	}
+
 	/** Serialize full game state via the bundle's own save path. */
 	serialize() {
 		return this.eval('KinkyDungeonGenerateSaveData()');

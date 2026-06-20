@@ -103,10 +103,15 @@ class SessionOrchestrator {
 	_advanceTurn() {
 		const actions = new Map(this._pending);
 
-		// 1) apply each player's own movement on their own instance.
-		for (const [id, a] of actions) {
-			if (a && ((a.dx | 0) !== 0 || (a.dy | 0) !== 0)) {
-				this.players.get(id).applyMove(a.dx | 0, a.dy | 0);
+		// 1) resolve + apply player actions (conflict-aware). The coop reconciler
+		//    handles the 'resolve' phase (random conflict resolution + move/attack
+		//    application, KD-085); if it doesn't, fall back to direct movement (legacy).
+		const handled = this.reconcile(this, { phase: 'resolve', actions });
+		if (handled !== true) {
+			for (const [id, a] of actions) {
+				if (a && ((a.dx | 0) !== 0 || (a.dy | 0) !== 0)) {
+					this.players.get(id).applyMove(a.dx | 0, a.dy | 0);
+				}
 			}
 		}
 		// 2) reconciler pre-step (KD-070: push avatars→world, set enemy targets).

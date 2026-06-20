@@ -47,8 +47,78 @@ class CoopReconciler {
 
 	_phase(orch, ctx) {
 		if (ctx.phase === 'setup') this._setup(orch);
+		else if (ctx.phase === 'resolve') { this._resolve(orch, ctx.actions); return true; }
 		else if (ctx.phase === 'pre-step') this._preStep(orch);
 		else if (ctx.phase === 'post-step') this._postStep(orch);
+	}
+
+	/** Normalize a submitted action to {kind, ...}. Legacy {dx,dy} → move. */
+	_normalize(a) {
+		if (!a) return { kind: 'wait' };
+		if (a.kind) return Object.assign({}, a);
+		if ((a.dx | 0) !== 0 || (a.dy | 0) !== 0) return { kind: 'move', dx: a.dx | 0, dy: a.dy | 0 };
+		return { kind: 'wait' };
+	}
+
+	/**
+	 * Resolve this turn's actions with random conflict resolution (KD-085 R9), then
+	 * apply them authoritatively. Conflict = two+ players moving into the SAME tile:
+	 * a uniform-random winner moves; each loser skips (waits). Attacks apply to the
+	 * world's authoritative enemy (routed-effect pattern). Records lastConflicts /
+	 * lastActions / lastPvE for assertions.
+	 */
+	_resolve(orch, actions) {
+		this.lastConflicts = [];
+		this.lastActions = [];
+		this.lastPvE = [];
+
+		const intents = new Map();
+		for (const id of orch.playerIds) intents.set(id, this._normalize(actions.get(id)));
+
+		// contested move destinations → random winner, losers skip
+		const destOwners = new Map();
+		for (const [id, act] of intents) {
+			if (act.kind !== 'move') continue;
+			const p = orch.players.get(id).getPlayerPos();
+			act.nx = p.x + act.dx; act.ny = p.y + act.dy;
+			const key = act.nx + ',' + act.ny;
+			if (!destOwners.has(key)) destOwners.set(key, []);
+			destOwners.get(key).push(id);
+		}
+		const skip = new Set();
+		for (const [dest, ids] of destOwners) {
+			if (ids.length < 2) continue;
+			const winner = ids[Math.floor(Math.random() * ids.length)];
+			for (const id of ids) if (id !== winner) skip.add(id);
+			this.lastConflicts.push({ dest, contenders: ids.slice(), winner, kind: 'move' });
+		}
+
+		// apply resolved actions
+		for (const [id, act] of intents) {
+			if (skip.has(id)) { this.lastActions.push({ id, kind: act.kind, applied: 'skipped-conflict' }); continue; }
+			if (act.kind === 'move') {
+				orch.players.get(id).applyMove(act.dx, act.dy);
+				this.lastActions.push({ id, kind: 'move', applied: 'ok' });
+			} else if (act.kind === 'attack') {
+				this._applyAttack(orch, id, act);
+				this.lastActions.push({ id, kind: 'attack', applied: 'ok' });
+			} else {
+				this.lastActions.push({ id, kind: 'wait', applied: 'ok' });
+			}
+		}
+	}
+
+	/** Routed attack: actor's real weapon profile → the world's authoritative enemy. */
+	_applyAttack(orch, id, act) {
+		const av = this._entity(orch.world, this.worldAvatar.get(id));
+		if (!av) return;
+		const tx = (act.tx != null) ? act.tx : av.x;
+		const ty = (act.ty != null) ? act.ty : av.y;
+		const enemy = orch.world.enemyAdjacentTo(tx, ty, 1) || orch.world.enemyAdjacentTo(av.x, av.y, 1);
+		if (!enemy) { this.lastPvE.push({ id, applied: 'no-target' }); return; }
+		const profile = orch.players.get(id).getAttackProfile();
+		const result = orch.world.damageEnemy(enemy.id, profile);
+		this.lastPvE.push({ id, enemyId: enemy.id, profile, result });
 	}
 
 	// ----- setup ----------------------------------------------------------------
