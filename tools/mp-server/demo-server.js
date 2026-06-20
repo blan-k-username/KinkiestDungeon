@@ -77,7 +77,9 @@ function serveStatic(req, res) {
 }
 
 function start(port = PORT) {
-	const bridge = new WSBridge({ requiredPlayers: 2, seed: 'coop-demo-seed' });
+	// autoAdvance: a single player's move advances the turn (the other auto-waits),
+	// so co-op sync is easy to validate solo across two windows.
+	const bridge = new WSBridge({ requiredPlayers: 2, seed: 'coop-demo-seed', autoAdvance: true });
 	const server = http.createServer(serveStatic);
 	bridge.attach(server);
 	return new Promise((resolve) => {

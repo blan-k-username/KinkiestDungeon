@@ -88,6 +88,10 @@ class WSBridge {
 		this.sockets = new Map();          // clientId -> socket
 		this._server = null;
 		this.port = null;
+		// Demo/UAT convenience: when true, one player's move advances the turn
+		// immediately (others auto-"wait"), instead of blocking on every player.
+		// Real lockstep (block until all submit) stays the default for actual co-op.
+		this.autoAdvance = !!opts.autoAdvance;
 	}
 
 	listen(port = 0) {
@@ -148,7 +152,15 @@ class WSBridge {
 		}
 		if (msg.type === 'input' && clientId && this.session.started) {
 			try {
-				const res = this.session.submit(clientId, msg.action || {});
+				let res = this.session.submit(clientId, msg.action || {});
+				// demo mode: auto-"wait" for any player who hasn't submitted so a single
+				// player's move advances the turn (easy to validate sync solo).
+				if (!res.advanced && this.autoAdvance) {
+					for (const pid of res.waitingOn || []) {
+						res = this.session.submit(pid, { dx: 0, dy: 0 });
+						if (res.advanced) break;
+					}
+				}
 				if (res.advanced) this._broadcastState();
 				else this._send(socket, { type: 'waiting', waitingOn: res.waitingOn });
 			} catch (e) {

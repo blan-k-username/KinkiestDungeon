@@ -70,14 +70,25 @@ test('two browser windows play one shared co-op dungeon via the demo server', as
 		// @ts-ignore — KDServerRole is a bundle `let` global, not on window
 		expect(await A.evaluate(() => (typeof KDServerRole !== 'undefined' ? KDServerRole : null))).toBe('client');
 
-		// lockstep move: both submit → the shared turn advances by exactly one
+		// demo runs autoAdvance: ONE player's move advances the shared turn, and the
+		// move is reflected in the OTHER window (B sees A's avatar move).
 		const t0 = await A.evaluate(() => (window as any).__coop.lastTick);
-		await A.evaluate(() => (window as any).__coop.sendMove(1, 0));
-		await A.waitForTimeout(200);
-		await B.evaluate(() => (window as any).__coop.sendMove(0, 0));
+		const peerBefore = await B.evaluate(() => {
+			// @ts-ignore
+			const a = (KDMapData.Entities || []).find((e: any) => e.Enemy && e.Enemy.name === 'RemotePlayer');
+			return a ? { x: a.x, y: a.y } : null;
+		});
+		await A.evaluate(() => (window as any).__coop.sendMove(1, 0)); // only A moves
 		await A.waitForFunction((prev) => (window as any).__coop.lastTick === prev + 1, t0, { timeout: 30_000 });
 		await B.waitForFunction((prev) => (window as any).__coop.lastTick === prev + 1, t0, { timeout: 30_000 });
-		expect(await A.evaluate(() => (window as any).__coop.lastTick)).toBe(t0 + 1);
+		const aPos = await A.evaluate(() => ({ /* @ts-ignore */ x: KinkyDungeonPlayerEntity.x, /* @ts-ignore */ y: KinkyDungeonPlayerEntity.y }));
+		const peerAfter = await B.evaluate(() => {
+			// @ts-ignore
+			const a = (KDMapData.Entities || []).find((e: any) => e.Enemy && e.Enemy.name === 'RemotePlayer');
+			return a ? { x: a.x, y: a.y } : null;
+		});
+		expect(peerAfter).toEqual({ x: aPos.x, y: aPos.y });            // B's view of A is in sync
+		expect(peerAfter!.x !== peerBefore!.x || peerAfter!.y !== peerBefore!.y).toBe(true); // it moved
 
 		// real rendered frames in both windows
 		const shotA = await A.locator('#MainCanvas').screenshot();
