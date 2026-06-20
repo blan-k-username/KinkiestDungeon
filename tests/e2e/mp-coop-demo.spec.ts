@@ -12,22 +12,42 @@ import { test, expect } from '@playwright/test';
 const { start } = require('../../tools/mp-server/demo-server');
 
 test('two browser windows play one shared co-op dungeon via the demo server', async ({ browser }) => {
-	test.setTimeout(120_000);
+	// Heavyweight: TWO full game bundles (each preloads ~600 char assets) + the
+	// server's 3 headless instances. Generous timeouts to absorb the cold start.
+	test.setTimeout(300_000);
 	const { server, bridge, port } = await start(0);
 
 	const ctxA = await browser.newContext();
 	const ctxB = await browser.newContext();
 	const A = await ctxA.newPage();
 	const B = await ctxB.newPage();
+	const errs: string[] = [];
+	A.on('pageerror', (e) => errs.push(e.message));
+	B.on('pageerror', (e) => errs.push(e.message));
 
 	try {
 		await A.goto(`http://127.0.0.1:${port}/#coop=A`);
-		await A.waitForFunction(() => (window as any).__coop && (window as any).__coop.connected, undefined, { timeout: 60_000 });
+		await A.waitForFunction(() => (window as any).__coop && (window as any).__coop.connected, undefined, { timeout: 150_000 });
 
 		await B.goto(`http://127.0.0.1:${port}/#coop=B`);
 		// both joined → server starts the shared world → both receive their first state
-		await A.waitForFunction(() => (window as any).__coop && (window as any).__coop.started, undefined, { timeout: 60_000 });
-		await B.waitForFunction(() => (window as any).__coop && (window as any).__coop.started, undefined, { timeout: 60_000 });
+		await A.waitForFunction(() => (window as any).__coop && (window as any).__coop.started, undefined, { timeout: 150_000 });
+		await B.waitForFunction(() => (window as any).__coop && (window as any).__coop.started, undefined, { timeout: 150_000 });
+		await A.waitForTimeout(1500); // let render frames settle
+
+		// the game actually reaches the dungeon SCREEN (not stuck on the asset
+		// preloader, and not crashed) in both windows.
+		for (const P of [A, B]) {
+			const screen = await P.evaluate(() => ({
+				// @ts-ignore bare let-globals
+				state: KinkyDungeonState, drawState: KinkyDungeonDrawState,
+			}));
+			expect(screen.state).toBe('Game');
+			expect(screen.drawState).toBe('Game');
+		}
+		// the draw path must not crash on the injected entities (regression guard:
+		// peer-avatar def must re-link, else KDEnemyRank reads `.tags` of undefined).
+		expect(errs.find((e) => /reading 'tags'/.test(e))).toBeUndefined();
 
 		// both windows render the SAME shared, server-owned dungeon, render-only
 		const ga = await A.evaluate(() => (KDMapData as any).Grid);

@@ -36,6 +36,26 @@
 
 	var inputCb = null;
 
+	/**
+	 * Ensure the `RemotePlayer` avatar enemy-def exists in THIS browser. The server
+	 * represents each other player as a `RemotePlayer` ally entity; the snapshot only
+	 * carries `enemyName`, and apply() re-links the def by name. The stock browser
+	 * bundle has no such def → the draw path (KDEnemyRank reads `.tags`) crashes. Push
+	 * the same minimal def the headless host uses (mod-style, once).
+	 */
+	function ensureAvatarDef() {
+		if (typeof KinkyDungeonEnemies === 'undefined' || typeof KinkyDungeonGetEnemyByName !== 'function') return;
+		if (KinkyDungeonGetEnemyByName('RemotePlayer')) return;
+		KinkyDungeonEnemies.push({
+			name: 'RemotePlayer', faction: 'Player', tags: KDMapInit(['peaceful']),
+			AI: 'guard', immobile: true, visionRadius: 0, maxhp: 100, minLevel: 0, weight: -1000,
+			movePoints: 1000, attackPoints: 0, attack: '', attackRange: 0,
+			evasion: -100, armor: 0, followRange: 100, lowpriority: true,
+			terrainTags: {}, floors: KDMapInit([]),
+		});
+		if (typeof KinkyDungeonRefreshEnemiesCache === 'function') KinkyDungeonRefreshEnemiesCache();
+	}
+
 	var KDRenderClient = {
 		/** Snapshot the current render globals (render-state v1). Mirrors the host. */
 		serialize: function () {
@@ -88,6 +108,7 @@
 		/** Adopt a render-state snapshot onto the render globals. NO simulation. */
 		apply: function (s) {
 			if (!s) return { ok: false, error: 'no snapshot' };
+			ensureAvatarDef();   // so peer avatars (RemotePlayer) re-link to a real def
 			if (typeof KDZoomIndex !== 'undefined') KDZoomIndex = s.camera.zoomIndex;
 			if (typeof KinkyDungeonGridSizeDisplay !== 'undefined') KinkyDungeonGridSizeDisplay = s.camera.gridSizeDisplay;
 			if (typeof KinkyDungeonGridWidthDisplay !== 'undefined') KinkyDungeonGridWidthDisplay = s.camera.gridWidthDisplay;

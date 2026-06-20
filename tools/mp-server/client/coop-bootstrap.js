@@ -47,17 +47,35 @@
 		return typeof KinkyDungeonStartNewGame === 'function' && typeof window.KDRenderClient === 'object';
 	}
 
+	// The bundle preloads character assets first (KinkyDungeonState 'Consent', the
+	// "Preloading Character Assets…" screen). Starting a game BEFORE that finishes is
+	// clobbered by the loading flow. Wait for KDLoadingFinished, THEN enter co-op.
+	function loaded() {
+		return typeof KDLoadingFinished !== 'undefined' && KDLoadingFinished === true;
+	}
+
 	function boot() {
 		if (!ready()) { setTimeout(boot, 100); return; }
-		// bring up render structures (KDMapData/stats/PIXI), then go render-only
-		try {
-			KinkyDungeonStartNewGame(false);
-			KinkyDungeonState = 'Game';
-			KinkyDungeonDrawState = 'Game';
-		} catch (e) { /* the server snapshot will populate the rest */ }
+		if (!loaded()) { setStatus('Co-op ' + id + ': loading game assets…'); setTimeout(boot, 200); return; }
+		// assets ready → bring up the dungeon and go render-only
+		forceGameScreen();
 		window.KDRenderClient.disableLocalSim();
 		connect();
 		installInput();
+	}
+
+	/** Start a game ONCE to bring up dungeon structures, then pin to the Game screen. */
+	function forceGameScreen() {
+		try {
+			KinkyDungeonStartNewGame(false);
+		} catch (e) { /* the server snapshot will populate the rest */ }
+		pinGameScreen();
+	}
+
+	/** Cheap per-frame guard: keep the dungeon on screen (don't regen the map). */
+	function pinGameScreen() {
+		KinkyDungeonState = 'Game';
+		KinkyDungeonDrawState = 'Game';
 	}
 
 	function connect() {
@@ -78,6 +96,7 @@
 				coop.submitted = false;
 				coop.lastTick = m.tick;
 				window.KDRenderClient.apply(m.snapshot);
+				pinGameScreen();   // keep the dungeon on screen (don't let the menu steal it)
 				setStatus('Co-op ' + id + '  turn ' + m.tick + '\n[arrows/WASD] move · [space] wait');
 			} else if (m.type === 'waiting') {
 				setStatus('Co-op ' + id + ': submitted, waiting for ' + (m.waitingOn || []).join(', ') + '…');
