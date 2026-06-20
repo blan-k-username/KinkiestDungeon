@@ -19,7 +19,11 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PORT="${PORT:-8090}"
 IMAGE="node:23-slim"
 
-exec docker run --rm -it \
+# --init runs a tiny init (tini) as PID 1 that forwards signals + reaps children, and
+# `exec node` makes node the direct foreground process — together they make Ctrl-C
+# actually stop the server (without --init, SIGINT never reaches node).
+exec docker run --rm -it --init \
+	--name kd-coop-demo \
 	-v "$PROJECT_ROOT":/usr/src/app -w /usr/src/app \
 	-p "${PORT}:${PORT}" -e "PORT=${PORT}" \
-	"$IMAGE" bash -c 'npm i --no-audit --no-fund && npx tsc && node tools/mp-server/demo-server.js'
+	"$IMAGE" bash -c 'npm i --no-audit --no-fund && npx tsc && exec node tools/mp-server/demo-server.js'
