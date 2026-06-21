@@ -29,6 +29,7 @@ class SwapSession {
 		this.seed = opts.seed || 'swap-session-seed';
 		this.enemyType = opts.enemyType || 'Rat';
 		this.maxLog = opts.maxLog || 100;
+		this.pvp = !!opts.pvp;        // per-session PvP toggle (KD-092) — OFF by default (co-op)
 		this.world = new HeadlessHost({ id: 'world' });
 		this.bundles = new Map();     // id -> player-state bundle
 		this.avatars = new Map();     // id -> world avatar entity id
@@ -109,7 +110,12 @@ class SwapSession {
 			const logLen0 = this.world.messageLogLength();
 			const lvl0 = this.world.getLevel();
 			let result = null;
-			if (kdType) result = this.world.applyInput(kdType, data);
+			if (action && action.kind === 'pvpAttack') {
+				// PvP (KD-092): A is swapped in now; route A's attack onto target B's bundle.
+				result = this._applyPvP(id, action.target);
+			} else if (kdType) {
+				result = this.world.applyInput(kdType, data);
+			}
 			// Capture the delta; if the log was reset this turn (e.g. a floor transition
 			// clears it), take the whole new log as the delta.
 			const newLen = this.world.messageLogLength();
@@ -137,6 +143,41 @@ class SwapSession {
 		this._pending.clear();
 		this.lastTurn = { order, applied };
 		return { turn: this.turn, applied };
+	}
+
+	/** Enable/disable intentional player-vs-player damage for this session (KD-092). */
+	setPvP(on) { this.pvp = !!on; return this.pvp; }
+
+	/**
+	 * Route attacker `id`'s attack onto target `targetId` (KD-092, Strategy B). The attacker is
+	 * ALREADY swapped in. Gated by the session PvP toggle and world adjacency. Computes the
+	 * attacker's weapon attack, swaps the target in, applies it via the player path
+	 * (applyEnemyHit → KinkyDungeonDealDamage), captures the target, then restores the attacker
+	 * as the swapped-in player (so the turn loop's capture of the attacker stays correct).
+	 */
+	_applyPvP(id, targetId) {
+		if (!this.pvp) return { applied: false, reason: 'pvp-off' };
+		if (!this._joined.includes(targetId) || targetId === id) {
+			return { applied: false, reason: 'bad-target' };
+		}
+		// adjacency: attacker (swapped in) vs the target's avatar entity
+		const a = this.world.getPlayerPos();
+		const bEnt = this.world.listEntities().find((e) => e.id === this.avatars.get(targetId));
+		if (!bEnt) return { applied: false, reason: 'no-target-avatar' };
+		const dist = Math.max(Math.abs(a.x - bEnt.x), Math.abs(a.y - bEnt.y));
+		if (dist > 1) return { applied: false, reason: 'out-of-range', dist };
+
+		// compute the attacker's outgoing attack while they are swapped in
+		const atk = this.world.computePlayerAttack();
+		// swap the attacker out, the target in, apply, capture target, swap attacker back in
+		const aBundle = this.world.capturePlayer();
+		this.world.restorePlayer(this.bundles.get(targetId));
+		const before = this.world.getVitals();
+		this.world.applyEnemyHit({ damage: atk.damage, type: atk.type });
+		const after = this.world.getVitals();
+		this.bundles.set(targetId, this.world.capturePlayer());
+		this.world.restorePlayer(aBundle);
+		return { applied: true, dist, atk, before, after };
 	}
 
 	/** Map a submitted action to a KD input {kdType, data}. */

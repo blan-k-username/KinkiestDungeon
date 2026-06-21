@@ -207,6 +207,24 @@ class HeadlessHost {
 	}
 
 	/**
+	 * Compute the CURRENTLY swapped-in player's outgoing weapon attack as data (KD-092 PvP):
+	 * runs the real `KinkyDungeonGetPlayerWeaponDamage` so perks/bondage penalties apply, and
+	 * returns a plain {damage,type,bind,bindType} that can be applied to another player's bundle.
+	 */
+	computePlayerAttack() {
+		return this.eval(`(function(){
+			var w = (typeof KinkyDungeonGetPlayerWeaponDamage === 'function') ? KinkyDungeonGetPlayerWeaponDamage(true) : null;
+			if (!w && typeof KinkyDungeonPlayerDamage !== 'undefined') w = KinkyDungeonPlayerDamage;
+			return {
+				damage: (w && typeof w.damage === 'number') ? w.damage : 1,
+				type: (w && w.type) ? w.type : 'unarmed',
+				bind: (w && typeof w.bind === 'number') ? w.bind : 0,
+				bindType: (w && w.bindType) ? w.bindType : 'Leather',
+			};
+		})()`);
+	}
+
+	/**
 	 * Initialise a game on a hardcoded scenario. Mirrors the bundle's own
 	 * new-game path used by the Playwright fixtures.
 	 * @param {object} opts { level=1, seed }
