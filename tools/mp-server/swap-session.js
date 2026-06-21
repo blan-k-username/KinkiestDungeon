@@ -139,15 +139,19 @@ class SwapSession {
 			const newLen = this.world.messageLogLength();
 			const added = (newLen >= logLen0) ? this.world.messagesSince(logLen0) : this.world.messageLog();
 			if (added && added.length) {
-				// A party-wide event (the shared floor changed — e.g. "level completed")
-				// is duplicated into EVERY player's log; otherwise it stays private to the actor.
-				const shared = this.world.getLevel() !== lvl0;
-				const targets = shared ? this._joined : [id];
-				for (const tid of targets) {
-					const lg = this.logs.get(tid) || [];
-					for (const m of added) lg.push(m);
-					while (lg.length > this.maxLog) lg.shift();
-					this.logs.set(tid, lg);
+				// KD-097: messages are SHARED with all players by default (world/enemy/tutorial
+				// events everyone should see); only the acting player's PERSONAL 2nd-person lines
+				// ("You …"/"Your …") stay private to them. A floor change forces all-broadcast.
+				const floorEvent = this.world.getLevel() !== lvl0;
+				for (const m of added) {
+					const personal = !floorEvent && this._isPersonalMessage(m);
+					const targets = personal ? [id] : this._joined;
+					for (const tid of targets) {
+						const lg = this.logs.get(tid) || [];
+						lg.push(m);
+						while (lg.length > this.maxLog) lg.shift();
+						this.logs.set(tid, lg);
+					}
 				}
 			}
 			// swap out: persist this player's new state + move their avatar to its new spot
@@ -165,6 +169,13 @@ class SwapSession {
 
 	/** Enable/disable GLOBAL player-vs-player damage for this session (KD-092). */
 	setPvP(on) { this.pvp = !!on; return this.pvp; }
+
+	/** A message is "personal" to the acting player if it is 2nd-person feedback ("You …"/"Your …").
+	 *  Everything else (enemy/world/tutorial lines) is shared with all players (KD-097). Heuristic. */
+	_isPersonalMessage(m) {
+		const t = (m && m.text != null) ? String(m.text).trim() : '';
+		return /^you\b|^your\b|^you'/i.test(t);
+	}
 
 	/** Enable/disable incidental AOE friendly-fire between partners (KD-096). */
 	setFriendlyFire(on) { this.friendlyFire = !!on; return this.friendlyFire; }

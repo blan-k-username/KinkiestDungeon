@@ -37,36 +37,40 @@ describe('Per-player message log over the swap path (KD-090)', () => {
 		};`);
 	}, BOOT_TIMEOUT);
 
-	it('clients see DIFFERENT logs; a player’s own message is private to them', () => {
+	it('a player’s PERSONAL ("You …") line is private; SHARED lines reach both (KD-097)', () => {
 		// Both start from the same shared intro log (seeded equally).
 		const a0 = logTexts(s, 'A');
 		const b0 = logTexts(s, 'B');
 		expect(a0).toEqual(b0);
 
-		// A performs an action that logs a unique personal line; B waits.
-		s.submit('A', { kdType: '__kdSay', data: { text: 'A_ONLY_1' } });
+		// A logs a personal 2nd-person line AND a shared world line in one turn; B waits.
+		s.submit('A', { kdType: '__kdSay', data: { text: 'You do A_PERSONAL_1' } });
+		s.submit('B', { kind: 'wait' });
+		s.submit('A', { kdType: '__kdSay', data: { text: 'The world does A_SHARED_1' } });
 		s.submit('B', { kind: 'wait' });
 
 		const a1 = logTexts(s, 'A');
 		const b1 = logTexts(s, 'B');
 
-		// THE headline fix: the two clients no longer see an identical log...
+		// the logs diverge...
 		expect(a1).not.toEqual(b1);
-		// ...A's personal line is in A's log...
-		expect(a1).toContain('A_ONLY_1');
-		// ...and is NOT leaked into B's log.
-		expect(b1).not.toContain('A_ONLY_1');
+		// A's personal "You …" line is private to A...
+		expect(a1.join('\n')).toContain('A_PERSONAL_1');
+		expect(b1.join('\n')).not.toContain('A_PERSONAL_1');
+		// ...but the shared (non-2nd-person) line reaches BOTH (fixes "P1 empty log").
+		expect(a1.join('\n')).toContain('A_SHARED_1');
+		expect(b1.join('\n')).toContain('A_SHARED_1');
 	}, BOOT_TIMEOUT);
 
-	it('symmetric: B’s own message is private to B', () => {
+	it('symmetric: B’s "You …" line is private to B', () => {
 		s.submit('A', { kind: 'wait' });
-		s.submit('B', { kdType: '__kdSay', data: { text: 'B_ONLY_1' } });
+		s.submit('B', { kdType: '__kdSay', data: { text: 'Your B_PERSONAL_1 happens' } });
 
-		const a1 = logTexts(s, 'A');
-		const b1 = logTexts(s, 'B');
+		const a1 = logTexts(s, 'A').join('\n');
+		const b1 = logTexts(s, 'B').join('\n');
 
-		expect(b1).toContain('B_ONLY_1');
-		expect(a1).not.toContain('B_ONLY_1');
+		expect(b1).toContain('B_PERSONAL_1');
+		expect(a1).not.toContain('B_PERSONAL_1');
 	}, BOOT_TIMEOUT);
 
 	it('a party-wide event (floor change) is duplicated into EVERY player’s log', () => {
