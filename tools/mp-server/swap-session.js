@@ -31,6 +31,7 @@ class SwapSession {
 		this.maxLog = opts.maxLog || 100;
 		this.pvp = !!opts.pvp;        // global PvP toggle (KD-092) — OFF by default (co-op)
 		this.pvpPairs = new Set();    // per-pair PvP relationships (KD-094) — "A|B" sorted keys
+		this.friendlyFire = !!opts.friendlyFire; // incidental AOE hits partners (KD-096) — OFF by default
 		this.world = new HeadlessHost({ id: 'world' });
 		this.bundles = new Map();     // id -> player-state bundle
 		this.avatars = new Map();     // id -> world avatar entity id
@@ -115,10 +116,23 @@ class SwapSession {
 				// PvP (KD-092/093): A is swapped in now; route A's attack/bind onto target B's bundle.
 				result = this._applyPvP(id, action);
 			} else {
+				// KD-095: a stock `doaggro` (sneak attack) on a peer STARTS PvP for that pair, then
+				// applies the first hit (co-op → PvP transition; nothing new in mechanics).
+				const sneakPeer = this._sneakTargetOf(id, kdType, data);
 				// KD-094: a stock `doattack` aimed at a PvP-active peer's avatar becomes a PvP hit.
 				const peer = this._pvpTargetOf(id, action, kdType, data);
-				if (peer) result = this._applyPvP(id, { kind: 'pvpAttack', target: peer });
-				else if (kdType) result = this.world.applyInput(kdType, data);
+				if (sneakPeer) {
+					this.setPvPPair(id, sneakPeer, true);
+					result = this._applyPvP(id, { kind: 'pvpAttack', target: sneakPeer });
+				} else if (peer) {
+					result = this._applyPvP(id, { kind: 'pvpAttack', target: peer });
+				} else if (kdType) {
+					result = this.world.applyInput(kdType, data);
+					// KD-096: an AOE cast whose footprint covers a partner splashes them (co-op
+					// friendly-fire), even without intentional PvP.
+					const ff = this._applyFriendlyFire(id, kdType, data);
+					if (ff && ff.length) result = { cast: result, friendlyFire: ff };
+				}
 			}
 			// Capture the delta; if the log was reset this turn (e.g. a floor transition
 			// clears it), take the whole new log as the delta.
@@ -152,6 +166,41 @@ class SwapSession {
 	/** Enable/disable GLOBAL player-vs-player damage for this session (KD-092). */
 	setPvP(on) { this.pvp = !!on; return this.pvp; }
 
+	/** Enable/disable incidental AOE friendly-fire between partners (KD-096). */
+	setFriendlyFire(on) { this.friendlyFire = !!on; return this.friendlyFire; }
+
+	/**
+	 * If `id` cast an AOE spell whose footprint covers a partner's position, apply splash to that
+	 * partner's bundle (KD-096). The caster is swapped in; we save it, apply to each covered peer
+	 * (swap in / applyEnemyHit / capture), then restore the caster. Returns [{id,before,after}].
+	 * Approximate (Chebyshev radius around the target tile; ignores walls/LoS/the real bullet).
+	 */
+	_applyFriendlyFire(id, kdType, data) {
+		if (!this.friendlyFire || kdType !== 'tryCastSpell') return [];
+		const d = data || {};
+		const info = (d.spellname != null) ? this.world.getSpellInfo(d.spellname) : null;
+		if (!info || !(info.aoe > 0)) return [];
+		const tx = d.tx, ty = d.ty;
+		if (tx == null || ty == null) return [];
+		const ents = this.world.listEntities();
+		const caster = this.world.capturePlayer();
+		const splashed = [];
+		for (const pid of this._joined) {
+			if (pid === id) continue;
+			const av = ents.find((e) => e.id === this.avatars.get(pid));
+			if (!av) continue;
+			if (Math.max(Math.abs(av.x - tx), Math.abs(av.y - ty)) > info.aoe) continue;
+			this.world.restorePlayer(this.bundles.get(pid));
+			const before = this.world.getVitals();
+			this.world.applyEnemyHit({ damage: info.power, type: info.type });
+			const after = this.world.getVitals();
+			this.bundles.set(pid, this.world.capturePlayer());
+			splashed.push({ id: pid, before, after });
+		}
+		this.world.restorePlayer(caster);
+		return splashed;
+	}
+
 	/** Enable/disable PvP between a specific PAIR of players (KD-094, "PvP starts between A and B"). */
 	setPvPPair(a, b, on) {
 		const key = [a, b].sort().join('|');
@@ -165,6 +214,19 @@ class SwapSession {
 		return this.pvpPairs.has([a, b].sort().join('|'));
 	}
 
+	/** Reverse-map an action's target entity id to a PEER clientId (or null). Shared by the
+	 *  doattack (KD-094) and doaggro (KD-095) routing. */
+	_peerTargetOf(id, data) {
+		const d = data || {};
+		let targetEnt = (d.id != null) ? d.id : null;
+		if (targetEnt == null && d.enemy && typeof d.enemy === 'object' && d.enemy.__kdEnt != null && d.enemy.__kdEnt !== 'player') {
+			targetEnt = d.enemy.__kdEnt;
+		}
+		if (targetEnt == null) return null;
+		for (const [cid, eid] of this.avatars.entries()) { if (eid === targetEnt && cid !== id) return cid; }
+		return null;
+	}
+
 	/**
 	 * If `id`'s action is a stock attack aimed at a PvP-active PEER's avatar, return that peer's
 	 * clientId (so the turn loop routes it to `_applyPvP` — the "peers-as-Enemy" model: a normal
@@ -172,16 +234,17 @@ class SwapSession {
 	 */
 	_pvpTargetOf(id, action, kdType, data) {
 		if (kdType !== 'doattack') return null; // spell-PvP is a later extension
-		const d = data || (action && action.data) || {};
-		let targetEnt = (d.id != null) ? d.id : null;
-		if (targetEnt == null && d.enemy && typeof d.enemy === 'object' && d.enemy.__kdEnt != null && d.enemy.__kdEnt !== 'player') {
-			targetEnt = d.enemy.__kdEnt;
-		}
-		if (targetEnt == null) return null;
-		let peer = null;
-		for (const [cid, eid] of this.avatars.entries()) { if (eid === targetEnt) { peer = cid; break; } }
-		if (!peer || peer === id) return null;
-		return this._isPvP(id, peer) ? peer : null;
+		const peer = this._peerTargetOf(id, data || (action && action.data));
+		return (peer && this._isPvP(id, peer)) ? peer : null;
+	}
+
+	/**
+	 * If `id`'s action is a stock `doaggro` (sneak attack) aimed at a PEER's avatar, return that
+	 * peer's clientId — REGARDLESS of current PvP state (this is what STARTS PvP). Else null. KD-095.
+	 */
+	_sneakTargetOf(id, kdType, data) {
+		if (kdType !== 'doaggro') return null;
+		return this._peerTargetOf(id, data);
 	}
 
 	/**

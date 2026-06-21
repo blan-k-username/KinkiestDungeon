@@ -201,6 +201,19 @@ class HeadlessHost {
 		return this.eval(`(function(){ var L=(typeof KinkyDungeonMessageLog!=="undefined"&&KinkyDungeonMessageLog)?KinkyDungeonMessageLog:[]; try{return JSON.parse(JSON.stringify(L.slice(${n | 0})));}catch(e){return [];} })()`);
 	}
 
+	/** A spell's AOE footprint + damage as data (KD-096 friendly-fire): {aoe,power,type}. */
+	getSpellInfo(name) {
+		return this.eval(`(function(){
+			var sp = (typeof KinkyDungeonFindSpell === 'function') ? KinkyDungeonFindSpell(${JSON.stringify(name)}, true) : null;
+			if (!sp) return null;
+			return {
+				aoe: (typeof sp.aoe === 'number') ? sp.aoe : ((typeof sp.size === 'number') ? sp.size : 0),
+				power: (typeof sp.power === 'number') ? sp.power : 0,
+				type: (typeof sp.damage === 'string') ? sp.damage : 'pain',
+			};
+		})()`);
+	}
+
 	/** The current dungeon floor (MiniGameKinkyDungeonLevel). A change is a party-wide event. */
 	getLevel() {
 		return this.eval('(typeof MiniGameKinkyDungeonLevel !== "undefined") ? MiniGameKinkyDungeonLevel : 0');
@@ -845,6 +858,19 @@ class HeadlessHost {
 				points: (typeof KinkyDungeonSpellPoints !== 'undefined') ? KinkyDungeonSpellPoints : 0,
 				weapon: (typeof KinkyDungeonPlayerWeapon !== 'undefined') ? KinkyDungeonPlayerWeapon : undefined,
 				spellChoices: (typeof KinkyDungeonSpellChoices !== 'undefined') ? clone(KinkyDungeonSpellChoices) : undefined,
+				// KD-091: non-self-healing per-player state (the restraint-DERIVED locks self-heal
+				// from inventory each turn, so they're omitted on purpose — these do NOT).
+				spells: (typeof KinkyDungeonSpells !== 'undefined') ? clone(KinkyDungeonSpells) : undefined,
+				statusCounters: {
+					bind: (typeof KinkyDungeonStatBind !== 'undefined') ? KinkyDungeonStatBind : undefined,
+					freeze: (typeof KinkyDungeonStatFreeze !== 'undefined') ? KinkyDungeonStatFreeze : undefined,
+					sleepiness: (typeof KinkyDungeonSleepiness !== 'undefined') ? KinkyDungeonSleepiness : undefined,
+				},
+				gameData: (typeof KDGameData !== 'undefined') ? {
+					OrgasmStage: KDGameData.OrgasmStage, OrgasmTurns: KDGameData.OrgasmTurns, OrgasmStamina: KDGameData.OrgasmStamina,
+					Balance: KDGameData.Balance, MovePoints: KDGameData.MovePoints, SleepTurns: KDGameData.SleepTurns,
+					KneelTurns: KDGameData.KneelTurns, Outfit: KDGameData.Outfit, ItemID: KDGameData.ItemID,
+				} : undefined,
 			};
 		})()`);
 	}
@@ -870,6 +896,15 @@ class HeadlessHost {
 			if (typeof KinkyDungeonSpellPoints !== 'undefined') KinkyDungeonSpellPoints = b.points;
 			if (b.weapon !== undefined && typeof KinkyDungeonPlayerWeapon !== 'undefined') KinkyDungeonPlayerWeapon = b.weapon;
 			if (b.spellChoices !== undefined && typeof KinkyDungeonSpellChoices !== 'undefined') KinkyDungeonSpellChoices = JSON.parse(JSON.stringify(b.spellChoices));
+			// KD-091: restore the non-self-healing per-player state.
+			if (b.spells !== undefined && typeof KinkyDungeonSpells !== 'undefined') KinkyDungeonSpells = JSON.parse(JSON.stringify(b.spells));
+			var sc = b.statusCounters || {};
+			if (sc.bind !== undefined && typeof KinkyDungeonStatBind !== 'undefined') KinkyDungeonStatBind = sc.bind;
+			if (sc.freeze !== undefined && typeof KinkyDungeonStatFreeze !== 'undefined') KinkyDungeonStatFreeze = sc.freeze;
+			if (sc.sleepiness !== undefined && typeof KinkyDungeonSleepiness !== 'undefined') KinkyDungeonSleepiness = sc.sleepiness;
+			if (b.gameData && typeof KDGameData !== 'undefined') {
+				for (var gk in b.gameData) { if (b.gameData[gk] !== undefined) KDGameData[gk] = b.gameData[gk]; }
+			}
 			if (typeof KDUpdateEnemyCache !== 'undefined') KDUpdateEnemyCache = true;
 			return true;
 		})()`);
