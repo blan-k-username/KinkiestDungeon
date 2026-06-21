@@ -29,7 +29,8 @@ class SwapSession {
 		this.seed = opts.seed || 'swap-session-seed';
 		this.enemyType = opts.enemyType || 'Rat';
 		this.maxLog = opts.maxLog || 100;
-		this.pvp = !!opts.pvp;        // per-session PvP toggle (KD-092) — OFF by default (co-op)
+		this.pvp = !!opts.pvp;        // global PvP toggle (KD-092) — OFF by default (co-op)
+		this.pvpPairs = new Set();    // per-pair PvP relationships (KD-094) — "A|B" sorted keys
 		this.world = new HeadlessHost({ id: 'world' });
 		this.bundles = new Map();     // id -> player-state bundle
 		this.avatars = new Map();     // id -> world avatar entity id
@@ -113,8 +114,11 @@ class SwapSession {
 			if (action && (action.kind === 'pvpAttack' || action.kind === 'pvpBind')) {
 				// PvP (KD-092/093): A is swapped in now; route A's attack/bind onto target B's bundle.
 				result = this._applyPvP(id, action);
-			} else if (kdType) {
-				result = this.world.applyInput(kdType, data);
+			} else {
+				// KD-094: a stock `doattack` aimed at a PvP-active peer's avatar becomes a PvP hit.
+				const peer = this._pvpTargetOf(id, action, kdType, data);
+				if (peer) result = this._applyPvP(id, { kind: 'pvpAttack', target: peer });
+				else if (kdType) result = this.world.applyInput(kdType, data);
 			}
 			// Capture the delta; if the log was reset this turn (e.g. a floor transition
 			// clears it), take the whole new log as the delta.
@@ -145,8 +149,40 @@ class SwapSession {
 		return { turn: this.turn, applied };
 	}
 
-	/** Enable/disable intentional player-vs-player damage for this session (KD-092). */
+	/** Enable/disable GLOBAL player-vs-player damage for this session (KD-092). */
 	setPvP(on) { this.pvp = !!on; return this.pvp; }
+
+	/** Enable/disable PvP between a specific PAIR of players (KD-094, "PvP starts between A and B"). */
+	setPvPPair(a, b, on) {
+		const key = [a, b].sort().join('|');
+		if (on === false) this.pvpPairs.delete(key); else this.pvpPairs.add(key);
+		return this._isPvP(a, b);
+	}
+
+	/** Are players `a` and `b` in a PvP relationship? (global toggle OR a per-pair relationship.) */
+	_isPvP(a, b) {
+		if (this.pvp) return true;
+		return this.pvpPairs.has([a, b].sort().join('|'));
+	}
+
+	/**
+	 * If `id`'s action is a stock attack aimed at a PvP-active PEER's avatar, return that peer's
+	 * clientId (so the turn loop routes it to `_applyPvP` — the "peers-as-Enemy" model: a normal
+	 * `doattack` on a peer becomes a PvP hit). Else null. KD-094.
+	 */
+	_pvpTargetOf(id, action, kdType, data) {
+		if (kdType !== 'doattack') return null; // spell-PvP is a later extension
+		const d = data || (action && action.data) || {};
+		let targetEnt = (d.id != null) ? d.id : null;
+		if (targetEnt == null && d.enemy && typeof d.enemy === 'object' && d.enemy.__kdEnt != null && d.enemy.__kdEnt !== 'player') {
+			targetEnt = d.enemy.__kdEnt;
+		}
+		if (targetEnt == null) return null;
+		let peer = null;
+		for (const [cid, eid] of this.avatars.entries()) { if (eid === targetEnt) { peer = cid; break; } }
+		if (!peer || peer === id) return null;
+		return this._isPvP(id, peer) ? peer : null;
+	}
 
 	/**
 	 * Route attacker `id`'s attack/bind onto target `action.target` (KD-092/093, Strategy B). The
@@ -160,10 +196,10 @@ class SwapSession {
 	 */
 	_applyPvP(id, action) {
 		const targetId = action.target;
-		if (!this.pvp) return { applied: false, reason: 'pvp-off' };
 		if (!this._joined.includes(targetId) || targetId === id) {
 			return { applied: false, reason: 'bad-target' };
 		}
+		if (!this._isPvP(id, targetId)) return { applied: false, reason: 'pvp-off' };
 		// adjacency: attacker (swapped in) vs the target's avatar entity
 		const a = this.world.getPlayerPos();
 		const bEnt = this.world.listEntities().find((e) => e.id === this.avatars.get(targetId));
@@ -252,6 +288,15 @@ class SwapSession {
 		// KD-090: replace the shared world log with THIS client's personal log so each
 		// player sees only their own relevant messages (not the other player's actions).
 		if (snap.messages) snap.messages.log = (this.logs.get(clientId) || []).slice(-this.maxLog);
+		// KD-094: peers in a PvP relationship with this client render+target as Enemy faction
+		// (stock attack mechanics then "just work" — the client originates a normal doattack).
+		if (snap.map && Array.isArray(snap.map.Entities)) {
+			for (const [cid, eid] of this.avatars.entries()) {
+				if (cid === clientId || !this._isPvP(clientId, cid)) continue;
+				const ent = snap.map.Entities.find((e) => e.id === eid);
+				if (ent) { ent.faction = 'Enemy'; ent.hostile = 9999; }
+			}
+		}
 		this.world.parkGlobalPlayer(PARK.x, PARK.y);
 		return snap;
 	}

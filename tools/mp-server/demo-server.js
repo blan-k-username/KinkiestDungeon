@@ -88,7 +88,9 @@ function start(port = PORT) {
 	// felt like "it didn't wait for me" when a player paused to think). Set a positive
 	// KD_IDLE_GRACE_MS (e.g. 30000) to re-enable auto-pass / self-heal from a stuck client.
 	const graceMs = parseInt(process.env.KD_IDLE_GRACE_MS || '0', 10);
-	const bridge = new WSBridge({ requiredPlayers: 2, seed: 'coop-demo-seed', idleGraceMs: graceMs });
+	// KD_PVP=1 starts the session in global PvP (peers see each other as Enemy — KD-094).
+	const pvp = /^(1|true|on)$/i.test(process.env.KD_PVP || '');
+	const bridge = new WSBridge({ requiredPlayers: 2, seed: 'coop-demo-seed', idleGraceMs: graceMs, pvp });
 	const server = http.createServer(serveStatic);
 	bridge.attach(server);
 	return new Promise((resolve) => {
