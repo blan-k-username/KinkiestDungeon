@@ -110,9 +110,9 @@ class SwapSession {
 			const logLen0 = this.world.messageLogLength();
 			const lvl0 = this.world.getLevel();
 			let result = null;
-			if (action && action.kind === 'pvpAttack') {
-				// PvP (KD-092): A is swapped in now; route A's attack onto target B's bundle.
-				result = this._applyPvP(id, action.target);
+			if (action && (action.kind === 'pvpAttack' || action.kind === 'pvpBind')) {
+				// PvP (KD-092/093): A is swapped in now; route A's attack/bind onto target B's bundle.
+				result = this._applyPvP(id, action);
 			} else if (kdType) {
 				result = this.world.applyInput(kdType, data);
 			}
@@ -149,13 +149,17 @@ class SwapSession {
 	setPvP(on) { this.pvp = !!on; return this.pvp; }
 
 	/**
-	 * Route attacker `id`'s attack onto target `targetId` (KD-092, Strategy B). The attacker is
-	 * ALREADY swapped in. Gated by the session PvP toggle and world adjacency. Computes the
-	 * attacker's weapon attack, swaps the target in, applies it via the player path
-	 * (applyEnemyHit → KinkyDungeonDealDamage), captures the target, then restores the attacker
-	 * as the swapped-in player (so the turn loop's capture of the attacker stays correct).
+	 * Route attacker `id`'s attack/bind onto target `action.target` (KD-092/093, Strategy B). The
+	 * attacker is ALREADY swapped in. Gated by the session PvP toggle and world adjacency. For
+	 * `pvpAttack`: computes the attacker's weapon attack and applies damage via the player path
+	 * (applyEnemyHit → KinkyDungeonDealDamage). For `pvpBind`: applies a restraint via the player
+	 * path (addRestraint → KinkyDungeonAddRestraint). Either way: swap the target in, apply,
+	 * capture the target, then restore the attacker (so the turn loop's capture stays correct).
+	 * The target's restraint-derived locks (slow/blind/tags) self-heal from the captured inventory
+	 * on the target's next turn (KD-073 §B) — see HeadlessHost.playerSlowLevel.
 	 */
-	_applyPvP(id, targetId) {
+	_applyPvP(id, action) {
+		const targetId = action.target;
 		if (!this.pvp) return { applied: false, reason: 'pvp-off' };
 		if (!this._joined.includes(targetId) || targetId === id) {
 			return { applied: false, reason: 'bad-target' };
@@ -173,11 +177,16 @@ class SwapSession {
 		const aBundle = this.world.capturePlayer();
 		this.world.restorePlayer(this.bundles.get(targetId));
 		const before = this.world.getVitals();
-		this.world.applyEnemyHit({ damage: atk.damage, type: atk.type });
+		let restraint = null;
+		if (action.kind === 'pvpBind') {
+			restraint = this.world.addRestraint(action.restraint || atk.bindType || 'DuctTapeFeet');
+		} else {
+			this.world.applyEnemyHit({ damage: atk.damage, type: atk.type });
+		}
 		const after = this.world.getVitals();
 		this.bundles.set(targetId, this.world.capturePlayer());
 		this.world.restorePlayer(aBundle);
-		return { applied: true, dist, atk, before, after };
+		return { applied: true, kind: action.kind, dist, atk, before, after, restraint };
 	}
 
 	/** Map a submitted action to a KD input {kdType, data}. */

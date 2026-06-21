@@ -207,6 +207,15 @@ class HeadlessHost {
 	}
 
 	/**
+	 * The swapped-in player's movement slow-level, RE-DERIVED from their worn restraints
+	 * (KD-093 self-heal proof): runs the real `KinkyDungeonCalculateSlowLevel` (reads
+	 * `KinkyDungeonAllRestraint()`) then returns `KinkyDungeonSlowLevel`. >0 ⇒ bound/slowed.
+	 */
+	playerSlowLevel() {
+		return this.eval('(function(){ if (typeof KinkyDungeonCalculateSlowLevel === "function") KinkyDungeonCalculateSlowLevel(0); return (typeof KinkyDungeonSlowLevel !== "undefined") ? KinkyDungeonSlowLevel : 0; })()');
+	}
+
+	/**
 	 * Compute the CURRENTLY swapped-in player's outgoing weapon attack as data (KD-092 PvP):
 	 * runs the real `KinkyDungeonGetPlayerWeaponDamage` so perks/bondage penalties apply, and
 	 * returns a plain {damage,type,bind,bindType} that can be applied to another player's bundle.
