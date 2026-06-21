@@ -28,10 +28,12 @@ class SwapSession {
 		this.required = opts.requiredPlayers || 2;
 		this.seed = opts.seed || 'swap-session-seed';
 		this.enemyType = opts.enemyType || 'Rat';
+		this.maxLog = opts.maxLog || 100;
 		this.world = new HeadlessHost({ id: 'world' });
 		this.bundles = new Map();     // id -> player-state bundle
 		this.avatars = new Map();     // id -> world avatar entity id
 		this.startOf = new Map();     // id -> {x,y}
+		this.logs = new Map();        // id -> per-player message log (KD-090)
 		this._joined = [];
 		this._pending = new Map();    // id -> { kdType, data }
 		this.started = false;
@@ -71,6 +73,10 @@ class SwapSession {
 		const enemy = this.world.summonEnemy(base.x + this._joined.length, base.y, this.enemyType, { rad: 6 });
 		this.enemyId = enemy ? enemy.id : null;
 		this.world.parkGlobalPlayer(PARK.x, PARK.y);
+		// KD-090: seed every player's personal log with the shared intro log; per-turn
+		// deltas are appended in _advanceTurn so each client sees only its own messages.
+		const intro = this.world.messageLog();
+		for (const id of this._joined) this.logs.set(id, intro.slice());
 		this.started = true;
 	}
 
@@ -98,8 +104,28 @@ class SwapSession {
 			this.world.restorePlayer(this.bundles.get(id));
 			const avId = this.avatars.get(id);
 			if (avId != null) this.world.moveAvatar(avId, PARK.x, PARK.y);
+			// KD-090: capture this player's message-log delta (messages pushed while THEY
+			// are the swapped-in player are theirs — incl. enemy-AI lines aimed at them).
+			const logLen0 = this.world.messageLogLength();
+			const lvl0 = this.world.getLevel();
 			let result = null;
 			if (kdType) result = this.world.applyInput(kdType, data);
+			// Capture the delta; if the log was reset this turn (e.g. a floor transition
+			// clears it), take the whole new log as the delta.
+			const newLen = this.world.messageLogLength();
+			const added = (newLen >= logLen0) ? this.world.messagesSince(logLen0) : this.world.messageLog();
+			if (added && added.length) {
+				// A party-wide event (the shared floor changed — e.g. "level completed")
+				// is duplicated into EVERY player's log; otherwise it stays private to the actor.
+				const shared = this.world.getLevel() !== lvl0;
+				const targets = shared ? this._joined : [id];
+				for (const tid of targets) {
+					const lg = this.logs.get(tid) || [];
+					for (const m of added) lg.push(m);
+					while (lg.length > this.maxLog) lg.shift();
+					this.logs.set(tid, lg);
+				}
+			}
 			// swap out: persist this player's new state + move their avatar to its new spot
 			this.bundles.set(id, this.world.capturePlayer());
 			const p = this.world.getPlayerPos();
@@ -173,6 +199,9 @@ class SwapSession {
 		if (snap.map && Array.isArray(snap.map.Entities) && ownAvatar != null) {
 			snap.map.Entities = snap.map.Entities.filter((e) => e.id !== ownAvatar);
 		}
+		// KD-090: replace the shared world log with THIS client's personal log so each
+		// player sees only their own relevant messages (not the other player's actions).
+		if (snap.messages) snap.messages.log = (this.logs.get(clientId) || []).slice(-this.maxLog);
 		this.world.parkGlobalPlayer(PARK.x, PARK.y);
 		return snap;
 	}

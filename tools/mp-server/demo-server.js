@@ -83,9 +83,12 @@ function start(port = PORT) {
 	// on WSBridge as a no-conflict solo-testing shortcut, but off here.)
 	// idleGraceMs (KD-087): if a player is idle/finished (e.g. their click-to-move route
 	// ended) the server auto-"wait"s them after this delay so a partner who is still
-	// walking isn't deadlocked. A `wait` is never a contested action (R9 safe). Tune to
-	// taste; 0 = strict lockstep (block until ALL act).
-	const bridge = new WSBridge({ requiredPlayers: 2, seed: 'coop-demo-seed', idleGraceMs: 2000 });
+	// walking isn't deadlocked. A `wait` is never a contested action (R9 safe).
+	// DEFAULT 0 = strict lockstep — the turn ALWAYS waits for both humans (a 2s grace
+	// felt like "it didn't wait for me" when a player paused to think). Set a positive
+	// KD_IDLE_GRACE_MS (e.g. 30000) to re-enable auto-pass / self-heal from a stuck client.
+	const graceMs = parseInt(process.env.KD_IDLE_GRACE_MS || '0', 10);
+	const bridge = new WSBridge({ requiredPlayers: 2, seed: 'coop-demo-seed', idleGraceMs: graceMs });
 	const server = http.createServer(serveStatic);
 	bridge.attach(server);
 	return new Promise((resolve) => {

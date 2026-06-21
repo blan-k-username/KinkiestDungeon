@@ -184,6 +184,28 @@ class HeadlessHost {
 	/** Read the current global turn counter. */
 	tick() { return this.eval('KinkyDungeonCurrentTick'); }
 
+	// ----- message log (KD-090: per-player log composition) --------------------
+
+	/** Length of the world message log (KinkyDungeonMessageLog). */
+	messageLogLength() {
+		return this.eval('(typeof KinkyDungeonMessageLog !== "undefined" && KinkyDungeonMessageLog) ? KinkyDungeonMessageLog.length : 0');
+	}
+
+	/** A JSON-safe clone of the world message log. */
+	messageLog() {
+		return this.eval('(function(){ var L=(typeof KinkyDungeonMessageLog!=="undefined"&&KinkyDungeonMessageLog)?KinkyDungeonMessageLog:[]; try{return JSON.parse(JSON.stringify(L));}catch(e){return [];} })()');
+	}
+
+	/** The message-log entries appended at/after index n (the delta since a marker). */
+	messagesSince(n) {
+		return this.eval(`(function(){ var L=(typeof KinkyDungeonMessageLog!=="undefined"&&KinkyDungeonMessageLog)?KinkyDungeonMessageLog:[]; try{return JSON.parse(JSON.stringify(L.slice(${n | 0})));}catch(e){return [];} })()`);
+	}
+
+	/** The current dungeon floor (MiniGameKinkyDungeonLevel). A change is a party-wide event. */
+	getLevel() {
+		return this.eval('(typeof MiniGameKinkyDungeonLevel !== "undefined") ? MiniGameKinkyDungeonLevel : 0');
+	}
+
 	/**
 	 * Initialise a game on a hardcoded scenario. Mirrors the bundle's own
 	 * new-game path used by the Playwright fixtures.
