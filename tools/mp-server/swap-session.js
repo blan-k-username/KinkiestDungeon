@@ -32,6 +32,7 @@ class SwapSession {
 		this.pvp = !!opts.pvp;        // global PvP toggle (KD-092) — OFF by default (co-op)
 		this.pvpPairs = new Set();    // per-pair PvP relationships (KD-094) — "A|B" sorted keys
 		this.friendlyFire = !!opts.friendlyFire; // incidental AOE hits partners (KD-096) — OFF by default
+		this.mods = Array.isArray(opts.mods) ? opts.mods.slice() : []; // server-side mod code (KD-074)
 		this.world = new HeadlessHost({ id: 'world' });
 		this.bundles = new Map();     // id -> player-state bundle
 		this.avatars = new Map();     // id -> world avatar entity id
@@ -59,6 +60,10 @@ class SwapSession {
 		this.world.boot();
 		this.world.init({ seed: this.seed });
 		this.world.setServerMode('world');
+		// KD-074: load server-side mods into the ONE authoritative world (players are state
+		// bundles — no per-instance engine, so "all instances agree" is automatic). Same eval
+		// path as the browser loader (KDMods.ts) — mods push to KD globals / reassign functions.
+		for (const code of this.mods) { try { this.world.loadMod(code); } catch (e) { /* keep going */ } }
 		const base = this.world.findOpenTile();
 		let i = 0;
 		for (const id of this._joined) {
@@ -179,6 +184,19 @@ class SwapSession {
 
 	/** Enable/disable incidental AOE friendly-fire between partners (KD-096). */
 	setFriendlyFire(on) { this.friendlyFire = !!on; return this.friendlyFire; }
+
+	/**
+	 * Load a mod's code server-side (KD-074). Before the session starts it's queued and loaded at
+	 * `_start`; after start it's eval'd into the live world immediately. One world ⇒ one load.
+	 */
+	loadMod(code) {
+		if (this.started) return this.world.loadMod(code);
+		this.mods.push(code);
+		return { ok: true, queued: true };
+	}
+
+	/** Look up an enemy def by name in the authoritative world (verify a mod took effect). */
+	getEnemyByName(name) { return this.world.getEnemyByName(name); }
 
 	/**
 	 * If `id` cast an AOE spell whose footprint covers a partner's position, apply splash to that
