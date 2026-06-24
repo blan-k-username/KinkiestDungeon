@@ -497,6 +497,9 @@ class HeadlessHost {
 				});
 				if (typeof KinkyDungeonRefreshEnemiesCache === 'function') KinkyDungeonRefreshEnemiesCache();
 			}
+			// KD-100: register the def's display-name key so real combat text reads a real name
+			// ("Your attack hits the Rival …") instead of "[NotFound] NameRemotePlayer".
+			if (typeof addTextKey === 'function') addTextKey('NameRemotePlayer', 'Rival');
 			return true;
 		})()`);
 	}
@@ -546,6 +549,55 @@ class HeadlessHost {
 		return this.eval(`(function(){
 			var e = KinkyDungeonEntityAt(${x | 0}, ${y | 0});
 			return e ? { id: e.id, name: e.Enemy && e.Enemy.name, player: !!e.player, x: e.x, y: e.y } : null;
+		})()`);
+	}
+
+	/**
+	 * KD-100: await the async text provider so real combat messages resolve to real text instead of
+	 * "[NotFound] …". `textProvider.readyAll()` returns a cross-realm promise; awaiting it in Node
+	 * pumps the loop until the boot-time CSV loads finish. Idempotent; safe to call repeatedly.
+	 */
+	async ready() {
+		try {
+			const p = this.eval('(typeof textProvider !== "undefined" && textProvider && textProvider.readyAll) ? textProvider.readyAll() : null');
+			if (p && typeof p.then === 'function') await p;
+		} catch (e) { /* best-effort */ }
+		return true;
+	}
+
+	/**
+	 * KD-100: make an injected avatar a REAL hostile enemy so the attacker's stock attack pipeline
+	 * (KinkyDungeonMove bump → KDDoAttack/KDDamageEnemy, real defeat/capture) targets it. hp tracks the
+	 * peer's Will (maxhp = WillMax) so KD's real low-hp helpless/capture thresholds fire near Will 0.
+	 */
+	setAvatarEnemy(entityId, hp, maxhp) {
+		return this.eval(`(function(){
+			var e = KDMapData.Entities.find(function(en){ return en.id === ${entityId | 0}; });
+			if (!e) return null;
+			e.Enemy.maxhp = ${Number(maxhp) || 10};
+			e.hp = Math.max(0, ${Number(hp) || 0});
+			e.faction = 'Enemy'; e.hostile = 9999; e.ce = undefined; e.player = undefined;
+			KDUpdateEnemyCache = true;
+			return { id: e.id, hp: e.hp, maxhp: e.Enemy.maxhp, faction: (typeof KDGetFaction==='function')?KDGetFaction(e):e.faction };
+		})()`);
+	}
+
+	/** KD-100: read an entity's combat state for reconciliation back to a player bundle. */
+	getEntityCombat(entityId) {
+		return this.eval(`(function(){
+			var e = KDMapData.Entities.find(function(en){ return en.id === ${entityId | 0}; });
+			if (!e) return null;
+			return { id: e.id, hp: e.hp, maxhp: e.Enemy && e.Enemy.maxhp, boundLevel: e.boundLevel || 0,
+				captured: (typeof KDHelpless === 'function') ? !!KDHelpless(e) : (e.hp <= 0.52) };
+		})()`);
+	}
+
+	/** KD-100: write the swapped-in player's Will (the reconcile target), clamped to [0, WillMax]. */
+	setWill(will) {
+		return this.eval(`(function(){
+			var mx = (typeof KinkyDungeonStatWillMax !== 'undefined') ? KinkyDungeonStatWillMax : 10;
+			KinkyDungeonStatWill = Math.max(0, Math.min(mx, ${Number(will) || 0}));
+			return KinkyDungeonStatWill;
 		})()`);
 	}
 
