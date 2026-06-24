@@ -46,6 +46,8 @@ describe('PvP via the REAL combat pipeline (KD-100)', () => {
 		expect(log).toMatch(/attack/i);                // a real KDAttack-style line
 		expect(log).not.toMatch(/\[NotFound\]/);       // text actually loaded
 		expect(log).not.toMatch(/for 1\.5 arcane/);    // NOT the old synthetic constant
+		expect(log).toMatch(/Player B/);               // names the real peer, not the generic "Rival"
+		expect(log).not.toMatch(/Rival/);
 	}, BOOT_TIMEOUT);
 
 	it('draining Will to the floor defeats the peer (real player-defeat condition)', () => {

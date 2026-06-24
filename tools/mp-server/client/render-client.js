@@ -227,6 +227,12 @@
 							var decision = ROUTED_INPUTS[type] ? 'ROUTE' : 'SWALLOW';
 							try { console.log('[mp-client] KDSendInput', type, '->', decision, (data && data.id != null) ? ('id=' + data.id) : ''); } catch (e) { /* ignore */ }
 						}
+						// KD-101: the Bondage cast OPENS the game's real "tie" submenu (a local UI), unlike
+						// other turn-consuming casts. Run it LOCALLY so the submenu appears on the attacker's
+						// screen; the submenu's own apply (addNPCRestraint) is routed separately (below).
+						if (type === 'tryCastSpell' && data && data.spellname === 'Bondage') {
+							return _origSend.apply(this, arguments);
+						}
 						if (ROUTED_INPUTS[type]) {
 							KDRenderClient.sendInput({ kdType: type, data: sanitizeInputData(data) });
 							return '';

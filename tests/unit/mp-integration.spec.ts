@@ -36,7 +36,7 @@ describe('Real entities + enemy attack + independent params', () => {
 		worldEntities = await s.entitiesIn('world');
 		// B's avatar as seen inside A's instance (a real entity at B's position)
 		const aEnts = await s.entitiesIn('A');
-		aSeesB = aEnts.find((e: any) => e.name === 'RemotePlayer');
+		aSeesB = aEnts.find((e: any) => e.name && e.name.startsWith('RemotePlayer'));
 
 		baseline = {
 			A: await s._t('A').request('getVitals'),
@@ -57,7 +57,7 @@ describe('Real entities + enemy attack + independent params', () => {
 	afterAll(async () => { if (s) await s.close(); });
 
 	it('gap1: each player is injected as a real Player-faction entity in the world', () => {
-		const avatars = worldEntities.filter((e) => e.name === 'RemotePlayer');
+		const avatars = worldEntities.filter((e) => e.name && e.name.startsWith('RemotePlayer'));
 		expect(avatars.length).toBe(2);
 		for (const av of avatars) expect(av.faction).toBe('Player');
 	});

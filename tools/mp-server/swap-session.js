@@ -218,6 +218,9 @@ class SwapSession {
 			// subtracts THAT from the victim's Will directly (so the pace is the same whether the real
 			// weapon does ~1.5 vs a weak player or ~16 vs a strong one). The avatar never dies.
 			this.world.setAvatarEnemy(eid, this._armHp, this._armHp);
+			// KD-101: also reset the avatar's bondage gauge so reconcile reads only the restraints the
+			// attacker ties on THIS turn (via the real addNPCRestraint apply).
+			this.world.clearAvatarBondage(eid);
 		}
 	}
 
@@ -236,26 +239,30 @@ class SwapSession {
 			// Avatar is a full-hp damage gauge; ARM_HP - hp = real damage dealt to this peer this turn.
 			// A missing avatar (shouldn't happen now it never dies) counts as full damage.
 			const dmg = (!ec || ec.hp == null) ? this._armHp : Math.max(0, this._armHp - ec.hp);
-			if (dmg > 1e-6) {
-				const willMax = (v.willMax != null && v.willMax > 0) ? v.willMax : 10;
-				const oldWill = (v.will != null) ? v.will : willMax;
-				const newWill = Math.max(0, oldWill - dmg);   // apply REAL damage straight to Will
-				this._dbg(`reconcile ${id} dmg=${dmg.toFixed(2)} will ${oldWill.toFixed(2)} -> ${newWill.toFixed(2)}`);
-				this._setPeerWill(id, newWill);
+			// KD-101: restraints the attacker tied onto the avatar THIS turn (real addNPCRestraint).
+			const restraints = (ec && Array.isArray(ec.npcRestraints)) ? ec.npcRestraints : [];
+			if (dmg > 1e-6 || restraints.length) {
+				this.world.restorePlayer(this.bundles.get(id));   // swap victim in once for both effects
+				if (dmg > 1e-6) {
+					const willMax = (v.willMax != null && v.willMax > 0) ? v.willMax : 10;
+					const oldWill = (v.will != null) ? v.will : willMax;
+					const newWill = Math.max(0, oldWill - dmg);   // apply REAL damage straight to Will
+					this._dbg(`reconcile ${id} dmg=${dmg.toFixed(2)} will ${oldWill.toFixed(2)} -> ${newWill.toFixed(2)}`);
+					this.world.setWill(newWill);
+				}
+				for (const rname of restraints) {
+					// mirror the tie onto the victim's real player via the game's real KinkyDungeonAddRestraint
+					const r = this.world.addRestraint(rname);
+					this._dbg(`reconcile ${id} bind +${rname} (restraints now ${r && r.count})`);
+				}
+				this.bundles.set(id, this.world.capturePlayer());
+				this.vitalsOf.set(id, this.world.getVitals());
 			}
 			const cur = this.vitalsOf.get(id) || {};
 			if (!this.defeated.has(id) && cur.will != null && cur.will <= 0.52) {
 				this._markDefeated(id, `will=${cur.will.toFixed(2)}`);
 			}
 		}
-	}
-
-	/** Write a Will value into a swapped-out player's bundle (swap in, set, capture). KD-100. */
-	_setPeerWill(id, will) {
-		this.world.restorePlayer(this.bundles.get(id));
-		this.world.setWill(will);
-		this.bundles.set(id, this.world.capturePlayer());
-		this.vitalsOf.set(id, this.world.getVitals());
 	}
 
 	/** Flag a player defeated + broadcast a shared "defeated" message to everyone. KD-099/100. */

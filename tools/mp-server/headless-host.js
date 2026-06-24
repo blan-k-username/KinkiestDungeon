@@ -511,8 +511,20 @@ class HeadlessHost {
 	spawnAvatar(x, y, name) {
 		this._ensureAvatarDef();
 		const label = name || 'Player';
+		// KD-100: combat text reads TextGet("Name"+Enemy.Enemy.name) — the def name, NOT CustomName —
+		// so give each avatar its OWN def clone with a unique name + registered name key, so a hit reads
+		// the real peer ("Your attack hits Player A …") instead of the shared "the Rival".
+		const defName = 'RemotePlayer_' + String(label).replace(/[^A-Za-z0-9]/g, '');
 		return this.eval(`(function(){
-			var def = KinkyDungeonGetEnemyByName('RemotePlayer');
+			var base = KinkyDungeonGetEnemyByName('RemotePlayer');
+			var defName = ${JSON.stringify(defName)};
+			var def = KinkyDungeonGetEnemyByName(defName);
+			if (!def) {
+				def = Object.assign({}, base, { name: defName });
+				KinkyDungeonEnemies.push(def);
+				if (typeof KinkyDungeonRefreshEnemiesCache === 'function') KinkyDungeonRefreshEnemiesCache();
+			}
+			if (typeof addTextKey === 'function') addTextKey('Name' + defName, ${JSON.stringify(label)});
 			// CustomName + style on the entity → client renders it as a full character
 			// (the NPC sprite path), so the other player is visible (not just an HP bar).
 			var ent = { id: KinkyDungeonGetEnemyID(), Enemy: def, x: ${x | 0}, y: ${y | 0}, hp: 100,
@@ -582,13 +594,31 @@ class HeadlessHost {
 		})()`);
 	}
 
-	/** KD-100: read an entity's combat state for reconciliation back to a player bundle. */
+	/** KD-100/101: read an entity's combat + bondage state for reconciliation back to a player bundle.
+	 *  npcRestraints = the restraint NAMES tied onto the avatar this turn (KD-101 real "tie"). */
 	getEntityCombat(entityId) {
 		return this.eval(`(function(){
 			var e = KDMapData.Entities.find(function(en){ return en.id === ${entityId | 0}; });
 			if (!e) return null;
+			var names = [];
+			if (typeof KDGetNPCRestraints === 'function') {
+				var r = KDGetNPCRestraints(${entityId | 0}) || {};
+				for (var k in r) { if (r[k] && r[k].name) names.push(r[k].name); }
+			}
 			return { id: e.id, hp: e.hp, maxhp: e.Enemy && e.Enemy.maxhp, boundLevel: e.boundLevel || 0,
-				captured: (typeof KDHelpless === 'function') ? !!KDHelpless(e) : (e.hp <= 0.52) };
+				captured: (typeof KDHelpless === 'function') ? !!KDHelpless(e) : (e.hp <= 0.52),
+				npcRestraints: names };
+		})()`);
+	}
+
+	/** KD-101: clear an avatar's per-turn bondage gauge (NPC restraints + boundLevel) before the turn,
+	 *  so _reconcilePeers reads only the bondage applied THIS turn (mirrors the hp damage gauge). */
+	clearAvatarBondage(entityId) {
+		return this.eval(`(function(){
+			var e = KDMapData.Entities.find(function(en){ return en.id === ${entityId | 0}; });
+			if (e) { e.boundLevel = 0; }
+			if (typeof KDSetNPCRestraints === 'function') KDSetNPCRestraints(${entityId | 0}, {});
+			return true;
 		})()`);
 	}
 
