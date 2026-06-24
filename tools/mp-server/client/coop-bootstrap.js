@@ -23,6 +23,11 @@
 	var id = getCoopId();
 	if (!id) return;   // not a co-op tab — leave the normal game alone
 
+	// KD-098 diagnostics: ON by default for the co-op demo (it's a debug harness). Logs to the
+	// browser console: every KDSendInput classification (render-client) + every submit() here.
+	// Add `&nodebug` to the URL to silence. Watch the console while reproducing PvP attacks.
+	window.__KDMP_DEBUG = !/(?:[#&?])nodebug/.test(location.hash + '&' + location.search);
+
 	var coop = window.__coop = {
 		id: id, connected: false, started: false, submitted: false,
 		lastTick: null, peers: [], status: 'init', route: null,
@@ -153,6 +158,13 @@
 				coop.started = true;
 				coop.submitted = false;
 				coop.lastTick = m.tick;
+				if (window.__KDMP_DEBUG && m.serverLog && m.serverLog.length) {
+					// KD-098: echo the server's per-turn diagnostics into THIS browser console
+					// (so one screenshot has both client + server logs — no Docker terminal needed).
+					for (var li = 0; li < m.serverLog.length; li++) {
+						try { console.log('[mp-server] ' + m.serverLog[li]); } catch (e) { /* ignore */ }
+					}
+				}
 				window.KDRenderClient.apply(m.snapshot);
 				pinGameScreen();   // keep the dungeon on screen (don't let the menu steal it)
 				if (coop.route) stepRoute();   // advance a click-to-move route by one tile this turn
@@ -171,9 +183,18 @@
 	}
 
 	function submit(action, fromRoute) {
-		if (!ws || ws.readyState !== 1 || !coop.started || coop.submitted) return;
+		if (!ws || ws.readyState !== 1 || !coop.started || coop.submitted) {
+			if (window.__KDMP_DEBUG) {
+				try {
+					console.log('[coop ' + id + '] submit BLOCKED', JSON.stringify(action),
+						{ wsOpen: !!(ws && ws.readyState === 1), started: coop.started, alreadySubmitted: coop.submitted });
+				} catch (e) { /* ignore */ }
+			}
+			return;
+		}
 		if (!fromRoute) coop.route = null;   // a manual action cancels an in-progress route
 		coop.submitted = true;
+		if (window.__KDMP_DEBUG) { try { console.log('[coop ' + id + '] submit ->', JSON.stringify(action)); } catch (e) { /* ignore */ } }
 		ws.send(JSON.stringify({ type: 'input', action: action }));
 	}
 

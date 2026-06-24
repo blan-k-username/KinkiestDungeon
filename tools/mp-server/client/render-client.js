@@ -108,6 +108,7 @@
 		if (KinkyDungeonGetEnemyByName('RemotePlayer')) return;
 		KinkyDungeonEnemies.push({
 			name: 'RemotePlayer', faction: 'Player', tags: KDMapInit(['peaceful']),
+			bound: 'Apprentice', // presence makes KDCanBind true so the Truss/bind context option appears (KD-098)
 			AI: 'guard', immobile: true, visionRadius: 0, maxhp: 100, minLevel: 0, weight: -1000,
 			movePoints: 1000, attackPoints: 0, attack: '', attackRange: 0,
 			evasion: -100, armor: 0, followRange: 100, lowpriority: true,
@@ -218,6 +219,14 @@
 				// run it locally. Local-only UI (menus/choices) still dispatches locally (R6).
 				KDSendInput = function (type, data) {
 					if (clientMode) {
+						// KD-098 diagnostics: trace turn-consuming inputs + dropped ones. We log only
+						// ROUTE (sent to server) and SWALLOW (dropped) — NOT local-ui, which includes
+						// per-frame chatter like setMoveDirection (mouse tracking) that would spam the
+						// console. Toggle window.__KDMP_DEBUG.
+						if (typeof window !== 'undefined' && window.__KDMP_DEBUG && !LOCAL_UI_INPUTS[type]) {
+							var decision = ROUTED_INPUTS[type] ? 'ROUTE' : 'SWALLOW';
+							try { console.log('[mp-client] KDSendInput', type, '->', decision, (data && data.id != null) ? ('id=' + data.id) : ''); } catch (e) { /* ignore */ }
+						}
 						if (ROUTED_INPUTS[type]) {
 							KDRenderClient.sendInput({ kdType: type, data: sanitizeInputData(data) });
 							return '';

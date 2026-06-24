@@ -201,6 +201,26 @@ class HeadlessHost {
 		return this.eval(`(function(){ var L=(typeof KinkyDungeonMessageLog!=="undefined"&&KinkyDungeonMessageLog)?KinkyDungeonMessageLog:[]; try{return JSON.parse(JSON.stringify(L.slice(${n | 0})));}catch(e){return [];} })()`);
 	}
 
+	/**
+	 * Push a combat-feedback line through KD's REAL message API (KD-098). Reuses
+	 * `KinkyDungeonSendTextMessage` so the entry has the same shape/styling as any in-game
+	 * message (and sets the floating `KinkyDungeonActionMessage`), then returns the produced
+	 * log entry so the caller can route it to the right player's personal log. NOT a fake
+	 * string injection — the game's own messaging code runs. Used for PvP hit feedback, which
+	 * the silent `KinkyDungeonDealDamage` path never emits on its own.
+	 */
+	sendFeedback(text, color, priority) {
+		return this.eval(`(function(){
+			var before = (typeof KinkyDungeonMessageLog!=="undefined"&&KinkyDungeonMessageLog)?KinkyDungeonMessageLog.length:0;
+			if (typeof KinkyDungeonSendTextMessage === 'function') {
+				KinkyDungeonSendTextMessage(${priority | 0} || 10, ${JSON.stringify(String(text))}, ${JSON.stringify(String(color || '#ff5555'))}, 2);
+			}
+			var L = (typeof KinkyDungeonMessageLog!=="undefined"&&KinkyDungeonMessageLog)?KinkyDungeonMessageLog:[];
+			var added = L.slice(before);
+			try { return JSON.parse(JSON.stringify({ entries: added, action: ${JSON.stringify(String(text))} })); } catch(e) { return { entries: [], action: '' }; }
+		})()`);
+	}
+
 	/** A spell's AOE footprint + damage as data (KD-096 friendly-fire): {aoe,power,type}. */
 	getSpellInfo(name) {
 		return this.eval(`(function(){
@@ -429,6 +449,7 @@ class HeadlessHost {
 			hp: KinkyDungeonPlayerEntity ? KinkyDungeonPlayerEntity.hp : null,
 			stamina: (typeof KinkyDungeonStatStamina !== 'undefined') ? KinkyDungeonStatStamina : null,
 			will: (typeof KinkyDungeonStatWill !== 'undefined') ? KinkyDungeonStatWill : null,
+			willMax: (typeof KinkyDungeonStatWillMax !== 'undefined') ? KinkyDungeonStatWillMax : null,
 			distraction: (typeof KinkyDungeonStatDistraction !== 'undefined') ? KinkyDungeonStatDistraction : null,
 			restraints: (typeof KinkyDungeonAllRestraint === 'function') ? KinkyDungeonAllRestraint().length : null,
 		}; })()`);
@@ -464,6 +485,7 @@ class HeadlessHost {
 			if (!KinkyDungeonGetEnemyByName('RemotePlayer')) {
 				KinkyDungeonEnemies.push({
 					name: 'RemotePlayer', faction: 'Player', tags: KDMapInit(['peaceful']),
+					bound: 'Apprentice', // sprite name; presence makes KDCanBind true so the Truss/bind option appears (KD-098)
 					AI: 'guard', immobile: true, visionRadius: 0, maxhp: 100, minLevel: 0, weight: -1000,
 					movePoints: 1000, attackPoints: 0, attack: '', attackRange: 0,
 					evasion: -100, armor: 0, followRange: 100, lowpriority: true,

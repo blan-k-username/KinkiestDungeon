@@ -152,6 +152,15 @@ class WSBridge {
 			try {
 				clientId = msg.clientId;
 				this.sockets.set(clientId, socket);
+				// Reload-friendly (KD-098): a KNOWN player reconnecting to an already-started
+				// session just REATTACHES its new socket and re-syncs — calling join() again
+				// would throw "session already started". This lets you reload a tab mid-session
+				// (e.g. to re-read the diagnostics) without restarting the server.
+				if (this.session.started && this.session.players.includes(clientId)) {
+					this._send(socket, { type: 'joined', clientId, started: true, players: this.session.players });
+					try { this._send(socket, { type: 'state', tick: this.session.turn, snapshot: this.session.snapshotFor(clientId) }); } catch (e) { /* ignore */ }
+					return clientId;
+				}
 				const r = this.session.join(clientId);
 				this._send(socket, { type: 'joined', clientId, started: r.started, players: this.session.players });
 				if (r.started) this._broadcastState();   // both in → push initial render-state
@@ -220,9 +229,12 @@ class WSBridge {
 	_broadcastState() {
 		this._clearGrace();
 		const tick = this.session.turn;
+		// KD-098: forward the server's per-turn diagnostics to every client so they show up
+		// in the browser console (no need to read the Docker terminal). Drained once per turn.
+		const serverLog = (typeof this.session.takeDbg === 'function') ? this.session.takeDbg() : null;
 		for (const [cid, sock] of this.sockets) {
 			const snapshot = this.session.snapshotFor(cid);
-			this._send(sock, { type: 'state', tick, snapshot });
+			this._send(sock, { type: 'state', tick, snapshot, serverLog });
 		}
 	}
 

@@ -32,19 +32,58 @@ class SwapSession {
 		this.pvp = !!opts.pvp;        // global PvP toggle (KD-092) — OFF by default (co-op)
 		this.pvpPairs = new Set();    // per-pair PvP relationships (KD-094) — "A|B" sorted keys
 		this.friendlyFire = !!opts.friendlyFire; // incidental AOE hits partners (KD-096) — OFF by default
+		// KD-098: a routed bind (Truss/Bondage spell) only succeeds once the peer is "subdued" —
+		// their Will fraction at/below this threshold — mirroring the base game's bind-when-helpless
+		// (low-HP) rule. The low-level pvpBind PRIMITIVE stays ungated (PoC/tests use it directly).
+		this.bindWillThresh = (opts.bindWillThresh != null) ? opts.bindWillThresh : 0.5;
 		this.mods = Array.isArray(opts.mods) ? opts.mods.slice() : []; // server-side mod code (KD-074)
 		this.world = new HeadlessHost({ id: 'world' });
 		this.bundles = new Map();     // id -> player-state bundle
 		this.avatars = new Map();     // id -> world avatar entity id
 		this.startOf = new Map();     // id -> {x,y}
 		this.logs = new Map();        // id -> per-player message log (KD-090)
+		this.actionMsgOf = new Map(); // id -> {text,color} transient floating combat text (KD-098)
+		this.vitalsOf = new Map();    // id -> {will,willMax,...} last-known vitals (KD-098 HP bar)
+		this.defeated = new Set();    // ids whose Will hit 0 — incapacitated (KD-099)
 		this._joined = [];
 		this._pending = new Map();    // id -> { kdType, data }
 		this.started = false;
 		this.turn = 0;
 		this.enemyId = null;
 		this.lastTurn = null;         // debug/assert record of the last resolution
+		// KD-098 diagnostics: set KD_MP_DEBUG=1 (or opts.debug) to trace action resolution
+		// per turn to the server console — what each player submitted, how it was classified
+		// (move/wait/sneak/peer-attack/plain), the PvP adjacency, and the applied result.
+		this.debug = !!opts.debug || (typeof process !== 'undefined' && process.env && process.env.KD_MP_DEBUG === '1');
+		this._dbgBuf = [];            // server diagnostics buffered for piping to the browser
 	}
+
+	/** Has this player been defeated (Will hit 0)? Sticky until freed (freeing = future work). */
+	isDefeated(id) { return this.defeated.has(id); }
+
+	/**
+	 * KD-099: flag a player defeated the first time their Will hits 0, and broadcast it to ALL
+	 * players (shared event). Called with the player swapped in (so the real KD message API runs).
+	 * A defeated player is then incapacitated in _advanceTurn (their action becomes a no-op).
+	 */
+	_checkDefeat(id, v) {
+		if (!v || v.will == null || v.will > 0) return;
+		if (this.defeated.has(id)) return;
+		this.defeated.add(id);
+		const txt = `Player ${id} has been defeated!`;
+		const fb = this.world.sendFeedback(txt, '#ff3333', 12);
+		const entries = (fb && fb.entries) || [];
+		for (const pid of this._joined) this._pushLog(pid, entries);
+		this.actionMsgOf.set(id, { text: 'Defeated!', color: '#ff3333' });
+		this._dbg(`DEFEAT ${id} (will<=0)`);
+	}
+
+	/** Server-side diagnostic log (gated by this.debug / KD_MP_DEBUG). Also buffered so the
+	 *  WS bridge can ship it to the browser console (no need to read the Docker terminal). */
+	_dbg(msg) { if (this.debug) { try { console.error('[mp] ' + msg); } catch (e) { /* ignore */ } this._dbgBuf.push(msg); if (this._dbgBuf.length > 200) this._dbgBuf.shift(); } }
+
+	/** Drain the buffered server diagnostics (the WS bridge forwards these to clients). */
+	takeDbg() { const b = this._dbgBuf; this._dbgBuf = []; return b; }
 
 	get players() { return [...this._joined]; }
 
@@ -71,6 +110,7 @@ class SwapSession {
 			// give each player a starting bundle at a distinct position
 			this.world.placePlayer(pos.x, pos.y);
 			this.bundles.set(id, this.world.capturePlayer());
+			this.vitalsOf.set(id, this.world.getVitals());   // KD-098: seed for the HP bar
 			const av = this.world.spawnAvatar(pos.x, pos.y, 'Player ' + id);
 			this.avatars.set(id, av.entityId);
 			this.startOf.set(id, pos);
@@ -96,6 +136,7 @@ class SwapSession {
 		if (!this.started) throw new Error('session not started');
 		if (!this._joined.includes(clientId)) throw new Error(`unknown player ${clientId}`);
 		this._pending.set(clientId, action);
+		this._dbg(`submit turn=${this.turn} ${clientId} action=${JSON.stringify(action)}`);
 		const waitingOn = this._joined.filter((id) => !this._pending.has(id));
 		if (waitingOn.length > 0) return { advanced: false, waitingOn };
 		return { advanced: true, turn: this._advanceTurn() };
@@ -105,8 +146,11 @@ class SwapSession {
 	_advanceTurn() {
 		const order = this._shuffle(this._joined.slice());
 		const applied = [];
+		this.actionMsgOf.clear();   // floating combat text is per-turn transient (KD-098)
 		for (const id of order) {
-			const action = this._pending.get(id) || { kind: 'wait' };
+			let action = this._pending.get(id) || { kind: 'wait' };
+			// KD-099: a defeated player is incapacitated — their move/attack is a no-op (wait).
+			if (this.defeated.has(id) && action.kind !== 'wait') action = { kind: 'wait' };
 			const { kdType, data } = this._toInput(id, action);
 			// swap this player in; park their avatar so it doesn't block their own move
 			this.world.restorePlayer(this.bundles.get(id));
@@ -126,11 +170,32 @@ class SwapSession {
 				const sneakPeer = this._sneakTargetOf(id, kdType, data);
 				// KD-094: a stock `doattack` aimed at a PvP-active peer's avatar becomes a PvP hit.
 				const peer = this._pvpTargetOf(id, action, kdType, data);
+				// KD-098: a stock `move` INTO a PvP peer's tile is a melee bump-attack.
+				const bumpPeer = (!sneakPeer && !peer) ? this._bumpTargetOf(id, kdType, data) : null;
+				// KD-098: the Truss/Bondage spell aimed at a PvP peer is a bind (WP-gated below).
+				const bindPeer = (!sneakPeer && !peer && !bumpPeer) ? this._bindTargetOf(id, kdType, data) : null;
+				this._dbg(`resolve ${id}: kdType=${kdType} dataId=${data && data.id} sneakPeer=${sneakPeer || '-'} pvpPeer=${peer || '-'} bumpPeer=${bumpPeer || '-'} bindPeer=${bindPeer || '-'} branch=${sneakPeer ? 'sneak' : peer ? 'peer-attack' : bumpPeer ? 'bump-attack' : bindPeer ? 'bind' : 'plain'}`);
 				if (sneakPeer) {
 					this.setPvPPair(id, sneakPeer, true);
 					result = this._applyPvP(id, { kind: 'pvpAttack', target: sneakPeer });
 				} else if (peer) {
 					result = this._applyPvP(id, { kind: 'pvpAttack', target: peer });
+				} else if (bumpPeer) {
+					result = this._applyPvP(id, { kind: 'pvpAttack', target: bumpPeer });
+				} else if (bindPeer) {
+					// WP gate: only bind a SUBDUED peer (low Will), like the base game's bind-when-helpless.
+					const v = this.vitalsOf.get(bindPeer);
+					const frac = (v && v.willMax) ? (v.will / v.willMax) : 1;
+					if (frac <= this.bindWillThresh) {
+						result = this._applyPvP(id, { kind: 'pvpBind', target: bindPeer, restraint: 'DuctTapeFeet' });
+					} else {
+						const txt = `Player ${bindPeer} resists — wear their WP down before binding!`;
+						const fb = this.world.sendFeedback(txt, '#ffcc55', 8);
+						this._pushLog(id, fb && fb.entries);
+						this.actionMsgOf.set(id, { text: txt, color: '#ffcc55' });
+						result = { applied: false, reason: 'not-subdued', willFrac: frac, feedbackRouted: true };
+						this._dbg(`bind ${id}->${bindPeer}: REJECT not-subdued willFrac=${frac.toFixed(2)} thresh=${this.bindWillThresh}`);
+					}
 				} else if (kdType) {
 					result = this.world.applyInput(kdType, data);
 					// KD-096: an AOE cast whose footprint covers a partner splashes them (co-op
@@ -143,7 +208,10 @@ class SwapSession {
 			// clears it), take the whole new log as the delta.
 			const newLen = this.world.messageLogLength();
 			const added = (newLen >= logLen0) ? this.world.messagesSince(logLen0) : this.world.messageLog();
-			if (added && added.length) {
+			if (added && added.length && !(result && result.feedbackRouted)) {
+				// KD-098: PvP feedback is generated + routed inside _applyPvP (to the victim and
+				// attacker explicitly); skip the generic delta here so it isn't re-credited to the
+				// acting player (the KD-097 misroute that left the victim with no message).
 				// KD-097: messages are SHARED with all players by default (world/enemy/tutorial
 				// events everyone should see); only the acting player's PERSONAL 2nd-person lines
 				// ("You …"/"Your …") stay private to them. A floor change forces all-broadcast.
@@ -161,6 +229,8 @@ class SwapSession {
 			}
 			// swap out: persist this player's new state + move their avatar to its new spot
 			this.bundles.set(id, this.world.capturePlayer());
+			this.vitalsOf.set(id, this.world.getVitals());   // KD-098: refresh for the HP bar
+			this._checkDefeat(id, this.vitalsOf.get(id));    // KD-099: defeat if this player's Will hit 0
 			const p = this.world.getPlayerPos();
 			if (avId != null) this.world.moveAvatar(avId, p.x, p.y);
 			applied.push({ id, kdType, result, pos: p });
@@ -277,6 +347,48 @@ class SwapSession {
 	}
 
 	/**
+	 * Bump-to-attack (KD-098): if `id`'s action is a stock `move` whose DESTINATION tile is a
+	 * PvP-active peer's avatar, return that peer's clientId so the turn loop routes it to
+	 * _applyPvP — walking into your enemy melees them. Far more reliable than right-clicking a
+	 * moving peer's exact tile. MUST be called AFTER `id` is swapped in (uses getPlayerPos).
+	 * Gated by _isPvP so bumping a co-op ally is still a normal (blocked) move, not an attack.
+	 */
+	/**
+	 * Bind routing (KD-098): if `id`'s action is the stock Bondage spell (the context-menu Truss
+	 * option → `tryCastSpell` with spellname "Bondage") aimed at a PvP peer's avatar tile, return
+	 * that peer's clientId. The turn loop then WP-gates it and routes to _applyPvP('pvpBind'). Else
+	 * null. Must be called AFTER `id` is swapped in (peer avatars are at their real world tiles).
+	 */
+	_bindTargetOf(id, kdType, data) {
+		if (kdType !== 'tryCastSpell') return null;
+		const d = data || {};
+		if (d.spellname !== 'Bondage') return null;     // only the bondage/truss spell
+		if (d.tx == null || d.ty == null) return null;
+		const ents = this.world.listEntities();
+		for (const [cid, eid] of this.avatars.entries()) {
+			if (cid === id || !this._isPvP(id, cid)) continue;
+			const ent = ents.find((e) => e.id === eid);
+			if (ent && ent.x === d.tx && ent.y === d.ty) return cid;
+		}
+		return null;
+	}
+
+	_bumpTargetOf(id, kdType, data) {
+		if (kdType !== 'move') return null;
+		const dir = data && data.dir;
+		if (!dir || ((dir.x | 0) === 0 && (dir.y | 0) === 0)) return null;
+		const p = this.world.getPlayerPos();
+		const tx = p.x + (dir.x | 0), ty = p.y + (dir.y | 0);
+		const ents = this.world.listEntities();
+		for (const [cid, eid] of this.avatars.entries()) {
+			if (cid === id || !this._isPvP(id, cid)) continue;
+			const ent = ents.find((e) => e.id === eid);
+			if (ent && ent.x === tx && ent.y === ty) return cid;
+		}
+		return null;
+	}
+
+	/**
 	 * Route attacker `id`'s attack/bind onto target `action.target` (KD-092/093, Strategy B). The
 	 * attacker is ALREADY swapped in. Gated by the session PvP toggle and world adjacency. For
 	 * `pvpAttack`: computes the attacker's weapon attack and applies damage via the player path
@@ -295,8 +407,9 @@ class SwapSession {
 		// adjacency: attacker (swapped in) vs the target's avatar entity
 		const a = this.world.getPlayerPos();
 		const bEnt = this.world.listEntities().find((e) => e.id === this.avatars.get(targetId));
-		if (!bEnt) return { applied: false, reason: 'no-target-avatar' };
+		if (!bEnt) { this._dbg(`pvp ${id}->${targetId}: REJECT no-target-avatar`); return { applied: false, reason: 'no-target-avatar' }; }
 		const dist = Math.max(Math.abs(a.x - bEnt.x), Math.abs(a.y - bEnt.y));
+		this._dbg(`pvp ${id}->${targetId}: aPos=${a.x},${a.y} bAvatar=${bEnt.x},${bEnt.y} dist=${dist}`);
 		if (dist > 1) return { applied: false, reason: 'out-of-range', dist };
 
 		// compute the attacker's outgoing attack while they are swapped in
@@ -312,9 +425,36 @@ class SwapSession {
 			this.world.applyEnemyHit({ damage: atk.damage, type: atk.type });
 		}
 		const after = this.world.getVitals();
+		this.vitalsOf.set(targetId, after);   // KD-098: refresh victim's HP bar immediately on hit
+		this._checkDefeat(targetId, after);   // KD-099: a PvP hit that empties Will defeats the victim
+		// KD-098: emit REAL combat feedback (KinkyDungeonSendTextMessage via host.sendFeedback)
+		// for the VICTIM while they are still swapped in, and route it straight to the victim's
+		// personal log + floating text — the silent KinkyDungeonDealDamage path emits nothing.
+		const dmgN = Math.round((atk.damage || 0) * 10) / 10;
+		const victimText = (action.kind === 'pvpBind')
+			? `Player ${id} restrains you! (${restraint || atk.bindType || 'bondage'})`
+			: `Player ${id} attacks you for ${dmgN} ${atk.type}!`;
+		const vfb = this.world.sendFeedback(victimText, '#ff5555', 10);
+		this._pushLog(targetId, vfb && vfb.entries);
+		this.actionMsgOf.set(targetId, { text: victimText, color: '#ff5555' });
 		this.bundles.set(targetId, this.world.capturePlayer());
 		this.world.restorePlayer(aBundle);
-		return { applied: true, kind: action.kind, dist, atk, before, after, restraint };
+		// attacker-facing line, generated while the attacker is swapped back in
+		const attackerText = (action.kind === 'pvpBind')
+			? `You restrain Player ${targetId}.`
+			: `You attack Player ${targetId} for ${dmgN} ${atk.type}.`;
+		const afb = this.world.sendFeedback(attackerText, '#ffcc55', 10);
+		this._pushLog(id, afb && afb.entries);
+		this.actionMsgOf.set(id, { text: attackerText, color: '#ffcc55' });
+		return { applied: true, kind: action.kind, dist, atk, before, after, restraint, feedbackRouted: true };
+	}
+
+	/** Append message-log entries to a player's personal log, trimmed to maxLog (KD-098). */
+	_pushLog(id, entries) {
+		if (!entries || !entries.length) return;
+		const lg = this.logs.get(id) || [];
+		for (const m of entries) { lg.push(m); while (lg.length > this.maxLog) lg.shift(); }
+		this.logs.set(id, lg);
 	}
 
 	/** Map a submitted action to a KD input {kdType, data}. */
@@ -373,6 +513,15 @@ class SwapSession {
 		if (!bundle) throw new Error(`unknown player ${clientId}`);
 		this.world.restorePlayer(bundle);
 		const snap = this.world.serializeRenderState();
+		// KD-098: the headless world never runs the draw-ease loop, so entities' visual_x/visual_y
+		// stay stuck near spawn while x/y jump via AI — the client then re-eases from the stale
+		// spot each turn (the "Rat teleports from its initial tile through several tiles"). Snap
+		// visual→real so every entity renders at its authoritative position. Turn-based ⇒ snapping
+		// is correct (peer avatars already snap via moveAvatar).
+		if (snap.map && Array.isArray(snap.map.Entities)) {
+			for (const e of snap.map.Entities) { e.visual_x = e.x; e.visual_y = e.y; }
+		}
+		if (snap.player) { snap.player.visual_x = snap.player.x; snap.player.visual_y = snap.player.y; }
 		const ownAvatar = this.avatars.get(clientId);
 		if (snap.map && Array.isArray(snap.map.Entities) && ownAvatar != null) {
 			snap.map.Entities = snap.map.Entities.filter((e) => e.id !== ownAvatar);
@@ -380,15 +529,32 @@ class SwapSession {
 		// KD-090: replace the shared world log with THIS client's personal log so each
 		// player sees only their own relevant messages (not the other player's actions).
 		if (snap.messages) snap.messages.log = (this.logs.get(clientId) || []).slice(-this.maxLog);
+		// KD-098: this turn's PvP floating combat text, scoped to this client (victim or attacker).
+		const am = this.actionMsgOf.get(clientId);
+		if (am && snap.messages) { snap.messages.action = am.text; snap.messages.actionColor = am.color; snap.messages.actionTime = 2; }
 		// KD-094: peers in a PvP relationship with this client render+target as Enemy faction
 		// (stock attack mechanics then "just work" — the client originates a normal doattack).
 		if (snap.map && Array.isArray(snap.map.Entities)) {
 			for (const [cid, eid] of this.avatars.entries()) {
-				if (cid === clientId || !this._isPvP(clientId, cid)) continue;
+				if (cid === clientId) continue;
 				const ent = snap.map.Entities.find((e) => e.id === eid);
-				if (ent) { ent.faction = 'Enemy'; ent.hostile = 9999; }
+				if (!ent) continue;
+				// KD-098: drive the peer's HP bar from their REAL defeat meter (Will). The avatar's
+				// own hp is a meaningless static 100; map Will→hp so the bar shows how close this
+				// player is to defeat (matches their WP corner gauge). Snapshot ent is a deep clone,
+				// so mutating it is per-client and safe.
+				const v = this.vitalsOf.get(cid);
+				if (v && v.will != null && v.willMax) {
+					const maxhp = (ent.Enemy && ent.Enemy.maxhp) || 100;
+					ent.hp = Math.max(0, Math.round((v.will / v.willMax) * maxhp));
+					ent.visual_hp = ent.hp;
+				}
+				// KD-094: PvP peers render+target as Enemy faction (red bar; stock attack mechanics).
+				if (this._isPvP(clientId, cid)) { ent.faction = 'Enemy'; ent.hostile = 9999; }
 			}
 		}
+		// KD-099: expose the defeated players so the client HUD can mark them (down/incapacitated).
+		snap.defeatedPlayers = [...this.defeated];
 		this.world.parkGlobalPlayer(PARK.x, PARK.y);
 		return snap;
 	}

@@ -57,3 +57,50 @@ describe('PvP binding — A binds B (KD-093)', () => {
 		expect(s.world.playerSlowLevel()).toBeGreaterThan(0);
 	}, BOOT_TIMEOUT);
 });
+
+describe('Routed bind (Truss/Bondage spell) is WP-gated — bind only when subdued (KD-098)', () => {
+	let s: any;
+	beforeEach(() => {
+		s = new SwapSession({ requiredPlayers: 2, seed: 'pvp-bind-gate-seed', pvp: true });
+		s.join('A');
+		s.join('B');
+	}, BOOT_TIMEOUT);
+
+	/** A casts the Bondage spell (the Truss option) at B's tile; B waits. Returns A's result. */
+	function castBindAtB(sess: any) {
+		const b = sess.posOf('B');
+		sess.submit('A', { kdType: 'tryCastSpell', data: { tx: b.x, ty: b.y, spellname: 'Bondage' } });
+		const r = sess.submit('B', { kind: 'wait' });
+		return r.turn.applied.find((e: any) => e.id === 'A').result;
+	}
+	/** A bumps B (melee) to drain B's Will; B waits. */
+	function bumpB(sess: any) {
+		const a = sess.posOf('A'), b = sess.posOf('B');
+		const dir = { x: Math.sign(b.x - a.x), y: Math.sign(b.y - a.y) };
+		sess.submit('A', { kdType: 'move', data: { dir, delta: 1 } });
+		sess.submit('B', { kind: 'wait' });
+	}
+	const willFracB = (sess: any) => {
+		const st = sess.snapshotFor('B').stats;
+		return st.will / st.willMax;
+	};
+
+	it('at full WP the bind is REFUSED (not subdued) and applies no restraint', () => {
+		expect(willFracB(s)).toBeGreaterThan(0.5);
+		const r = castBindAtB(s);
+		expect(r.applied).toBe(false);
+		expect(r.reason).toBe('not-subdued');
+		expect(s.snapshotFor('B').restraints.length).toBe(0);
+	}, BOOT_TIMEOUT);
+
+	it('once WP is worn low, the bind LANDS (restraint added to B)', () => {
+		// drain B's Will under the threshold with bump-attacks
+		for (let i = 0; i < 5 && willFracB(s) > 0.5; i++) bumpB(s);
+		expect(willFracB(s)).toBeLessThanOrEqual(0.5);
+
+		const r = castBindAtB(s);
+		expect(r.applied).toBe(true);
+		expect(r.after.restraints).toBe(r.before.restraints + 1);
+		expect(s.snapshotFor('B').restraints.length).toBeGreaterThan(0);
+	}, BOOT_TIMEOUT);
+});
