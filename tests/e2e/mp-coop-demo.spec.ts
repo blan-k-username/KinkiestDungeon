@@ -73,7 +73,7 @@ test('two browser windows play one shared co-op dungeon via the demo server', as
 
 		const peerOfA = () => B.evaluate(() => {
 			// @ts-ignore
-			const a = (KDMapData.Entities || []).find((e: any) => e.Enemy && e.Enemy.name === 'RemotePlayer');
+			const a = (KDMapData.Entities || []).find((e: any) => e.Enemy && e.Enemy.name && e.Enemy.name.indexOf('RemotePlayer') === 0);
 			return a ? { x: a.x, y: a.y } : null;
 		});
 

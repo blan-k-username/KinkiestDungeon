@@ -33,7 +33,7 @@ test('PvP session: each browser sees the peer avatar as Enemy faction', async ({
 		// In A's view, the single RemotePlayer avatar is B; the game must see it as Enemy.
 		const factionForA = await A.evaluate(() => {
 			const ents = (KDMapData as any).Entities || [];
-			const peer = ents.find((e: any) => e.Enemy && e.Enemy.name === 'RemotePlayer');
+			const peer = ents.find((e: any) => e.Enemy && e.Enemy.name && e.Enemy.name.indexOf('RemotePlayer') === 0);
 			return peer ? (KDGetFaction as any)(peer) : null;
 		});
 		expect(factionForA).toBe('Enemy');
@@ -41,7 +41,7 @@ test('PvP session: each browser sees the peer avatar as Enemy faction', async ({
 		// Symmetric in B's view.
 		const factionForB = await B.evaluate(() => {
 			const ents = (KDMapData as any).Entities || [];
-			const peer = ents.find((e: any) => e.Enemy && e.Enemy.name === 'RemotePlayer');
+			const peer = ents.find((e: any) => e.Enemy && e.Enemy.name && e.Enemy.name.indexOf('RemotePlayer') === 0);
 			return peer ? (KDGetFaction as any)(peer) : null;
 		});
 		expect(factionForB).toBe('Enemy');

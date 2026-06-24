@@ -582,15 +582,19 @@ class HeadlessHost {
 	 * (KinkyDungeonMove bump → KDDoAttack/KDDamageEnemy, real defeat/capture) targets it. hp tracks the
 	 * peer's Will (maxhp = WillMax) so KD's real low-hp helpless/capture thresholds fire near Will 0.
 	 */
-	setAvatarEnemy(entityId, hp, maxhp) {
+	setAvatarEnemy(entityId, hp, maxhp, stun) {
 		return this.eval(`(function(){
 			var e = KDMapData.Entities.find(function(en){ return en.id === ${entityId | 0}; });
 			if (!e) return null;
 			e.Enemy.maxhp = ${Number(maxhp) || 10};
 			e.hp = Math.max(0, ${Number(hp) || 0});
 			e.faction = 'Enemy'; e.hostile = 9999; e.ce = undefined; e.player = undefined;
+			// KD-101: stun marks the avatar "disabled" (KinkyDungeonIsStunned) so the game's real
+			// KDCanApplyBondage gate lets a SUBDUED peer be tied — the avatar's hp is a per-turn damage
+			// gauge (always full) and can't express the victim's subdued state, so we set it explicitly.
+			e.stun = Math.max(0, ${Number(stun) || 0});
 			KDUpdateEnemyCache = true;
-			return { id: e.id, hp: e.hp, maxhp: e.Enemy.maxhp, faction: (typeof KDGetFaction==='function')?KDGetFaction(e):e.faction };
+			return { id: e.id, hp: e.hp, maxhp: e.Enemy.maxhp, stun: e.stun, faction: (typeof KDGetFaction==='function')?KDGetFaction(e):e.faction };
 		})()`);
 	}
 

@@ -217,7 +217,14 @@ class SwapSession {
 			// the peer's health. _reconcilePeers reads `ARM_HP - hp` as the real damage dealt and
 			// subtracts THAT from the victim's Will directly (so the pace is the same whether the real
 			// weapon does ~1.5 vs a weak player or ~16 vs a strong one). The avatar never dies.
-			this.world.setAvatarEnemy(eid, this._armHp, this._armHp);
+			// KD-101: a peer is "subdued" (bindable) once their Will is worn low or they're defeated —
+			// stun the avatar so the game's real KDCanApplyBondage gate (needs the target disabled) lets
+			// the attacker tie them. A healthy peer can't be tied — wear them down first (real rule).
+			const v = this.vitalsOf.get(cid) || {};
+			const willMax = (v.willMax != null && v.willMax > 0) ? v.willMax : 10;
+			const subdued = this.defeated.has(cid) || (v.will != null && v.will <= 0.5 * willMax);
+			this.world.setAvatarEnemy(eid, this._armHp, this._armHp, subdued ? 6 : 0);
+			this._dbg(`arm ${cid} subdued=${subdued} -> stun=${subdued ? 6 : 0} (will=${v.will != null ? v.will.toFixed(1) : '?'}/${willMax})`);
 			// KD-101: also reset the avatar's bondage gauge so reconcile reads only the restraints the
 			// attacker ties on THIS turn (via the real addNPCRestraint apply).
 			this.world.clearAvatarBondage(eid);
@@ -507,7 +514,9 @@ class SwapSession {
 				const v = this.vitalsOf.get(cid);
 				if (v && v.will != null && v.willMax) {
 					const maxhp = (ent.Enemy && ent.Enemy.maxhp) || 100;
-					ent.hp = Math.max(0, Math.round((v.will / v.willMax) * maxhp));
+					// Floor at 1: a hp=0 entity reads as DEAD on the client (untargetable → can't be tied
+					// even when defeated). The bar still shows ~empty; defeat is conveyed by defeatedPlayers.
+					ent.hp = Math.max(1, Math.round((v.will / v.willMax) * maxhp));
 					ent.visual_hp = ent.hp;
 				}
 				// KD-094: PvP peers render+target as Enemy faction (red bar; stock attack mechanics).

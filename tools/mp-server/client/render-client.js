@@ -118,6 +118,35 @@
 		if (typeof KinkyDungeonRefreshEnemiesCache === 'function') KinkyDungeonRefreshEnemiesCache();
 	}
 
+	/**
+	 * KD-100: peers now use per-entity def names (RemotePlayer_<label>) so combat text reads the real
+	 * peer name. KDEnemyRank looks the def up by name and crashes on `.tags` if it's missing, and the
+	 * JSON-cloned Enemy in the snapshot has a mangled tags Map. So for every peer entity: register a
+	 * client def under its exact name (clone of the base, which has a real tags Map) and re-link the
+	 * entity to it. Safe + idempotent.
+	 */
+	function ensureAvatarDefsFor(entities) {
+		if (!Array.isArray(entities) || typeof KinkyDungeonGetEnemyByName !== 'function') return;
+		ensureAvatarDef();
+		var base = KinkyDungeonGetEnemyByName('RemotePlayer');
+		if (!base) return;
+		var added = false;
+		for (var i = 0; i < entities.length; i++) {
+			var en = entities[i];
+			var nm = en && en.Enemy && en.Enemy.name;
+			if (!nm || nm.indexOf('RemotePlayer') !== 0) continue;
+			if (!KinkyDungeonGetEnemyByName(nm)) {
+				KinkyDungeonEnemies.push(Object.assign({}, base, { name: nm }));
+				added = true;
+			}
+			// register the display-name key client-side too, so the tie submenu / name bar reads the
+			// real peer name instead of "[NotFound] NameRemotePlayer_<label>".
+			if (typeof addTextKey === 'function') addTextKey('Name' + nm, en.CustomName || nm);
+			en.Enemy = KinkyDungeonGetEnemyByName(nm);   // re-link to the real def (real tags Map)
+		}
+		if (added && typeof KinkyDungeonRefreshEnemiesCache === 'function') KinkyDungeonRefreshEnemiesCache();
+	}
+
 	var KDRenderClient = {
 		/** Snapshot the current render globals (render-state v1). Mirrors the host. */
 		serialize: function () {
@@ -179,6 +208,9 @@
 			// carry their full Enemy defs in the clone, so no def re-link is needed.
 			// Vision/light (KDMapExtraData) is recomputed locally (pinGameScreen flags it).
 			if (s.map) KDMapData = s.map;
+			// KD-100: register/re-link a real def for each peer's unique name so the draw path
+			// (KDEnemyRank → .tags) doesn't crash on the renamed/JSON-mangled avatar Enemy.
+			if (KDMapData && Array.isArray(KDMapData.Entities)) ensureAvatarDefsFor(KDMapData.Entities);
 			if (typeof KDUpdateEnemyCache !== 'undefined') KDUpdateEnemyCache = true;
 			if (s.player && KinkyDungeonPlayerEntity) {
 				for (var k in s.player) { if (k !== 'enemyName' && k !== 'Enemy') KinkyDungeonPlayerEntity[k] = s.player[k]; }
