@@ -521,6 +521,15 @@ class SwapSession {
 				}
 				// KD-094: PvP peers render+target as Enemy faction (red bar; stock attack mechanics).
 				if (this._isPvP(clientId, cid)) { ent.faction = 'Enemy'; ent.hostile = 9999; }
+				// KD-101: set the avatar's disabled state DIRECTLY in the snapshot from the peer's
+				// subdued state (defeated / Will ≤ half). The world avatar's `stun` is armed per-turn
+				// and may decay before snapshot time; setting it here guarantees the CLIENT sees the
+				// peer as disabled so its real KDCanApplyBondage gate allows the tie.
+				{
+					const willMax = (v && v.willMax > 0) ? v.willMax : 10;
+					const subdued = this.defeated.has(cid) || (v && v.will != null && v.will <= 0.5 * willMax);
+					if (subdued) ent.stun = Math.max(ent.stun || 0, 6);
+				}
 			}
 		}
 		// KD-099: expose the defeated players so the client HUD can mark them (down/incapacitated).

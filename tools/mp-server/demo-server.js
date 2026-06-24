@@ -103,8 +103,13 @@ function start(port = PORT) {
 
 module.exports = { start };
 
+// Bump this when server-side MP code changes, so a stale-process restart is obvious.
+const MP_BUILD = 'KD-101 stun-gate + real-tie';
+
 // Run directly: node tools/mp-server/demo-server.js
 if (require.main === module) {
+	// eslint-disable-next-line no-console
+	console.log(`\n  [mp-server] BUILD: ${MP_BUILD}\n`);
 	start(PORT).then(({ port }) => {
 		// eslint-disable-next-line no-console
 		console.log(`\n  Co-op demo running:  http://localhost:${port}/#coop=A   (window 1)`);
