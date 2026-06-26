@@ -75,7 +75,61 @@
 		// turn-consuming action to this callback, which forwards it to the server.
 		window.KDRenderClient.onInput(function (action) { submit(action); });
 		installRouteDriver();
+		ensureQuickBind();
+		ensureStartItem();
 		connect();
+	}
+
+	/** Read a hash/query param like `&startitem=HingedCuffs`. */
+	function getParam(name) {
+		var m = new RegExp('(?:[#&?])' + name + '=([A-Za-z0-9_]+)').exec(location.hash + '&' + location.search);
+		return m ? m[1] : null;
+	}
+
+	/**
+	 * KD-101 UAT: give THIS client a carryable loose-restraint item (Items inventory). The name comes
+	 * from the server (snapshot.startItem, driven by KD_START_RESTRAINT) or a URL override
+	 * (`#coop=A&startitem=HingedCuffs`). The Items inventory is client-local (snapshots don't sync it),
+	 * so it must be added here to be visible; the server bundle has the same item so apply works too.
+	 * Stock function, no game-source edit. Idempotent (won't double-add).
+	 */
+	function addStartItem(name) {
+		try {
+			if (!name) return;
+			if (typeof KinkyDungeonInventoryAddLoose !== 'function') return;
+			if (typeof KinkyDungeonGetRestraintByName === 'function' && !KinkyDungeonGetRestraintByName(name)) return;
+			if (typeof KinkyDungeonInventoryGetLoose === 'function' && KinkyDungeonInventoryGetLoose(name)) return; // already carry it
+			KinkyDungeonInventoryAddLoose(name);
+		} catch (e) { /* best-effort UAT convenience */ }
+	}
+
+	/** URL-override path (runs at boot, before the first snapshot). */
+	function ensureStartItem() { addStartItem(getParam('startitem')); }
+
+	/**
+	 * KD-101: pre-select the player's binding material as the quick-bind item (stock
+	 * KinkyDungeonAttemptQuickRestraint). When "Tie Up" casts Bondage with a raw material
+	 * selected, the stock cast (KinkyDungeonMagicCode "Bondage") opens the bind submenu
+	 * already in the generic view with THAT material's category chosen. Without a selection
+	 * the submenu defaults to the first global category (ChainRaw) — which the demo players
+	 * don't carry — so every restraint click is gated out by the quantity check and "Tie Up
+	 * does nothing". We only select when the player has no selection of their own, and only a
+	 * generic raw binding material they actually own — pure stock data/selection, no patch.
+	 */
+	function ensureQuickBind() {
+		try {
+			if (typeof KinkyDungeonAttemptQuickRestraint !== 'function') return;
+			if (typeof KinkyDungeonTargetingSpellItem !== 'undefined' && KinkyDungeonTargetingSpellItem) return;
+			if (typeof KinkyDungeonFilterInventory !== 'function' || typeof KDRestraint !== 'function') return;
+			var inv = KinkyDungeonFilterInventory(LooseRestraint, undefined, undefined, undefined, undefined, KDInvFilter, undefined, undefined, true) || [];
+			for (var i = 0; i < inv.length; i++) {
+				var r = KDRestraint(inv[i].item);
+				if (r && r.shrine && r.shrine.indexOf('Raw') >= 0) {
+					KinkyDungeonAttemptQuickRestraint(inv[i].name);
+					return;
+				}
+			}
+		} catch (e) { /* best-effort demo convenience */ }
 	}
 
 	/**
@@ -166,6 +220,12 @@
 					}
 				}
 				window.KDRenderClient.apply(m.snapshot);
+				// KD-101 UAT: seed the server-configured carryable restraint item once (the Items inventory
+				// is client-local, so it must be added here even though the server bundle already has it).
+				if (!coop._startItemAdded && m.snapshot && m.snapshot.startItem) {
+					addStartItem(m.snapshot.startItem);
+					coop._startItemAdded = true;
+				}
 				pinGameScreen();   // keep the dungeon on screen (don't let the menu steal it)
 				if (coop.route) stepRoute();   // advance a click-to-move route by one tile this turn
 				setStatus('Co-op ' + id + '  turn ' + m.tick + '\n[arrows/WASD] move · [space] wait');
@@ -183,11 +243,16 @@
 	}
 
 	function submit(action, fromRoute) {
-		if (!ws || ws.readyState !== 1 || !coop.started || coop.submitted) {
+		// A MANUAL action may REPLACE an already-submitted-but-unresolved one (we're still waiting for
+		// the peer): the server keeps only the latest pending action and the turn waits for the peer
+		// regardless, so e.g. opening "Tie Up" / applying a restraint after you've already moved still
+		// works instead of being silently dropped. Route auto-steps still respect the one-per-turn gate.
+		var blocked = !ws || ws.readyState !== 1 || !coop.started || (coop.submitted && !!fromRoute);
+		if (blocked) {
 			if (window.__KDMP_DEBUG) {
 				try {
 					console.log('[coop ' + id + '] submit BLOCKED', JSON.stringify(action),
-						{ wsOpen: !!(ws && ws.readyState === 1), started: coop.started, alreadySubmitted: coop.submitted });
+						{ wsOpen: !!(ws && ws.readyState === 1), started: coop.started, alreadySubmitted: coop.submitted, fromRoute: !!fromRoute });
 				} catch (e) { /* ignore */ }
 			}
 			return;

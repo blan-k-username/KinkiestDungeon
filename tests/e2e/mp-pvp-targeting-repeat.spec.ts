@@ -33,7 +33,7 @@ test('PvP: A can attack the peer every turn (context-menu visibility holds)', as
 	// before it will offer (and send) an Attack/Aggro on the entity.
 	const peerGateA = () => A.evaluate(() => {
 		// @ts-ignore bare let-globals
-		const e = ((KDMapData as any).Entities || []).find((x: any) => x.Enemy && x.Enemy.name === 'RemotePlayer');
+		const e = ((KDMapData as any).Entities || []).find((x: any) => x.Enemy && typeof x.Enemy.name === 'string' && x.Enemy.name.indexOf('RemotePlayer') === 0);
 		if (!e) return null;
 		// @ts-ignore
 		const vis = (typeof KinkyDungeonVisionGet === 'function') ? KinkyDungeonVisionGet(e.x, e.y) : -1;

@@ -20,7 +20,7 @@ async function menuAttackPeer(P: any) {
 	return P.evaluate(() => {
 		const w = window as any;
 		// @ts-ignore bare let-globals
-		const peer = ((KDMapData as any).Entities || []).find((x: any) => x.Enemy && x.Enemy.name === 'RemotePlayer');
+		const peer = ((KDMapData as any).Entities || []).find((x: any) => x.Enemy && typeof x.Enemy.name === 'string' && x.Enemy.name.indexOf('RemotePlayer') === 0);
 		if (!peer) return { ok: false, why: 'no-peer-entity' };
 		// Target the peer's TILE directly. The .Game wrapper re-aims from KDContextX/Y as
 		// pixel coords (KinkyDungeonSetTargetLocation), which we can't easily compute headless;
@@ -90,6 +90,7 @@ test('PvP via the real context menu: sneak then repeated attacks keep landing', 
 
 		let prevWill = await willOfB();
 		const trace: any[] = [];
+		let attackTurns = 0;
 
 		for (let t = 1; t <= TURNS; t++) {
 			const r = await menuAttackPeer(A);
@@ -103,9 +104,20 @@ test('PvP via the real context menu: sneak then repeated attacks keep landing', 
 			trace.push({ t, ...r, willBefore: prevWill, willAfter: will });
 
 			expect(r.ok, `turn ${t}: context menu did not offer/send an attack — ${JSON.stringify(r)}. trace=${JSON.stringify(trace)}`).toBe(true);
-			expect(will, `turn ${t}: B Will did not drop (was ${prevWill}, now ${will}) after menu sent '${r.key}'. trace=${JSON.stringify(trace)}`).toBeLessThan(prevWill);
+			// Real KD mechanic: the sneak/Aggro option (doaggro, unaware) does NOT deal damage —
+			// it makes the peer hostile + stun(1) + vulnerable(1) (KDAggroViaDialogue). The damage
+			// lands on the FOLLOW-UP Attack (doattack), boosted by `vulnerable`. So Will only drops
+			// on Attack/Tease/Capture turns, not the sneak-transition turn. (The synthetic KD-098/099
+			// path dealt sneak damage directly; KD-100 moved PvP to the real pipeline — KD-102.)
+			if (r.key !== 'Aggro') {
+				attackTurns++;
+				expect(will, `turn ${t}: B Will did not drop (was ${prevWill}, now ${will}) after menu sent '${r.key}'. trace=${JSON.stringify(trace)}`).toBeLessThan(prevWill);
+			}
 			prevWill = will;
 		}
+		// the whole point ("repeated attacks keep landing"): the menu must transition past the sneak
+		// to real attacks that each land — otherwise the peer is stuck un-attackable.
+		expect(attackTurns, `menu never transitioned from sneak to landing attacks. trace=${JSON.stringify(trace)}`).toBeGreaterThan(0);
 	} finally {
 		await ctxA.close();
 		await ctxB.close();

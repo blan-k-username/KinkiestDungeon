@@ -37,6 +37,7 @@
 
 	var inputCb = null;
 	var clientMode = false;   // closure flag — NOT the game-source KDServerRole (reverted, KD-085)
+	var _lastRestraintSig = null;   // KD-101: re-dress the player paper-doll only when worn restraints change
 
 	// Input classification (KD-085/088). KD funnels every action through KDSendInput;
 	// under the thin client we split it three ways:
@@ -211,11 +212,65 @@
 			// KD-100: register/re-link a real def for each peer's unique name so the draw path
 			// (KDEnemyRank → .tags) doesn't crash on the renamed/JSON-mangled avatar Enemy.
 			if (KDMapData && Array.isArray(KDMapData.Entities)) ensureAvatarDefsFor(KDMapData.Entities);
-			if (typeof KDUpdateEnemyCache !== 'undefined') KDUpdateEnemyCache = true;
+			// KD-101: the "Tie Up" submenu runs LOCALLY on the attacker and writes the avatar's NPC
+				// restraints into KDGameData.NPCRestraints — which the snapshot does NOT reset (it only
+				// syncs KDMapData). Over several ties those local slots accumulate and the stock apply
+				// (KDGetNPCBindingSlotForItem(...).sgroup, no null guard) crashes on a full slot. Reset each
+				// peer avatar's LOCAL bondage every snapshot — the authoritative tie lives on the server and
+				// is reflected on the VICTIM's own client via s.restraints below.
+				if (KDMapData && Array.isArray(KDMapData.Entities) && typeof KDSetNPCRestraints === 'function') {
+					for (var ai = 0; ai < KDMapData.Entities.length; ai++) {
+						var av = KDMapData.Entities[ai];
+						if (av && av.Enemy && typeof av.Enemy.name === 'string' && av.Enemy.name.indexOf('RemotePlayer') === 0) {
+							try { KDSetNPCRestraints(av.id, {}); av.boundLevel = av.boundLevel || 0; } catch (e) { /* ignore */ }
+						}
+					}
+				}
+				if (typeof KDUpdateEnemyCache !== 'undefined') KDUpdateEnemyCache = true;
 			if (s.player && KinkyDungeonPlayerEntity) {
 				for (var k in s.player) { if (k !== 'enemyName' && k !== 'Enemy') KinkyDungeonPlayerEntity[k] = s.player[k]; }
 			}
-			KinkyDungeonMessageLog = s.messages.log || [];
+			if (Array.isArray(s.restraints) && typeof KinkyDungeonInventory !== 'undefined' && typeof Restraint !== 'undefined') {
+					// KD-101: mirror the authoritative worn-restraint list onto this client's player so a
+					// peer-applied tie is VISIBLE here (server reconcile binds the bundle + the snapshot
+					// carries the full items; without this the victim's screen shows nothing). Rebuild the
+					// real inventory Map + refresh the game's own caches/dress — no reimplementation.
+					try {
+						var rmap = new Map();
+						var sig = '';
+						for (var ri = 0; ri < s.restraints.length; ri++) {
+							var rit = s.restraints[ri];
+							if (rit && rit.name) { rmap.set(rit.name, rit); sig += rit.name + '|' + (rit.id || '') + ';'; }
+						}
+						KinkyDungeonInventory.set(Restraint, rmap);
+						// Only rebuild caches + the paper-doll when the worn set actually changed (avoids a
+						// per-turn re-dress flicker / cost). KD-101: the thin client never runs KD's own
+						// input-queue re-dress, so worn restraints stayed INVISIBLE — setting
+						// KinkyDungeonCheckClothesLoss alone doesn't re-dress; we must flag KDRefreshCharacter
+						// for the player and call KinkyDungeonDressPlayer to strip+re-apply from the worn Map.
+						if (sig !== _lastRestraintSig) {
+							_lastRestraintSig = sig;
+							if (typeof KinkyDungeonRefreshRestraintsCache === 'function') KinkyDungeonRefreshRestraintsCache();
+							if (typeof KinkyDungeonUpdateRestraints === 'function' && typeof KinkyDungeonPlayer !== 'undefined') {
+									// KD-103: run the game's OWN per-turn restraint computation so KinkyDungeonPlayerTags
+									// gains the "<Group>Full"/"<name>Worn" tags that drive KinkyDungeonIsArmsBound and thus
+									// the bound ARM POSE (KinkyDungeonDress.ts:646/689/702). RefreshRestraintsCache alone
+									// rebuilds only the def cache, not player tags — so the victim stayed armsBound=false and
+									// arms rendered "Free" despite the rope overlay. Real per-turn call (KinkyDungeonStats.ts:1749),
+									// no reimplementation. Proven: tests/e2e/mp-bind-victim-modelstate (armsBound false→true).
+									try { KinkyDungeonPlayerTags = KinkyDungeonUpdateRestraints(KinkyDungeonPlayer, -1, 1); } catch (eUR) { /* ignore */ }
+								}
+								if (typeof KinkyDungeonCheckClothesLoss !== 'undefined') KinkyDungeonCheckClothesLoss = true;
+							if (typeof KDRefreshCharacter !== 'undefined' && typeof KinkyDungeonPlayer !== 'undefined') {
+								try { KDRefreshCharacter.set(KinkyDungeonPlayer, true); } catch (e2) { /* ignore */ }
+							}
+							if (typeof KinkyDungeonDressPlayer === 'function' && typeof KinkyDungeonPlayer !== 'undefined') {
+								try { KinkyDungeonDressPlayer(KinkyDungeonPlayer); } catch (e3) { /* ignore */ }
+							}
+						}
+					} catch (e) { /* best-effort render sync */ }
+				}
+				KinkyDungeonMessageLog = s.messages.log || [];
 			if (typeof KinkyDungeonActionMessage !== 'undefined') KinkyDungeonActionMessage = s.messages.action;
 			if (typeof KinkyDungeonActionMessageTime !== 'undefined') KinkyDungeonActionMessageTime = s.messages.actionTime;
 			if (typeof KinkyDungeonActionMessageColor !== 'undefined') KinkyDungeonActionMessageColor = s.messages.actionColor;

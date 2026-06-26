@@ -33,6 +33,7 @@ class SwapSession {
 		this.pvpPairs = new Set();    // per-pair PvP relationships (KD-094) — "A|B" sorted keys
 		this.friendlyFire = !!opts.friendlyFire; // incidental AOE hits partners (KD-096) — OFF by default
 		this.mods = Array.isArray(opts.mods) ? opts.mods.slice() : []; // server-side mod code (KD-074)
+		this.startRestraint = opts.startRestraint || ''; // KD-101 UAT: equip every player with this worn restraint at start (e.g. "HingedCuffs")
 		this.world = new HeadlessHost({ id: 'world' });
 		this.bundles = new Map();     // id -> player-state bundle
 		this.avatars = new Map();     // id -> world avatar entity id
@@ -41,6 +42,7 @@ class SwapSession {
 		this.actionMsgOf = new Map(); // id -> {text,color} transient floating combat text (KD-098)
 		this.vitalsOf = new Map();    // id -> {will,willMax,...} last-known vitals (KD-098 HP bar)
 		this.defeated = new Set();    // ids whose Will hit 0 — incapacitated (KD-099)
+		this.tiedOf = new Map();      // id -> Set of restraint NAMES already reconciled onto this peer (KD-101)
 		this._armHp = 100;            // per-turn damage-gauge full hp for peer avatars (KD-100)
 		this._joined = [];
 		this._pending = new Map();    // id -> { kdType, data }
@@ -80,6 +82,13 @@ class SwapSession {
 		// bundles — no per-instance engine, so "all instances agree" is automatic). Same eval
 		// path as the browser loader (KDMods.ts) — mods push to KD globals / reassign functions.
 		for (const code of this.mods) { try { this.world.loadMod(code); } catch (e) { /* keep going */ } }
+		// KD-101 UAT aid: give the (shared) starting player a CARRYABLE loose-restraint ITEM (Items
+		// inventory) BEFORE capturing each bundle, so the server can apply it; every capturePlayer below
+		// inherits it. The CLIENT shows it via coop-bootstrap (snapshots don't sync the loose inventory).
+		if (this.startRestraint) {
+			const r = this.world.addLooseRestraint(this.startRestraint);
+			this._dbg(`start-restraint(loose) ${this.startRestraint} -> ${JSON.stringify(r)}`);
+		}
 		const base = this.world.findOpenTile();
 		let i = 0;
 		for (const id of this._joined) {
@@ -225,8 +234,11 @@ class SwapSession {
 			const subdued = this.defeated.has(cid) || (v.will != null && v.will <= 0.5 * willMax);
 			this.world.setAvatarEnemy(eid, this._armHp, this._armHp, subdued ? 6 : 0);
 			this._dbg(`arm ${cid} subdued=${subdued} -> stun=${subdued ? 6 : 0} (will=${v.will != null ? v.will.toFixed(1) : '?'}/${willMax})`);
-			// KD-101: also reset the avatar's bondage gauge so reconcile reads only the restraints the
-			// attacker ties on THIS turn (via the real addNPCRestraint apply).
+			// KD-101: clear the avatar's bondage gauge each turn so reconcile reads only THIS turn's new
+			// ties. The avatar must NOT accumulate restraints — its binding slots would fill up and the
+			// stock submenu apply (KDGetNPCBindingSlotForItem(...).sgroup, no null guard) crashes after a
+			// few ties. The victim STAYS bound on their own bundle (reconcile adds, never removes) and
+			// renders it client-side (serializeRenderState→render-client). hp is the per-turn damage gauge.
 			this.world.clearAvatarBondage(eid);
 		}
 	}
@@ -246,9 +258,14 @@ class SwapSession {
 			// Avatar is a full-hp damage gauge; ARM_HP - hp = real damage dealt to this peer this turn.
 			// A missing avatar (shouldn't happen now it never dies) counts as full damage.
 			const dmg = (!ec || ec.hp == null) ? this._armHp : Math.max(0, this._armHp - ec.hp);
-			// KD-101: restraints the attacker tied onto the avatar THIS turn (real addNPCRestraint).
+			// KD-101: restraints the attacker tied onto the avatar THIS turn (avatar is cleared each turn,
+			// so this is the per-turn delta). De-dup against what's already on the victim's bundle so a
+			// re-detected name isn't double-applied; mirror new ones via the game's real KinkyDungeonAddRestraint.
 			const restraints = (ec && Array.isArray(ec.npcRestraints)) ? ec.npcRestraints : [];
-			if (dmg > 1e-6 || restraints.length) {
+			let tied = this.tiedOf.get(id);
+			if (!tied) { tied = new Set(); this.tiedOf.set(id, tied); }
+			const newRestraints = restraints.filter((rn) => !tied.has(rn));
+			if (dmg > 1e-6 || newRestraints.length) {
 				this.world.restorePlayer(this.bundles.get(id));   // swap victim in once for both effects
 				if (dmg > 1e-6) {
 					const willMax = (v.willMax != null && v.willMax > 0) ? v.willMax : 10;
@@ -257,9 +274,10 @@ class SwapSession {
 					this._dbg(`reconcile ${id} dmg=${dmg.toFixed(2)} will ${oldWill.toFixed(2)} -> ${newWill.toFixed(2)}`);
 					this.world.setWill(newWill);
 				}
-				for (const rname of restraints) {
+				for (const rname of newRestraints) {
 					// mirror the tie onto the victim's real player via the game's real KinkyDungeonAddRestraint
 					const r = this.world.addRestraint(rname);
+					tied.add(rname);
 					this._dbg(`reconcile ${id} bind +${rname} (restraints now ${r && r.count})`);
 				}
 				this.bundles.set(id, this.world.capturePlayer());
@@ -534,6 +552,10 @@ class SwapSession {
 		}
 		// KD-099: expose the defeated players so the client HUD can mark them (down/incapacitated).
 		snap.defeatedPlayers = [...this.defeated];
+		// KD-101 UAT: tell the client which carryable loose-restraint item to seed (KD_START_RESTRAINT),
+		// so the standard #coop=<id> URL + server env is enough — no per-tab URL param needed. The client
+		// adds it once (the Items inventory is client-local; snapshots don't sync it).
+		if (this.startRestraint) snap.startItem = this.startRestraint;
 		this.world.parkGlobalPlayer(PARK.x, PARK.y);
 		return snap;
 	}

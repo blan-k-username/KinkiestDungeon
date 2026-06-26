@@ -90,7 +90,9 @@ function start(port = PORT) {
 	const graceMs = parseInt(process.env.KD_IDLE_GRACE_MS || '0', 10);
 	// KD_PVP=1 starts the session in global PvP (peers see each other as Enemy — KD-094).
 	const pvp = /^(1|true|on)$/i.test(process.env.KD_PVP || '');
-	const bridge = new WSBridge({ requiredPlayers: 2, seed: 'coop-demo-seed', idleGraceMs: graceMs, pvp });
+	// KD_START_RESTRAINT=<name> equips every player with that worn restraint at start (UAT aid, KD-101).
+	const startRestraint = process.env.KD_START_RESTRAINT || '';
+	const bridge = new WSBridge({ requiredPlayers: 2, seed: 'coop-demo-seed', idleGraceMs: graceMs, pvp, startRestraint });
 	const server = http.createServer(serveStatic);
 	bridge.attach(server);
 	return new Promise((resolve) => {

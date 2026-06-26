@@ -471,6 +471,18 @@ class HeadlessHost {
 		})()`);
 	}
 
+	/** KD-101 UAT: add a CARRYABLE loose-restraint item (Items inventory), not a worn one. */
+	addLooseRestraint(name, quantity = 1) {
+		return this.eval(`(function(){
+			var def = KinkyDungeonGetRestraintByName(${JSON.stringify(name)});
+			if (!def) return { added: false, error: 'no restraint def: ' + ${JSON.stringify(name)} };
+			if (typeof KinkyDungeonInventoryAddLoose !== 'function') return { added: false, error: 'no KinkyDungeonInventoryAddLoose' };
+			KinkyDungeonInventoryAddLoose(${JSON.stringify(name)}, undefined, undefined, ${quantity | 0 || 1});
+			var item = (typeof KinkyDungeonInventoryGetLoose === 'function') ? KinkyDungeonInventoryGetLoose(${JSON.stringify(name)}) : null;
+			return { added: !!item, name: ${JSON.stringify(name)} };
+		})()`);
+	}
+
 	// ----- real in-game integration: players-as-entities (KD-082) ---------------
 
 	/**
@@ -766,7 +778,9 @@ class HeadlessHost {
 					actionTime: (typeof KinkyDungeonActionMessageTime !== 'undefined') ? KinkyDungeonActionMessageTime : 0,
 					actionColor: (typeof KinkyDungeonActionMessageColor !== 'undefined') ? KinkyDungeonActionMessageColor : '#ffffff',
 				},
-				restraints: (typeof KinkyDungeonAllRestraint === 'function') ? KinkyDungeonAllRestraint().map(function(r){ return { name: r.name, id: r.id }; }) : [],
+				// KD-101: ship the FULL worn-restraint items (not just name/id) so the client can rebuild
+				// the player's worn-restraint Map — a peer-applied tie must render on the victim's screen.
+				restraints: (typeof KinkyDungeonAllRestraint === 'function') ? KinkyDungeonAllRestraint().map(function(r){ return clone(r) || { name: r.name, id: r.id }; }).filter(function(r){ return r && r.name; }) : [],
 				buffs: clone(typeof KinkyDungeonPlayerBuffs !== 'undefined' ? KinkyDungeonPlayerBuffs : {}),
 				level: (typeof MiniGameKinkyDungeonLevel !== 'undefined') ? MiniGameKinkyDungeonLevel : 1,
 				checkpoint: (typeof MiniGameKinkyDungeonCheckpoint !== 'undefined') ? MiniGameKinkyDungeonCheckpoint : 'grv',
