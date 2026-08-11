@@ -63,6 +63,7 @@ KDPrisonTypes.HighSec = {
 				&& en.Enemy?.tags.jailer
 				&& en != KinkyDungeonJailGuard()
 				&& en != KinkyDungeonLeashingEnemy()
+				 && !KDEnemyHasFlag(en, "despawn")
 				&& (en.idle || KDEnemyHasFlag(en, "idleg"))
 				&& !en.goToDespawn) {
 				idleGuard.push(en);
@@ -82,7 +83,7 @@ KDPrisonTypes.HighSec = {
 				if (en.Enemy.tags.jailer) guardCount += 1;
 			}
 		}
-		if (guardCount > 8) {
+		if (guardCount > 6) {
 			let max = guardCount * 0.2;
 			let despawning = 0;
 			for (let en of idleGuards) {
@@ -97,8 +98,11 @@ KDPrisonTypes.HighSec = {
 					despawning += 1;
 					KinkyDungeonSetEnemyFlag(en, "despawn", 300);
 					KinkyDungeonSetEnemyFlag(en, "wander", 300);
+					KinkyDungeonSetEnemyFlag(en, "vis_despawn", 300);
 					en.gx = KDMapData.EndPosition.x;
 					en.gy = KDMapData.EndPosition.y;
+					en.despawnX = KDMapData.EndPosition.x;
+					en.despawnY = KDMapData.EndPosition.y;
 					en.goToDespawn = true;
 					if (despawning > max) break;
 				}
@@ -106,7 +110,19 @@ KDPrisonTypes.HighSec = {
 		} else if (!KinkyDungeonFlags.get("guardspawn")) {
 			// TODO replace with map flags
 			// spawn a new one
-			KinkyDungeonSetFlag("guardspawn", 20);
+			if (KinkyDungeonFlags.get("shiftchange")) {
+				KinkyDungeonSetFlag("guardspawn", 4);
+			} else {
+				KinkyDungeonSetFlag("guardspawn", 80);
+			}
+
+			if (!KinkyDungeonFlags.get("onshift")) {
+				if (!KinkyDungeonFlags.get("shiftchange")) {
+					KinkyDungeonSetFlag("shiftchange", 100, -1);
+					KinkyDungeonSetFlag("onshift", 1000, -1);
+				}
+			}
+			
 
 
 			if (KDMapData.Labels && KDMapData.Labels.Deploy?.length > 0) {
@@ -206,8 +222,13 @@ KDPrisonTypes.HighSec = {
 					}
 
 				}
+
 				KinkyDungeonHandleJailSpawns(delta, KDRandom() < 0.9);
 
+				if (KDGameData.PrisonerState == 'parole') 
+					return KDSetPrisonState(player, "Jail");
+
+			
 
 				let lostTrack = KDLostJailTrackCell(player);
 				if (lostTrack == "Unaware") {
@@ -402,6 +423,10 @@ KDPrisonTypes.HighSec = {
 				let player = KinkyDungeonPlayerEntity;
 				let guard = KDPrisonCommonGuard(player);
 				KinkyDungeonSetFlag("noWeaponStop", 10);
+
+				if (KinkyDungeonAggressive(guard, player)) 
+					return KDPopSubstate(player);
+
 				let nearestfurniture = guard ?KinkyDungeonNearestJailPoint(guard.x, guard.y, ["furniture"], 
 					undefined, undefined, true, 
 					KDGetFurnitureCriteria(player)) : null;
@@ -510,6 +535,10 @@ KDPrisonTypes.HighSec = {
 			},
 			update: (delta) => {
 				let player = KinkyDungeonPlayerEntity;
+
+				if (KDGameData.PrisonerState == 'parole') 
+					return KDPopSubstate(player)
+
 				KDPrisonCommonGuard(player, undefined, false);
 
 

@@ -183,6 +183,19 @@ function KDUpdateLeashCondition(entity: entity, noDelete: boolean = false) : boo
 	return true;
 }
 
+function KDRemoveLeashRemovedRestraints(player: entity) {
+	if (player.player) {
+		for (let inv of KinkyDungeonAllRestraint()) {
+			if (KDRestraint(inv).removeOnLeash) {
+				KinkyDungeonRemoveRestraint(KDRestraint(inv).Group, false);
+				if (KDRestraint(inv).Group == "ItemDevices") {
+					KDReleaseDueToLeashFlags(player);
+				}
+			}
+		}
+	}
+}
+
 function KinkyDungeonAttachTetherToEntity(dist: number, entity: entity, player: entity, reason: string = "Default", color?: string, priority: number = 5, item: item = null): KDLeashData {
 	if (!player) player = KDPlayer();
 
@@ -197,6 +210,8 @@ function KinkyDungeonAttachTetherToEntity(dist: number, entity: entity, player: 
 			priority: priority,
 			restraintID: item?.id,
 		};
+		KDRemoveLeashRemovedRestraints(player);
+		
 		return player.leash;
 	}
 	return undefined;
@@ -248,12 +263,25 @@ function KinkyDungeonDrawTethers(CamX: number, CamY: number) {
 
 	let drawTether = (entity: entity) => {
 		if (entity.leash && (KinkyDungeonVisionGet(entity.x, entity.y) > 0.5 || KinkyDungeonVisionGet(entity.leash.x, entity.leash.y) > 0.5)) {
+			
+
+			if (KDistChebyshev(entity.visual_x - entity.x, entity.visual_y - entity.y) > 2) {
+				//snap
+				entity.visual_x = entity.x;
+				entity.visual_y = entity.y;
+			}
 			let xx = canvasOffsetX + (entity.visual_x - CamX)*KinkyDungeonGridSizeDisplay;
 			let yy = canvasOffsetY + (entity.visual_y - CamY)*KinkyDungeonGridSizeDisplay;
 			let txx = canvasOffsetX + (entity.leash.x - CamX)*KinkyDungeonGridSizeDisplay;
 			let tyy = canvasOffsetY + (entity.leash.y - CamY)*KinkyDungeonGridSizeDisplay;
+
 			let leasher = entity.leash.entity ? KDLookupID(entity.leash.entity) : undefined;
 			if (leasher) {
+				if (KDistChebyshev(leasher.visual_x - leasher.x, leasher.visual_y - leasher.y) > 2) {
+					//snap
+					leasher.visual_x = leasher.x;
+					leasher.visual_y = leasher.y;
+				}
 				txx = canvasOffsetX + (leasher.visual_x - CamX)*KinkyDungeonGridSizeDisplay;
 				tyy = canvasOffsetY + (leasher.visual_y - CamY)*KinkyDungeonGridSizeDisplay;
 				txx += KinkyDungeonGridSizeDisplay * (leasher.flip ? 0.2 : -0.2);
@@ -329,8 +357,7 @@ function KinkyDungeonUpdateTether(delta: number, Msg: boolean, Entity: entity, x
 				if (KDRestraint(inv).removeOnLeash) {
 					KinkyDungeonRemoveRestraint(KDRestraint(inv).Group, false);
 					if (KDRestraint(inv).Group == "ItemDevices") {
-						KinkyDungeonSetFlag("Released", 15);
-						KinkyDungeonSetFlag("nojailbreak", 15);
+						KDReleaseDueToLeashFlags(Entity);
 					}
 				}
 			}
@@ -490,4 +517,10 @@ function KDWillingLeash(entity: entity): boolean {
 	return entity?.personality != undefined
 				&& KDLeashablePersonalities[entity.personality]
 				&& KDLeashablePersonalities[entity.personality](entity, KDPlayer());
+}
+
+
+function KDReleaseDueToLeashFlags(player: entity) {
+	KinkyDungeonSetFlag("Released", 15);
+	KinkyDungeonSetFlag("nojailbreak", 15);
 }

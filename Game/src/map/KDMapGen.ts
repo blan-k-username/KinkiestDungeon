@@ -137,6 +137,9 @@ function KinkyDungeonCreateMap (
 			room: KDGameData.RoomType,
 		});
 
+		
+		KinkyDungeonSendEvent("afterChangeMap", {delta: 1});
+
 		KDGameData.ShortcutIndex = KDGameData.RoomType;
 		return {
 			newMapDataObject: KDMapData,
@@ -779,6 +782,9 @@ function KinkyDungeonCreateMap (
 		room: KDGameData.RoomType,
 	});
 
+	
+	KinkyDungeonSendEvent("afterChangeMap", {delta: 1});
+
 	KDGameData.ShortcutIndex = KDGameData.RoomType;
 	return {
 		newMapDataObject: KDMapData,
@@ -954,7 +960,19 @@ function KinkyDungeonGetAllies(): entity[] {
  * @param enemy
  */
 function KDIsImprisoned(enemy: entity): boolean {
+	if (enemy?.player) {
+		return KDPrisonIsInFurniture(enemy);// || KinkyDungeonPlayerInCell(true, true);
+	}
 	return enemy && KDEntityHasFlag(enemy, "imprisoned");
+}
+/**
+ * @param enemy
+ */
+function KDIsImprisonedOrJailed(enemy: entity): boolean {
+	if (enemy?.player) {
+		return KDPrisonIsInFurniture(enemy) || KinkyDungeonPlayerInCell(true, true);
+	}
+	return enemy && KDEntityHasFlag(enemy, "imprisoned"); // todo add later if prisoners get to free roam
 }
 
 

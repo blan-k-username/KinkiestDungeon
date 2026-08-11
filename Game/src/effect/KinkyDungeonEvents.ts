@@ -782,7 +782,48 @@ let KDEventMapInventory: Record<string, Record<string, (e: KinkyDungeonEvent, it
 			if (item == data.item) {
 				// Ne
 			}
-		}
+		},
+		"SpiritbondCollar": (_e, item, data) => {
+			if (item == data.item) {
+				let player = KDPlayer();
+				let en = KDGetSpiritBondEntityLocal(KDPlayer(), item);
+				if (en) {
+					// make the collar glow
+					if (!data.Filters) {
+						data.Filters = {};
+					}
+					if (data.Filters.Glow) {
+						data.Filters.Glow.alpha = 1;
+					} else
+					data.Filters.Glow = {"gamma":1,"saturation":0,"contrast":1,"brightness":1,"red":1,"green":1,"blue":1,"alpha":1};
+
+					if (data.item.data) {
+						if (!data.item.data.drewGlow) {
+							KDRefreshCharacter.set(KinkyDungeonPlayer, true);
+							data.item.data.drewGlow = true;
+							KinkyDungeonSendTextMessage(6, TextGet("KDSpiritbound_Enable"), KDBaseYellow, 2);
+						}
+					} else {
+						// irrelevant, shouldnt be the case
+					}
+				} else {
+					// make the runes dark
+					if (!data.Filters) {
+						data.Filters = {};
+					}
+					data.Filters.Runes = {"gamma":1,"saturation":0,"contrast":1,"brightness":1,"red":0.5098039215686274,"green":0.5098039215686274,"blue":0.5098039215686274,"alpha":1};
+					data.Filters.Glow = {"gamma":1,"saturation":0,"contrast":1,"brightness":1,"red":1,"green":1,"blue":1,"alpha":0};
+
+					if (data.item.data) {
+						if (data.item.data.drewGlow) {
+							KDRefreshCharacter.set(KinkyDungeonPlayer, true);
+							data.item.data.drewGlow = false;
+							KinkyDungeonSendTextMessage(6, TextGet("KDSpiritbound_Disable"), KDBaseGreal, 2);
+						}
+					}
+				}
+			}
+		},
 	},
 	"afterDress": {
 		"PrisonerJacket": (_e, item, _data) => {
@@ -1218,6 +1259,24 @@ let KDEventMapInventory: Record<string, Record<string, (e: KinkyDungeonEvent, it
 		}
 	},
 	"tick": {
+		
+		"SpiritbondCollar": (_e, item, data) => {
+			let player = KDPlayer();
+			let id = KDGetSpiritBondID(KDPlayer(), item);
+			// TODO add the heal functionality
+			// TODO make the spiritbound stop attacking you sooner than normal, and also take less damage from you
+			// TODO check behavior of your dominant leashing you to jail, it seemed bugged last time I checked
+			if (KDGetPersistentNPC(id)) {
+				KinkyDungeonSetFlag("Spiritbound", 2);
+			} else {
+				KinkyDungeonRemoveRestraintSpecific(item, false, undefined,
+					true, undefined, undefined, undefined,
+					true
+				);
+				KinkyDungeonPlaySound(KinkyDungeonRootDirectory + "Audio/Fwoosh.ogg", undefined, _e.vol);
+				KinkyDungeonSendTextMessage(10, TextGet("KDSpiritbondEnd"), KDBaseCursedRed)
+			}
+		},
 		/** for stuff like binding dress, doll stand, etc that get equipped */
 		"DollHypno_Passive": (e, item, data) => {
 			if (data?.delta > 0) {
@@ -2286,7 +2345,7 @@ let KDEventMapInventory: Record<string, Record<string, (e: KinkyDungeonEvent, it
 				}
 				if (KinkyDungeonPlayerTags.get("Collars")) collar = true;
 				if (!collar) {
-					KinkyDungeonRemoveRestraint(KDRestraint(item).Group, false, false, false);
+					KinkyDungeonRemoveRestraint(KDRestraint(item).Group, true, false, false, undefined, undefined, data.Remover);
 				}
 			}
 		},
@@ -3196,20 +3255,22 @@ let KDEventMapInventory: Record<string, Record<string, (e: KinkyDungeonEvent, it
 			let category = KDControlHarnessCategories[e.kind];
 
 			if (category) {
-				category.activateFunction(e, item, data);
+				if (category.activateFunction(e, item, data)) {
+					if (e.enemyDialogue) {
+						const dialogue = KinkyDungeonGetTextForEnemy(e.enemyDialogue, enemy, undefined, KDPlayer());
+						KinkyDungeonSendDialogue(enemy, dialogue, KDGetColor(enemy), 2, 4);
+					}
+
+					if (e.msg) {
+						const msg = TextGet(e.msg)
+							.replace("RestraintName", TextGet(`Restraint${item.name}`))
+							.replace("EnemyName", TextGet(`Name${enemy.Enemy.name}`));
+						KinkyDungeonSendTextMessage(5, msg, KDBaseOrange, 2);
+					}
+				}
 			}
 
-			if (e.enemyDialogue) {
-				const dialogue = KinkyDungeonGetTextForEnemy(e.enemyDialogue, enemy, undefined, KDPlayer());
-				KinkyDungeonSendDialogue(enemy, dialogue, KDGetColor(enemy), 2, 4);
-			}
-
-			if (e.msg) {
-				const msg = TextGet(e.msg)
-					.replace("RestraintName", TextGet(`Restraint${item.name}`))
-					.replace("EnemyName", TextGet(`Name${enemy.Enemy.name}`));
-				KinkyDungeonSendTextMessage(5, msg, KDBaseOrange, 2);
-			}
+			
 		},
 		"RemoteLinkItem": (e, item, data) => {
 			const enemy = data.enemy;
@@ -11203,7 +11264,7 @@ let KDEventMapEnemy: Record<string, Record<string, (e: KinkyDungeonEvent, enemy:
 				if (!e.chance || KDRandom() < e.chance) {
 					if (!KDIsPlayerTethered(KinkyDungeonPlayerEntity)) {
 						// Apply eager buff to make the shopkeeper fast
-						KinkyDungeonApplyBuffToEntity(enemy, KDEager);
+						KinkyDungeonApplyBuffToEntity(enemy, KDSpeedy);
 						// Go to leash the player
 						enemy.gx = KinkyDungeonPlayerEntity.x;
 						enemy.gy = KinkyDungeonPlayerEntity.y;
@@ -12568,12 +12629,27 @@ let KDEventMapGeneric: Record<string, Record<string, (e: string, data: any) => v
 			KDCollectionNPCEscapeTicks(12 + Math.floor(KDRandom() * 24));
 		},
 	},
+	"afterChangeMap": {
+		"TempFlagFloorTicksNeg": (_e, data) => {
+			if (KDGameData.TempFlagFloorTicks)
+				for (let f of Object.entries(KDGameData.TempFlagFloorTicks)) {
+					if (!KinkyDungeonFlags.get(f[0])) delete KDGameData.TempFlagFloorTicks[f[0]];
+					else if (KinkyDungeonFlags.get(f[0]) < 0) {
+						if (f[1] < data.delta) KDGameData.TempFlagFloorTicks[f[0]] = KDGameData.TempFlagFloorTicks[f[0]] + data.delta;
+						else {
+							KinkyDungeonSetFlag(f[0], 0);
+							delete KDGameData.TempFlagFloorTicks[f[0]];
+						}
+					}
+				}
+		},
+	},
 	"tickFlags": {
 		"TempFlagFloorTicks": (_e, data) => {
 			if (KDGameData.TempFlagFloorTicks)
 				for (let f of Object.entries(KDGameData.TempFlagFloorTicks)) {
 					if (!KinkyDungeonFlags.get(f[0])) delete KDGameData.TempFlagFloorTicks[f[0]];
-					else {
+					else if (KinkyDungeonFlags.get(f[0]) > 0) {
 						if (f[1] > data.delta) KDGameData.TempFlagFloorTicks[f[0]] = KDGameData.TempFlagFloorTicks[f[0]] - data.delta;
 						else {
 							KinkyDungeonSetFlag(f[0], 0);

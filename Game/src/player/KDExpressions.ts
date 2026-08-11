@@ -333,6 +333,46 @@ let KDExpressions: Record<string, KDExpression> = {
 			};
 		},
 	},
+	"Shocked": {
+		priority: 10,
+		stackable: true,
+		criteria: (C, flags) => {
+			if (flags.get("aggroed") || flags.get("jailbroke")) {
+				return true;
+			}
+			return false;
+		},
+		expression: (C, flags) => {
+			return {
+				EyesPose: "EyesSurprised",
+				Eyes2Pose: "Eyes2Surprised",
+				BrowsPose: flags.get("jailbroke") ? "BrowsSurprised" : "",
+				Brows2Pose: flags.get("jailbroke") ? "Brows2Surprised" : "",
+				BlushPose: "",
+				MouthPose: "",
+				FearPose: flags.get("jailbroke") ? "FearPose" : "",
+			};
+		},
+	},
+	"Sneak": {
+		priority: 1,
+		criteria: (C, flags) => {
+			if (flags.get("scanned")) {
+				return true;
+			}
+			return false;
+		},
+		expression: (C, flags) => {
+			return {
+				EyesPose: "EyesSly",
+				Eyes2Pose: "Eyes2Sly",
+				BrowsPose: "",
+				Brows2Pose: "",
+				BlushPose: "",
+				MouthPose: "",
+			};
+		},
+	},
 	"Grope": {
 		priority: 4,
 		criteria: (C, flags) => {
@@ -542,10 +582,10 @@ let KDExpressions: Record<string, KDExpression> = {
 		},
 		expression: (C, flags) => {
 			return {
-				EyesPose: (KinkyDungeonStatDistraction > KinkyDungeonStatDistractionMax*0.5) ? "EyesAngry" : "",
-				Eyes2Pose: (KinkyDungeonStatDistraction > KinkyDungeonStatDistractionMax*0.5) ? "Eyes2Angry" : "",
-				BrowsPose: "BrowsNeutral",
-				Brows2Pose: "Brows2Neutral",
+				EyesPose: (KinkyDungeonStatDistraction > KinkyDungeonStatDistractionMax*0.4) ? "EyesAngry" : "",
+				Eyes2Pose: (KinkyDungeonStatDistraction > KinkyDungeonStatDistractionMax*0.4) ? "Eyes2Angry" : "",
+				BrowsPose: (KinkyDungeonStatDistraction > KinkyDungeonStatDistractionMax*0.6) ? "BrowsAngry" : "",
+				Brows2Pose: (KinkyDungeonStatDistraction > KinkyDungeonStatDistractionMax*0.6) ? "Brows2Angry" : "",
 				BlushPose: (KinkyDungeonVibeLevel > 2 || KinkyDungeonStatDistraction > KinkyDungeonStatDistractionMax*0.5) ? "BlushMedium" : "BlushHigh",
 				MouthPose: "MouthDazed",
 			};
@@ -905,8 +945,11 @@ let KDExpressions: Record<string, KDExpression> = {
 				let id = KDNPCChar_ID.get(C);
 				if (id) {
 					let opinion = KDGetModifiedOpinionID(id);
-					if (opinion >= -15 && opinion <= 15)
-						return true;
+					if (opinion >= -15 && opinion <= 15)	{
+						let entity = KDGetCharacterEntity(C);
+						return entity && ((entity.distraction > 0.01 * entity.Enemy.maxhp && entity.distraction < 0.5 * entity.Enemy.maxhp)
+							|| (!KDGameData.PrisonerState && KDIsBrattyPersonality(entity)));
+					}
 				}
 			}
 			return (KDGameData.PrisonerState == "jail" || KDGameData.PrisonerState == "parole"
@@ -935,8 +978,10 @@ let KDExpressions: Record<string, KDExpression> = {
 				let id = KDNPCChar_ID.get(C);
 				if (id) {
 					let opinion = KDGetModifiedOpinionID(id);
-					if (opinion >= -15 && opinion <= 15)
-						return true;
+					if (opinion >= -15 && opinion <= 15) {
+						let entity = KDGetCharacterEntity(C);
+						return entity && entity.distraction > 0.5 * entity.Enemy.maxhp;
+					}
 				}
 			}
 			return (KinkyDungeonFlags.get("embarrassed")

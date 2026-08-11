@@ -189,8 +189,8 @@ let KDInventoryAction: Record<string, KDInventoryActionDef> = {
 	"Recolor": {
 		hotkey: () => {return KDHotkeyToText(KinkyDungeonKeySpell[8]);},
 		hotkeyPress: () => {return KinkyDungeonKeySpell[8];},
-		icon: (_player, _item) => {
-			return "InventoryAction/Recolor";
+		icon: (_player, item) => {
+			return item.forceFaction ? "InventoryAction/RecolorSet" : "InventoryAction/Recolor";
 		},
 		valid: (_player, _item) => {
 			return true;
@@ -474,6 +474,9 @@ let KDInventoryAction: Record<string, KDInventoryActionDef> = {
 		},
 	},
 	"Use": {
+		doubleSize: true,
+		hotkey: () => {return KDHotkeyToText(KinkyDungeonKeyEnter[0]);},
+		hotkeyPress: () => {return KinkyDungeonKeyEnter[0];},
 		icon: (_player, _item) => {
 			return "InventoryAction/Use";
 		},
@@ -733,6 +736,7 @@ let KDInventoryAction: Record<string, KDInventoryActionDef> = {
 		icon: (_player, _item) => {
 			return "InventoryAction/Offhand";
 		},
+		doubleSize: true,
 		valid: (player, item) => {
 			if (!(item?.type == Weapon && KDCanOffhand(item))) return false;
 			if (KDInventoryActionContainer(player)) return false;
@@ -765,6 +769,7 @@ let KDInventoryAction: Record<string, KDInventoryActionDef> = {
 		icon: (_player, _item) => {
 			return "InventoryAction/RemoveOffhand";
 		},
+		doubleSize: true,
 		valid: (player, item) => {
 			if (KDInventoryActionContainer(player)) return false;
 			return KDGameData.Offhand == item.name;

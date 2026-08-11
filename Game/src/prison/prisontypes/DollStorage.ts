@@ -13,12 +13,14 @@ KDPrisonTypes.DollStorage = {
 		let idleGuard: entity[] = [];
 		for (let en of KDMapData.Entities) {
 			if ((en.Enemy?.tags?.prisoner || en.Enemy?.tags?.formerprisoner) && !KDEnemyHasFlag(en, "conveyed_rec")) {
-				if ((KDEnemyHasFlag(en, "punishdoll") || KDRandom() < 0.15) && !KDEnemyHasFlag(en, "punished")) {
+				if (!KDEnemyHasFlag(en, "punished")) {
 					punishDoll.push(en);
-					KinkyDungeonSetEnemyFlag(en, "punishdoll", 300);
+					KinkyDungeonSetEnemyFlag(en, "punishdoll", 9999);
 				} else
 					idleDoll.push(en);
-			} else if (en.faction == "Enemy" && en.Enemy?.tags.jailer && en != KinkyDungeonJailGuard() && en != KinkyDungeonLeashingEnemy() && (en.idle || KDEnemyHasFlag(en, "idleg"))) {
+			} else if (en.faction == "Enemy" && en.Enemy?.tags.jailer && en != KinkyDungeonJailGuard() && en != KinkyDungeonLeashingEnemy()
+				 && !KDEnemyHasFlag(en, "despawn")
+				&& (en.idle || KDEnemyHasFlag(en, "idleg"))) {
 				idleGuard.push(en);
 				KinkyDungeonSetEnemyFlag(en, "idleg", 2);
 			}
@@ -27,6 +29,14 @@ KDPrisonTypes.DollStorage = {
 		for (let doll of idleDoll) {
 			let gg: entity = null;
 			let dist = 11;
+			if (KDEnemyHasFlag(doll, "punished")) {
+				let storage = KinkyDungeonNearestJailPoint(doll.x, doll.y, ["display"], undefined, undefined);
+				if (doll.x == storage?.x && doll.y == storage?.y) {
+					continue;
+				}
+			}
+			
+
 			for (let guard of idleGuard) {
 				if (!KDEnemyHasFlag(guard, "idlegselect") && KDistChebyshev(guard.x - doll.x, guard.y - doll.y) < dist) {
 					gg = guard;
@@ -36,13 +46,20 @@ KDPrisonTypes.DollStorage = {
 			if (gg) {
 				if (dist < 1.5) {
 					// Set the doll as a punishment doll or delete it if there are too many
+					
 					if (punishDoll.length < 20 && !KDEnemyHasFlag(doll, "punished")) {
-						KinkyDungeonSetEnemyFlag(doll, "punishdoll", 300);
-						KinkyDungeonSetEnemyFlag(doll, "punished", 9999);
+						KinkyDungeonSetEnemyFlag(doll, "punishdoll", 9999);
+						KinkyDungeonSetEnemyFlag(doll, "punished", Math.floor(KDRandom() *500) + 200);
 						KinkyDungeonSetEnemyFlag(doll, "tryNotToSwap", 9999);
 						punishDoll.push(doll);
 					} else {
-						doll.hp = 0;
+						if (!KDEnemyHasFlag(doll, "punished")) {
+							delete doll.preferredX;
+							delete doll.preferredY;
+						}
+						KinkyDungeonSetEnemyFlag(gg, "leadawayselect", 2);
+						KinkyDungeonSetEnemyFlag(doll, "leadAway", 9999);
+						KinkyDungeonSetEnemyFlag(doll, "tryNotToSwap", 0);
 					}
 				} else {
 					KinkyDungeonSetEnemyFlag(gg, "idlegselect", 2);
@@ -53,11 +70,85 @@ KDPrisonTypes.DollStorage = {
 			}
 		}
 
+		let deleteDoll: entity[] = [];
+		for (let en of KDMapData.Entities) {
+			if (KDEnemyHasFlag(en, "leadAway")) {
+				deleteDoll.push(en);
+			}
+		}
+		// For each deleteDoll, pick a guard to pull
+		for (let doll of deleteDoll) {
+			let gg: entity = null;
+
+			if (!doll.preferredX) {
+				let point = CommonRandomItemFromList(null, KDMapData.Labels.Delete);
+				if (point) doll.preferredX = point.x;
+				if (point) doll.preferredY = point.y;
+			}
+			let storage = doll.preferredX ? {x: doll.preferredX, y: doll.preferredY}  : KDMapData.EndPosition;
+			if (doll.x == storage?.x && doll.y == storage?.y) {doll.hp = 0; continue;}
+			let dist = 11;
+			let canLeash = (guard: entity, dd: number) => {
+				return guard?.Enemy && (!KDEnemyHasFlag(guard, "idlegselect") || !KDEnemyHasFlag(guard, "leadawayselect")) && KDistChebyshev(guard.x - doll.x, guard.y - doll.y) < dd;
+			}
+			if (doll.leash?.entity && KDLookupID(doll.leash.entity)?.Enemy && idleGuard.some((entity) => {return entity.id == doll.leash.entity;})) {
+				gg = KDLookupID(doll.leash.entity);
+				dist = KDistChebyshev(gg.x - doll.x, gg.y - doll.y);
+			} else {
+				if (doll.leash?.reason == "DollLeash") {
+					KDBreakTether(doll);
+				}
+				for (let guard of idleGuard) {
+					if (canLeash(guard, dist)) {
+						gg = guard;
+						dist = KDistChebyshev(guard.x - doll.x, guard.y - doll.y);
+					}
+				}
+			}
+
+			if (gg) {
+				if (dist < 2.5 || doll.leash?.entity == gg.id) {
+					// Move the doll toward the nearest storage
+					//let storage = KinkyDungeonNearestJailPoint(gg.x, gg.y, ["display"], undefined, undefined, true);
+					if (storage) {
+						if (dist < 1.5 && KDistChebyshev(gg.x - storage.x, gg.y - storage.y) < 1.5) {
+							doll.hp = 0;
+						} else {
+							KinkyDungeonSetEnemyFlag(gg, "idlegselect", 2);
+							KinkyDungeonSetEnemyFlag(gg, "overrideMove", 10);
+							KinkyDungeonSetEnemyFlag(gg, "leashPrisoner", 3);
+							KinkyDungeonAttachTetherToEntity(1.5, gg, doll, "DollLeash", KDBasePink, 6);
+							gg.gx = storage.x;
+							gg.gy = storage.y;
+							if (dist > 1.5) {
+								let path = KinkyDungeonFindPath(doll.x, doll.y, gg.x, gg.y, true, true, false, KinkyDungeonMovableTilesEnemy,
+									false, false, false
+								);
+								if (path && path.length > 0) {
+									//KDMoveEntity(doll, path[0].x, path[0].y, false, false, false, false);
+									KDStaggerEnemy(doll);
+								}
+							}
+						}
+					}
+				} else {
+					KinkyDungeonSetEnemyFlag(gg, "idlegselect", 2);
+					KinkyDungeonSetEnemyFlag(gg, "overrideMove", 10);
+					gg.gx = doll.x;
+					gg.gy = doll.y;
+				}
+			}
+		}
+
+
 		// For each punishment doll, pick a guard to pull
 		for (let doll of punishDoll) {
 			let gg: entity = null;
 			let storage = KinkyDungeonNearestJailPoint(doll.x, doll.y, ["storage"], undefined, undefined);
-			if (doll.x == storage?.x && doll.y == storage?.y) continue;
+			if (doll.x == storage?.x && doll.y == storage?.y) {
+				KinkyDungeonSetEnemyFlag(doll, "punished", Math.floor(KDRandom() *500) + 200);
+				continue;
+			}
 			let dist = 11;
 			let canLeash = (guard: entity, dd: number) => {
 				return guard?.Enemy && !KDEnemyHasFlag(guard, "idlegselect") && KDistChebyshev(guard.x - doll.x, guard.y - doll.y) < dd;
@@ -83,8 +174,10 @@ KDPrisonTypes.DollStorage = {
 					let storage = KinkyDungeonNearestJailPoint(gg.x, gg.y, ["storage"], undefined, undefined, true);
 					if (storage) {
 						if (dist < 1.5 && KDistChebyshev(gg.x - storage.x, gg.y - storage.y) < 1.5) {
+							KinkyDungeonSetEnemyFlag(doll, "punished", Math.floor(KDRandom() *500) + 200);
 							KDMoveEntity(doll, storage.x, storage.y, false, false, false, false);
-							KDTieUpEnemy(doll, 100, "Latex", undefined, false, 0);
+							KDTieUpEnemy(doll, (doll.Enemy.maxhp || doll.hp) * (1 + KDNPCStruggleThreshMult(doll)) - (doll.boundLevel || 0), "Latex", undefined, false, 0);
+							KinkyDungeonSetEnemyFlag(doll, "tryNotToSwap", 500);
 						} else {
 							KinkyDungeonSetEnemyFlag(gg, "idlegselect", 2);
 							KinkyDungeonSetEnemyFlag(gg, "overrideMove", 10);
@@ -125,14 +218,29 @@ KDPrisonTypes.DollStorage = {
 		if (guardCount > 8) {
 			for (let en of idleGuards) {
 				KinkyDungeonSetEnemyFlag(en, "despawn", 300);
+				KinkyDungeonSetEnemyFlag(en, "vis_despawn", 300);
 				KinkyDungeonSetEnemyFlag(en, "wander", 300);
 				en.gx = KDMapData.EndPosition.x;
 				en.gy = KDMapData.EndPosition.y;
+				en.despawnX = KDMapData.EndPosition.x;
+				en.despawnY = KDMapData.EndPosition.y;
+				en.goToDespawn = true;
 			}
 		} else if (!KinkyDungeonFlags.get("guardspawn")) {
 			// TODO replace with map flags
 			// spawn a new one
-			KinkyDungeonSetFlag("guardspawn", 10);
+			if (KinkyDungeonFlags.get("shiftchange")) {
+				KinkyDungeonSetFlag("guardspawn", 4);
+			} else {
+				KinkyDungeonSetFlag("guardspawn", 40);
+			}
+
+			if (!KinkyDungeonFlags.get("onshift")) {
+				if (!KinkyDungeonFlags.get("shiftchange")) {
+					KinkyDungeonSetFlag("shiftchange", 100, -1);
+					KinkyDungeonSetFlag("onshift", 1000, -1);
+				}
+			}
 
 
 			if (KDMapData.Labels && KDMapData.Labels.Deploy?.length > 0) {

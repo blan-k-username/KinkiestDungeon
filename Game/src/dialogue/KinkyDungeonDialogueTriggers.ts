@@ -297,7 +297,8 @@ function KDDefaultPrereqs(enemy: entity, AIData: any, dist: number, maxdist: num
 				undefined,
 				undefined,
 				{
-					allowLowPower: true
+					allowLowPower: true,
+					noOverpowerMetaTags: true,
 				}) != undefined)
 			&& (KinkyDungeonStatsChoice.get("Undeniable") || !KDIsBrat(enemy) || force);
 }
@@ -312,12 +313,19 @@ function KDShopTrigger(name: string): KinkyDialogueTrigger {
 		excludeTags: ["noshop"],
 		blockDuringPlaytime: true,
 		prerequisite: (enemy, dist, _AIData) => {
-			return (dist < 1.5
+			
+			if (dist < 1.5
 				&& !KinkyDungeonFlags.get("NoTalk")
 				&& !KDGameData.NoForceGreet
 				&& !(KDGameData.SleepTurns > 0)
 				&& KDEnemyHasFlag(enemy, name)
-				&& !KDEnemyHasFlag(enemy, "NoShop"));
+				&& !KDEnemyHasFlag(enemy, "NoShop")) {
+					if (KDGameData.PrisonerState != "jail" && KDGameData.PrisonerState != "parole") return true;
+					let opinion = KDGetModifiedOpinionID(enemy.id);
+				
+					let enemyFactionRep = 50 * KDFactionRelation(KDGetFaction(enemy), KDGetMainFaction());
+					return opinion >= enemyFactionRep + KDBuyPrisonerThreshold;
+				}
 		},
 		weight: (_enemy, _dist) => {
 			return 100;

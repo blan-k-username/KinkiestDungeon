@@ -4,6 +4,7 @@
 
 let KDConfirmType = "";
 let KinkyDungeonReplaceConfirm = 0;
+let KinkyDungeonReplaceColorConfirm = -999;
 
 let lastFastPaletteUpdate = 0;
 
@@ -365,13 +366,31 @@ function KDDrawSavedColors(X: number, y: number, max: number, C: Character): voi
 			]
 		});
 		DrawButtonKDExTo(kdpalettecontainer, "SavedColorCopy" + ii, (_bdata) => {
+			if (KinkyDungeonReplaceColorConfirm != (ii + 1)) {
+				KinkyDungeonReplaceColorConfirm = (ii + 1);
+                if (KDSoundEnabled()) AudioPlayInstantSoundKD(KinkyDungeonRootDirectory + "Audio/ClickError.ogg");
+				return true;
+			}
 			if (filters && KDSelectedModel) {
 				KDSavedColors[ii] = Object.assign({}, filters);
 				localStorage.setItem("kdcolorfilters", JSON.stringify(KDSavedColors));
 			}
 			return true;
-		}, true, X + spacing * i + 32 - 48, Y + 64, 48, 48, "", KDBaseWhite, KinkyDungeonRootDirectory + "UI/savedColor_copy.png", undefined, false, true);
+		}, true, 
+		X + spacing * i + 32 - 48+ (KinkyDungeonReplaceColorConfirm == (ii + 1) ? Math.round(Math.random() * 3 - 1) : 0), 
+		Y + 64+ (KinkyDungeonReplaceColorConfirm == (ii + 1) ? Math.round(Math.random() * 3 - 1) : 0), 
+		48, 48, "", 
+		KDBaseWhite, KinkyDungeonRootDirectory + "UI/savedColor_copy.png", undefined, false, 
+		KinkyDungeonReplaceColorConfirm != (ii + 1), undefined, undefined, undefined, {
+			onHover: KDRenderTooltipRed,
+			hoverData: TextGet("KDCopyColor")
+		});
 		DrawButtonKDExTo(kdpalettecontainer, "SavedColorPaste" + ii, (_bdata) => {
+			if (KinkyDungeonReplaceColorConfirm != -(ii + 1)) {
+				KinkyDungeonReplaceColorConfirm = -(ii + 1);
+                if (KDSoundEnabled()) AudioPlayInstantSoundKD(KinkyDungeonRootDirectory + "Audio/ClickError.ogg");
+				return true;
+			}
 			if (filters && KDSelectedModel) {
 				Object.assign(filters, KDSavedColors[ii]);
 				KDChangeWardrobe(C);
@@ -380,7 +399,15 @@ function KDDrawSavedColors(X: number, y: number, max: number, C: Character): voi
 				KDCurrentModels.get(C).Models.set(KDSelectedModel.Name, JSON.parse(JSON.stringify(KDSelectedModel)));
 			}
 			return true;
-		}, true, X + spacing * i + 32 + 0, Y + 64, 48, 48, "", KDBaseWhite, KinkyDungeonRootDirectory + "UI/savedColor_paste.png", undefined, false, true);
+		}, true, 
+		X + spacing * i + 32 + 0 + (KinkyDungeonReplaceColorConfirm == -(ii + 1) ? Math.round(Math.random() * 3 - 1) : 0), 
+		Y + 64+ (KinkyDungeonReplaceColorConfirm == -(ii + 1) ? Math.round(Math.random() * 3 - 1) : 0), 
+		48, 48, "", 
+		KDBaseWhite, KinkyDungeonRootDirectory + "UI/savedColor_paste.png", undefined, false, 
+		KinkyDungeonReplaceColorConfirm != -(ii + 1), undefined, undefined, undefined, {
+			onHover: KDRenderTooltip,
+			hoverData: TextGet("KDPasteColor")
+		});
 	}
 }
 
@@ -1961,7 +1988,7 @@ function KDDrawWardrobe(_screen: string, Character: Character) {
 				KinkyDungeonConfigAppearance = true;
 			}
 
-			KinkyDungeonReplaceConfirm = 0;
+			KinkyDungeonReplaceColorConfirm = -999; KinkyDungeonReplaceConfirm = 0;
 			return true;
 		} else {
 			KDConfirmType = "strip";
@@ -1992,7 +2019,7 @@ function KDDrawWardrobe(_screen: string, Character: Character) {
 	DrawButtonKDEx("KDWardrobeCancel", (_bdata) => {
 		if (KDConfirmType == "revert" && KinkyDungeonReplaceConfirm > 0) {
 			KDSelectedModel = null;
-			KinkyDungeonReplaceConfirm = 0;
+			KinkyDungeonReplaceColorConfirm = -999; KinkyDungeonReplaceConfirm = 0;
 
 			if (KDWardrobeRevertCallback) KDWardrobeRevertCallback();
 			else
@@ -2018,7 +2045,7 @@ function KDDrawWardrobe(_screen: string, Character: Character) {
 					KDOutfitInfo[KDCurrentOutfit] = ElementValue("KDOutfitName");
 					KDSaveOutfitInfo();
 				}
-				KinkyDungeonReplaceConfirm = 0;
+				KinkyDungeonReplaceColorConfirm = -999; KinkyDungeonReplaceConfirm = 0;
 				localStorage.setItem("kinkydungeonappearance" + KDCurrentOutfit,
 					LZString.compressToBase64(
 						CharacterAppearanceStringify(C || KinkyDungeonPlayer,
@@ -2061,7 +2088,7 @@ function KDDrawWardrobe(_screen: string, Character: Character) {
 					KDInitProtectedGroups(KinkyDungeonPlayer);
 					UpdateModels(KinkyDungeonPlayer);
 					KinkyDungeonConfigAppearance = true;
-					KinkyDungeonReplaceConfirm = 0;
+					KinkyDungeonReplaceColorConfirm = -999; KinkyDungeonReplaceConfirm = 0;
 				} else if (C == KDSpeakerNPC) {
 					let value = KDNPCStyle.get(KDSpeakerNPC);
 					if (!value) return false;
@@ -2297,7 +2324,7 @@ function KDSaveCodeOutfit(C: Character, clothesOnly: boolean = false): void {
 		KinkyDungeonDressPlayer(C, true);
 		KDInitProtectedGroups(C);
 		KinkyDungeonConfigAppearance = true;
-		KinkyDungeonReplaceConfirm = 0;
+		KinkyDungeonReplaceColorConfirm = -999; KinkyDungeonReplaceConfirm = 0;
 
 		// Then decompresses
 		CharacterAppearanceRestore(C, decompressed, clothesOnly, !clothesOnly);
@@ -2541,7 +2568,6 @@ function KDDrawWardrobeToolsButtons(X, Y, C, Model) {
 
 
 function KDWardrobeToolsDraw(C: Character) {
-	let Zoom = 1;
 	if (!C) C = KinkyDungeonPlayer;
 
 	if (KDSelectedModel) {
@@ -2566,7 +2592,7 @@ function KDWardrobeToolsDraw(C: Character) {
 			if (KDWToolsDraggingRefresh)
 				ApplyDragDisplacement(C, CurrentLayer, parent);
 
-			KDWToolsDrawPivotPoint(C, CurrentLayer, Zoom, parent);
+			KDWToolsDrawPivotPoint(C, CurrentLayer, parent);
 			return true;
 		}
 	}
@@ -2583,7 +2609,7 @@ let KDWToolsPivotAimRefresh = false;
 
 //Set pivot location to the mouse pointer
 function CenterPivotToMouse(C: Character, CurrentLayer: LayerPropertiesType, Parent?: string) {
-	let Zoom = 1;
+	let Zoom = KDCharSize;
 	//Translate Mouse coordinates to canvas coordinates
 
 
@@ -2618,7 +2644,7 @@ function CenterPivotToMouse(C: Character, CurrentLayer: LayerPropertiesType, Par
 	//X_Pivot = ox + dox * Math.cos(-Rotation) - doy * Math.sin(-Rotation);
 	//Y_Pivot = oy + doy * Math.cos(-Rotation) + dox * Math.sin(-Rotation);
 
-	let {x, y, angle} = GetModelLocInverse(C, 0, 0, Zoom, {
+	let {x, y, angle} = GetModelLocInverse(C, KDPlayerPos().x, KDPlayerPos().y, Zoom, {
 		Angle: 0,
 		Parent: Parent || "Torso",
 		X: X_Pivot,
@@ -2659,7 +2685,8 @@ function CenterPivotToMouse(C: Character, CurrentLayer: LayerPropertiesType, Par
 }
 
 //Draw red circle at the pivot location
-function KDWToolsDrawPivotPoint(C: Character, CurrentLayer: LayerPropertiesType, Zoom: number, Parent: string) {
+function KDWToolsDrawPivotPoint(C: Character, CurrentLayer: LayerPropertiesType, Parent: string) {
+	let Zoom = KDCharSize;
 	//Transform model coordiantes to screen coordinates
 	if (!CurrentLayer.XPivot || !CurrentLayer.YPivot) return;
 	let X_Pivot = CurrentLayer.XPivot || 0;
@@ -2676,7 +2703,7 @@ function KDWToolsDrawPivotPoint(C: Character, CurrentLayer: LayerPropertiesType,
 	//if (KDToggles.FlipPlayer) X_Pivot = (MODELWIDTH + MODEL_XOFFSET * 2 - X_Pivot);
 
 	//Consider offsets from poses (like hogtie)
-	let {x, y, angle} = GetModelLoc(C, 0, 0, Zoom, {
+	let {x, y, angle} = GetModelLoc(C, KDPlayerPos().x, KDPlayerPos().y, Zoom, {
 		Angle: 0,
 		Parent: Parent || "Torso",
 		X: X_Offset,
@@ -2791,14 +2818,14 @@ let KDWToolsDraggingLazyRefresh = 0;
 
 //Calculations of properties while drag-moving
 function ApplyDragDisplacement(C, CurrentLayer, Parent: string) {
-	let Zoom = 1;
+	let Zoom = KDCharSize;
 	let X_OFFSET = (KDToggles.FlipPlayer ? -1 : 1) * (KDWToolsDraggingDelta.x / (MODEL_SCALE * Zoom));
 	let Y_OFFSET = KDWToolsDraggingDelta.y / (MODEL_SCALE * Zoom);
 	//console.log("WardrobeTools.ks - ApplyDragDisplacement");
 
 	//Consider rotation from poses (like hogtie)
 
-	let {x, y, angle} = GetModelLoc(C, 0, 0, Zoom, {
+	let {x, y, angle} = GetModelLoc(C, KDPlayerPos().x, KDPlayerPos().y, Zoom, {
 		Angle: 0,
 		Parent: Parent || "Torso",
 		X: 0,
@@ -2994,6 +3021,7 @@ function KDGetLayerPropFields(): Record<keyof LayerPropertiesType, string> {
 		EraseAmount: "1",
 		NoLoss: "0",
 		HideRestraintsTags: ",",
+		UnderwearType: "0",
 	};
 }
 

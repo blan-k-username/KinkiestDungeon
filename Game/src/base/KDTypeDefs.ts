@@ -441,6 +441,9 @@ interface KDRestraintPropsBase {
 		Unlock?: string,
 		Destroy?: string,
 	}
+
+	nippleclamp?: boolean,
+	nipplevibe?: boolean,
 	/** Remove sound */
 	sfxRemove?: string,
 	/** Equip sound */
@@ -530,6 +533,7 @@ interface KDRestraintPropsBase {
 	/** Can be linked by items with this shrine category */
 	LinkableBy?: string[],
 	DefaultLock?: string,
+	spiritbond?: boolean,
 	HideDefaultLock?: boolean,
 	Link?: string,
 	UnLink?: string,
@@ -837,6 +841,8 @@ interface KDLoadout {name: string, tags?: string[], singletag: string[], singlet
 interface enemy extends KDHasTags {
 	/** allows custom intentactions for capture */
 	captureAction?: string,
+	/** sound played when you capture this entity */
+	captureSound?: string,
 	/** Makes them special persistent */
 	special?: boolean,
 	overrideFactionDefeat?: boolean,
@@ -849,6 +855,10 @@ interface enemy extends KDHasTags {
 	intro?: string,
 
 	nameList?: string,
+
+	
+	/** Pronoun list */
+	pronouns?: Record<string, number>,
 
 	/** Multiplier to tease damage */
 	teaseMod?: number,
@@ -979,6 +989,11 @@ interface enemy extends KDHasTags {
 		ensureGroupTiedArousal?: string[],
 		/** Wont stop tying you until these playertags are fulfilled (arousal mode only)*/
 		ensurePlayerTagArousal?: string[],
+		/** Used for robot scanning */
+		scanBeforeAlert?: boolean,
+		/** Dont jailbreak alert*/
+		noAlert?: boolean,
+		
 	}
 
 	/** This enemy wont appear outside of its designated floors even if it shares the tag */
@@ -1844,6 +1859,11 @@ interface entity {
 
 	partyLeader?: number,
 
+	/** the enemy's 'type' that they prefer */
+	preferredSubType?: string,
+	/** the enemy's 'type' that they prefer */
+	preferredDomType?: string,
+
 	/** BindStun is a mechanic that reduces the struggle rate based on how much bondage is added
 	 * Each turn it is reduced by 10% of enemy current hp, 10% of bindStun, or 2.5% of max hp, whichever is more
 	 * The amount is always set to the maximum of current bindStun or the amount of binding taken, or half damage taken
@@ -1906,6 +1926,7 @@ interface entity {
 	created?: boolean,
 	/** Creation script has run */
 	ranOnSpawn?: boolean,
+
 	
 
 	/** Amount of sound the entity is currently producing */
@@ -1979,6 +2000,10 @@ interface entity {
 	tempitems?: string[],
 	x: number,
 	y: number,
+	/** use for jailing */
+	preferredX?: number,
+	/** use for jailing */
+	preferredY?: number,
 	targetingX?: number,
 	targetingY?: number,
 	lastx?: number,
@@ -2026,6 +2051,7 @@ interface entity {
 
 	IntentAction?: string,
 	IntentLeashPoint?: {x: number, y: number, type: string, radius: number, entrance?: boolean},
+	IntentLeashPointType?: string,
 	intentDialogue?: string,
 
 	CurrentAction?: string,
@@ -2122,6 +2148,7 @@ interface effectTile {
 	spinAngle?: number,
 	colortint?: string,
 	colorforcetint?: string,
+	phase?: number,
 
 };
 
@@ -2137,6 +2164,7 @@ interface effectTileRef {
 	statuses?: Record<string, number>,
 	colortint?: string,
 	colorforcetint?: string,
+	phase?: number,
 };
 
 type KDPerk = {
@@ -2219,6 +2247,13 @@ interface spell {
 
 	/** enemies will not try to lead target */
 	noLeading?: boolean,
+	/** multiplies the leading by this amount */
+	leadingMult?: number,
+	/** cannot lead more than the spell's AoE */
+	mustIncludeAoE?: boolean,
+	/** cannot lead more than the spell's AoE */
+	leadaoe?: number,
+	
 
 	ignoreshield?: boolean,
 	shield_crit?: boolean, // Crit thru shield
@@ -2624,6 +2659,7 @@ interface KDQuest {
 	oncancel?: (player: entity, force: boolean, intentional: boolean, success: boolean) => boolean;
 	priority?: (player: entity) => number;
 	text?: (player: entity) => string[];
+	customNPC?: (player: entity) => string;
 	npc: string;
 	visible: boolean;
 	nocancel?: boolean,
@@ -2646,6 +2682,8 @@ interface KinkyDialogue {
 	tags?: string[];
 	singletag?: string[];
 	excludeTags?: string[];
+	/** Always shows an NPC as "the X" instead of their name */
+	alwaysEnemyTypeName?: boolean,
 	/** Shows the quick inventory */
 	inventory?: boolean;
 	/** Function to play when clicked. If not specified, nothing happens.  Bool is whether or not to abort current click*/
@@ -2837,6 +2875,16 @@ interface KDFilteredInventoryItem {
     key?: string;
 }
 
+type itemPreviewEntry = {
+	name:             string;
+	item:             item;
+	preview:          string;
+	preview2?:        string;
+	previewcolor?:    string;
+	previewcolorbg?:  string;
+	key?:             string;
+}
+
 interface KDInventoryActionDef {
 	text?: (player: entity, item: item) => string;
 	label?: (player: entity, item: item) => string;
@@ -2888,6 +2936,7 @@ interface KinkyDungeonSave {
 
 		outfit: string,
 		name: string,
+		pronoun: string,
 		level: number,
 		sp: string,
 		mp: string,
@@ -3453,6 +3502,8 @@ interface KDAIData extends KDAITriggerData {
 
 	/** The enemy is ABLE to aggro the target, either due to aggression or dominant play */
 	canAggro?: boolean,
+	/** The enemy is ABLE to tease the target, either due to aggression or dominant play */
+	canTeaseAggro?: boolean,
 	/** The enemy actually aggros the target and will make attacks */
 	wantsToAttack?: boolean,
 	wantsToTease?: boolean,
@@ -3526,7 +3577,7 @@ interface KDAIData extends KDAITriggerData {
 	playEvent?: boolean,
 }
 
-interface KDJailRestraint {Name: string, Level: number, Variant?: string, Condition?: string, Priority?: string, Lock?: string};
+interface KDJailRestraint {Name: string, Level: number, Variant?: string, Condition?: string, Conditions?: string[], flags?: string[], noflags?: string[], Priority?: string, Lock?: string};
 
 type KDEventDataBoolean = KDEventTriggerDataPoint | KDAIData;
 
@@ -4217,6 +4268,8 @@ interface KDCollectionEntry {
 	name: string,
 	refreshSprite?: boolean,
 	origname?: string,
+	origpronoun?: string,
+	pronoun?: string,
 	color: string,
 	type: string,
 	sprite: string,

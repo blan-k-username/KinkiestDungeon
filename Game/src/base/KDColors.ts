@@ -60,6 +60,11 @@ let KDBaseLightGrey = "#80949a";
 // #000000
 let KDBaseVLightGrey = `rgb(180, 185, 190)`;
 
+let KDBaseCursedRed = "#f52358";
+
+
+let KDVibeTextColor = "#ff88ff";
+
 let KDColorList = {
     KDBaseLightGrey: KDBaseLightGrey,
     KDBaseBlack: KDBaseBlack,
@@ -84,4 +89,7 @@ let KDColorList = {
     KDBaseOrange: KDBaseOrange,
     KDBaseRed: KDBaseRed,
     KDBaseGreen: KDBaseGreen,
+    KDBaseVLightGrey: KDBaseVLightGrey,
+    KDBaseCursedRed: KDBaseCursedRed,
+    KDVibeTextColor: KDVibeTextColor,
 };

@@ -20,6 +20,7 @@ interface KDScrollableListData {
     items: any[],
     lastUpdated: number,
     updateInterval: number,
+	lastDrawn: number
 }
 let KDScrollableListExp = 4;
 let KDScrollableListMin = 4;
@@ -62,7 +63,8 @@ function PopulateList(name: string, x: number, y: number, w: number, h: number, 
 			zIndex: z,
 			max: list.length - 1,
 			min: 0,
-			num_per_page: num_per_page
+			num_per_page: num_per_page,
+			lastDrawn: 0,
 		};
 	} else {
 		let index = KDScrollableListDataset[name].index;
@@ -71,6 +73,7 @@ function PopulateList(name: string, x: number, y: number, w: number, h: number, 
 		let click_hold_y = KDScrollableListDataset[name].click_hold_y;
 		let click_hold_y_index = KDScrollableListDataset[name].click_hold_y_index;
 		let lastUpdated = KDScrollableListDataset[name].lastUpdated;
+		let lastDrawn = KDScrollableListDataset[name].lastDrawn;
 
 		KDScrollableListDataset[name] = {
 			allowWrap: allowWrap,
@@ -89,7 +92,8 @@ function PopulateList(name: string, x: number, y: number, w: number, h: number, 
 			zIndex: z,
 			max: list.length - 1,
 			min: 0,
-			num_per_page: num_per_page
+			num_per_page: num_per_page,
+			lastDrawn: lastDrawn,
 		};
 
 	}
@@ -118,7 +122,7 @@ function KDScrollScrollableLists(mouseX: number, mouseY: number, scrollAmount: n
 	let highest = "";
 	for (let name in KDScrollableListDataset) {
         let list = KDScrollableListDataset[name];
-        if (list) {
+        if (list && list.lastDrawn > CommonTime() - 100) {
 			if (list.zIndex > highestZ) {
 				if (PointIn(mouseX, mouseY, list.x, list.y, list.w, list.h)) {
 					highestZ = list.zIndex;
@@ -191,6 +195,8 @@ function KDDrawScrollableList(name: string, useContainer: boolean, drawCallback:
 	scrollSuff = "Small", scrollhotkeyUp = "", scrollhotkeyDown = "", alpha?: number, alphaborder?: number, color?: string, pad: number = 4): any {
 	let list = KDScrollableListDataset[name];
 	let container = kdcanvas;
+
+	list.lastDrawn = CommonTime();
 	
 	
 	if (useContainer != undefined) {
@@ -285,8 +291,8 @@ function KDDrawScrollableList(name: string, useContainer: boolean, drawCallback:
 		KDBaseWhite, KinkyDungeonRootDirectory + (horizontal ? "Left" : "Up") + scrollSuff + ".png", undefined, 
 		undefined, true, undefined, undefined, undefined, {
 				centered: true,
-				//hotkey: scrollhotkeyUp ? KDHotkeyToText(scrollhotkeyUp) : undefined,
-				//hotkeyPressed: scrollhotkeyUp,
+				hotkey: scrollhotkeyUp ? KDHotkeyToText(scrollhotkeyUp) : undefined,
+				hotkeyPress: scrollhotkeyUp,
 			});
 		DrawButtonKDEx(name + "downbtn", (_b) => {
 			KDScrollScrollableList(name, 1);
@@ -298,8 +304,8 @@ function KDDrawScrollableList(name: string, useContainer: boolean, drawCallback:
 		KDBaseWhite, KinkyDungeonRootDirectory + (horizontal ? "Right" : "Down") + scrollSuff + ".png", undefined, 
 		undefined, true, undefined, undefined, undefined, {
 				centered: true,
-				//hotkey: scrollhotkeyDown ? KDHotkeyToText(scrollhotkeyDown) : undefined,
-				//hotkeyPressed: scrollhotkeyDown,
+				hotkey: scrollhotkeyDown ? KDHotkeyToText(scrollhotkeyDown) : undefined,
+				hotkeyPress: scrollhotkeyDown,
 			});
 
 
@@ -349,14 +355,37 @@ function KDDrawScrollableList(name: string, useContainer: boolean, drawCallback:
 	if (list) {
 		let diff = Math.round(list.index - list.visual_index);
 		let diffReal = (list.index - list.visual_index);
+		let drawnFirst = false;
+		let drawnLast = false;
 		for (let i = -1 - diff; i <= list.num_per_page - diff; i++) {
 			if (list.items[i + list.index]) {
-				if (drawCallback(container, i >= 0 && i <= list.num_per_page, list.items[i + list.index], i + list.index,
+				if (drawCallback(container, ( i >= 0 && i <= list.num_per_page), list.items[i + list.index], i + list.index,
 						i + diffReal,
 						list.selectedindex == i + list.index, lastSelectedIndex, list)) {
 					list.selectedindex = i + list.index;
 					selected = list.items[i + list.index];
 				}
+				if (i + list.index == 0) drawnFirst = true;
+				if (i + list.index == list.items.length - 1) drawnLast = true;
+			}
+		}
+
+		if (!drawnFirst) {
+			let i = -list.index;
+			if (drawCallback(container, ( i >= 0 && i <= list.num_per_page), list.items[i + list.index], i + list.index,
+					i + diffReal,
+					list.selectedindex == i + list.index, lastSelectedIndex, list)) {
+				list.selectedindex = i + list.index;
+				selected = list.items[i + list.index];
+			}
+		}
+		if (!drawnLast) {
+			let i = -list.index + list.items.length - 1;
+			if (drawCallback(container, ( i >= 0 && i <= list.num_per_page), list.items[i + list.index], i + list.index,
+					i + diffReal,
+					list.selectedindex == i + list.index, lastSelectedIndex, list)) {
+				list.selectedindex = i + list.index;
+				selected = list.items[i + list.index];
 			}
 		}
 	}

@@ -33,7 +33,7 @@ RestartNeededPL,"Restart required!"
 
 KDVersion,"Version"
 KinkyDungeon,"Kinky Dungeon"
-KDVersionStr,"5.5.0"
+KDVersionStr,"5.5.1"
 KDLogo2,"By Ada18980"
 Intro,"You are an adventurer descending into an ancient underground city of magic."
 Intro2,"Beneath its depths lies the Mistress' Staff, an artifact of untold power."
@@ -1075,7 +1075,7 @@ KinkyDungeonCancel,"Cancel"
 KinkyDungeonFilter,"Filter"
 
 KinkyDungeonLoadModWarning1,"DANGER: Loading a mod will execute ARBITRARY CODE on your machine."
-KinkyDungeonLoadModWarning2,"Like connecting to a server, etc. Only load mods from a TRUSTED source."
+KinkyDungeonLoadModWarning2,"(e.g. connecting to a server and sending data) Only load mods from a TRUSTED source."
 
 KinkyDungeonKeyUp,Up
 KinkyDungeonKeyDown,Down
@@ -2624,6 +2624,8 @@ KinkyDungeonSummonSingleSlimeMold,A mobile cyst emerges from the slime mold nest
 
 NameFactoryDoll,Factory Doll
 KillFactoryDoll,"The doll is subdued."
+NamePrettyDoll,Pretty Doll
+KillPrettyDoll,"The doll is subdued."
 NameFreeDoll,Freed Doll
 KillFreeDoll,"The doll returns to ${Etheir} place."
 
@@ -3305,7 +3307,7 @@ KinkyDungeonNeedCrack,"You glare at the crack in the wall as you realize you cou
 KinkyDungeonNeedGrip,You can't hold your knife like this...
 
 KinkyDungeonStruggleStruggleImpossible,"The TargetRestraint is too secure to struggle out."
-KinkyDungeonStruggleStruggleImpossibleAroused,"You groan in frustration as you realize the TargetRestraint is too tight to escape."
+KinkyDungeonStruggleStruggleImpossibleAroused,"You groan in frustration as you realize the TargetRestraint is too strong to escape."
 KinkyDungeonStruggleStruggleImpossible2,"The TargetRestraint tightens itself as you try to squeeze out!"
 KinkyDungeonStruggleStruggleImpossible3,"You will need someone's help to squeeze out of the TargetRestraint."
 KinkyDungeonStruggleStruggleImpossibleGoddess,"The TargetRestraint flashes magically as the Goddess' curse resists your efforts!"
@@ -4133,6 +4135,15 @@ RestraintKittyCollarDesc2,"Allows fitting of a leash."
 RestraintBasicLeash,Leash
 RestraintBasicLeashDesc,"A leash made from a strong material."
 RestraintBasicLeashDesc2,"Functions as a handle for moving unruly prisoners."
+
+RestraintSpiritbondCollar,Spiritbound Collar
+RestraintSpiritbondCollarDesc,"A collar carved with glyphs that describe a spiritual connection. While you wear it, the collar will drain your willpower, mana, and stamina to empower your spiritbond."
+RestraintSpiritbondCollarDesc2,"It's sealed magically around your neck, and binds you to your spiritbond. The only way to remove it is to take the key from them."
+KDSpiritbondEnd,"The spiritbond collar falls from your neck."
+
+KDSpiritbond_DrainMana,"Your collar drains ${MPAmount} mana to heal your spiritbond!"
+KDSpiritbond_DrainWill,"Your collar drains ${WPAmount} willpower to heal your spiritbond!"
+KDSpiritbond_DrainStamina,"Your collar drains ${SPAmount} stamina to strengthen your spiritbond!"
 
 RestraintPrisonVibe,Prisoner Plug
 RestraintPrisonVibeDesc,"A teaser to keep you occupied."
@@ -5097,13 +5108,17 @@ RestraintMaidMuzzle,Maid Security Gag
 RestraintMaidMuzzleDesc,"A muzzle with a long, mouth-filling plug that muffles speech completely."
 RestraintMaidMuzzleDesc2,"Reinforced and secured with a disc lock to ensure unruly maids don't skip their duty."
 
-RestraintKiguMask,Suspicious Mask
+RestraintKiguMask,Doll Mask (Excited)
 RestraintKiguMaskDesc2,"A well-fitted mask, covering your entire head neatly and locking in place."
 RestraintKiguMaskDesc,"It has eyeholes for you to somewhat see out of, but blocks access to the face."
 
-RestraintKiguMaskSmile,Happy Face
+RestraintKiguMaskSmile,Doll Mask (Smiling)
 RestraintKiguMaskSmileDesc2,"Just put on a happy face and enjoy it."
 RestraintKiguMaskSmileDesc,"It has eyeholes for you to somewhat see out of, but blocks access to the face."
+
+RestraintKiguMaskEmbarrassed,Doll Mask (Nervous)
+RestraintKiguMaskEmbarrassedDesc2,"Don't be shy~"
+RestraintKiguMaskEmbarrassedDesc,"It has eyeholes for you to somewhat see out of, but blocks access to the face."
 
 RestraintLeatherHood,Sensory Hood
 RestraintLeatherHoodDesc2,"A well-fitted hood that covers your head and muffles sounds."
@@ -5951,6 +5966,8 @@ KDEffectTileTooltipLatex,Liquid Latex
 KDEffectTileTooltipLatexDesc,"Engulfs creatures"
 KDEffectTileTooltipLatexThin,Liquid Latex
 KDEffectTileTooltipLatexThinDesc,"Engulfs creatures"
+KDEffectTileTooltipScanning,Scanning Field
+KDEffectTileTooltipScanningDesc,"Detecting disobedience"
 KDEffectTileTooltipLatexBlue,Liquid Latex
 KDEffectTileTooltipLatexBlueDesc,"Engulfs dolls (like you)"
 KDEffectTileTooltipLatexThinBlue,Liquid Latex
@@ -6051,7 +6068,11 @@ KDTileTooltip+,Empty Fixture
 KDTileTooltip=,Filled Fixture
 KDTileTooltipM,Tablet
 KDTileTooltipg,Wall Opening
+KDTileTooltip],Pink Haze
+KDTileTooltip[,Spore Cloud
 KDTileTooltipDescg,Takes an extra turn to enter
+KDTileTooltipDesc],Increases distraction
+KDTileTooltipDesc[,Causes drowsiness
 
 
 
@@ -7683,8 +7704,9 @@ KinkyDungeonTrapLustCloud,"You breathe in the gas, and a wave of pleasure hits y
 KinkyDungeonTrapSPCloud,"You breathe in the gas, and feel lethargic..."
 KinkyDungeonTrapSpikeTrap,"You hear a mechanism trip..."
 
-KinkyDungeonInventory,"Items"
+KinkyDungeonInventory,"Inventory"
 KinkyDungeonReputation,"Rep"
+KinkyDungeonCollection,"Collection"
 KinkyDungeonMagic,"Spells"
 KinkyDungeonMagicSpells,"Learn New Spells"
 KinkyDungeonMagicSpellsQuick,"Click a spell to replace SPELLNAME with."
@@ -7932,6 +7954,12 @@ KinkyDungeonCurseUnlockWill,"Feeling determined, you override the seal and relea
 KinkyDungeonCurseInfoGhostLock,"The lock is protected by a revenant seal. You'll need 25 ectoplasm to disenchant it."
 KinkyDungeonCurseStruggleGhostLock,"Your fingers pass right through the collar. Pity your neck doesn't pass through it."
 KinkyDungeonCurseUnlockGhostLock,"You channel ghastly energy into the lock and break the seal!!!"
+
+
+KinkyDungeonCurseInfoSpiritbondCollar,"The collar marks you as spiritbound. It requires a magic key, and the spiritbond to be absent."
+KinkyDungeonCurseInfoMistressSpiritbondCollar,"The collar marks you as spiritbound. It cannot be removed while your Dominant controls you."
+KinkyDungeonCurseStruggleSpiritbondCollar,"The collar is sealed around your neck. The runes flash a sinister light as you struggle"
+KinkyDungeonCurseUnlockSpiritbondCollar,"You bring the collar close to the magic key and will it to release."
 
 KinkyDungeonCurseInfoDollLock,"It would take many lifetimes to crack the code. You'll have to find another way to break the program..."
 KinkyDungeonCurseStruggleDollLock,"You tug against the straps to no avail."
@@ -8231,6 +8259,7 @@ KDGameData.ConfirmAttack,Are you sure you want to attack?
 KinkyDungeonConfirmStairs,Are you sure you want to go to the next level? (Click self to confirm)
 
 
+KinkyDungeonSelfBondageArmor,You start putting on the the RestraintName.
 KinkyDungeonSelfBondage,You shudder as you apply the RestraintName to yourself...
 KinkyDungeonSelfBondagePlug,"You insert the RestraintName and close your belt's shield over it, with a click as it locks in place."
 KinkyDungeonSelfBondageNipple,"You attack the RestraintName and close your bra's shield over it, with a click as it locks in place."
@@ -9593,7 +9622,7 @@ KinkyDungeonRemindJailPlaySubNurse0,"It's your turn, dear~"
 KinkyDungeonRemindJailPlaySubNurse1,"Looks like I'm the patient now~"
 KinkyDungeonRemindJailPlaySubNurse2,"I've been an unruly nurse..."
 KinkyDungeonRemindJailPlayNurse0,"It's time for your shot..."
-KinkyDungeonRemindJailPlayNurse1,"Why are you out of your cell?"
+KinkyDungeonRemindJailPlayNurse1,"Why are you out of your cell~?"
 KinkyDungeonRemindJailPlayNurse2,"You need my help!"
 KinkyDungeonRemindJailPlayNurseStruggle,"Those are supposed to keep you still you know..."
 KinkyDungeonRemindJailPlayNurseLeash,"You've got an appointment scheduled."
@@ -11992,7 +12021,7 @@ rOfferMithrilYes_Yes,"(The SPEAKER smiles sweetly)|Such a good ${Psub}~|(The RES
 rOfferMithrilYes_No,"(The SPEAKER sagely nods)|As you wish~"
 rOfferMithrilNo,"(The SPEAKER frowns briefly)|I understand~"
 rOfferMithrilForce,"(The SPEAKER leans closer)|Then you can test their escapability!|(The SPEAKER dives towards you!)"
-rOfferMithrilForceYes,"(The SPEAKER shifts her weight back)|I'm afraid I must insist.|(${EThey} ${ETheyThem_is} gripping a RESTRAINT)|(The SPEAKER dives towards you!)"
+rOfferMithrilForceYes,"(The SPEAKER shifts her weight back)|I'm afraid I must insist.|(${EThey} ${Eis} gripping a RESTRAINT)|(The SPEAKER dives towards you!)"
 rOfferMithrilForce_No,"(The SPEAKER rolls past harmlessly)|Oh! So fast~"
 rOfferMithrilForce_Yes,"(The SPEAKER snaps the RESTRAINT on)|There, much better.|Now squirm for me cutie~"
 rOfferMithrilForce_Failure,"(The SPEAKER trips you over)|(Before you can move, the RESTRAINT closes firmly)|Strict, isn't it?~"
@@ -12379,7 +12408,7 @@ rOfferChastityYes,"(The SPEAKER grins)|Wonderful! You see, I've just recently ac
 rOfferChastityYes_Yes,"(The SPEAKER blushes as ${Ethey} lock${Es} the belt around your waist)|I'm enjoying this more than I thought I would~"
 rOfferChastityYes_No,"(The SPEAKER smiles)|Enjoy your freedom while it lasts~"
 rOfferChastityNo,"(The SPEAKER shrugs)|That's okay, just thought I'd ask."
-rOfferChastityForce,"(The SPEAKER rubs the smooth metal seductively)|Are you sure?|Adventurers need to take care of themselves.|You don't want to lose control of yourself and run into some curse,|do you?"
+rOfferChastityForce,"(The SPEAKER rubs the smooth metal seductively)|Are you sure?|Adventurers need to take care of themselves.|You don't want to lose control of yourself and|run into some curse... or do you?"
 rOfferChastityForceYes,"(The SPEAKER gives an evil smile)|What if I wasn't asking?"
 rOfferChastityForce_No,"(The SPEAKER sighs)|I'll find some other cutie to wear it, I guess~"
 rOfferChastityForce_Yes,"(The SPEAKER blushes as ${Ethey} lock${Es} the RESTRAINT onto you)|There we go~"
@@ -13401,24 +13430,24 @@ rGenericAllyFlirt_LeashWalkSub,"(The SPEAKER blushes)|Sure! I'll make sure you d
 rGenericAllyFlirt_LeashWalkBrat,"(The SPEAKER giggles)|Time for walkies!"
 rGenericAllyFlirt_LeashWalkRobot,"(The SPEAKER calculates)|Routing coordinates..."
 
-dGenericAllyHelpMe,"(Ask her for help)"
-dGenericAllyHelpMe_Confirm,"(Ask her for help)"
+dGenericAllyHelpMe,"(Ask ${Ethem} for help)"
+dGenericAllyHelpMe_Confirm,"(Ask ${Ethem} for help)"
 dGenericAllyHelpMe_Leave,"(Never mind...)"
-rGenericAllyHelpMe,"(Are you sure? She might see you as being submissive)"
+rGenericAllyHelpMe,"(Are you sure? ${EThey} might see you as being submissive)"
 rGenericAllyHelpMe_Fail,"(The SPEAKER prefers you the way you are)"
 rGenericAllyHelpMe_Confirm,"(The SPEAKER will help you out of your restraints)"
 rGenericAllyHelpMe_Leave,"(You decide to deal with your problems yourself.)"
-dGenericAllyHelpMeCommandWord,"(Plead with her to unlock you with a Command Word)"
+dGenericAllyHelpMeCommandWord,"(Plead with ${Ethem} to unlock you with a Command Word)"
 dGenericAllyHelpMeCommandWord_Confirm,"(Yes!)"
 dGenericAllyHelpMeCommandWord_Leave,"(Never mind...)"
-rGenericAllyHelpMeCommandWord,"(Are you sure? She might see you as being submissive)"
-rGenericAllyHelpMeCommandWord_Fail,"(The SPEAKER would rather 'conserve her mana')"
+rGenericAllyHelpMeCommandWord,"(Are you sure? ${EThey} might see you as being submissive)"
+rGenericAllyHelpMeCommandWord_Fail,"(The SPEAKER would rather 'conserve ${Ethem} mana')"
 rGenericAllyHelpMeCommandWord_Confirm,"(The SPEAKER utters a command word on you)"
 rGenericAllyHelpMeCommandWord_Leave,"(Your magical locks continue to restrain you.)"
-dGenericAllyHelpMeKey,"(Plead with her to unlock your restraints)"
+dGenericAllyHelpMeKey,"(Plead with ${Ethem} to unlock your restraints)"
 dGenericAllyHelpMeKey_Confirm,"(Yes!)"
 dGenericAllyHelpMeKey_Leave,"(Never mind...)"
-rGenericAllyHelpMeKey,"(Are you sure? She might see you as being submissive)"
+rGenericAllyHelpMeKey,"(Are you sure? ${EThey} might see you as being submissive)"
 rGenericAllyHelpMeKey_Fail,"(The SPEAKER would rather not give up a magic key)"
 rGenericAllyHelpMeKey_NoKey,"(The SPEAKER doesn't have any keys)"
 rGenericAllyHelpMeKey_Confirm,"(The SPEAKER giggles and gives you a key)"
@@ -13428,25 +13457,27 @@ rGenericAllyDontHelpMe,"(Confirm? You will have to ask again to get help.)"
 dGenericAllyDontHelpMe_Confirm,"(Stop receiving help)"
 dGenericAllyDontHelpMe_Leave,"(Never mind...)"
 rGenericAllyDontHelpMe_Confirm,"(The SPEAKER will no longer help you.)"
-rGenericAllyDontHelpMe_Leave,"(You sigh as you realize you really need her help.)"
-dGenericAllyRemoveParty,"(Kick her out of your party)"
-rGenericAllyRemoveParty,"(Confirm? She will stop following you)"
+rGenericAllyDontHelpMe_Leave,"(You sigh as you realize you really need ${Etheir} help.)"
+dGenericAllyRemoveParty,"(Kick ${Ethem} out of your party)"
+rGenericAllyRemoveParty,"(Confirm? ${EThey} will stop following you)"
 dGenericAllyRemoveParty_Confirm,"(Remove from party)"
 dGenericAllyRemoveParty_Leave,"(Never mind...)"
 rGenericAllyRemoveParty_Confirm,"(The SPEAKER understands.)"
-rGenericAllyRemoveParty_Leave,"(You decide to keep her.)"
-dGenericAllyJoinParty,"(Add her to your party)"
-rGenericAllyJoinParty,"(Confirm? She will follow you across floors. You can only have 3 party members)"
+rGenericAllyRemoveParty_Leave,"(You decide to keep ${Ethem}.)"
+dGenericAllyJoinParty,"(Add ${Ethem} to your party)"
+rGenericAllyJoinParty,"(Confirm? ${EThey} will follow you across floors. You can only have 3 party members)"
 dGenericAllyJoinParty_Confirm,"(Add to party)"
 dGenericAllyJoinParty_Leave,"(Never mind...)"
 rGenericAllyJoinParty_Confirm,"(The SPEAKER is happy to join you)"
 rGenericAllyJoinParty_Leave,"(You decide not to.)"
 
+KDGenericCantRemoveParty,(Cannot remove party member)
+
 dGenericAllyShop,"(Sell items)"
 dGenericAllyShopBuy,"(Buy items)"
 
-dGenericAllyLeash,"(Pick up her leash)"
-dGenericAllyReleaseLeash,"(Release her leash)"
+dGenericAllyLeash,"(Pick up ${Etheir} leash)"
+dGenericAllyReleaseLeash,"(Release ${Etheir} leash)"
 
 NameDollmakerBoss1,"Dollmaker"
 KillDollmakerBoss1,"The Dollmaker throws a device to the ground, teleporting her instantly!"
@@ -14139,7 +14170,7 @@ KDDialogueRemoteLinkTether,What's this do?
 KDDialogueRemoteLinkTetherNevermere,"That harness you're wearing is quite convenient for me~"
 KDDialogueRemoteLinkTetherAncientRobot,Initiating prisoner lockdown protocol
 KDMsgRemoteLinkCuffs,Your RestraintName suddenly snap together as the EnemyName activates them!
-KDMsgRemoteLinkCHTether,Your harness projects energy tethers between your cuffs EnemyName activates it!
+KDMsgRemoteLinkCHTether,Your harness projects energy tethers between your cuffs as EnemyName activates it!
 
 TurnCounter,"Turn Count: "
 
@@ -14803,15 +14834,24 @@ l_Earrings_EarringsBack,EarringsBack
 m_BunnyEars,Latex Bunny Ears
 l_BunnyEars_Ears,Ears
 l_BunnyEars_InnerEars,EarsInner
-m_KittyEars,Catgirl Ears
-l_KittyEars_Ears,Kitty
-l_KittyEars_InnerEars,KittyInner
-m_WolfEars,WolfE ars
-l_WolfEars_Ears,Wolf
-l_WolfEars_InnerEars,WolfInner
-m_FoxEars,Fox Ears
-l_FoxEars_Ears,Fox
-l_FoxEars_InnerEars,FoxInner
+m_Kitty_Ears,Cat Ears
+l_Kitty_Ears_Ears,Kitty
+l_Kitty_Ears_InnerEars,KittyInner
+m_KittyEars,Catgirl Ears (Same Color)
+l_KittyEars_Ears,Ears
+l_KittyEars_InnerEars,Inner
+m_Wolf_Ears,Wolf Ears
+l_Wolf_Ears_Ears,Wolf
+l_Wolf_Ears_InnerEars,WolfInner
+m_WolfEars,Wolfgirl Ears (Same Color)
+l_WolfEars_Ears,Ears
+l_WolfEars_InnerEars,Inner
+m_Fox_Ears,Fox Ears
+l_Fox_Ears_Ears,Fox
+l_Fox_Ears_InnerEars,FoxInner
+m_FoxEars,Foxgirl Ears (Same Color)
+l_FoxEars_Ears,Ears
+l_FoxEars_InnerEars,Inner
 c_WolfTail,Tail
 c_FoxTail,Fox Tails
 c_KittyTail,Cat Tails
@@ -27085,6 +27125,50 @@ m_FashionHighSecCuffsThigh_l_Cuff,Cuff
 m_FashionHighSecCuffsThigh_l_Band,Band
 m_FashionHighSecCuffsThigh_l_Hardware,Hardware
 m_FashionHighSecCuffsThigh_l_ThighLink,ThighLink
+m_DollArmRight_l_RightArm,RightArm
+m_DollArmRight_l_RightArm,RightArm
+m_DollArmRight_l_RightArm,RightArm
+m_DollArmRight_l_RightArm,RightArm
+m_DollArmRight_l_RightArm,RightArm
+m_DollArmLeft_l_LeftArm,LeftArm
+m_DollArmLeft_l_LeftArm,LeftArm
+m_DollArmLeft_l_LeftArm,LeftArm
+m_DollArmLeft_l_LeftArm,LeftArm
+m_DollArmLeft_l_LeftArm,LeftArm
+m_Kitty_Ears_l_EarR,EarR
+m_Kitty_Ears_l_InnerEarR,InnerEarR
+m_Kitty_Ears_l_EarL,EarL
+m_Kitty_Ears_l_InnerEarL,InnerEarL
+m_Wolf_Ears_l_EarR,EarR
+m_Wolf_Ears_l_InnerEarL,InnerEarL
+m_Wolf_Ears_l_EarR,EarR
+m_Wolf_Ears_l_InnerEarR,InnerEarR
+m_Fox_Ears_l_EarR,EarR
+m_Fox_Ears_l_InnerEarR,InnerEarR
+m_Fox_Ears_l_EarL,EarL
+m_Fox_Ears_l_InnerEarL,InnerEarL
+m_KiguMaskEmbarrassed,KiguMaskEmbarrassed
+m_KiguMaskEmbarrassed_l_Head,Head
+m_KiguMaskEmbarrassed_l_Eyes,Eyes
+m_KiguMaskEmbarrassed_l_Eyes2,Eyes2
+m_KiguMaskEmbarrassed_l_Lock,Lock
+m_KiguMaskEmbarrassed_l_EyesWhites,EyesWhites
+m_KiguMaskEmbarrassed_l_MouthEmbarrassed,MouthEmbarrassed
+m_KiguMaskEmbarrassed_l_BlushMedium,BlushMedium
+m_FashionKiguMaskEmbarrassed,FashionKiguMaskEmbarrassed
+m_FashionKiguMaskEmbarrassed_l_Head,Head
+m_FashionKiguMaskEmbarrassed_l_Eyes,Eyes
+m_FashionKiguMaskEmbarrassed_l_Eyes2,Eyes2
+m_FashionKiguMaskEmbarrassed_l_Lock,Lock
+m_FashionKiguMaskEmbarrassed_l_EyesWhites,EyesWhites
+m_FashionKiguMaskEmbarrassed_l_MouthEmbarrassed,MouthEmbarrassed
+m_FashionKiguMaskEmbarrassed_l_BlushMedium,BlushMedium
+m_SpiritbondCollar,SpiritbondCollar
+m_SpiritbondCollar_l_BaseMetal,BaseMetal
+m_SpiritbondCollar_l_Runes,Runes
+m_FashionSpiritbondCollar,FashionSpiritbondCollar
+m_FashionSpiritbondCollar_l_BaseMetal,BaseMetal
+m_FashionSpiritbondCollar_l_Runes,Runes
 
 
 m_ShockModule_l_Display,Display
@@ -28577,6 +28661,13 @@ LootChestAncientCoreSingle,"You find a golden crystal. It glows faintly."
 LootChestAncientCoreSingleSpent,"You find a dull, gold-tinted crystal."
 
 KDQuickLoadoutSave,"Save Loadout"
+KDQuickLoadoutWeapon_0,"Primary: "
+KDQuickLoadoutWeapon_1,"Slot 1: "
+KDQuickLoadoutWeapon_2,"Slot 2: "
+KDQuickLoadoutWeapon_3,"Slot 3: "
+KDQuickLoadoutWeapon_4,"Slot 4: "
+KDQuickLoadoutWeapon_5,"Offhand: "
+KDQuickLoadoutWeapon_6,"Last Offhand: "
 
 KinkyDungeonInventoryItemDildoBat,Rubber Stick
 KinkyDungeonInventoryItemDildoBatDesc,"A rubber cylinder without any lewd intentions whatsoever."
@@ -28808,9 +28899,9 @@ KDInventoryActionRemoveCurseOrHex,"Purify"
 
 
 KDBondageFailNoTarget,You need to target an NPC
-KDBondageFailInvalidTarget,Target must be bindable and disabled.
+KDBondageFailInvalidTarget,"Must be disabled, or vulnerable and <50% hp"
 KDBondageTarget,Target acquired!
-KinkyDungeonSpellBondage,"Truss em up!"
+KinkyDungeonSpellBondage,"Bind"
 KinkyDungeonSpellTargetBondage,"Choose target to bind"
 KinkyDungeonSpellCastBondage,"Target Acquired!"
 KinkyDungeonSpellDescriptionBondage,"Designates the target for bondage and allows you to apply items from the inventory. Can only be applied to entities that are willing or disabled. Some items require higher levels of incapacitation to be applied"
@@ -29130,6 +29221,7 @@ KDWeaponTagD_damage,"Damage Type: "
 KinkyDungeonSpellOffhand,"Dual Wield"
 KinkyDungeonSpellDescriptionOffhand,"Designate an Offhand weapon to gain passive effects such as a light source, armor, or extra crit damage.|Rogues cannot wield heavy or massive weapons in the offhand unless they are multiclass.|Wizards can only wield magic weapons in the offhand unless they are multiclass, and receive +1 slow level if they wield a 2-handed, heavy, or massive magical weapon in the offhand."
 
+KDInventoryActionUse,"Use"
 KDInventoryActionOffhand,"Equip Offhand"
 KDInventoryActionRemoveOffhand,"Remove Offhand"
 
@@ -29443,9 +29535,11 @@ KinkyDungeonSpellsPageCommand,"Command"
 KinkyDungeonSpellsPageClass,"Unique"
 
 KDInventoryActionRemoveMagicLock,Magic Unlock
+KDInventoryActionOffhand,Dual Wield
+KDInventoryActionRemoveOffhand,Cancel Dual Wield
 
-KDQuickLoadout_Weapon,Include Weapons
-KDQuickLoadout_Merge,Merge Armor
+KDQuickLoadout_Weapon,Include\nWeapons
+KDQuickLoadout_Merge,Merge\nArmor
 
 KDNeedDiscPick,You need a special tool to pick this kind of lock.
 
@@ -29563,7 +29657,7 @@ rTutorialContinue_Continue_Continue_Continue_Continue_Continue_Continue_Continue
 KDNavGame,Game
 KDNavQuit,Menu
 
-
+KDInvFilterLimt,search...
 KDInvFilter,Search ITMNS:
 KDInvFilterQ,Search Items:
 KDMagicFilter,Search Spells:
@@ -30147,6 +30241,8 @@ KillDirtPile,You clear out the dirt pile
 KDDirtPileSurprise,A ENMY was lurking inside the dirt pile!
 KDNotEnoughDirtPiles,"You skipped your duty and left some dirt missing in the last level!"
 
+KDQuest_Mistress,"You are currently referring to ${EName} as your ${EHonorinti}."
+KDQuest_MistressFail,"..."
 KDQuest_EscapedDoll,"The Dollmaker does not take no for an answer."
 KDQuest_FuukaPet,"Fuuka's shrine maidens would like to have a word with you."
 KDQuest_Nawashi,"Your instructor will meet with you at regular intervals for further training."
@@ -30450,7 +30546,7 @@ KDBalanceGettingUp,"Getting up in AMNT turns..."
 KDBalance,"Balance: AMNT%"
 KDBalanceNoSprint,"Balance: AMNT% (Sprinting Disabled!!!)"
 KDTrip,You lose your balance and fall over!!!
-KDBalanceTraining,Training Level: AMNT
+KDBalanceTraining,Heels Training: AMNT
 
 KDInventoryActionUse,Use One
 KDInventoryActionEquip,Equip
@@ -31857,6 +31953,7 @@ KDPropField_DisplaceAmount,Displace Amount
 KDPropField_EraseAmount,Erase Amount
 KDPropField_NoLoss,NoLoss
 KDPropField_HideRestraintsTags,HideRestraintsTags
+KDPropField_UnderwearType,Bra/Panty/Sock/None
 
 KDPropField_HideRestraintTags,HideRestraintTags
 
@@ -31920,6 +32017,7 @@ KDDialogue_StepAsideBrat,"You're in my way!"
 KDDialogue_StepAsideSub,"${PHonor}, you're blocking me..."
 KDDialogue_StepAsideDom,"Step aside~"
 KDDialogue_StepAsideRobot,"Path blocked by citizen."
+KDDialogue_StepAsideVoyeur,"Please step aside~"
 KDDialogue_StepAsideGagged,"*Bumps into you*"
 
 
@@ -32182,7 +32280,7 @@ KDBondageFailNoSelect,You can use the quick inventory to bind yourself or others
 KDBondageFailError,Error. Please screenshot and report.
 KDBondageFailCantAdd,"You can't wear that item, regrettably."
 
-KDBondageCondition_HeavyBondage,Must be stunned 3+ turns or fully bound
+KDBondageCondition_HeavyBondage,"Must be stunned 2+ turns, or fully bound"
 KDBondageCondition_Extra,Does not meet conditions
 KDBondageCondition_MissingNPC,Error: Missing NPC (report to Ada!)
 KDBondageCondition_MissingTag1,Requires additional items to equip
@@ -32346,6 +32444,9 @@ KDBindType_Slime,Slime
 KDBindType_Tape,Tape
 KDBindType_Vine,Vine
 KDBindType_Ice,Ice
+KDBindType_Dress,Dress
+KDBindType_Cloth,Cloth
+KDBindType_Ribbons,Magic Ribbons
 KDBindType_Furniture,Furniture
 
 KDSaving,Saving...
@@ -32364,22 +32465,23 @@ KDContainerBack_Facilities,Back to Facilities
 KDContainerBack_Game,Back to Game
 KDContainerBack_Restart,Back to Menu
 
+KDContainerFilters," <- Filters -> "
 KDContainerType_Self,Your Inventory
 KDContainerType_Chest,Chest
 KDContainerType_,Chest
 KDContainerType_WardenChest,Warden's Storage
 KDContainerType_PlayerChest,Automated Storage Network
 
-KDAdd1,Store 1 ITMN
-KDTake1,Take 1 ITMN
-KDAdd5,Store 5 ITMN
-KDTake5,Take 5 ITMN
-KDAddAll,Store ALL ITMN
-KDTakeAll,Take ALL ITMN
-KDAddAll1,Store ALL-1 ITMN
-KDTakeAll1,Take ALL-1 ITMN
-KDAddAllExcess,Store Excess ITMN
-KDRefill,Refill ITMN
+KDAdd1,Store 1\nITMN
+KDTake1,Take 1\nITMN
+KDAdd5,Store 5\nITMN
+KDTake5,Take 5\nITMN
+KDAddAll,Store ALL\nITMN
+KDTakeAll,Take ALL\nITMN
+KDAddAll1,Store ALL-1\nITMN
+KDTakeAll1,Take ALL-1\nITMN
+KDAddAllExcess,Store Excess\nITMN
+KDRefill,Refill\nITMN
 KDMaxNum,(Max: ${Num})
 KDMaxNumMinimal,(max ${Num})
 KDTakeEverything,Take Everything
@@ -32801,6 +32903,7 @@ KinkyDungeonSpellOneBarMissile,One Bar Missile
 KDTut_RestraintContext,Right click on a restraint's name to open a context menu.
 KDTut_RestraintContext2,There is also an option in HUD settings to replace the small buttons with a context menu.
 
+KDTut_Mistress,"Your character now has a dominant. You can end this relation in Journal -> Quests"
 KDTut_Taunt,"You've been taunted, leaving the angry zone will stun you!"
 KDTut_TauntFail,"You moved out of the taunt zone, and are now punished!"
 rTauntFail,"The warrior's taunt effect forces you to stay in a certain area.|If you move out of the area, you are stunned,|as you have just been."
@@ -33161,6 +33264,8 @@ KDWToolsLayerAbbrText,"Layer Text: "
 
 KDContextMenu_None,No Actions Available
 KDContextMenu_Interact,Interact
+KDContextMenu_CloseDoor,Close Door
+KDContextMenu_OpenDoor,Open Door
 KDContextMenu_Chest,Open Container
 KDContextMenu_Talk,Talk
 KDContextMenu_MoveTo,Move To
@@ -33721,6 +33826,7 @@ KDHypno_Doll_6,Polite doll.
 KDHypno_Doll_7,Beautiful doll.
 KDHypno_Doll_8,Graceful doll.
 KDHypno_Doll_9,Elegant doll.
+KDHypno_Doll_10,Perfect doll.
 
 KDHypno_Doll_Still,Be still...
 KDHypno_Doll_Silent,A quiet doll...
@@ -33865,3 +33971,238 @@ KinkyDungeonStatKnockedDown,On the ground! Bondage Resist reduced by 50%
 KinkyDungeonStatLowBalance,Your balance is low! Consider standing in place to restore it.
 
 KDToggleShowDefensiveStats,Always show defense in buff bar
+
+KinkyDungeonBuffSleepy,Sleepy...
+KinkyDungeonBuffPoisonBreath,Toxic spores are making it difficult to move
+
+KDMissingEnemyType,An NPC in your collection was missing an enemy type and has been removed
+
+KDScanning,SCANNING
+
+KDCantBuyPrison,Unavailable while you are a prisoner.
+
+KDMouseHole,It's a little hole in the wall where a mouse lives. Perhaps you could drop an item here.
+KDMouseHoleSuccess,The mouse takes your item and brings something interesting!
+KDMouseHoleFail,"The mouse steals your item and runs back into the hole."
+
+rDollShoppeVisitor,"(The SPEAKER looks at you)|Well if it isn't another lovely doll~"
+rDollShoppeVisitorVoyeur,"(The SPEAKER walks along from doll to doll,|${Etheir} eye${Es} hanging over you with a smug gaze)"
+rDollShoppeVisitorDom,"(The SPEAKER visits the doll shoppe, ${Etheir} eye${Es}|lingering on you in their search for the perfect doll)"
+rDollShoppeVisitorSub,"(The SPEAKER stops near you, looking at you|with deep interest and a blush on ${Etheir} face)"
+rDollShoppeVisitorBrat,"(The SPEAKER glances at you,|${Etheir} head giving a little tilt as ${Ethey} flash${Ees} a smile)|Why hello, doll."
+rDollShoppeVisitorRobot,"(The SPEAKER stops and scans you)"
+
+rDollShoppeVisitorBuyout,"(The SPEAKER eyes you with great interest)|You're quite the interesting one.|I think I'll keep you~"
+rDollShoppeVisitorBuyoutDom,"(The SPEAKER eyes you with great interest)|I've decided to take you as my own.|You will be a good ${Psub} and obay, right?"
+rDollShoppeVisitorBuyoutBrat,"(The SPEAKER eyes you with great interest)|I think I'll take you for myself.|Ready to be collared?|(${EThey} smirk${Es} at you)"
+rDollShoppeVisitorBuyoutVoyeur,"(The SPEAKER smiles at you)|An excellent item.|It's too bad I'm not in the market for one..."
+rDollShoppeVisitorBuyoutSub,"(The SPEAKER bows politely)|You're a good ${Psub}.|Hopefully you find someone... nice~"
+rDollShoppeVisitorBuyoutRobot,"(The SPEAKER beeps)|Please continue good behavior."
+
+rDollShoppeVisitorBeBought_Continue,"(A SPEAKER appears to facilitate)|I'm glad you've taken a liking to one of our dolls.|I'm sure ${Pthey} will make an excellent addition to your party."
+rDollShoppeVisitorBeBought_Continue_Continue,"(The SPEAKER locks a collar on you.|It glows with magical runes, flashing brightly as|the SPEAKER holds a jeweled key to ${Ethem}self.|You feel ${Etheir} energy flow into you, and yours into ${Ethem})"
+rDollShoppeVisitorBuyout_ContinueFail,"(The SPEAKER tries to lock a collar on you,|but ${Ethey} frown${Es} with a sour expression on ${Etheir} face)|Looks like someone already owns you.|Be a good ${Pdim} and tell them I said hello, okay?"
+
+dAcceptMistress,(Accept ${Ethem} as your ${EHonorinti})
+dRejectMistress,"(Continue normally)"
+dNeutralMistress,"(...)"
+
+dDollShoppeVisitor_BeCute,(Be cute and presentable)
+dDollShoppeVisitor_BeStill,(Be a still doll)
+dDollShoppeVisitor_BeBrat,(Ignore ${Ethem} and try to look away)
+dDollShoppeVisitor_BeAngry,(Struggle uselessly against your bindings)
+dDollShoppeVisitor_BeBought,(Be enticing)
+dDollShoppeVisitor_Attack,(Lash out at ${Ethem}) (Will aggro)
+dDollShoppeVisitorAttack_Confirm,(You have to try!)
+dDollShoppeVisitorAttack_GiveUp,(Reconsider)
+
+rDollShoppeVisitorBeCute_Success,"(The SPEAKER gushes over how adorable you are)|Oh gods, ${Ptheyre} so cute!|Looks like I've come to the right place~"
+rDollShoppeVisitorBeCute_SuccessLate,"(The SPEAKER chuckles)|There we go, that's better. Good girl~"
+rDollShoppeVisitorBeCute_Fail,"(The SPEAKER smiles)|Not quite my type. But cute."
+rDollShoppeVisitorBeCute_FailLate,"(The SPEAKER shakes ${Etheir} head)|I'll have a look at the other dolls."
+
+rDollShoppeVisitorBeStill_Success,"(The SPEAKER gives an approving nod)|A lovely, still, doll. Excellent."
+rDollShoppeVisitorBeStill_SuccessLate,"(The SPEAKER cants ${Etheir} head and smiles)|There we go. A proper doll should be still."
+rDollShoppeVisitorBeStill_Fail,"(The SPEAKER shakes ${Etheir} head|I prefer a little more... personality."
+rDollShoppeVisitorBeStill_FailLate,"(The SPEAKER tilts ${Etheir} head)|Interesting."
+
+rDollShoppeVisitorBeBrat_Success,"(The SPEAKER smirks)|How lovely it will be to break you in, ${Pdim}."
+rDollShoppeVisitorBeBrat_SuccessLate,"(The SPEAKER smiles)|That's better. Show some spirit!"
+rDollShoppeVisitorBeBrat_Fail,"(The SPEAKER shakes ${Etheir} head)|I see this one needs breaking in."
+rDollShoppeVisitorBeBrat_FailLate,"(The SPEAKER chuckles)|A bit shy, aren't you?"
+
+rDollShoppeVisitorBeAngry_Success,"(The SPEAKER flashes an evil grin)|That's right ${Pdim}. Keep struggling. There's no escape."
+rDollShoppeVisitorBeAngry_SuccessLate,"(The SPEAKER grins)|Relax, ${Pdim}, you're not going anywhere. Just give in~"
+rDollShoppeVisitorBeAngry_Fail,"(The SPEAKER shakes ${Etheir} head)|That's not how a doll should be."
+rDollShoppeVisitorBeAngry_FailLate,"(The SPEAKER laughs)|A feisty one. Cute."
+
+
+
+rDollShoppeVisitorBeCute_SuccessVoyeur,"(The SPEAKER watches you for a while, forming a pleasant expression on ${Etheir} face)|What have we here? Quite the pretty one."
+rDollShoppeVisitorBeCute_SuccessLateVoyeur,"(The SPEAKER's expression slowly forms a smile)"
+rDollShoppeVisitorBeCute_FailVoyeur,"(The SPEAKER yawns, and then smiles)"
+rDollShoppeVisitorBeCute_FailLateVoyeur,"(The SPEAKER watches you and pats you on the head)"
+
+rDollShoppeVisitorBeStill_SuccessVoyeur,"(The SPEAKER watches you for a long, long, time. A smile forms on ${Etheir} satisfied face)|A great time to go window shopping, I see~"
+rDollShoppeVisitorBeStill_SuccessLateVoyeur,"(The SPEAKER's expression slowly forms a smile)"
+rDollShoppeVisitorBeStill_FailVoyeur,"(The SPEAKER watches you for a bit, expecting you to do something.)|(${EThey} lose${Es} interest after a while)"
+rDollShoppeVisitorBeStill_FailLateVoyeur,"(The SPEAKER watches you, tilting ${Etheir} head.)"
+
+rDollShoppeVisitorBeBrat_SuccessVoyeur,"(The SPEAKER giggles to ${Ethem}self)|A blushy one. I quite enjoy watching cuties like you."
+rDollShoppeVisitorBeBrat_SuccessLateVoyeur,"(The SPEAKER flashes a smug grin before moving on)"
+rDollShoppeVisitorBeBrat_FailVoyeur,"(The SPEAKER smiles, and shrugs)"
+rDollShoppeVisitorBeBrat_FailLateVoyeur,"(The SPEAKER watches you intently)"
+
+rDollShoppeVisitorBeAngry_SuccessVoyeur,"(The SPEAKER watches you struggle with great amusement)|Keep struggling, dear, you'll get there eventually!|Or perhaps not, but it's fun to see you try~"
+rDollShoppeVisitorBeAngry_SuccessLateVoyeur,"(The SPEAKER watches you struggle with great amusement)"
+rDollShoppeVisitorBeAngry_FailVoyeur,"(The SPEAKER yawns as you struggle)"
+rDollShoppeVisitorBeAngry_FailLateVoyeur,"(The SPEAKER watches you with a slight grin)"
+
+
+
+
+
+rDollShoppeVisitorBeCute_SuccessDom,"(The SPEAKER moves closer and holds your chin)|Absolutely adorable. I like you~"
+rDollShoppeVisitorBeCute_SuccessLateDom,"(The SPEAKER steps closer and corrects your posture to look even cuter)|Much better!"
+rDollShoppeVisitorBeCute_FailDom,"(The SPEAKER holds a finger to ${Etheir} chin, inspecting you closely)|Very cute... but not quite what I'm looking for."
+rDollShoppeVisitorBeCute_FailLateDom,"(The SPEAKER tilts ${Etheir} head and smiles)|Cute."
+
+rDollShoppeVisitorBeStill_SuccessDom,"(The SPEAKER inspects your pose carefully and nods with approval)|Very good. An ideal doll."
+rDollShoppeVisitorBeStill_SuccessLateDom,"(The SPEAKER watches you with a smile)|Good."
+rDollShoppeVisitorBeStill_FailDom,"(The SPEAKER seems interested in your restraints)|You should struggle, ${Pdim}. It'd be nice to see you squirm."
+rDollShoppeVisitorBeStill_FailLateDom,"(The SPEAKER holds your chin and runs a hand along your body, smiling)"
+
+rDollShoppeVisitorBeBrat_SuccessDom,"(The SPEAKER reaches over and grabs you by the forehead)|Look at me, ${Pdim}. Brats like you should be broken in, made to squirm,|until you know. Your. Place."
+rDollShoppeVisitorBeBrat_SuccessDomBlind,"(The SPEAKER reaches over and grabs you by the forehead)|${Pdim}, you should pay more attention.|You know, brats like you ought to be taught a lesson~"
+rDollShoppeVisitorBeBrat_SuccessLateDom,"(The SPEAKER smirks)|That's cute.|If I had the time, I'd train you myself, but ahh~"
+rDollShoppeVisitorBeBrat_FailDom,"(The SPEAKER sighs)|A brat who doesn't know her place.|I'm sure you'll find someone to train you soon enough."
+rDollShoppeVisitorBeBrat_FailLateDom,"(The SPEAKER smiles)|A brat who doesn't know her place."
+
+rDollShoppeVisitorBeAngry_SuccessDom,"(The SPEAKER smiles warmly)|A ${Psub} like you belongs in restrains.|Strictly tied.|Unable to move an inch."
+rDollShoppeVisitorBeAngry_SuccessLateDom,"(The SPEAKER chuckles)|No point in struggling, ${Psub}.|Just give in, won't you~?"
+rDollShoppeVisitorBeAngry_FailDom,"(The SPEAKER smirks)|Let's check your restraints... Making sure they're nice and tight."
+rDollShoppeVisitorBeAngry_FailLateDom,"(The SPEAKER chuckles)|It is a good thing you are restrained."
+
+
+
+
+
+rDollShoppeVisitorBeCute_SuccessSub,"(The SPEAKER smiles and blushes)|Cute ${Psub}."
+rDollShoppeVisitorBeCute_SuccessLateSub,"(The SPEAKER pats your head as ${Ethey} pass${Ees} by)"
+rDollShoppeVisitorBeCute_FailSub,"(The SPEAKER smiles)|Your motivation is admirable but you have much to learn~"
+rDollShoppeVisitorBeCute_FailLateSub,(The SPEAKER smiles and shrugs)
+
+rDollShoppeVisitorBeStill_SuccessSub,"(The SPEAKER nods in approval)|You make a very good doll, ${Psub}."
+rDollShoppeVisitorBeStill_SuccessLateSub,"(The SPEAKER gives a little giggle as ${Ethey} pass${Ees} by)"
+rDollShoppeVisitorBeStill_FailSub,"(The SPEAKER nods once)|I admire your dedication~"
+rDollShoppeVisitorBeStill_FailLateSub,(The SPEAKER smiles at your dedication to being a doll on display)
+
+rDollShoppeVisitorBeBrat_SuccessSub,"(The SPEAKER looks curious)|Oh? You look like a ${Pdim} who needs some training..."
+rDollShoppeVisitorBeBrat_SuccessLateSub,"(The SPEAKER smiles)|Needs training... hehe~"
+rDollShoppeVisitorBeBrat_FailSub,"(The SPEAKER crosses ${Etheir} arms)|Be a good ${Pdim} and show some respect."
+rDollShoppeVisitorBeBrat_FailLateSub,"(The SPEAKER giggles and shrugs)"
+
+rDollShoppeVisitorBeAngry_SuccessSub,"(The SPEAKER looks curious)|Oh? You look like a ${Pdim} who needs some training..."
+rDollShoppeVisitorBeAngry_SuccessLateSub,"(The SPEAKER smiles)|Needs training... hehe~"
+rDollShoppeVisitorBeAngry_FailSub,"(The SPEAKER crosses ${Etheir} arms)|Be a good ${Pdim} and behave."
+rDollShoppeVisitorBeAngry_FailLateSub,"(The SPEAKER smiles and shrugs)"
+
+
+
+
+
+rDollShoppeVisitorBeCute_SuccessBrat,"(The SPEAKER grabs your head and leans in, a wide smile growing on ${Etheir} face)|SO CUTE!|(${EThey} give${Es} you headpats repeatedly)"
+rDollShoppeVisitorBeCute_SuccessLateBrat,"(The SPEAKER pats you on the head)|Adorable. Be good, okay?"
+rDollShoppeVisitorBeCute_FailBrat,"(The SPEAKER giggles)|Cute, but not quite my style~"
+rDollShoppeVisitorBeCute_FailLateBrat,"(The SPEAKER smiles)|Cute."
+
+rDollShoppeVisitorBeStill_SuccessBrat,"(The SPEAKER reaches out almost to touch your chest,|${Etheir} hand hovering just above your still body)|Good doll~"
+rDollShoppeVisitorBeStill_SuccessLateBrat,"(The SPEAKER smiles)|Good, still, doll."
+rDollShoppeVisitorBeStill_FailBrat,"(The SPEAKER hums)|The pose could use some work..."
+rDollShoppeVisitorBeStill_FailLateBrat,"(The SPEAKER chuckles)|Being on display is getting to your head, eh?"
+
+rDollShoppeVisitorBeBrat_SuccessBrat,"(The SPEAKER grabs your chin and points your head toward ${Ethem})|I think I'd enjoy showing you your place..."
+rDollShoppeVisitorBeBrat_SuccessLateBrat,"(The SPEAKER folds ${Etheir} arms and smiles)|I like your spirit."
+rDollShoppeVisitorBeBrat_FailBrat,"(The SPEAKER tilts ${Etheir} head)|Do you think this will get you anywhere?|(${EThey} smile and hold up your chin)"
+rDollShoppeVisitorBeBrat_FailLateBrat,"(The SPEAKER smiles)|Better start begging~"
+
+rDollShoppeVisitorBeAngry_SuccessBrat,"(The SPEAKER grabs your shoulder to stop you moving)|Oh, cutie, you won't be going anywhere.|Except perhaps with me, hehe~"
+rDollShoppeVisitorBeAngry_SuccessLateBrat,"(The SPEAKER chuckles)|Cute. Keep trying, ${Pdim}.|I'm sure you'll get out if you try hard enough... heh~"
+rDollShoppeVisitorBeAngry_FailBrat,"(The SPEAKER laughts)|You won't be going anywhere with that attitude~"
+rDollShoppeVisitorBeAngry_FailLateBrat,"(The SPEAKER giggles)|You're not going anywhere~"
+
+
+
+
+rDollShoppeVisitorBeCute_SuccessRobot,"(The SPEAKER makes a beep of approval)|Cute behavior has been noted, logged, and approved.|Good girl."
+rDollShoppeVisitorBeCute_SuccessLateRobot,"(The SPEAKER pauses)|Subject cuteness within expected bounds.|Good girl."
+rDollShoppeVisitorBeCute_FailRobot,"(The SPEAKER makes a loud noise resembling an error message)|Subject does not conform to expected standards.|Suggest corrective training."
+rDollShoppeVisitorBeCute_FailLateRobot,"(The SPEAKER pauses)|Subject continues to defy protocol."
+
+rDollShoppeVisitorBeBrat_SuccessRobot,"(The SPEAKER makes a beep of approval)|Behavior has been noted, logged, and found to be within acceptable bounds.|Good girl."
+rDollShoppeVisitorBeBrat_SuccessLateRobot,"(The SPEAKER pauses)|Subject behavior within expected parameters.|Good girl."
+rDollShoppeVisitorBeBrat_FailRobot,"(The SPEAKER makes a loud noise resembling an error message)|Subject does not conform to expected standards.|Suggest corrective training."
+rDollShoppeVisitorBeBrat_FailLateRobot,"(The SPEAKER pauses)|Subject continues to defy protocol."
+
+rDollShoppeVisitorBeAngry_SuccessRobot,"(The SPEAKER makes a beep of approval)|Subject resists as expected.|Noting and proceeding."
+rDollShoppeVisitorBeAngry_SuccessLateRobot,"(The SPEAKER pauses)|Subject resists as expected.|Proceeding."
+rDollShoppeVisitorBeAngry_FailRobot,"(The SPEAKER makes a loud noise resembling an error message)|Subject continues to resist capture.|Propose intense corrective measures."
+rDollShoppeVisitorBeAngry_FailLateRobot,"(The SPEAKER pauses)|Subject continues to resist, despite lack of capability.|Logical error."
+
+rDollShoppeVisitorBeStill_SuccessRobot,"(The SPEAKER makes a beep of approval)|No movement detected. This has been logged.|Good girl."
+rDollShoppeVisitorBeStill_SuccessLateRobot,"(The SPEAKER pauses)|Subject has corrected unwanted behavior.|Good girl."
+rDollShoppeVisitorBeStill_FailRobot,"(The SPEAKER makes a loud noise resembling an error message)|Subject does not respond to stimuli in an expected manner.|Suggest additional stimulation."
+rDollShoppeVisitorBeStill_FailLateRobot,"(The SPEAKER pauses)|Subject does not act when prompted.|This is not acceptable."
+
+
+KDCantBeBought_Dislike,"You didn't leave a good first impression"
+KDCantBeBought_Party,"Requires an empty party slot"
+KDCantBeBought_Alreadybound,"You are already spiritbound"
+
+KDRandomText_Plugs0,"It's hard to take your mind off the plugs inside of you..."
+KDRandomText_Plugs1,"The plugs inside you are really stimulating."
+KDRandomText_Plugs2,"The plugs filling your holes make your mind wander."
+KDRandomText_Plugs3,"You notice the plugs inside you as you move."
+KDRandomText_Plugs4,"The plugs move around inside of you, stimulating you with each move."
+
+KDRandomText_Plug0,"It's hard not to think about the plug inside of you..."
+KDRandomText_Plug1,"The plug inside of you is really stimulating."
+KDRandomText_Plug2,"The plug in your body is quite noticeable."
+KDRandomText_Plug3,"You notice the plug inside you as you move."
+KDRandomText_Plug4,"A plug moves around inside of you, stimulating you with every move."
+
+KDRandomText_Bra0,"Your nipples lightly chafe against the inside of your bra."
+KDRandomText_Bra1,"Your chastity bra squeezes your breasts gently."
+KDRandomText_Bra2,"Your confined breasts jiggle inside your chastity bra."
+
+KDRandomText_Belt0,"Your belt taunts you with a lack of sensation between your legs."
+KDRandomText_Belt1,"Your chastity belt rubs between your thighs."
+KDRandomText_Belt2,"The chastity belt between your legs sits secure with no way out."
+
+KDRandomText_Clamp0,"A weight on your nipples reminds you of the toys attached."
+KDRandomText_Clamp1,"The toys on your nipples gently tug with each motion."
+KDRandomText_Clamp2,"A light pressure on each nipple keeps you constantly aware of the toys."
+
+KDRandomText_ClampV0,"Your nipple stay sensitive from the gentle buzz of your toys."
+KDRandomText_ClampV1,"A gentle buzz reminds you of the toys on your nipples."
+
+KDPronoun_,"She/Her"
+KDPronoun_She,"She/Her"
+KDPronoun_They,"They/Them"
+KDPronoun_It,"It/Its"
+
+KDInfoNPC,Detailed Info
+
+KDCollectionInfo_Type,"Class: "
+KDCollectionInfo_Pronouns,"Pronouns: "
+KDCollectionInfo_Personality,"Personality: "
+
+KDStartWear_PutOn,You start putting on a ${ItemName}
+KDStartWear_LockOn,You start locking on a ${ItemName}
+KDStartWear_Lock,You put a ${LockName} on your ${ItemName}
+
+KDSpiritbound_Disable,"The spiritbond collar fades, but stays on. Now would be the time to remove it."
+KDSpiritbound_Enable,"The spiritbond collar glows brightly on your neck."
+
+KDCopyColor,Copy Color
+KDPasteColor,Paste to Layer

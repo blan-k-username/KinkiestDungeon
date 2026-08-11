@@ -3,6 +3,19 @@ let KDUISmoothness = 6;
 
 let KDInteracting = false;
 
+let KDHUDGlobals = {
+	PronounPicker_SpacingX: 170,
+	PronounPicker_Fontsize: 18,
+	PronounPicker_Size: 50,
+	PronounPicker_ShowInCollectionByDefault: true,
+	PronounPicker_CollectionOptions: {
+		spacing: 150,
+		fontsize: 16,
+		size: 42,
+		offX: 25,
+	},
+};
+
 let KinkyDungeonStruggleGroups: StruggleGroup[] = [];
 let KinkyDungeonStruggleGroupsBase = [
 	"ItemDevices",
@@ -313,7 +326,7 @@ function KinkyDungeonDrawInterface(_showControls: boolean) {
 
 	if (!KDPatched) DrawButtonKDEx("quitbutton", (_b) => {
 		KinkyDungeonDrawState = "Restart";
-		KDConfirmDeleteSave = false;
+		KDConfirmDeleteSave = false; KinkyDungeonReplaceColorConfirm = -999; 
 		if (KDDebugMode) {
 			ElementCreateTextArea("DebugEnemy");
 			ElementValue("DebugEnemy", "Maidforce");
@@ -411,6 +424,22 @@ function KinkyDungeonDrawInterface(_showControls: boolean) {
 
 }
 
+function KDRenderTooltip(button: KDButtonParamData) {
+	if (button.hoverData) {
+		DrawTextFitKD(button.hoverData,
+			button.Left, button.Top - 70, 300,
+			KDBaseWhite, "#0c0c0c", undefined, "center");
+		return;
+	}
+}
+function KDRenderTooltipRed(button: KDButtonParamData) {
+	if (button.hoverData) {
+		DrawTextFitKD(button.hoverData,
+			button.Left, button.Top - 70, 300,
+			"#ffaeae", "#0c0c0c", undefined, "center");
+		return;
+	}
+}
 function KDRenderHotbarTooltip(button: KDButtonParamData) {
 	if (button.hoverData) {
 		if (!KDToggles.HotbarTooltips) {
@@ -1223,7 +1252,7 @@ function KinkyDungeonDrawActionBar(_x: number, _y: number) {
 			24, "left", 110, 0.9);
 		KinkyDungeonBarTo(kdstatusboard, 1000, BalanceOffset + 8 - BalanceSpacing*(II), 500, 12, 100*KDGameData.Balance,
 			"#4fd658", "#283540", KDGameData.Balance * 100, "#ffee83",
-			KDSteps(KDGameData.Balance, -KDGetBalanceCost()*1.5), "#283540", "#4fd658");
+			KDSteps(KDGameData.Balance, -KDGetBalanceCost("move")*1.5), "#283540", "#4fd658");
 
 		if (!KDGameData.Training) KDGameData.Training = {};
 		DrawTextFitKDTo(kdstatusboard, TextGet("KDBalanceTraining")
@@ -1281,17 +1310,20 @@ function KinkyDungeonDrawActionBar(_x: number, _y: number) {
 		if (DrawButtonKDEx("SetTransparentBullets", (_bdata) => {
 			if (KDStatusToggle) {
 				if (!KDBulletTransparency) {
-					KDBulletTransparency = true;
-				} else {
 					KDStatusToggle = false;
+				} else {
+					KDBulletTransparency = false;
 				}
 			} else {
-				KDBulletTransparency = false;
-				KDStatusToggle = true;
+				if (!KDBulletTransparency) {
+					KDBulletTransparency = true;
+				} else {
+					KDStatusToggle = true;
+				}
 			}
 			return true;
 		}, true, 720, 925, 60, 60, "", KDBaseWhite, KinkyDungeonRootDirectory + "UI/BulletTransparency" +
-			((KDBulletTransparency && KDStatusToggle) ? "All" : (KDStatusToggle ? "Only" : "None"))
+			((!KDBulletTransparency && KDStatusToggle) ? "All" : (KDStatusToggle ? "Only" : (!KDBulletTransparency ? "Bullet" : "None")))
 		+".png", "", false, false,
 		KDButtonColor, undefined, undefined)) str = "KDBulletTransparency";
 	}
@@ -1326,7 +1358,7 @@ function KinkyDungeonDrawActionBar(_x: number, _y: number) {
 					resourcesX + 60, MouseY, KDBaseWhite, "#333333", 24, "left");
 			resourcesIndex--;
 
-			if (KDShowQuickInv() || (KinkyDungeonDrawStruggle == KDDrawStruggleEnum.FULL || KinkyDungeonDrawStruggle == KDDrawStruggleEnum.STRUGGLE || MouseIn(0, 0, 500, 1000))) {
+			if ((KDShowQuickInv() && !KDToggleShowAllBuffs) || (KinkyDungeonDrawStruggle == KDDrawStruggleEnum.FULL || KinkyDungeonDrawStruggle == KDDrawStruggleEnum.STRUGGLE || MouseIn(0, 0, 500, 1000))) {
 				KDDraw(kdcanvas, kdpixisprites, "pick", KinkyDungeonRootDirectory + "Items/Pick.png", resourcesX, resourcesY + resourcesIndex*resourceSpacing, 50, 50, undefined, {
 					zIndex: 90
 				});
@@ -1363,7 +1395,7 @@ function KinkyDungeonDrawActionBar(_x: number, _y: number) {
 		if (DrawButtonKDEx("openQuickInv", (_b) => {
 			KinkyDungeonShowInventory = !KinkyDungeonShowInventory;
 			return true;
-		}, true, 510, 825, 60, 90, "", KDBaseWhite, KinkyDungeonRootDirectory + (KinkyDungeonShowInventory ? "BackpackOpen.png" : "Backpack.png"), "",
+		}, true, 509, 825, 60, 90, "", KDBaseWhite, KinkyDungeonRootDirectory + (KinkyDungeonShowInventory ? "BackpackOpen.png" : "Backpack.png"), "",
 		undefined, undefined, undefined, undefined, undefined,
 		{
 			hotkey: KDHotkeyToText(KinkyDungeonKeyMenu[0]),
@@ -1867,7 +1899,7 @@ function KinkyDungeonHandleHUD() {
 	} else if (KinkyDungeonDrawState == "Perks2") {
 		if (MouseIn(1650, 920, 300, 64)) {
 			KinkyDungeonDrawState = "Restart";
-			KDConfirmDeleteSave = false;
+			KDConfirmDeleteSave = false; KinkyDungeonReplaceColorConfirm = -999; 
 			if (KDDebugMode) {
 				ElementCreateTextArea("DebugEnemy");
 				ElementValue("DebugEnemy", "Maidforce");
@@ -2038,7 +2070,7 @@ function KinkyDungeonHandleHUD() {
 			//KDUpdateWaitTime(500);
 			return true;
 		}
-		KDConfirmDeleteSave = false;
+		KDConfirmDeleteSave = false; KinkyDungeonReplaceColorConfirm = -999; 
 		return true;
 	}
 
@@ -2158,12 +2190,12 @@ function KDGetItemLinkHost(inv: item): item {
  * @param skip - Skips the button being drawn in this instance
  */
 function KDDrawNavBar(skip: number, _quit: boolean = false) {
-	let by = 440;
+	let by = 432;
 	let bwidth = 140;
 	let bx = 2000 - 10 - bwidth;
 	let bspacing = 5;
 	let bindex = 0;
-	let bheight = 60;
+	let bheight = 55;
 
 	let bInc = () => {
 		by += bheight + bspacing;
@@ -2174,14 +2206,14 @@ function KDDrawNavBar(skip: number, _quit: boolean = false) {
 
 	DrawButtonKDEx((skip == bindex) ? "goGame" : "goQuit", (_bdata) => {
 		KDResetAlternateInventoryRender();
-		if (skip == 0) {
+		if (skip == bindex) {
 			KinkyDungeonDrawState = "Game";
 			KDRefreshCharacter.set(KinkyDungeonPlayer, true);
 			KinkyDungeonDressPlayer();
 
 		} else {
 			KinkyDungeonDrawState = "Restart";
-			KDConfirmDeleteSave = false;
+			KDConfirmDeleteSave = false; KinkyDungeonReplaceColorConfirm = -999; 
 			if (KDDebugMode) {
 				ElementCreateTextArea("DebugEnemy");
 				ElementValue("DebugEnemy", "Maidforce");
@@ -2206,7 +2238,7 @@ function KDDrawNavBar(skip: number, _quit: boolean = false) {
 	}); bindex++; bInc();
 	DrawButtonKDEx((skip == bindex) ? "goGame" : "goInv", (_bdata) => {
 		KDResetAlternateInventoryRender();
-		if (skip == 1)
+		if (skip == bindex)
 			KinkyDungeonDrawState = "Game";
 		else
 			KDShowInventory(null);
@@ -2220,7 +2252,7 @@ function KDDrawNavBar(skip: number, _quit: boolean = false) {
 	}); bindex++; bInc();
 	DrawButtonKDEx((skip == bindex) ? "goGame" : "goSpells", (_bdata) => {
 		KDResetAlternateInventoryRender();
-		if (skip == 2)
+		if (skip == bindex)
 			KinkyDungeonDrawState = "Game";
 		else
 			KinkyDungeonDrawState = "MagicSpells";
@@ -2238,7 +2270,7 @@ function KDDrawNavBar(skip: number, _quit: boolean = false) {
 	if (skip == bindex) logtxt = TextGet("KDNavGame");
 	DrawButtonKDEx((skip == bindex) ? "goGame" : "goLog", (_bdata) => {
 		KDResetAlternateInventoryRender();
-		if (skip == 3)
+		if (skip == bindex)
 			KinkyDungeonDrawState = "Game";
 		else {
 			KinkyDungeonDrawState = "Quest";
@@ -2252,6 +2284,24 @@ function KDDrawNavBar(skip: number, _quit: boolean = false) {
 	KinkyDungeonRootDirectory + ((skip == bindex) ? "UI/button_game.png" : "UI/button_logbook.png"), undefined, undefined, false, "", 24, true, {
 		hotkey: KDHotkeyToText(KinkyDungeonKeyMenu[3]),
 	}); bindex++; bInc();
+	if (KDGameData.Collection && Object.entries(KDGameData.Collection).length > 0) {
+		DrawButtonKDEx((skip == bindex) ? "goGame" : "goCollection", (_bdata) => {
+			KDResetAlternateInventoryRender();
+			if (skip == bindex)
+				KinkyDungeonDrawState = "Game";
+			else
+				KinkyDungeonDrawState = "Collection";
+			KDRefreshCharacter.set(KinkyDungeonPlayer, true);
+			KinkyDungeonDressPlayer();
+			return true;
+		}, true, bx, by, bwidth, bheight, 
+		TextGet((skip == bindex) ? "KDNavGame" : "KinkyDungeonCollection"), KDBaseWhite,
+		KinkyDungeonRootDirectory + ((skip == bindex) ? "UI/button_game.png" : "UI/button_collection.png"), 
+		undefined, undefined, false, "", 24, true,
+		{
+			hotkey: KDHotkeyToText(KinkyDungeonKeyMenu[5]),
+		}); bindex++; bInc();
+	}
 }
 
 function KDCullSpellChoices() {
@@ -2489,7 +2539,9 @@ function KDDrawPartyMembers(PartyX: number, PartyY: number, tooltips: object[]) 
 		for (let i = 0; i < KDGameData.Party.length; i++) {
 			let PM = KinkyDungeonFindID(KDGameData.Party[i].id);
 			if (PM) {
-				KDDrawEnemySprite(kdstatusboard, PM, PartyX/KinkyDungeonGridSizeDisplay, PartyY/KinkyDungeonGridSizeDisplay, 0, 0, true, zIndex, "PM");
+				KDDrawEnemySprite(kdstatusboard, PM, 
+					PartyX/PartyDy, PartyY/PartyDy, 
+					0, 0, true, zIndex, "PM", PartyDy);
 				KinkyDungeonBarTo(kdstatusboard, PartyX, PartyY,
 					PartyDy, 10, PM.visual_hp / PM.Enemy.maxhp * 100, KDBaseMint, KDBaseRed, undefined, undefined, undefined, undefined, undefined, zIndex + 0.05);
 
@@ -2503,7 +2555,7 @@ function KDDrawPartyMembers(PartyX: number, PartyY: number, tooltips: object[]) 
 
 				if (selected) {
 					DrawButtonKDExTo(kdstatusboard, "PM" + i + "remove", (_bdata) => {
-						KDSendInput("cancelParty", {enemy: PM});
+						KDSendInput("cancelParty", {enemy: PM, player: KinkyDungeonPlayerEntity});
 						return true;
 					}, true, PartyX + 170, PartyY, 38, 38, "", KDButtonColor, KinkyDungeonRootDirectory + "UI/X.png", undefined, false, false,
 					KDBaseBlack, undefined, undefined, {zIndex: zIndex,});
@@ -2520,16 +2572,18 @@ function KDDrawPartyMembers(PartyX: number, PartyY: number, tooltips: object[]) 
 					KDBaseBlack, undefined, undefined, {zIndex: zIndex,});
 				}
 
-				if (MouseIn(PartyX, PartyY, PartyDy, PartyDy)) {
+				if (MouseIn(PartyX, PartyY, PartyDy, PartyDy)
+					&& KDLastHoverButton?.name == "PM" + i + "click"
+					&& (!KDGameData.CurrentDialog || KDGetSpeaker()?.id != PM?.id)) {
 					tooltips.push((offset: number) => KDDrawEnemyTooltip(PM, offset, false));
 				}
 
 			} else {
 				PM = KDGameData.Party[i];
 				if (PM) {
-					KDDrawEnemySprite(kdstatusboard, PM, PartyX/KinkyDungeonGridSizeDisplay, PartyY/KinkyDungeonGridSizeDisplay, 0, 0, true, zIndex, "PM");
+					KDDrawEnemySprite(kdstatusboard, PM, PartyX/PartyDy, PartyY/PartyDy, 0, 0, true, zIndex, "PM");
 					KDDraw(kdstatusboard, kdpixisprites, "pmFailFind" + PM.id, KinkyDungeonRootDirectory + "Spells/SpellFail.png",
-						PartyX, PartyY, KinkyDungeonGridSizeDisplay, KinkyDungeonGridSizeDisplay, undefined, {
+						PartyX, PartyY, PartyDy, PartyDy, undefined, {
 							zIndex: zIndex + 0.1,
 							alpha: 0.5,
 						},
@@ -2547,14 +2601,15 @@ function KDDrawPartyMembers(PartyX: number, PartyY: number, tooltips: object[]) 
 
 					if (selected) {
 						DrawButtonKDExTo(kdstatusboard, "PM" + i + "remove", (_bdata) => {
-							KDSendInput("cancelParty", {enemy: PM});
+							KDSendInput("cancelParty", {enemy: PM, player: KinkyDungeonPlayerEntity});
 							return true;
 						}, true, PartyX + 170, PartyY, 38, 38, "", KDButtonColor, KinkyDungeonRootDirectory + "UI/X.png", undefined, false, false,
 						KDBaseBlack, undefined, undefined, {zIndex: zIndex,});
 
 					}
 
-					if (MouseIn(PartyX, PartyY, PartyDy, PartyDy)) {
+					if (MouseIn(PartyX, PartyY, PartyDy, PartyDy)
+						&& KDLastHoverButton?.name == "PM" + i + "click") {
 						tooltips.push((offset: number) => KDDrawEnemyTooltip(PM, offset, false));
 					}
 				}
@@ -2568,8 +2623,8 @@ function KDDrawPartyMembers(PartyX: number, PartyY: number, tooltips: object[]) 
 					{
 						Left: PartyX,
 						Top: PartyY,
-						Width: KinkyDungeonGridSizeDisplay,
-						Height: KinkyDungeonGridSizeDisplay,
+						Width: PartyDy,
+						Height: PartyDy,
 						Color: KDBaseBlack,
 						alpha: 0.9,
 						zIndex: zIndex - 0.1,
@@ -3068,7 +3123,7 @@ function KDProcessBuffIcons(minXX: number, minYY: number, side: boolean = false)
 			KinkyDungeonSelectedBuff = b.id;
 			KinkyDungeonSelectedBuffEntity = KDPlayer();
 			
-			let t = TextGet("KinkyDungeonBuff" + (b.desc || b.id), KDGetGenericDialogueParams(KDPlayer(), null)) + (count ? ` ${count}/${b.maxCount}` : "") + ((b.duration >= 1 && b.duration < 1000) ? ` (${b.duration})` : "");
+			let t = TextGet("KinkyDungeonBuff" + (b.desc || b.id)) + (count ? ` ${count}/${b.maxCount}` : "") + ((b.duration >= 1 && b.duration < 1000) ? ` (${b.duration})` : "");
 			if (b.buffTextReplace) {
 				for (let replace of Object.entries(b.buffTextReplace)) {
 					t = t.replace(replace[0], (replace as [string , string])[1]);
@@ -3185,7 +3240,8 @@ function KDDrawBuffIcons(minXX: number, minYY: number, statsDraw: Record<string,
 			DrawTextFitKDTo(kdstatusboard, stat.count, XX + spriteSize/2, YY + spriteSize/2 - 10, textWidth, stat.countcolor || KDBaseWhite, KDBaseBlack,
 				16, undefined, 151.1, undefined, 5);
 
-		if (!tooltip && MouseIn(XX, YY - Math.ceil(spriteSize/2), spriteSize, spriteSize)) {
+		if (!tooltip && MouseIn(XX, YY - Math.ceil(spriteSize/2), spriteSize, spriteSize)
+			&& !KinkyDungeonShowInventory) {
 			FillRectKD(kdcanvas, kdpixisprites, "buffttDesc", {
 				Left: (side ? XX + 100 : minXX) - 10,
 				Top: (side ? YY : tooltipY) - 17,
@@ -3195,7 +3251,9 @@ function KDDrawBuffIcons(minXX: number, minYY: number, statsDraw: Record<string,
 				zIndex: 159,
 				alpha: 0.5,
 			});
-			DrawTextFitKD(stat.text, side ? XX + 100 : minXX, side ? YY : tooltipY, 1000, stat.color,
+			
+			let params = KDGetGenericDialogueParams(KDPlayer(), null);
+			DrawTextFitKD(TextProvider.applyTemplate(stat.text, params), side ? XX + 100 : minXX, side ? YY : tooltipY, 1000, stat.color,
 				KDBaseBlack, 22, "left", 160, 1.0, 8);
 			tooltip = true;
 			if (stat.click) {
@@ -3712,7 +3770,7 @@ function KDDrawStruggleGroups() {
 				FillRectKD(kdcanvas, kdpixisprites, "selectedBG", {
 					Left: 510, Top: MY - 20, Width: 740,
 					Height: lastO * lineSize + 40,
-					Color: KDBaseBlack, alpha: 0.7, zIndex: 110
+					Color: KDBaseBlack, alpha: 0.7, zIndex: 149
 				});
 			}
 
@@ -3867,4 +3925,24 @@ let KDAlreadyEquippedWeaponErrorIcon = "GrabClosed";
 
 function KDDrawResourcesQuick() {
 	return !KinkyDungeonTargetingSpell;
+}
+
+function KDDrawPronounPicker(X: number, Y: number, list: string[], current: string, callback: (pronoun: string) => void, params?: Record<string, number|string>) {
+	let count = list.length;
+	let i = 0;
+	let spacing = params?.spacing as number || KDHUDGlobals.PronounPicker_SpacingX;
+	let size = params?.size as number || KDHUDGlobals.PronounPicker_Size;
+	let fontsize = params?.fontsize as number || KDHUDGlobals.PronounPicker_Fontsize;
+	let textcolor = params?.color as string || KDTextWhite;
+	for (let pronoun of list) {
+		DrawCheckboxKDEx("pronounlist" + X + pronoun, 
+			(d) => {
+				callback(pronoun);
+				return true;
+			}, true, X - (!params?.vertical ? (0.5 * (count) * spacing - spacing * i++) : (spacing * 0.5)), 
+			Y + (params?.vertical ? params.spacingY as number * i++ : 0), 
+			size, size, TextGet("KDPronoun_" + pronoun), (!pronoun && !current) || current == pronoun, undefined, textcolor, undefined, {
+				fontSize: fontsize
+			});
+	}
 }

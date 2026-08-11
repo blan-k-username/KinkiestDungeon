@@ -22,15 +22,31 @@ let KinkyDungeonEnemies: enemy[] = [
 		},
 		faction: "Prisoner", lowpriority: true, evasion: -100, armor: 1, followRange: 100, AI: "wander", regen: 0.1,
 		stunWhenSwap: true,
+		pronouns: {It: 100},
 		visionRadius: 0, maxhp: 12, minLevel:0, weight:-10, movePoints: 4, attackPoints: 0, attack: "", attackRange: 0, events: [
 			{trigger: "tick", type: "secretToy"},
 		],
 		Behavior: {noPlay: true},
 		terrainTags: {"bellowsDoll": 20}, allFloors: true},
+	{name: "PrettyDoll", bound: "PrettyDoll", playLine: "Gagged", tags: KDMapInit(["prisoner",
+		"nocapture", "dressconvert", "doll", "human", "minor", "peaceful", "nohelp", "noshop"]),
+		rescueTo: {
+			Remove: "FreeDoll",
+			Unlock: "FreeDoll",
+		},
+		pronouns: {It: 100},
+		faction: "Prisoner", lowpriority: true, evasion: -100, armor: 1, followRange: 100, AI: "wander", regen: 0.1,
+		stunWhenSwap: true,
+		visionRadius: 0, maxhp: 12, minLevel:0, weight:-10, movePoints: 4, attackPoints: 0, attack: "", attackRange: 0, events: [
+			{trigger: "tick", type: "secretToy"},
+		],
+		Behavior: {noPlay: true},
+		terrainTags: {"dressDoll": 20}, allFloors: true},
 	{name: "FreeDoll", bound: "FactoryDoll", tags: KDMapInit(["formerprisoner", "nocapture", "doll", "human", "minor", "peaceful", "noshop"]),
 		faction: "Prisoner", lowpriority: true, evasion: -100, armor: 1, followRange: 100, AI: "wander", regen: 0.1,
 		visionRadius: 0, maxhp: 12, minLevel:0, weight:-1000, movePoints: 4, attackPoints: 0, attack: "", attackRange: 0,
 		Behavior: {noPlay: true},
+		pronouns: {It: 100},
 		terrainTags: {}, allFloors: true},
 	{name: "DollmakerTarget", nameList: "cyborg", outfit: "DollsmithDoll", style: "Water", bound: "FactoryDoll", playLine: "Gagged", tags: KDMapInit(["prisoner", "silenceimmune", "blindimmune", "escapeddoll", "doll", "human", "minor", "peaceful", "noshop"]),
 		faction: "Prisoner", lowpriority: true, evasion: -100, armor: 0, followRange: 100, AI: "wander", regen: 0.01, events: [
@@ -39,6 +55,7 @@ let KinkyDungeonEnemies: enemy[] = [
 		visionRadius: 0, maxhp: 8, minLevel:0, weight:-10, movePoints: 4, attackPoints: 0, attack: "", attackRange: 0,
 		Behavior: {noPlay: true},
 		ondeath: [{type: "dollID"}],
+		pronouns: {It: 100},
 		terrainTags: {}, allFloors: true},
 
 
@@ -51,6 +68,7 @@ let KinkyDungeonEnemies: enemy[] = [
 		events: [
 			{type: "ShopkeeperRescueAI", trigger: "afterEnemyTick"},
 		],
+		pronouns: {She: 100},
 		terrainTags: {}, floors:KDMapInit([])},
 
 	// Easy mode NPC
@@ -59,6 +77,7 @@ let KinkyDungeonEnemies: enemy[] = [
 		Behavior: {noPlay: true},
 		spawnAISetting: "None",
 		noDisplace: false, keys: true,
+		pronouns: {She: 100},
 		terrainTags: {}, floors:KDMapInit([])},
 
 	// Quest NPC
@@ -73,20 +92,24 @@ let KinkyDungeonEnemies: enemy[] = [
 	{name: "BlacksmithQuest", tags: KDMapInit(["human", "peaceful", "alwayshelp", "noshop"]), faction: "Prisoner", lowpriority: true, armor: 0, followRange: 100, AI: "hunt", regen: 0.1,
 		visionRadius: 0, maxhp: 12, minLevel:0, weight:-1000, movePoints: 4, attackPoints: 0, attack: "", attackRange: 0, specialdialogue: "BlacksmithShop", data: {"shop": "BlacksmithShop"},
 		Behavior: {noPlay: true},
+		pronouns: {She: 100},
 		ondeath: [{type: "murder", count: 1}],
 		terrainTags: {}, floors:KDMapInit([])},
 	{name: "AdaLovelock", tags: KDMapInit(["human", "peaceful", "alwayshelp", "noshop"]), faction: "Prisoner", lowpriority: true, armor: 0, followRange: 100, AI: "hunt", regen: 0.1,
 		visionRadius: 0, maxhp: 25, minLevel:0, weight:-1000, movePoints: 4, attackPoints: 0, attack: "", attackRange: 0, specialdialogue: "AdaMasterwork",
 		Behavior: {noPlay: true},
+		pronouns: {She: 100},
 		terrainTags: {}, floors:KDMapInit([])},
 	{name: "AntiqueQuest", tags: KDMapInit(["skeleton", "peaceful", "alwayshelp", "noshop"]), faction: "Prisoner", lowpriority: true, armor: 0, followRange: 100, AI: "hunt", regen: 1,
 		visionRadius: 0, maxhp: 12, minLevel:0, weight:-1000, movePoints: 4, attackPoints: 0, attack: "", attackRange: 0, specialdialogue: "AntiqueShop", data: {"shop": "AntiqueShop"},
 		Behavior: {noPlay: true},
+		pronouns: {She: 100},
 		ondeath: [{type: "murder", count: 1}],
 		terrainTags: {}, floors:KDMapInit([])},
 	{name: "BowyerQuest", tags: KDMapInit(["human", "peaceful", "alwayshelp", "noshop"]), faction: "Prisoner", lowpriority: true, armor: 0, followRange: 100, AI: "hunt", regen: 0.1,
 		visionRadius: 0, maxhp: 12, minLevel:0, weight:-1000, movePoints: 4, attackPoints: 0, attack: "", attackRange: 0, specialdialogue: "BowyerShop", data: {"shop": "BowyerShop"},
 		Behavior: {noPlay: true},
+		pronouns: {She: 100},
 		ondeath: [{type: "murder", count: 1}],
 		terrainTags: {}, floors:KDMapInit([])},
 	{name: "ShadyQuest", tags: KDMapInit(["human", "peaceful", "alwayshelp", "noshop"]),
@@ -94,11 +117,13 @@ let KinkyDungeonEnemies: enemy[] = [
 		visionRadius: 0, maxhp: 12, minLevel:0, weight:-1000, movePoints: 4, attackPoints: 0, attack: "",
 		attackRange: 0, specialdialogue: "ShadyShop", data: {"shop": "ShadyShop"},
 		Behavior: {noPlay: true},
+		pronouns: {She: 100},
 		ondeath: [{type: "murder", count: 1}],
 		terrainTags: {}, floors:KDMapInit([])},
 	{name: "ArmorerQuest", tags: KDMapInit(["human", "peaceful", "alwayshelp", "noshop"]), faction: "Prisoner", lowpriority: true, armor: 0, followRange: 100, AI: "hunt", regen: 0.1,
 		visionRadius: 0, maxhp: 12, minLevel:0, weight:-1000, movePoints: 4, attackPoints: 0, attack: "", attackRange: 0, specialdialogue: "ArmorerShop", data: {"shop": "ArmorerShop"},
 		Behavior: {noPlay: true},
+		pronouns: {They: 100},
 		ondeath: [{type: "murder", count: 1}],
 		terrainTags: {}, floors:KDMapInit([])},
 	{name: "DragonheartQuest", tags: KDMapInit(["dragon", "peaceful", "alwayshelp", "noshop"]), faction: "Prisoner", lowpriority: true, armor: 0, followRange: 100, AI: "hunt", regen: 0.1,
@@ -202,6 +227,9 @@ let KinkyDungeonEnemies: enemy[] = [
 		evasion: -0.2,
 		maxblock: 1,
 		maxdodge: 0,
+		Behavior: {
+			noAlert: true,
+		},
 		Sound: {
 			baseAmount: 4.5,
 			moveAmount: 4.5,
@@ -226,6 +254,9 @@ let KinkyDungeonEnemies: enemy[] = [
 		evasion: -0.2,
 		maxblock: 1,
 		maxdodge: 0,
+		Behavior: {
+			noAlert: true,
+		},
 		Sound: {
 			baseAmount: 6,
 			moveAmount: 7,
@@ -252,6 +283,9 @@ let KinkyDungeonEnemies: enemy[] = [
 		ondeath: [
 			{type: "WolfServer"}
 		],
+		Behavior: {
+			noAlert: true,
+		},
 		Sound: {
 			baseAmount: 5,
 			moveAmount: 0,
@@ -594,30 +628,30 @@ let KinkyDungeonEnemies: enemy[] = [
 		dropTable: [{name: "MagicSword", weight: 1, ignoreInInventory: true}, {name: "MagicSpear", weight: 1, ignoreInInventory: true}, {name: "MagicAxe", weight: 1, ignoreInInventory: true}, {name: "MagicFlail", weight: 1, ignoreInInventory: true}, {name: "MagicHammer", weight: 1, ignoreInInventory: true}],
 		rep: {"Will": -1, "Elements": -1, "Conjure": -1, "Illusion": -1}},
 
-	{name: "BlindZombie", bound: "Zombie", style: "Zombie", outfit: "Zombie", playLine: "Zombie", clusterWith: "zombie", tags: KDMapInit(["ignoretiedup", "nocapture", "minor", "zombie", "melee", "fireweakness", "ribbonRestraints", "meleeweakness"]),
+	{name: "BlindZombie", pronouns: {It: 100}, bound: "Zombie", style: "Zombie", outfit: "Zombie", playLine: "Zombie", clusterWith: "zombie", tags: KDMapInit(["ignoretiedup", "nocapture", "minor", "zombie", "melee", "fireweakness", "ribbonRestraints", "meleeweakness"]),
 		evasion: -1, ignorechance: 0.33, armor: 0, followRange: 1, AI: "wander",
 		visionRadius: 2.5, maxhp: 8, minLevel:0, weight:14, movePoints: 3, attackPoints: 4, attack: "MeleeBind", attackWidth: 1, attackRange: 1, power: 1, dmgType: "grope", fullBoundBonus: 1,
 		terrainTags: {"increasingWeight":-1.5}, floors:KDMapInit(["grv"]), dropTable: [], difficulty: 0.9},
-	{name: "FastZombie", bound: "Zombie", style: "Zombie", outfit: "Zombie", playLine: "Zombie", clusterWith: "zombie", tags: KDMapInit(["ignoretiedup", "nocapture", "zombie", "melee", "fireweakness", "ribbonRestraints", "meleeweakness"]),
+	{name: "FastZombie", pronouns: {It: 100}, bound: "Zombie", style: "Zombie", outfit: "Zombie", playLine: "Zombie", clusterWith: "zombie", tags: KDMapInit(["ignoretiedup", "nocapture", "zombie", "melee", "fireweakness", "ribbonRestraints", "meleeweakness"]),
 		evasion: -1, ignorechance: 0.33, armor: 1, followRange: 1, AI: "hunt",
 		stamina: 3,
 		visionRadius: 5, maxhp: 10, minLevel:0, weight:9, movePoints: 3, attackPoints: 4, attack: "MeleeBind", attackWidth: 1, attackRange: 1, power: 1, dmgType: "grope", fullBoundBonus: 1,
 		terrainTags: {"secondhalf":10, "lastthird":14}, floors:KDMapInit(["grv"]), dropTable: [{name: "Gold", amountMin: 5, amountMax: 10, weight: 10}]},
-	{name: "SummonedZombie", bound: "Zombie", style: "Zombie", outfit: "Zombie", playLine: "Zombie", clusterWith: "zombie", tags: KDMapInit(["ignoretiedup", "nocapture", "zombieTrap", "zombie", "melee", "fireweakness", "ribbonRestraints", "meleeweakness", "temporary", "nocapture"]),
+	{name: "SummonedZombie", pronouns: {It: 100}, bound: "Zombie", style: "Zombie", outfit: "Zombie", playLine: "Zombie", clusterWith: "zombie", tags: KDMapInit(["ignoretiedup", "nocapture", "zombieTrap", "zombie", "melee", "fireweakness", "ribbonRestraints", "meleeweakness", "temporary", "nocapture"]),
 		evasion: -1, ignorechance: 0.33, armor: 1.5, followRange: 1, AI: "hunt", regen: -0.1,
 		Behavior: {
 			leashCondition: "fuukaLeash",
 		},
 		visionRadius: 5, maxhp: 12, minLevel:0, weight:-1000, movePoints: 3, attackPoints: 3, attack: "MeleeBind", attackWidth: 1, attackRange: 1, power: 1, dmgType: "grope", fullBoundBonus: 1,
 		terrainTags: {"secondhalf":10, "zombieTrap": 50, "lastthird":14}, floors:KDMapInit([])},
-	{name: "MageZombie", bound: "MageZombie", style: "Zombie", outfit: "Zombie", playLine: "Zombie", clusterWith: "zombie",
+	{name: "MageZombie", pronouns: {It: 100}, bound: "MageZombie", style: "Zombie", outfit: "Zombie", playLine: "Zombie", clusterWith: "zombie",
 		tags: KDMapInit(["leashing", "zombie", "ranged", "zombieTrap", "fireweakness", "ribbonRestraints", "meleeweakness", "hunter"]),
 		spellResist: 0.5, evasion: -1, armor: 1, followRange: 2, AI: "hunt",
 		spells: ["ZombieOrb", "ZombieOrbIce"], spellCooldownMult: 1, spellCooldownMod: 0, castWhileMoving: true, projectileAttack: true,
 		visionRadius: 6, maxhp: 11, minLevel:2, weight:28, movePoints: 3, attackPoints: 4, attack: "SpellMeleeBindLock", attackWidth: 1, attackRange: 1, power: 1, dmgType: "grope", fullBoundBonus: 2,
 		attackLock: "Purple",
 		terrainTags: {"zombieTrap": 25}, floors:KDMapInit(["grv", "tmb"]), dropTable: [{name: "Gold", amountMin: 10, amountMax: 20, weight: 10}]},
-	{name: "TalismanZombie", bound: "TalismanZombie", style: "Zombie", outfit: "Zombie", playLine: "Zombie", clusterWith: "zombie", tags: KDMapInit(["leashing", "zombie", "zombieTrap", "ranged", "fireweakness", "ribbonRestraints", "meleeweakness", "hunter"]),
+	{name: "TalismanZombie", pronouns: {It: 100}, bound: "TalismanZombie", style: "Zombie", outfit: "Zombie", playLine: "Zombie", clusterWith: "zombie", tags: KDMapInit(["leashing", "zombie", "zombieTrap", "ranged", "fireweakness", "ribbonRestraints", "meleeweakness", "hunter"]),
 		spellResist: 0.5, evasion: -1, armor: 1, followRange: 3, AI: "hunt",
 		spells: ["ZombieOrb", "ZombieBuff", "OrbHeal", "EnemyCM1"], unlockCommandLevel: 1, unlockCommandCD: 90, spellCooldownMult: 1, spellCooldownMod: 0, castWhileMoving: true, buffallies: true, kite: 1.5, projectileAttack: true,
 		visionRadius: 6, maxhp: 20, minLevel:3, weight:34, movePoints: 3, attackPoints: 4, attack: "SpellMeleeBindLock", attackWidth: 1, attackRange: 1, power: 1, dmgType: "grope", fullBoundBonus: 2,
@@ -626,7 +660,7 @@ let KinkyDungeonEnemies: enemy[] = [
 			{trigger: "getLights", type: "enemyTorch", power: 3, color: "#ffff44"},
 		],
 		terrainTags: {"mummy": 3, "zombieTrap": 10}, floors:KDMapInit(["grv", "tmb"]), dropTable: [{name: "Gold", amountMin: 10, amountMax: 20, weight: 10}]},
-	{name: "SamuraiZombie", bound: "SamuraiZombie", style: "Zombie", outfit: "Zombie", playLine: "Zombie", clusterWith: "zombie",
+	{name: "SamuraiZombie", pronouns: {It: 100}, bound: "SamuraiZombie", style: "Zombie", outfit: "Zombie", playLine: "Zombie", clusterWith: "zombie",
 		tags: KDMapInit(["leashing", "zombie",
 			"bulwark", "zombieTrap", "melee", "elite", "fireweakness", "unflinching", "ropeRestraints", "ropeRestraints2", "meleeweakness", "hunter"]),
 		evasion: -1, armor: 1, followRange: 1, AI: "hunt",
@@ -636,10 +670,10 @@ let KinkyDungeonEnemies: enemy[] = [
 			block_phys: 2,
 		},
 		stamina: 2,
-		specialCDonAttack: false, visionRadius: 6, maxhp: 20, minLevel:4, weight:15, movePoints: 3, attackPoints: 3, attack: "MeleeBindLock",
+		specialCDonAttack: false, visionRadius: 6, maxhp: 20, minLevel:3, weight:15, movePoints: 3, attackPoints: 3, attack: "MeleeBindLock",
 		attackWidth: 1, attackRange: 1, power: 2, dmgType: "grope", fullBoundBonus: 3, specialWidth: 5, specialRange: 1,
 		terrainTags: {"secondhalf":5, "zombieTrap": 20, "lastthird":5}, shrines: ["Will"], floors:KDMapInit(["grv", "tmb"]), dropTable: [{name: "Gold", amountMin: 15, amountMax: 20, weight: 10}, {name: "Sword", weight: 3.5, ignoreInInventory: true},]},
-	{name: "NawashiZombie", bound: "NawashiZombie", style: "Zombie", outfit: "Zombie", playLine: "Zombie", clusterWith: "zombie", tags: KDMapInit(["leashing", "zombie", "zombieTrap", "melee", "elite", "fireweakness", "unflinching", "ropeRestraints", "ropeRestraints2", "meleeweakness", "hunter"]),
+	{name: "NawashiZombie", pronouns: {It: 100}, bound: "NawashiZombie", style: "Zombie", outfit: "Zombie", playLine: "Zombie", clusterWith: "zombie", tags: KDMapInit(["leashing", "zombie", "zombieTrap", "melee", "elite", "fireweakness", "unflinching", "ropeRestraints", "ropeRestraints2", "meleeweakness", "hunter"]),
 		evasion: -1, armor: 0, followRange: 1, AI: "hunt",
 		visionRadius: 8, maxhp: 11, minLevel:2, weight:2, movePoints: 2, attackPoints: 2, attack: "MeleeBind", attackWidth: 1, attackRange: 1, power: 1, dmgType: "grope", fullBoundBonus: 2, difficulty: 1.4,
 		terrainTags: {"secondhalf":1, "lastthird":2}, shrines: [], floors:KDMapInit(["grv", "tmb"]), dropTable: [{name: "Gold", amountMin: 5, amountMax: 15, weight: 10}, {name: "Rope", weight: 3.5, ignoreInInventory: true}, {name: "Scissors", weight: 0.5, ignoreInInventory: true},]},
@@ -708,7 +742,9 @@ let KinkyDungeonEnemies: enemy[] = [
 		terrainTags: {"secondhalf":1, "lastthird":2, "ropeAnger": 1, "ropeRage": 1, "bountyhunter": 4, "rope": 5}, shrines: ["Rope"], allFloors: true,
 		dropTable: [{name: "Gold", amountMin: 20, amountMax: 30, weight: 10}, {name: "Scissors", ignoreInInventory: true, weight: 10}, {name: "EnchKnife", ignoreInInventory: true, weight: 1}, {name: "Rope", weight: 100, ignoreInInventory: true},]},
 
-	{name: "Maidforce", nameList: "maid", faction: "Maidforce", bound: "Maid", outfit: "Maidforce", style: "Maid", clusterWith: "maid", playLine: "SubMaid", color: "#814BB7", tags: KDMapInit(["leashing", "submissive", "tickleweakness", "imprisonable", "opendoors", "human", "minor", "maid", "melee", "ropeRestraints", "ropeRestraints2", "handcuffer", "maidVibeRestraintsLimited", "maidRestraintsLight", "jail", "jailer", "search"]), blindSight: 3, followRange: 1, AI: "hunt",
+	{name: "Maidforce", nameList: "maid", faction: "Maidforce", bound: "Maid", outfit: "Maidforce", style: "Maid", clusterWith: "maid", playLine: "SubMaid", color: "#814BB7",
+		tags: KDMapInit(["leashing", "submissive", "tickleweakness", "imprisonable", "opendoors", "human", "minor", "maid", "melee", "clothRestraints",
+			"ropeRestraints", "ropeRestraints2", "handcuffer", "maidVibeRestraintsLimited", "maidRestraintsLight", "jail", "jailer", "search"]), blindSight: 3, followRange: 1, AI: "hunt",
 		stealth: 3.5, noReveal: true, bindOnDisableSpecial: true, bindOnDisable: true,  events: [
 			{trigger: "tick", type: "secretToy"},
 		],
@@ -1637,6 +1673,7 @@ let KinkyDungeonEnemies: enemy[] = [
 		],
 		Behavior: {
 			leashCondition: "dollmakerLeash",
+			scanBeforeAlert: true,
 		},
 		maxblock: 0,
 		maxdodge: 0,
@@ -1667,6 +1704,7 @@ let KinkyDungeonEnemies: enemy[] = [
 		],
 		Behavior: {
 			leashCondition: "dollmakerLeash",
+			scanBeforeAlert: true,
 		},
 		maxblock: 0,
 		maxdodge: 0,
@@ -1697,6 +1735,9 @@ let KinkyDungeonEnemies: enemy[] = [
 		events: [
 			{trigger: "getLights", type: "enemyTorch", power: 3, color: "#e7cf1a"},
 		],
+		Behavior: {
+			scanBeforeAlert: true,
+		},
 		maxblock: 0,
 		maxdodge: 1,
 		stamina: 2,
@@ -1741,6 +1782,9 @@ let KinkyDungeonEnemies: enemy[] = [
 		RestraintFilter: {
 			unlimitedRestraints: true,
 		},
+		Behavior: {
+			scanBeforeAlert: true,
+		},
 		Security: {
 			level_key: 1,
 			level_tech: 1,
@@ -1774,6 +1818,9 @@ let KinkyDungeonEnemies: enemy[] = [
 			Block: "Clang",
 			Resist: "SoftShield",
 			Damage: "RobotHit",
+		},
+		Behavior: {
+			scanBeforeAlert: true,
 		},
 		maxblock: 0,
 		maxdodge: 0,
@@ -1812,6 +1859,9 @@ let KinkyDungeonEnemies: enemy[] = [
 			Resist: "SoftShield",
 			Damage: "RobotHit",
 		},
+		Behavior: {
+			scanBeforeAlert: true,
+		},
 		Sound: {
 			baseAmount: 0,
 			moveAmount: 0,
@@ -1842,6 +1892,9 @@ let KinkyDungeonEnemies: enemy[] = [
 		],
 		effect: {
 			effect: {name: "LatexSpray", count: 1, time: 4, power: 2, mult: 2, damage: "glue"},
+		},
+		Behavior: {
+			scanBeforeAlert: true,
 		},
 		spells: ["LatexSpray"], spellCooldownMult: 1, spellCooldownMod: 0, projectileTargeting: true,
 		cueSfx: {
@@ -1879,6 +1932,9 @@ let KinkyDungeonEnemies: enemy[] = [
 		Security: {
 			level_tech: 2,
 		},
+		Behavior: {
+			scanBeforeAlert: true,
+		},
 		maxblock: 0,
 		maxdodge: 3,
 		stamina: 8,
@@ -1915,6 +1971,9 @@ let KinkyDungeonEnemies: enemy[] = [
 		events: [
 			{trigger: "getLights", type: "enemyTorch", power: 3, color: "#e7cf1a"},
 		],
+		Behavior: {
+			scanBeforeAlert: true,
+		},
 		maxblock: 0,
 		maxdodge: 3,
 		stamina: 8,
@@ -2040,6 +2099,9 @@ let KinkyDungeonEnemies: enemy[] = [
 			Resist: "SoftShield",
 			Damage: "RobotHit",
 		},
+		Behavior: {
+			scanBeforeAlert: true,
+		},
 		stamina: 2,
 		Sound: {
 			baseAmount: 3,
@@ -2059,7 +2121,7 @@ let KinkyDungeonEnemies: enemy[] = [
 		},
 		attack: "MeleeBind", attackPoints: 4, attackWidth: 3, attackRange: 1, power: 3, dmgType: "crush", multiBind: 2, fullBoundBonus: 2,
 		minLevel:3, weight:-6, terrainTags: {"nocablebot": -1000, "secondhalf":1, "thirdhalf":1, "increasingWeight":0.5, "metalAnger": 6, "metalRage": 4, "metalPleased": 6, "metalFriendly": 4, "robot": 20, "tapePref": -4, "tapeOptout": 3}, shrines: ["Metal"], allFloors: true,
-		dropTable: [{name: "Gold", amountMin: 10, amountMax: 20, weight: 10, noSummon: true}, {name: "KeyCard", weight: 1}, {name: "AncientPowerSourceSpent", weight: 1, noSummon: true}]},
+		dropTable: [{name: "Gold", amountMin: 10, amountMax: 20, weight: 5, noSummon: true}, {name: "KeyCard", weight: 1}, {name: "AncientPowerSourceSpent", weight: 1, noSummon: true}]},
 	{name: "ForcefieldBot", faction: "AncientRobot", clusterWith: "robot", playLine: "Robot", color: "#2a319c",
 		SFX: {death: "SciFiExplode"},
 		tags: KDMapInit(["leashing", "jailer", "doortrap", "robot", "acidweakness", "soapweakness", "melee", "elite", "electricsevereweakness",
@@ -2076,6 +2138,9 @@ let KinkyDungeonEnemies: enemy[] = [
 			Block: "Clang",
 			Resist: "SoftShield",
 			Damage: "RobotHit",
+		},
+		Behavior: {
+			noAlert: true,
 		},
 		Sound: {
 			baseAmount: 4,
@@ -2096,7 +2161,7 @@ let KinkyDungeonEnemies: enemy[] = [
 		attack: "SpellMeleeBind", attackPoints: 4, attackWidth: 1, attackRange: 1, power: 3, dmgType: "electric", multiBind: 1, fullBoundBonus: 4,
 		minLevel:6, weight:-6,
 		terrainTags: {"secondhalf":1, "thirdhalf":1, "increasingWeight":0.5, "metalAnger": 5, "metalRage": 3, "metalPleased": 5, "metalFriendly": 3, "robot": 17}, shrines: ["Metal"], allFloors: true,
-		dropTable: [{name: "Gold", amountMin: 10, amountMax: 20, weight: 10, noSummon: true}, {name: "AncientPowerSourceSpent", weight: 1, noSummon: true}]},
+		dropTable: [{name: "Gold", amountMin: 10, amountMax: 20, weight: 3, noSummon: true}, {name: "AncientPowerSourceSpent", weight: 1, noSummon: true}]},
 	{name: "TapeBot", faction: "AncientRobot", clusterWith: "robot", playLine: "Robot", color: "#00eeee",
 		SFX: {death: "SciFiExplode"},
 		tags: KDMapInit(["leashing", "jailer", "doortrap", "robot", "acidweakness", "soapweakness", "melee", "electricsevereweakness", "coldresist", "soulresist", "guardCall", "iceresist", "slashresist", "crushsevereweakness", "pierceweakness", "autoTape", "opendoors", "closedoors", "search"]),
@@ -2110,6 +2175,9 @@ let KinkyDungeonEnemies: enemy[] = [
 			Block: "Clang",
 			Resist: "SoftShield",
 			Damage: "RobotHit",
+		},
+		Behavior: {
+			scanBeforeAlert: true,
 		},
 		stamina: 2,
 		Sound: {
@@ -2130,7 +2198,7 @@ let KinkyDungeonEnemies: enemy[] = [
 		},
 		attack: "MeleeBind", attackPoints: 3, attackWidth: 1, attackRange: 3.5, power: 3, dmgType: "glue", multiBind: 1, fullBoundBonus: 2,
 		minLevel:2, weight:-8, terrainTags: {"notapebot": -1000, "secondhalf":1, "thirdhalf":1, "increasingWeight":0.5, "metalAnger": 6, "metalRage": 4, "metalPleased": 6, "metalFriendly": 4, "robot": 20, "tape": 5, "tapePref": 6, "tapeOptout": -30}, shrines: ["Metal"], allFloors: true,
-		dropTable: [{name: "Gold", amountMin: 10, amountMax: 20, weight: 10, noSummon: true}, {name: "KeyCard", weight: 1}, {name: "AncientPowerSourceSpent", weight: 1, noSummon: true}]},
+		dropTable: [{name: "Gold", amountMin: 10, amountMax: 20, weight: 5, noSummon: true}, {name: "KeyCard", weight: 1}, {name: "AncientPowerSourceSpent", weight: 1, noSummon: true}]},
 	{name: "BotMissile", faction: "AncientRobot", clusterWith: "robot", playLine: "Robot", color: "#2a319c",
 		SFX: {death: "SciFiExplodeLarge"},
 		tags: KDMapInit(["leashing", "disarmresist", "robot", "ranged", "miniboss", "acidweakness", "soapweakness", "electricsevereweakness",
@@ -2147,6 +2215,9 @@ let KinkyDungeonEnemies: enemy[] = [
 			Block: "Clang",
 			Resist: "SoftShield",
 			Damage: "RobotHit",
+		},
+		Behavior: {
+			scanBeforeAlert: true,
 		},
 		Sound: {
 			baseAmount: 5,
@@ -2166,7 +2237,7 @@ let KinkyDungeonEnemies: enemy[] = [
 		},
 		attack: "SpellMeleeBind", attackPoints: 2, attackWidth: 1, attackRange: 3.5, power: 1, dmgType: "crush", multiBind: 1, fullBoundBonus: 3,
 		minLevel:7, weight:-106, terrainTags: {"nolatexbot": -1000,"thirdhalf":1, "increasingWeight":0.5, "open": 100, "metalAnger": 44, "metalRage": 13, "metalPleased": 44, "latex": 5, "metalFriendly": 13, "robot": 7}, shrines: ["Metal"], allFloors: true,
-		dropTable: [{name: "Gunpowder", amountMin: 2, amountMax: 3, weight: 5, noSummon: true}, {name: "KeyCard", weight: 1}, {name: "AncientPowerSource", weight: 1, noSummon: true}]},
+		dropTable: [{name: "Gunpowder", amountMin: 2, amountMax: 3, weight: 2, noSummon: true}, {name: "KeyCard", weight: 1}, {name: "AncientPowerSource", weight: 1, noSummon: true}]},
 	{name: "EnforcerBot", faction: "AncientRobot", clusterWith: "robot", playLine: "Robot", color: "#2a319c",
 		SFX: {death: "SciFiExplodeLarge"},
 		tags: KDMapInit(["leashing", "disarmresist", "robot", "ranged", "miniboss", "acidweakness", "soapweakness",
@@ -2182,6 +2253,9 @@ let KinkyDungeonEnemies: enemy[] = [
 			Block: "Clang",
 			Resist: "SoftShield",
 			Damage: "RobotHit",
+		},
+		Behavior: {
+			scanBeforeAlert: true,
 		},
 		Security: {
 			level_key: 2,
@@ -2203,7 +2277,7 @@ let KinkyDungeonEnemies: enemy[] = [
 		},
 		attack: "SpellMeleeBind", attackPoints: 2, attackWidth: 1, attackRange: 3.5, power: 1, dmgType: "crush", multiBind: 1, fullBoundBonus: 3,
 		minLevel:9, weight:-106, terrainTags: {"thirdhalf":1, "increasingWeight":0.5, guardian: 100, "robot": 7}, shrines: ["Metal"], allFloors: true,
-		dropTable: [{name: "Gold", amountMin: 20, amountMax: 30, weight: 5, noSummon: true}, {name: "KeyCard", weight: 1}, {name: "AncientPowerSource", weight: 1, noSummon: true}]},
+		dropTable: [{name: "KeyCard", weight: 1}, {name: "AncientPowerSource", weight: 1, noSummon: true}]},
 
 	{name: "EnforcerBotGuardian", faction: "AncientRobot", clusterWith: "robot", playLine: "Robot", color: "#2a319c",
 		SFX: {death: "SciFiExplodeLarge"},
@@ -2220,6 +2294,9 @@ let KinkyDungeonEnemies: enemy[] = [
 			Block: "Clang",
 			Resist: "SoftShield",
 			Damage: "RobotHit",
+		},
+		Behavior: {
+			scanBeforeAlert: true,
 		},
 		Sound: {
 			baseAmount: 5,
@@ -2276,6 +2353,9 @@ let KinkyDungeonEnemies: enemy[] = [
 		ignorechance: 0, armor: 2.5, followRange: 2, AI: "hunt",  cohesion: 0.5, events: [
 			{trigger: "tick", type: "secretToy"},
 		],
+		Behavior: {
+			scanBeforeAlert: true,
+		},
 		maxblock: 0,
 		maxdodge: 3,
 		nopickpocket: true,
@@ -2341,6 +2421,9 @@ let KinkyDungeonEnemies: enemy[] = [
 		events: [
 			{trigger: "tick", type: "LeashWolfgirls", dist: 3.5, chance: 0.3},
 		],
+		Behavior: {
+			noAlert: true,
+		},
 		maxblock: 3,
 		maxdodge: 2,
 		stamina: 6,
@@ -2417,6 +2500,9 @@ let KinkyDungeonEnemies: enemy[] = [
 			moveAmount: 4.5,
 			alertAmount: 12,
 		},
+		Behavior: {
+			noAlert: true,
+		},
 		shield: 5,
 		AI: "hunt",  visionRadius: 9, maxhp: 6, minLevel:0, weight:-4, movePoints: 1.5, cohesion: 1.0, armor: 1.5, spellResist: 1.5,
 		attackPoints: 3, attack: "", attackWidth: 1, attackRange: 1, tilesMinRange: 1, power: 1, dmgType: "grope",
@@ -2435,6 +2521,9 @@ let KinkyDungeonEnemies: enemy[] = [
 			baseAmount: 4,
 			moveAmount: 7,
 			alertAmount: 12,
+		},
+		Behavior: {
+			scanBeforeAlert: true,
 		},
 		AI: "hunt",  visionRadius: 9, maxhp: 7, minLevel:0, weight:-3, movePoints: 1, cohesion: 1.0, armor: 1, spellResist: -0.5, evasion: 0.5,
 		attackPoints: 2, attack: "MeleeBind", attackWidth: 2.5, attackRange: 1, tilesMinRange: 1, power: 1, dmgType: "glue", fullBoundBonus: 1,
@@ -5462,6 +5551,7 @@ let KinkyDungeonEnemies: enemy[] = [
 			level_key: 3,
 			level_tech: 1,
 		},
+		pronouns: {It: 100},
 		preferBlock: true,
 		Behavior: {
 			thorough: 0.6,
@@ -5495,6 +5585,7 @@ let KinkyDungeonEnemies: enemy[] = [
 			level_key: 3,
 			level_tech: 1,
 		},
+		pronouns: {It: 100},
 		stamina: 2,
 		Behavior: {
 			thorough: 0.6,
@@ -5519,6 +5610,7 @@ let KinkyDungeonEnemies: enemy[] = [
 		ignorechance: 0, armor: 1, spellResist: 1.0, followRange: 1, AI: "hunt",  cohesion: 0.9, events: [
 			{trigger: "tick", type: "secretToy"},
 		],
+		pronouns: {It: 100},
 		nopickpocket: true,
 		stamina: 4,
 		master: {type: "Dollsmith", range: 2.5, loose: true, aggressive: true},
@@ -6148,6 +6240,7 @@ let KinkyDungeonEnemies: enemy[] = [
 		armor: 0, followRange: 3, AI: "guard",
 		
 		
+		pronouns: {She: 100},
 		onSpawnScript: "Boss",
 		wanderAISetting: "Boss",
 
@@ -6190,6 +6283,7 @@ let KinkyDungeonEnemies: enemy[] = [
 			unlimitedRestraints: true,
 			requiredItems: ["MikoGag", "MikoDress"],
 		},
+		pronouns: {She: 100},
 		Behavior: {
 			leashCondition: "fuukaLeash",
 		},
@@ -6229,6 +6323,7 @@ let KinkyDungeonEnemies: enemy[] = [
 			unlimitedRestraints: true,
 			requiredItems: ["MikoGag", "MikoDress"],
 		},
+		pronouns: {She: 100},
 		special: true,
 		events: [
 			{trigger: "getLights", type: "enemyTorch", power: 3.5, color: "#ff7777"},
@@ -6396,6 +6491,7 @@ let KinkyDungeonEnemies: enemy[] = [
 			{trigger: "tick", type: "BossAssignFaction", kind: "Warden"},
 			{trigger: "tick", type: "WardenManagement", count: 1},
 		],
+		pronouns: {She: 100},
 		onSpawnScript: "Boss",
 		wanderAISetting: "Boss",
 		RestraintFilter: {
@@ -6435,6 +6531,7 @@ let KinkyDungeonEnemies: enemy[] = [
 		stamina: 4,
 		maxblock: 1,
 		maxdodge: 1,
+		pronouns: {She: 100},
 		unlockCommandLevel: 3, unlockCommandCD: 7,
 		spells: ["OneBarMissile", "EnemySteelRainBurst", "EnemyCM_self"], spellCooldownMult: 0.4, spellCooldownMod: 0, castWhileMoving: true, buffallies: true, kite: 2.5, projectileAttack: true, accuracy: 0.75, noChannel: true,
 		visionRadius: 9, maxhp: 80, minLevel:0, weight:-1000, movePoints: 2, attackPoints: 3, attack: "SpellMeleeBindLockAllWill", attackWidth: 2.5, attackRange: 1, power: 4, dmgType: "grope", fullBoundBonus: 4,
@@ -6442,23 +6539,24 @@ let KinkyDungeonEnemies: enemy[] = [
 		terrainTags: {}, floors:KDMapInit([]), dropTable: [{name: "Scrolls", weight: 10}], ondeath: [{type: "dialogue_and_die", dialogue:"TheWardenWin", click: true}]},
 
 	{name: "TheWardenRecruit", outfit: "Jailer", style: "Jailer", nameList: "TheWarden", playLine: "TheWarden", bound: "TheWarden", clusterWith: "human",
-			color: "#ffaa44",
-			tags: KDMapInit(["nosub", "leashing", "noshop", "warden", "human", "soulweakness", "magicresist", "ranged", "highsecRestraints", "leatherRestraints", "leatherRestraintsHeavy", "unflinching", "stageBossRecruit"]),
-			armor: 1, followRange: 3, AI: "guard",
-			
-			RestraintFilter: {
-				unlimitedRestraints: true,
-			},
-			special: true,
-			preferDodge: true,
-			stamina: 4,
-			maxblock: 1,
-			maxdodge: 1,
-			unlockCommandLevel: 3, unlockCommandCD: 7,
-			spells: ["EnemySteelRainBurst", "EnemyCM_self"], spellCooldownMult: 0.5, spellCooldownMod: 0, castWhileMoving: true, buffallies: true, kite: 2.5, projectileAttack: true, accuracy: 0.75, noChannel: true,
-			visionRadius: 9, maxhp: 40, minLevel:0, weight:-1000, movePoints: 2, attackPoints: 3, attack: "SpellMeleeBindLockAllWill", attackWidth: 2.5, attackRange: 1, power: 4, dmgType: "grope", fullBoundBonus: 4,
-			attackLock: "HiSec",
-			terrainTags: {}, floors:KDMapInit([]), dropTable: [{name: "Scrolls", weight: 10}]},
+		color: "#ffaa44",
+		tags: KDMapInit(["nosub", "leashing", "noshop", "warden", "human", "soulweakness", "magicresist", "ranged", "highsecRestraints", "leatherRestraints", "leatherRestraintsHeavy", "unflinching", "stageBossRecruit"]),
+		armor: 1, followRange: 3, AI: "guard",
+		
+		RestraintFilter: {
+			unlimitedRestraints: true,
+		},
+		pronouns: {She: 100},
+		special: true,
+		preferDodge: true,
+		stamina: 4,
+		maxblock: 1,
+		maxdodge: 1,
+		unlockCommandLevel: 3, unlockCommandCD: 7,
+		spells: ["EnemySteelRainBurst", "EnemyCM_self"], spellCooldownMult: 0.5, spellCooldownMod: 0, castWhileMoving: true, buffallies: true, kite: 2.5, projectileAttack: true, accuracy: 0.75, noChannel: true,
+		visionRadius: 9, maxhp: 40, minLevel:0, weight:-1000, movePoints: 2, attackPoints: 3, attack: "SpellMeleeBindLockAllWill", attackWidth: 2.5, attackRange: 1, power: 4, dmgType: "grope", fullBoundBonus: 4,
+		attackLock: "HiSec",
+		terrainTags: {}, floors:KDMapInit([]), dropTable: [{name: "Scrolls", weight: 10}]},
 
 	{name: "DollmakerBoss1", recruitType: "DollmakerRecruit", outfit: "DollSuit", playLine: "Dollmaker", bound: "DollmakerBoss", faction: "Boss", clusterWith: "dollsmith",
 		applyFaction: "Dollsmith",
@@ -6479,6 +6577,7 @@ let KinkyDungeonEnemies: enemy[] = [
 		Behavior: {
 			leashCondition: "dollmakerLeash",
 		},
+		pronouns: {She: 100},
 		maxblock: 3,
 		maxdodge: 1,
 		preferDodge: true,
@@ -6503,6 +6602,7 @@ let KinkyDungeonEnemies: enemy[] = [
 			{trigger: "afterEnemyTick", type: "dollmakerMissiles", count: 2, time: 15, dist: 10, kind: "RubberNuke"},
 			{trigger: "tick", type: "BossAssignFaction", kind: "Dollsmith"},
 		],
+		pronouns: {She: 100},
 		onSpawnScript: "Boss",
 		wanderAISetting: "Boss",
 		stamina: 3,
@@ -6533,6 +6633,7 @@ let KinkyDungeonEnemies: enemy[] = [
 			{trigger: "afterEnemyTick", type: "dollmakerMissiles", count: 2, time: 9, dist: 10, kind: "RubberNuke"},
 			{trigger: "tick", type: "BossAssignFaction", kind: "Dollsmith"},
 		],
+		pronouns: {She: 100},
 		onSpawnScript: "Boss",
 		wanderAISetting: "Boss",
 		preferBlock: true,
@@ -6562,6 +6663,7 @@ let KinkyDungeonEnemies: enemy[] = [
 		events: [
 			{trigger: "getLights", type: "enemyTorch", power: 3.5, color: "#ff88ff"},
 		],
+		pronouns: {She: 100},
 		preferBlock: true,
 		maxblock: 5,
 		maxdodge: 0,
@@ -6685,6 +6787,7 @@ let KDOndeath: Record<string, (enemy: entity, o: any, mapData: KDMapDataType) =>
 					f.id = enemy.id;
 					f.CustomName = enemy.CustomNameColor;
 					f.CustomNameColor = enemy.CustomNameColor;
+					f.CustomPronoun = enemy.CustomPronoun;
 					f.created = enemy.created;
 					f.homeCoord = enemy.homeCoord;
 					if (o.storeTrueForm) {
@@ -6714,6 +6817,7 @@ let KDOndeath: Record<string, (enemy: entity, o: any, mapData: KDMapDataType) =>
 					f.id = enemy.id;
 					f.CustomName = enemy.CustomNameColor;
 					f.CustomNameColor = enemy.CustomNameColor;
+					f.CustomPronoun = enemy.CustomPronoun;
 					f.created = enemy.created;
 					f.homeCoord = enemy.homeCoord;
 					if (o.storeTrueForm) {

@@ -276,6 +276,13 @@ function GetModelLayersNoOverride(ModelName: string, PrependString?: string, App
 	}
 	return [];
 }
+function GetModelLayersNoOverrideCB(ModelName: string, cb: (layer: ModelLayer) => void, PrependString?: string, AppendString?: string, InheritColor?: string, PriBonus?: number, layerSwap?: string, Folder?: string): ModelLayer[] {
+	let layers = GetModelLayersNoOverride(ModelName, PrependString, AppendString, InheritColor, PriBonus, layerSwap, Folder);
+	for (let layer of layers) {
+		cb(layer);
+	}
+	return layers;
+}
 function GetModelWithExtraLayers(NewModel: string, BaseModel: string, Layers: ModelLayer[], Parent?: string, TopLevel?: boolean, ExtraProps?: object): Model {
 	if (ModelDefs[BaseModel]) {
 		let model: Model = JSON.parse(JSON.stringify(ModelDefs[BaseModel]));
@@ -2865,8 +2872,8 @@ function GetModelLoc(C: Character, X: number, Y: number, ZoomInit: number = 1, h
 	let pos = {x: hp?.X*Zoom || 0, y: hp?.Y*Zoom || 0, angle: hp.Angle};
 
 	let MC = KDCurrentModels.get(C);
-	let StartMods = MC.Mods.get(`${X},${Y},${ZoomInit}`);
-	let EndMods = MC.EndMods.get(`${X},${Y},${ZoomInit}`);
+	let StartMods = MC.Mods.get(`${Math.round(X)},${Math.round(Y)},${ZoomInit}`);
+	let EndMods = MC.EndMods.get(`${Math.round(X)},${Math.round(Y)},${ZoomInit}`);
 	let mods = ModelGetPoseMods(MC.Poses);
 
 	for (let m of StartMods) {
@@ -2968,8 +2975,8 @@ function GetModelLocInverse(C: Character, X: number, Y: number, ZoomInit: number
 	}
 
 	let MC = KDCurrentModels.get(C);
-	let StartMods = MC.Mods.get(`${X},${Y},${ZoomInit}`);
-	let EndMods = MC.EndMods.get(`${X},${Y},${ZoomInit}`);
+	let StartMods = MC.Mods.get(`${Math.round(X)},${Math.round(Y)},${ZoomInit}`);
+	let EndMods = MC.EndMods.get(`${Math.round(X)},${Math.round(Y)},${ZoomInit}`);
 	let mods = ModelGetPoseMods(MC.Poses);
 
 	for (let m of StartMods) {

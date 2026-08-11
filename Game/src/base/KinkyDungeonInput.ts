@@ -16,6 +16,29 @@ let KDInputTypes: Record<string, (data: any) => string> = {
 		return KinkyDungeonMove(data.dir, data.delta, data.AllowInteract,
 			 data.SuppressSprint, data.forceSprint) ? "move" : "nomove";
 	},
+	"setrestraintpalette": (data) => {
+		let currentItem = data.currentItem;
+		let player = data.player;
+		let palette = data.palette;
+		let item = KDFindRestraint(KDPlayer(), currentItem, data.filter);
+		if (item) {
+			
+			if (item.forceFaction == palette) {
+				delete currentItem.forceFaction;
+				delete item.forceFaction;
+			} else {
+				currentItem.forceFaction = palette;
+				currentItem.faction = palette;
+				item.forceFaction = palette;
+				item.faction = palette;
+			}
+			KDRefreshCharacter.set(KinkyDungeonPlayer, true);
+			KinkyDungeonCheckClothesLoss = true;
+			KinkyDungeonDressPlayer();
+			return "";
+		}
+		return "";
+	},
 	"movestairs": (data) => {
 		KDInteracting = false;
 		KinkyDungeonToggleAutoPass = data.AutoPass;
@@ -284,6 +307,16 @@ let KDInputTypes: Record<string, (data: any) => string> = {
 		data.player = KDPlayer().id;
 
 		let maxtime = data.duration || KDGetEquipDuration(newItem.name, KDPlayer());
+		
+		let customEq = newItem.customEquip || "";
+		let msg = "KinkyDungeonSelfBondage" + customEq;
+		if (!customEq) {
+			msg = KDCustomEquipMsgRestraint(newItem) || msg;
+		}
+
+		KinkyDungeonSendTextMessage(10, TextGet(msg).replace("RestraintName", TextGet("Restraint" + newItem.name)), "yellow", 1);
+
+
 		for (let i = 1; i <= maxtime; i++)
 			KDAddDelayedAction({
 				data: data,
@@ -340,6 +373,16 @@ let KDInputTypes: Record<string, (data: any) => string> = {
 		data.player = KDPlayer().id;
 
 		let maxtime = KDGetEquipDuration(newItem.name, KDPlayer());
+		
+		let customEq = KDRestraint(newItem).customEquip || "";
+		let msg = "KinkyDungeonSelfBondage" + customEq;
+		if (!customEq) {
+			msg = KDCustomEquipMsgRestraint(newItem) || msg;
+		}
+
+		KinkyDungeonSendTextMessage(10, TextGet(msg).replace("RestraintName", 
+			TextGet("Restraint" + newItem.name)), "yellow", 1);
+
 		for (let i = 1; i <= maxtime; i++)
 			KDAddDelayedAction({
 				data: data,
@@ -781,27 +824,66 @@ let KDInputTypes: Record<string, (data: any) => string> = {
 	},
 	"renamenpc": (data) => {
 			let origname = KDGameData.Collection[data.id]?.origname;
-			if (KDGameData.Collection[data.id]
-				&& KDGameData.Collection[data.id].name != data.newName) {
-				if (!origname) origname = KDGameData.Collection[data.id].name;
-				KDGameData.Collection[data.id].name = data.newName;
-			}
-			if (KDPersistentNPCs[data.id]
-				&& KDPersistentNPCs[data.id].Name != data.newName) {
-				if (!origname) origname = KDPersistentNPCs[data.id].Name;
-				KDPersistentNPCs[data.id].Name = data.newName;
-			}
-			if (KDPersistentNPCs[data.id]?.entity
-				&& KDPersistentNPCs[data.id].entity.CustomName != data.newName) {
-				if (!origname) origname = KDPersistentNPCs[data.id].entity.CustomName;
-				KDPersistentNPCs[data.id].entity.CustomName = data.newName;
-			}
-			if (KDPersistentNPCs[data.id]?.trueEntity
-				&& KDPersistentNPCs[data.id].trueEntity.CustomName != data.newName) {
-				if (!origname) origname = KDPersistentNPCs[data.id].trueEntity.CustomName;
-				KDPersistentNPCs[data.id].trueEntity.CustomName = data.newName;
-			}
+			let origpronoun = KDGameData.Collection[data.id]?.origpronoun;
 
+			
+			
+			if (data.newName) {
+				if (KDGameData.Collection[data.id]
+					&& KDGameData.Collection[data.id].name != data.newName) {
+					if (!origname) origname = KDGameData.Collection[data.id].name;
+					KDGameData.Collection[data.id].name = data.newName;
+				}
+				if (KDPersistentNPCs[data.id]
+					&& KDPersistentNPCs[data.id].Name != data.newName) {
+					if (!origname) origname = KDPersistentNPCs[data.id].Name;
+					KDPersistentNPCs[data.id].Name = data.newName;
+				}
+				if (KDPersistentNPCs[data.id]?.entity
+					&& KDPersistentNPCs[data.id].entity.CustomName != data.newName) {
+					if (!origname) origname = KDPersistentNPCs[data.id].entity.CustomName;
+					KDPersistentNPCs[data.id].entity.CustomName = data.newName;
+				}
+				if (KDPersistentNPCs[data.id]?.trueEntity
+					&& KDPersistentNPCs[data.id].trueEntity.CustomName != data.newName) {
+					if (!origname) origname = KDPersistentNPCs[data.id].trueEntity.CustomName;
+					KDPersistentNPCs[data.id].trueEntity.CustomName = data.newName;
+				}
+			}
+			
+
+
+			if (data.newPronoun) {
+				if (KDPersistentNPCs[data.id]?.entity
+					&& KDPersistentNPCs[data.id].entity.CustomPronoun != data.newPronoun) {
+					if (!origpronoun) origpronoun = KDPersistentNPCs[data.id].entity.CustomPronoun;
+					KDPersistentNPCs[data.id].entity.CustomPronoun = data.newPronoun;
+				}
+				
+				if (KDPersistentNPCs[data.id]?.trueEntity
+					&& KDPersistentNPCs[data.id].trueEntity.CustomPronoun != data.newPronoun) {
+					if (!origpronoun) origpronoun = KDPersistentNPCs[data.id].trueEntity.CustomPronoun;
+					KDPersistentNPCs[data.id].trueEntity.CustomPronoun = data.newPronoun;
+				}
+				if (KDPersistentNPCs[data.id]
+					&& KDPersistentNPCs[data.id].pronoun != data.newPronoun) {
+					if (!origpronoun) origpronoun = KDPersistentNPCs[data.id].pronoun;
+					KDPersistentNPCs[data.id].pronoun = data.newPronoun;
+				}
+				if (KDGameData.Collection[data.id]
+					&& KDGameData.Collection[data.id].pronoun != data.newPronoun) {
+					if (!origpronoun) origpronoun = KDGameData.Collection[data.id].pronoun;
+					KDGameData.Collection[data.id].pronoun = data.newPronoun;
+				}
+			}
+			
+			
+
+			if (origpronoun) {
+				if (KDGameData.Collection[data.id]) {
+					KDGameData.Collection[data.id].origpronoun = origpronoun;
+				}
+			}
 			if (origname) {
 				if (KDGameData.Collection[data.id]) {
 					KDGameData.Collection[data.id].origname = origname;
@@ -1172,6 +1254,7 @@ let KDInputTypes: Record<string, (data: any) => string> = {
 	},
 	"cancelParty": (data) => {
 		if (data.enemy) {
+			if (!KDCanRemovePartyMember(data.player, data.enemy.id)) return "Fail";
 			let enemy = KinkyDungeonFindID(data.enemy.id);
 			if (!enemy && KDGameData.Party) enemy = KDGameData.Party.find((entity) => {return entity.id == data.enemy.id;});
 			if (enemy) {

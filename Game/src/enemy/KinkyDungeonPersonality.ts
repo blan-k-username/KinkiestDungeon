@@ -4,14 +4,113 @@ let KDJailPersonalities = {
 	"Robot": true,
 	"Dom": true,
 	"Sub": true,
+	"": true,
 };
 
 let KDStrictPersonalities = [
 	"Dom",
+	"Voyeur",
+	"Protocol",
 ];
 let KDLoosePersonalities = [
 	"Sub",
 ];
+let KDBratPersonalities = [
+	"Brat",
+];
+
+let KDBuyerPersonalities = [
+	"Sub",
+	"Brat",
+	"",
+	"Dom",
+	"Protocol",
+];
+let KDBuyerPersonalities_Comment = [
+	"Robot",
+	"Sub",
+	"Brat",
+	"",
+	"Dom",
+	"Protocol",
+	"Voyeur"
+];
+
+
+
+
+let KDPreferredSubTypeWeights: Record<string, ((enemy: entity, player?: entity) => number)[]> = {
+	PillowPrincess: [
+		(en) => {
+			if (KDGetPersonality(en) == "Voyeur") return 0.1;
+			if (KDGetPersonality(en) == "Protocol") return 10;
+			if (KDGetPersonality(en) == "Brat") return 0;
+			return KDLoosePersonalities.includes(KDGetPersonality(en)) ? 2 : (
+				KDStrictPersonalities.includes(KDGetPersonality(en)) ? 5 : 0.1
+			);
+		},
+	],
+	Cute: [
+		(en) => {
+			if (KDGetPersonality(en) == "Voyeur") return 3;
+			if (KDGetPersonality(en) == "Protocol") return 6;
+			return KDBratPersonalities.includes(KDGetPersonality(en)) ? 0.25 : (
+				KDLoosePersonalities.includes(KDGetPersonality(en)) ? 2 : 1
+			);
+		},
+	],
+	Brat: [
+		(en) => {
+			if (KDGetPersonality(en) == "Voyeur") return 3;
+			return KDBratPersonalities.includes(KDGetPersonality(en)) ? 3 : (
+				KDStrictPersonalities.includes(KDGetPersonality(en)) ? 3 : 0
+			);
+		},
+	],
+	Rough: [
+		(en) => {
+			if (KDGetPersonality(en) == "Voyeur") return 3;
+			if (KDGetPersonality(en) == "Sub") return 0;
+			return KDLoosePersonalities.includes(KDGetPersonality(en)) ? 2 : (
+				KDStrictPersonalities.includes(KDGetPersonality(en)) ? 3 : 0
+			);
+		},
+	],
+}
+
+
+
+let KDPreferredDomTypeWeights: Record<string, ((enemy: entity, player?: entity) => number)[]> = {
+	Protocol: [
+		(en) => {
+			return KDLoosePersonalities.includes(KDGetPersonality(en)) ? 4: (
+				KDStrictPersonalities.includes(KDGetPersonality(en)) ? 2 : 2
+			);
+		},
+	],
+	Strict: [
+		(en) => {
+			return KDBratPersonalities.includes(KDGetPersonality(en)) ? 2.25 : (
+				KDLoosePersonalities.includes(KDGetPersonality(en)) ? 2 : 1.5
+			);
+		},
+	],
+	Gentle: [
+		(en) => {
+			return KDLoosePersonalities.includes(KDGetPersonality(en)) ? 5 : (
+				KDStrictPersonalities.includes(KDGetPersonality(en)) ? 1 : 0.5
+			);
+		},
+	],
+	Mean: [
+		(en) => {
+			return KDBratPersonalities.includes(KDGetPersonality(en)) ? 5 : (
+				KDStrictPersonalities.includes(KDGetPersonality(en)) ? 2 : 1
+			);
+		},
+	],
+}
+
 
 let KDEnemyPersonalities = {
 	"": {weight: 10,
@@ -62,6 +161,42 @@ let KDEnemyPersonalities = {
 			"submissive": -10,
 			"dom": 10,
 			"verydom": 100,
+			"nobrain": -100,
+		},
+	},
+	
+	/*"Protocol": {weight: 0,
+		loose: false,
+		strict: true,
+		brat: false,
+		submissiveness: 0,
+		tags: {
+			"minor": -3,
+			"alchemist": 2,
+			"elite": 3,
+			"boss": 3,
+			"robot": -100,
+			"cyborg": 100,
+			"submissive": -10,
+			"dom": 5,
+			"verydom": 50,
+			"nobrain": -100,
+		},
+	},*/
+	
+	"Voyeur": {weight: 1.5,
+		loose: false,
+		strict: true,
+		brat: false,
+		submissiveness: 0,
+		tags: {
+			"minor": 3,
+			"elite": 1,
+			"robot": -100,
+			"cyborg": 100,
+			"submissive": -4,
+			"dom": 3,
+			"verydom": 1,
 			"nobrain": -100,
 		},
 	},
@@ -171,8 +306,44 @@ function KDGetPersonalityType(Enemy: enemy): string {
 }
 
 /**
+ * Gets personality for generic jail dialogue
+ * much more limited subset than the total personalities. defaults to switch ("")
  * @param enemy
  */
 function KDJailPersonality(enemy: entity): string {
 	return (enemy.personality && KDJailPersonalities[enemy.personality]) ? enemy.personality : "";
+}
+
+function KDEnemyGetPreferredSubType(en: entity, player?: entity, cache?: boolean): string {
+	if (en.preferredSubType) return en.preferredSubType;
+	let weights : Record<string, number> = {};
+
+	for (let type in KDPreferredSubTypeWeights) {
+		let w = 0;
+		for (let item of KDPreferredSubTypeWeights[type]) {
+			w += item(en, player);
+		}
+	}
+
+	let val = KDGetByWeight(weights) || "Cute";
+
+	if (cache) en.preferredSubType = val;
+	return val;
+}
+
+function KDEnemyGetPreferredDomType(en: entity, player?: entity, cache?: boolean): string {
+	if (en.preferredDomType) return en.preferredDomType;
+	let weights : Record<string, number> = {};
+
+	for (let type in KDPreferredDomTypeWeights) {
+		let w = 0;
+		for (let item of KDPreferredDomTypeWeights[type]) {
+			w += item(en, player);
+		}
+	}
+
+	let val = KDGetByWeight(weights) || "Cute";
+
+	if (cache) en.preferredDomType = val;
+	return val;
 }

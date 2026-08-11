@@ -326,6 +326,8 @@ function KinkyDungeonStartChase(enemy: entity, Type: string, faction?: string, f
 				KinkyDungeonChangeRep("Ghost", -5 * repMult - GuiltAmount*KDGuiltMult);
 			KinkyDungeonChangeRep("Prisoner", 10 * repMult + GuiltAmount*KDGuiltMult);
 
+			KinkyDungeonSetFlag("jailbroke", 3);
+
 			KDGameData.Guilt = Math.max(0, (KDGameData.Guilt || 0) - GuiltAmount);
 			KDGameData.PrisonerState = "chase";
 			KinkyDungeonInterruptSleep();
@@ -357,7 +359,10 @@ function KinkyDungeonStartChase(enemy: entity, Type: string, faction?: string, f
 							KinkyDungeonSendDialogue(e, TextGet("KinkyDungeonRemindJailChase" + suff + index,
 									KDGetGenericDialogueParams(KDPlayer(), enemy)).replace("EnemyName", TextGet("Name" + e.Enemy.name)), KDGetColor(e), 7, (!KDGameData.PrisonerState) ? 3 : 5);
 					}
-					if (!e.hostile) e.hostile = KDMaxAlertTimerAggro;
+					if (!e.hostile) {
+						e.hostile = KDMaxAlertTimerAggro;
+						KinkyDungeonSetFlag("aggroed", 3);
+					}
 					else KDMakeHostile(e);//e.hostile = Math.max(KDMaxAlertTimerAggro, e.hostile);
 					e.ceasefire = undefined;
 				}
@@ -366,13 +371,24 @@ function KinkyDungeonStartChase(enemy: entity, Type: string, faction?: string, f
 	}
 
 	if (enemy && KDFactionRelation(KDGetFaction(enemy), "Jail") > -0.1 && !enemy.Enemy.tags.peaceful) {
-		if (!enemy.hostile) KDMakeHostile(enemy);//enemy.hostile = KDMaxAlertTimerAggro;
+		if (!enemy.hostile) {
+			KDMakeHostile(enemy);//enemy.hostile = KDMaxAlertTimerAggro;
+						KinkyDungeonSetFlag("aggroed", 3);
+		}
 		else KDMakeHostile(enemy);//Math.max(KDMaxAlertTimerAggro, enemy.hostile);
 		enemy.ceasefire = undefined;
 	}
 	if (Type && enemy?.hostile && (enemy.Enemy.tags.jail || enemy.Enemy.tags.jailer || KDGetEnemyPlayLine(enemy))) {
 		let suff = KDGetEnemyPlayLine(enemy) ? KDGetEnemyPlayLine(enemy) + Type : Type;
 		let index = (Type == "Attack" || Type == "Spell") ? ("" + Math.floor(Math.random() * 3)) : "";
+
+		if (KDGameData.PrisonerState == 'jail' || KDGameData.PrisonerState == 'parole') {
+			if (!KinkyDungeonFlags.get("recent_jb")) {
+
+				KinkyDungeonSetFlag("jailbroke", 4);
+				KinkyDungeonSetFlag("recent_jb", 14);
+			}
+		}
 
 		if (!enemy.dialogue || !enemy.dialogueDuration)
 			KinkyDungeonSendDialogue(enemy, TextGet("KinkyDungeonRemindJailChase" + suff + index,
@@ -555,8 +571,31 @@ function KinkyDungeonGetJailRestraintsForGroup(Group: string, jailRestraintList?
  * @param r
  */
 function KDJailCondition(r: KDJailRestraint): boolean {
-	if (r.Condition && KDJailConditions[r.Condition]) {
-		return KDJailConditions[r.Condition](r);
+	if (r.Condition && KDJailConditions[r.Condition] && !KDJailConditions[r.Condition](r)) {
+		return false;
+	}
+	if (r.Conditions) {
+		for (let Condition of r.Conditions) {
+			if (Condition && KDJailConditions[Condition] && !KDJailConditions[Condition](r)) {
+				return false;
+			}
+		}
+	}
+	if (r.flags) {
+		let player = KDPlayer()
+		for (let flag of r.flags) {
+			if (!KinkyDungeonFlags.get(flag)) {
+				return false;
+			}
+		}
+	}
+	if (r.noflags) {
+		let player = KDPlayer()
+		for (let flag of r.noflags) {
+			if (KinkyDungeonFlags.get(flag)) {
+				return false;
+			}
+		}
 	}
 	return true;
 }
@@ -1558,9 +1597,10 @@ function KinkyDungeonDefeat(PutInJail?: boolean, leashEnemy?: entity) {
 
 	let forceFaction = KDGetLeashFaction(leashEnemy);
 	let jailroom = KDGetLeashJailRoom(leashEnemy);
+	let hisecoutpost = KDGetHighSecOutpost(leashEnemy);
 	let slot = KDGetWorldMapLocation(KDCurrentWorldSlot);
 
-	if (PutInJail && jailroom == KDMapData.RoomType && forceFaction == KDMapData.MapFaction) {
+	if (PutInJail && (hisecoutpost != undefined ? hisecoutpost : jailroom) == KDMapData.RoomType && forceFaction == KDMapData.MapFaction) {
 		PutInJail = false;
 		// Cancel if we are already in the target room!
 	}
@@ -1761,6 +1801,7 @@ function KinkyDungeonDefeat(PutInJail?: boolean, leashEnemy?: entity) {
 			guard.aware = true;
 			guard.gx = guard.x;
 			guard.gy = guard.y;
+			KDResetIntent(leasher);
 			let action = "leashCell";
 			if (guard.IntentAction != action) {
 				KDIntentEvents[action].trigger(guard, {});
@@ -2042,16 +2083,21 @@ function KDWanderEnemy(en: entity) {
  * Moves an enemy to a random position on the map
  * @param e
  */
-function KDKickEnemy(e: entity, minDist: number = 10, force: boolean = false) {
+function KDKickEnemy(e: entity, minDist: number = 10, force: boolean = false, prefDist?: number) {
 	if (!e.Enemy.tags.temporary || force) {
 		if (!e.Enemy.tags.prisoner && !KDEnemyHasFlag(e, "imprisoned")) {
 			let p = (e.spawnX != undefined && e.spawnY != undefined
 				&& (!e.homeCoord || (KDCompareLocation(e.homeCoord, KDGetCurrentLocation())))
 			) ? {x: e.spawnX, y: e.spawnY} : undefined;
 			if (!p  ||  KDistEuclidean (e.x - (e.spawnX != undefined ? e.spawnX : e.x),
-				                    e.y - (e.spawnY != undefined ? e.spawnY : e.y)) < minDist)
+				                    e.y - (e.spawnY != undefined ? e.spawnY : e.y)) < minDist
+								|| prefDist)
 			{
-				p = KinkyDungeonGetRandomEnemyPoint(true);
+				if (prefDist) {
+					p = KinkyDungeonGetNearbyPoint(e.x, e.y, true, e, prefDist < 2, true);
+				}
+				if (!prefDist || !p)
+					p = KinkyDungeonGetRandomEnemyPoint(true);
 			}
 			if (p) {
 				e.x = p.x;
@@ -2545,8 +2591,8 @@ function KDGetLeashJailRoom(leashEnemy: entity): string {
 	} else if (leashEnemy && KDSelfishLeash(leashEnemy) && 
 		KDGetWorldMapLocation(KDCurrentWorldSlot) && KDGetLairs(KDGetWorldMapLocation(KDCurrentWorldSlot),
 		leashEnemy.id)?.length > 0) {
-		jailRoom = KDGetLairs(KDGetWorldMapLocation(KDCurrentWorldSlot),
-			leashEnemy.id)[0];
+		jailRoom = KDPersonalAlt[KDGetLairs(KDGetWorldMapLocation(KDCurrentWorldSlot),
+			leashEnemy.id)[0][0]]?.RoomType;
 	} else if (leashEnemy
 		&& (KDFactionProperties[faction]?.lairType
 		|| (!KDFactionProperties[faction]
