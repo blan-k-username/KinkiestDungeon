@@ -93,7 +93,13 @@
 	 * so it must be added here to be visible; the server bundle has the same item so apply works too.
 	 * Stock function, no game-source edit. Idempotent (won't double-add).
 	 */
-	function addStartItem(name) {
+	function addStartItem(spec) {
+		// Accepts one name or a comma/space-separated list, matching the server's
+		// KDParseStartRestraints (swap-session.js) — e.g. "MasterworkHeels,HighsecShackles".
+		if (!spec) return;
+		var names = String(spec).split(/[,\s]+/).filter(Boolean);
+		if (names.length > 1) { names.forEach(addStartItem); return; }
+		var name = names[0];
 		try {
 			if (!name) return;
 			if (typeof KinkyDungeonInventoryAddLoose !== 'function') return;

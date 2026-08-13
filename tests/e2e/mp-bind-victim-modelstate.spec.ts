@@ -115,6 +115,14 @@ test('PROBE: victim MP client model-container state after a tie', async ({ brows
 			const armsBoundBefore = (typeof KinkyDungeonIsArmsBound === 'function') ? KinkyDungeonIsArmsBound(false, false) : '<undef>';
 			// @ts-ignore
 			const hadArmsFullBefore = (typeof KinkyDungeonPlayerTags !== 'undefined' && KinkyDungeonPlayerTags.has) ? KinkyDungeonPlayerTags.has('ItemArmsFull') : '<undef>';
+			// KDM-156: what the CLIENT produced on its own, before any manual call below. Vanilla
+			// rebuilds this in its per-turn stats pass (KinkyDungeonStats.ts:1774), which the thin
+			// client never runs; while it stayed stale, every inventory action on a worn restraint
+			// hit an undefined `.find()` result and crashed (KDInventoryActions.ts:408 / :424).
+			// @ts-ignore
+			const sgGroupsAuto = (typeof KinkyDungeonStruggleGroups !== 'undefined')
+				// @ts-ignore
+				? KinkyDungeonStruggleGroups.map((g) => g.group) : ['<undef>'];
 			// THE CANDIDATE FIX — the real per-turn player-tag computation the render-client never runs:
 			// @ts-ignore
 			try { if (typeof KinkyDungeonUpdateRestraints === 'function') KinkyDungeonPlayerTags = KinkyDungeonUpdateRestraints(KinkyDungeonPlayer, -1, 1); } catch (e) {}
@@ -128,6 +136,7 @@ test('PROBE: victim MP client model-container state after a tie', async ({ brows
 			const MC = KDCurrentModels.get(KinkyDungeonPlayer);
 			return {
 				standalonePatched: sp,
+				sgGroupsAuto,
 				armsBoundBefore, hadArmsFullBefore, armsBoundAfter, hasArmsFullAfter,
 				// @ts-ignore
 				poses: MC ? Object.keys(MC.Poses || {}).filter((k) => MC.Poses[k]) : ['<no MC>'],
@@ -143,6 +152,9 @@ test('PROBE: victim MP client model-container state after a tie', async ({ brows
 		// KD-103 assertions — with the render-client fix (KinkyDungeonUpdateRestraints) the victim's own
 		// client must compute the arms-bound state from the worn rope, WITHOUT any manual force:
 		expect(after.worn).toContain('StrongMagicRopeArmsBoxtie'); // the tie reached the victim
+		// KDM-156: the client rebuilt the struggle groups by ITSELF (no manual call), so the victim
+		// can open "worn" and click struggle/remove without hitting an undefined .find() result.
+		expect(forced.sgGroupsAuto).toContain('ItemArms');
 		expect(before.armsBound).toBe(false);                      // started free
 		expect(after.armsBound).toBe(true);                        // now arms-bound (drives the bound pose)
 		expect(after.hasArmsFull).toBe(true);                      // ItemArmsFull tag present

@@ -765,6 +765,20 @@ class HeadlessHost {
 					manaPool: (typeof KinkyDungeonStatManaPool !== 'undefined') ? KinkyDungeonStatManaPool : 0,
 					distraction: KinkyDungeonStatDistraction, distractionMax: KinkyDungeonStatDistractionMax,
 					distractionLower: (typeof KinkyDungeonStatDistractionLower !== 'undefined') ? KinkyDungeonStatDistractionLower : 0,
+					// Movement-cost state. The client DRAWS the "xN" move reticule itself
+					// (KinkyDungeonDraw.ts:1581) from KDGameData.MovePoints and the tile cost derived
+					// from KinkyDungeonSlowLevel. Anything the client renders has to be in this
+					// contract; while these were missing it drew its own untouched defaults and
+					// always said x1 — contradicting the "You are slowed!" line beside it.
+					// Recomputed, not read ambient: KinkyDungeonSlowLevel is a world global holding
+					// whoever was last in the player slot, and this snapshot must describe THIS player.
+					slowLevel: (function(){
+						if (typeof KinkyDungeonCalculateSlowLevel === 'function') KinkyDungeonCalculateSlowLevel(0);
+						return (typeof KinkyDungeonSlowLevel !== 'undefined') ? KinkyDungeonSlowLevel : 0;
+					})(),
+					movePoints: (typeof KDGameData !== 'undefined' && KDGameData) ? KDGameData.MovePoints : null,
+					slowMoveTurns: (typeof KDGameData !== 'undefined' && KDGameData) ? KDGameData.SlowMoveTurns : null,
+					sprintTurns: (typeof KDGameData !== 'undefined' && KDGameData) ? KDGameData.SprintTurns : null,
 				},
 				// Full authoritative KDMapData (JSON-clones cleanly headless, ~10KB). The
 				// client adopts it WHOLESALE — a field-subset splice leaves a half-local/
@@ -992,6 +1006,16 @@ class HeadlessHost {
 					OrgasmStage: KDGameData.OrgasmStage, OrgasmTurns: KDGameData.OrgasmTurns, OrgasmStamina: KDGameData.OrgasmStamina,
 					Balance: KDGameData.Balance, MovePoints: KDGameData.MovePoints, SleepTurns: KDGameData.SleepTurns,
 					KneelTurns: KDGameData.KneelTurns, Outfit: KDGameData.Outfit, ItemID: KDGameData.ItemID,
+					// Per-player movement penalty timers — without these the "you lose a turn" state
+					// bleeds onto whoever swaps in next.
+					SlowMoveTurns: KDGameData.SlowMoveTurns, SprintTurns: KDGameData.SprintTurns,
+					// Per-player action queue: self-equip, consumables and channelled casts all push
+					// here (KinkyDungeonInput.ts:321/386) and commit N turns later. Without it in the
+					// bundle the queue stayed on the shared world — so it never followed the player
+					// across a swap and a co-op player could never finish equipping anything.
+					// Deep-copied so two bundles can't alias the same array.
+					DelayedActions: (KDGameData.DelayedActions
+						? JSON.parse(JSON.stringify(KDGameData.DelayedActions)) : []),
 				} : undefined,
 			};
 		})()`);
@@ -1027,6 +1051,12 @@ class HeadlessHost {
 			if (b.gameData && typeof KDGameData !== 'undefined') {
 				for (var gk in b.gameData) { if (b.gameData[gk] !== undefined) KDGameData[gk] = b.gameData[gk]; }
 			}
+			// Re-derive the swapped-in player's slow from THEIR restraints. KinkyDungeonSlowLevel is a
+			// world global that KinkyDungeonCalculateSlowLevel writes for whoever is currently in the
+			// player slot; without this it survives the swap and the next player inherits a stranger's
+			// hobble ("You are slowed!" on the unbound partner). Derived state, so recompute rather
+			// than carry it in the bundle — it can never go stale that way.
+			if (typeof KinkyDungeonCalculateSlowLevel === 'function') KinkyDungeonCalculateSlowLevel(0);
 			if (typeof KDUpdateEnemyCache !== 'undefined') KDUpdateEnemyCache = true;
 			return true;
 		})()`);

@@ -204,6 +204,17 @@
 			if (typeof KinkyDungeonStatManaPool !== 'undefined') KinkyDungeonStatManaPool = s.stats.manaPool;
 			KinkyDungeonStatDistraction = s.stats.distraction; KinkyDungeonStatDistractionMax = s.stats.distractionMax;
 			if (typeof KinkyDungeonStatDistractionLower !== 'undefined') KinkyDungeonStatDistractionLower = s.stats.distractionLower;
+			// Movement cost state. The client draws the "xN" reticule itself
+			// (KinkyDungeonDraw.ts:1581 reads KDGameData.MovePoints; the tile cost comes from
+			// KinkyDungeonSlowLevel), so without adopting these it always showed x1 no matter how
+			// hobbled the player was — the number disagreed with the "You are slowed!" message.
+			if (typeof KDGameData !== 'undefined' && KDGameData) {
+				if (s.stats.movePoints != null) KDGameData.MovePoints = s.stats.movePoints;
+				if (s.stats.slowMoveTurns != null) KDGameData.SlowMoveTurns = s.stats.slowMoveTurns;
+				if (s.stats.sprintTurns != null) KDGameData.SprintTurns = s.stats.sprintTurns;
+			}
+			if (s.stats.slowLevel != null && typeof KinkyDungeonSlowLevel !== 'undefined')
+				KinkyDungeonSlowLevel = s.stats.slowLevel;
 			// adopt the authoritative KDMapData WHOLESALE (internally consistent — a
 			// field-subset splice over the client's local map renders broken). Entities
 			// carry their full Enemy defs in the clone, so no def re-link is needed.
@@ -259,6 +270,17 @@
 									// arms rendered "Free" despite the rope overlay. Real per-turn call (KinkyDungeonStats.ts:1749),
 									// no reimplementation. Proven: tests/e2e/mp-bind-victim-modelstate (armsBound false→true).
 									try { KinkyDungeonPlayerTags = KinkyDungeonUpdateRestraints(KinkyDungeonPlayer, -1, 1); } catch (eUR) { /* ignore */ }
+								}
+								// KDM-156: rebuild the struggle-group list from the worn set. Vanilla does this in
+								// its per-turn stats pass (KinkyDungeonUpdateStats → KinkyDungeonUpdateStruggleGroups,
+								// KinkyDungeonStats.ts:1774) — which the thin client never runs, local sim being off.
+								// While it was stale, KinkyDungeonStruggleGroups had no entry for a restraint the
+								// player visibly wore, so every inventory action on it hit an undefined `.find()`
+								// result and CRASHED: `sg.noCut` when drawing the worn screen
+								// (KDInventoryActions.ts:424) and `sg.group` when clicking struggle/remove (:408).
+								// The serve-time guards keep those from being fatal; this is the actual cause.
+								if (typeof KinkyDungeonUpdateStruggleGroups === 'function') {
+									try { KinkyDungeonUpdateStruggleGroups(); } catch (eSG) { /* ignore */ }
 								}
 								if (typeof KinkyDungeonCheckClothesLoss !== 'undefined') KinkyDungeonCheckClothesLoss = true;
 							if (typeof KDRefreshCharacter !== 'undefined' && typeof KinkyDungeonPlayer !== 'undefined') {

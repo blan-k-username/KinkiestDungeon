@@ -46,6 +46,69 @@ const INJECT = [
 	'/tools/mp-server/client/coop-bootstrap.js',
 ];
 
+/* ── Serve-time workaround for an UPSTREAM crash (see tests/unit/mp-bundle-sgroup-patch.spec.ts)
+ *
+ * `NPCRestrain.ts:310` / `:402` read `KDGetNPCBindingSlotForItem(...).sgroup` without a guard,
+ * but that helper returns null when no binding row accepts the item on that NPC
+ * (`KDGenRestraintUniform.ts:38`, `:48`). Clicking such an item in the bind menu — easy to hit in
+ * PvP, where the peer is an Enemy — throws "Cannot read properties of null (reading 'sgroup')".
+ * The sibling call sites are already guarded (`:877` `?.sgroup`, `:445` null-check), so `?.` is
+ * the intended shape and `if (slot_temp)` on the next line already handles null: the click
+ * becomes the no-op it should have been.
+ *
+ * Patched on the way OUT rather than on disk, so Game/src/** stays byte-identical to upstream
+ * (zero game-source edits). Delete this once upstream ships the guard — the spec's site-count
+ * assertion is what tells you that happened.
+ * ─────────────────────────────────────────────────────────────────────────────────────────── */
+// Every entry is the same defect: an unguarded lookup result (`.find()` / a helper returning null)
+// dereferenced without `?.`. Optional chaining only changes behaviour where the code currently
+// THROWS, so guarding is safe; the callers already handle a falsy value.
+const BUNDLE_PATCHES = [
+	{
+		// NPCRestrain.ts:310, :402 — KDGetNPCBindingSlotForItem returns null when no binding row
+		// accepts the item on that NPC (KDGenRestraintUniform.ts:38, :48). Crashes on CLICK in the
+		// bind menu. Siblings :877/:445 are already guarded, so `?.` is the intended shape.
+		find: 'KDGetNPCBindingSlotForItem(restraint, npcID).sgroup',
+		repl: 'KDGetNPCBindingSlotForItem(restraint, npcID)?.sgroup',
+		sites: 2,
+	},
+	{
+		// KDInventoryActions.ts:424 ("Cut".show) — KinkyDungeonStruggleGroups.find(...) is undefined
+		// when no struggle group matches the worn item's Group. Crashes while the Inventory screen is
+		// being DRAWN, so the game dies every frame rather than on interaction.
+		find: '!sg.noCut', repl: '!sg?.noCut', sites: 3,
+	},
+	{
+		// KDInventoryActions.ts:429 ("Cut".valid) — same `sg`, same miss, one line later.
+		find: '!sg.blocked', repl: '!sg?.blocked', sites: 14,
+	},
+];
+const SGROUP_PATCH_SITES = BUNDLE_PATCHES[0].sites;   // kept for the spec's real-bundle assertion
+
+function patchServedBundle(js) {
+	let out = js;
+	for (const p of BUNDLE_PATCHES) out = out.split(p.find).join(p.repl);
+	return out;
+}
+
+// Patched bundle cache, invalidated by mtime so a rebuild is picked up without a restart.
+let bundleCache = null;   // { mtimeMs, body }
+
+function serveBundle(filePath, stat) {
+	if (!bundleCache || bundleCache.mtimeMs !== stat.mtimeMs) {
+		const raw = fs.readFileSync(filePath, 'utf8');
+		for (const p of BUNDLE_PATCHES) {
+			const found = raw.split(p.find).length - 1;
+			if (found !== p.sites) {
+				console.log(`  [patch] "${p.find}": expected ${p.sites} site(s), found ${found}` +
+					(found === 0 ? ' — upstream may have fixed it; drop this entry.' : ' — COUNT IS STALE, check the bundle.'));
+			}
+		}
+		bundleCache = { mtimeMs: stat.mtimeMs, body: patchServedBundle(raw) };
+	}
+	return bundleCache.body;
+}
+
 function safeJoin(root, urlPath) {
 	const clean = decodeURIComponent(urlPath.split('?')[0].split('#')[0]);
 	const p = path.normalize(path.join(root, clean));
@@ -71,6 +134,19 @@ function serveStatic(req, res) {
 			res.end(html);
 			return;
 		}
+		if (urlPath === '/out/main.js') {
+			let body;
+			try {
+				body = serveBundle(filePath, fs.statSync(filePath));
+			} catch (e) {
+				// Never let the workaround take the game down — serve the bundle unpatched.
+				console.log('  [patch] bundle patch failed, serving unpatched: ' + e.message);
+				body = data.toString('utf8');
+			}
+			res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-cache' });
+			res.end(body);
+			return;
+		}
 		res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-cache' });
 		res.end(data);
 	});
@@ -92,7 +168,11 @@ function start(port = PORT) {
 	const pvp = /^(1|true|on)$/i.test(process.env.KD_PVP || '');
 	// KD_START_RESTRAINT=<name> equips every player with that worn restraint at start (UAT aid, KD-101).
 	const startRestraint = process.env.KD_START_RESTRAINT || '';
-	const bridge = new WSBridge({ requiredPlayers: 2, seed: 'coop-demo-seed', idleGraceMs: graceMs, pvp, startRestraint });
+	// KD_WEAR_RESTRAINT=<Name[,Name]> puts items straight ON every player at start. Self-equipping
+	// from the inventory is a delayed action that cannot complete in co-op (see SwapSession), so this
+	// is the way to UAT anything about being bound — e.g. movement speed in heels + ankle shackles.
+	const wearRestraint = process.env.KD_WEAR_RESTRAINT || '';
+	const bridge = new WSBridge({ requiredPlayers: 2, seed: 'coop-demo-seed', idleGraceMs: graceMs, pvp, startRestraint, wearRestraint });
 	const server = http.createServer(serveStatic);
 	bridge.attach(server);
 	return new Promise((resolve) => {
@@ -103,7 +183,7 @@ function start(port = PORT) {
 	});
 }
 
-module.exports = { start };
+module.exports = { start, patchServedBundle, SGROUP_PATCH_SITES };
 
 // Bump this when server-side MP code changes, so a stale-process restart is obvious.
 const MP_BUILD = 'KD-101 stun-gate + real-tie';

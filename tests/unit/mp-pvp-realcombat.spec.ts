@@ -59,12 +59,16 @@ describe('PvP via the REAL combat pipeline (KD-100)', () => {
 		expect(s.snapshotFor('A').defeatedPlayers).toContain('B');
 	}, BOOT_TIMEOUT);
 
-	it('a defeated peer is incapacitated (cannot act)', () => {
+	// KDM-154: this used to assert "a defeated peer cannot act" — a rule WE invented. KD has no
+	// Will-based action gate (KinkyDungeonMove has no Will check; KDPlayerCanMove is terrain-only),
+	// so a downed player keeps full agency and it is the bondage a peer then applies — enforced by
+	// the real pipeline — that limits them. The flag now only marks them bindable + down on the HUD.
+	it('a defeated peer keeps agency (down ≠ frozen)', () => {
 		for (let i = 0; i < 25 && !s.isDefeated('B'); i++) bumpB(s);
 		expect(s.isDefeated('B')).toBe(true);
 		const pos = s.posOf('B');
 		s.submit('B', { kdType: 'move', data: { dir: { x: 1, y: 0 }, delta: 1 } });
 		s.submit('A', { kind: 'wait' });
-		expect(s.posOf('B')).toEqual(pos);             // down — no move
+		expect(s.posOf('B')).not.toEqual(pos);         // down, but still moves under their own power
 	}, BOOT_TIMEOUT);
 });

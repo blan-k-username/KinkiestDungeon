@@ -22,6 +22,20 @@ const { HeadlessHost } = require('./headless-host');
 
 const PARK = { x: 1, y: 1 };
 
+/**
+ * KD_START_RESTRAINT accepts ONE name or a comma/space-separated list
+ * (e.g. "MasterworkHeels,HighsecShackles"). Single source of truth for the
+ * server seeding and the client's copy in coop-bootstrap.js.
+ */
+function KDParseStartRestraints(spec) {
+	return String(spec || '').split(/[,\s]+/).map((s) => s.trim()).filter(Boolean);
+}
+
+// KD-099: Will at/below which a player goes down; and the fraction of WillMax they must
+// climb back to before they act again (see SwapSession._reviveWill for the hysteresis).
+const DEFEAT_WILL = 0.52;
+const REVIVE_WILL_FRACTION = 0.25;
+
 class SwapSession {
 	/** @param {object} opts { requiredPlayers=2, seed, enemyType='Rat' } */
 	constructor(opts = {}) {
@@ -33,7 +47,13 @@ class SwapSession {
 		this.pvpPairs = new Set();    // per-pair PvP relationships (KD-094) — "A|B" sorted keys
 		this.friendlyFire = !!opts.friendlyFire; // incidental AOE hits partners (KD-096) — OFF by default
 		this.mods = Array.isArray(opts.mods) ? opts.mods.slice() : []; // server-side mod code (KD-074)
-		this.startRestraint = opts.startRestraint || ''; // KD-101 UAT: equip every player with this worn restraint at start (e.g. "HingedCuffs")
+		this.startRestraint = opts.startRestraint || ''; // KD-101 UAT: give every player this CARRYABLE loose item at start (e.g. "HingedCuffs")
+		// UAT: put items straight ON the player at start (KD_WEAR_RESTRAINT). Self-equip from the
+		// inventory is a DELAYED action (KinkyDungeonInput.ts:386 → KDGameData.DelayedActions) whose
+		// queue is not part of the player bundle (headless-host.js:991) and whose auto-wait cannot
+		// drive lockstep turns — so it never commits in co-op. Wearing at start sidesteps that
+		// entirely, which is what you want when testing movement speed while bound.
+		this.wearRestraint = opts.wearRestraint || '';
 		this.world = new HeadlessHost({ id: 'world' });
 		this.bundles = new Map();     // id -> player-state bundle
 		this.avatars = new Map();     // id -> world avatar entity id
@@ -86,8 +106,36 @@ class SwapSession {
 		// inventory) BEFORE capturing each bundle, so the server can apply it; every capturePlayer below
 		// inherits it. The CLIENT shows it via coop-bootstrap (snapshots don't sync the loose inventory).
 		if (this.startRestraint) {
-			const r = this.world.addLooseRestraint(this.startRestraint);
-			this._dbg(`start-restraint(loose) ${this.startRestraint} -> ${JSON.stringify(r)}`);
+			for (const name of KDParseStartRestraints(this.startRestraint)) {
+				const r = this.world.addLooseRestraint(name);
+				this._dbg(`start-restraint(loose) ${name} -> ${JSON.stringify(r)}`);
+			}
+			// UAT: heels only slow you down when the ClassicHeels toggle is ON — without it
+			// KinkyDungeonCalculateSlowLevel (KinkyDungeonStats.ts:2065) ignores `heelpower`
+			// entirely, so seeded heels would feel like nothing. Stock perk, set at runtime.
+			try {
+				this.world.eval(`(function(){
+					if (typeof KinkyDungeonStatsChoice !== 'undefined' && KinkyDungeonStatsChoice)
+						KinkyDungeonStatsChoice.set("ClassicHeels", true);
+				})()`);
+				this._dbg('start-restraint: ClassicHeels toggle enabled (heelpower counts toward slow)');
+			} catch (e) { this._dbg('start-restraint: could not enable ClassicHeels — ' + e.message); }
+		}
+		// Worn-at-start items: applied BEFORE each bundle is captured below, so every player
+		// starts wearing them (and their slow level is already derived from them).
+		for (const name of KDParseStartRestraints(this.wearRestraint)) {
+			const r = this.world.addRestraint(name);
+			this._dbg(`wear-restraint ${name} -> ${JSON.stringify(r)}`);
+		}
+		if (this.wearRestraint) {
+			try {
+				this.world.eval(`(function(){
+					if (typeof KinkyDungeonStatsChoice !== 'undefined' && KinkyDungeonStatsChoice)
+						KinkyDungeonStatsChoice.set("ClassicHeels", true);
+					if (typeof KinkyDungeonCalculateSlowLevel === 'function') KinkyDungeonCalculateSlowLevel(0);
+				})()`);
+				this._dbg(`wear-restraint: ClassicHeels on, slowLevel now ${JSON.stringify(this.world.playerSlowLevel())}`);
+			} catch (e) { this._dbg('wear-restraint: perk/slow refresh failed — ' + e.message); }
 		}
 		const base = this.world.findOpenTile();
 		let i = 0;
@@ -137,9 +185,16 @@ class SwapSession {
 		const applied = [];
 		this.actionMsgOf.clear();   // floating combat text is per-turn transient (KD-098)
 		for (const id of order) {
-			let action = this._pending.get(id) || { kind: 'wait' };
-			// KD-099: a defeated player is incapacitated — their move/attack is a no-op (wait).
-			if (this.defeated.has(id) && action.kind !== 'wait') action = { kind: 'wait' };
+			const action = this._pending.get(id) || { kind: 'wait' };
+			// KD-099 revised (KDM-154): a downed player is NOT incapacitated by us. KD has no
+			// "Will = 0 ⇒ you cannot act" rule — KinkyDungeonMove has no Will check and
+			// KDPlayerCanMove is terrain-only; low Will only makes enemies grab you more
+			// (KinkyDungeonEnemyTeaseAttacks.ts:746) and immobility comes from bondage/stun
+			// (KinkyDungeonIsDisabled = stunned || KDBoundEffects > 3). So being worn down leads to
+			// being TIED, and the tie — mirrored into the victim's bundle and enforced by the real
+			// pipeline — is what limits them. Escapable by struggling, exactly like single-player.
+			// `defeated` therefore survives only as the bindability signal (_armPeerEnemies stuns the
+			// avatar so KD's own KDCanApplyBondage gate passes) and the HUD marker.
 			const { kdType, data } = this._toInput(id, action);
 			// swap this player in; park their avatar so it doesn't block their own move
 			this.world.restorePlayer(this.bundles.get(id));
@@ -200,6 +255,13 @@ class SwapSession {
 		// KD-100: reconcile each peer avatar's REAL combat result (hp damage, capture) back into its
 		// owner's bundle (avatar.hp → Will; real capture/helpless → defeated + broadcast).
 		this._reconcilePeers();
+		// Per-turn state line: who is down and where everyone's Will sits. This is the view you
+		// need to tell "my input is ignored" apart from "my input did nothing".
+		this._dbg(`turn=${this.turn} done defeated=[${[...this.defeated].join(',')}] ` +
+			this._joined.map((pid) => {
+				const v = this.vitalsOf.get(pid) || {};
+				return `${pid}:will=${v.will != null ? v.will.toFixed(2) : '?'}/${v.willMax != null ? v.willMax : '?'}`;
+			}).join(' '));
 		this.world.parkGlobalPlayer(PARK.x, PARK.y);
 		this.turn += 1;
 		this._pending.clear();
@@ -283,11 +345,44 @@ class SwapSession {
 				this.bundles.set(id, this.world.capturePlayer());
 				this.vitalsOf.set(id, this.world.getVitals());
 			}
+			// KDM-156: CONSUME the gauge. It measures damage dealt to this peer THIS TURN
+			// (ARM_HP - hp), so it must be zeroed once charged. _armPeerEnemies resets it only for
+			// peers of an ACTING PvP player — but the avatar also takes hits from WORLD enemies, and
+			// with PvP off it is never armed at all. Left standing, the same hit was re-charged every
+			// single turn: a downed player was pinned at 0 Will and any healing (a Willpower potion)
+			// was wiped by the stale hit on the very turn they drank it.
+			if (eid != null) this.world.setAvatarEnemy(eid, this._armHp, this._armHp, 0);
 			const cur = this.vitalsOf.get(id) || {};
-			if (!this.defeated.has(id) && cur.will != null && cur.will <= 0.52) {
+			if (!this.defeated.has(id) && cur.will != null && cur.will <= DEFEAT_WILL) {
 				this._markDefeated(id, `will=${cur.will.toFixed(2)}`);
+			} else if (this.defeated.has(id) && cur.will != null && cur.will >= this._reviveWill(cur)) {
+				// KD-099 "freed": defeat is a state, not a life sentence. Once Will has recovered
+				// well clear of the floor the player acts again. Hysteresis (a fraction of WillMax,
+				// not the defeat line) so a sliver of regen doesn't flap them up and down.
+				this._markRecovered(id, `will=${cur.will.toFixed(2)}`);
 			}
 		}
+	}
+
+	/**
+	 * Will at/below which a player goes down, and the (higher) Will at which they get back up.
+	 * The gap is deliberate hysteresis — recovering exactly to the defeat line would let a
+	 * player flicker between down and up on every point of regen.
+	 */
+	_reviveWill(vitals) {
+		const willMax = (vitals && vitals.willMax != null && vitals.willMax > 0) ? vitals.willMax : 10;
+		return Math.max(DEFEAT_WILL * 2, REVIVE_WILL_FRACTION * willMax);
+	}
+
+	/** Clear a player's defeat + broadcast a shared "recovered" message to everyone. KD-099 "freed". */
+	_markRecovered(id, why) {
+		this.defeated.delete(id);
+		const txt = `Player ${id} is back on their feet!`;
+		const fb = this.world.sendFeedback(txt, '#33ff66', 12);
+		const entries = (fb && fb.entries) || [];
+		for (const pid of this._joined) this._pushLog(pid, entries);
+		this.actionMsgOf.set(id, { text: 'Recovered!', color: '#33ff66' });
+		this._dbg(`RECOVERED ${id} (${why})`);
 	}
 
 	/** Flag a player defeated + broadcast a shared "defeated" message to everyone. KD-099/100. */
@@ -301,7 +396,7 @@ class SwapSession {
 		this._dbg(`DEFEAT ${id} (${why})`);
 	}
 
-	/** Has this player been defeated (real capture / Will floor)? Sticky until freed (future work). */
+	/** Has this player been defeated (real capture / Will floor)? Cleared once Will recovers (_markRecovered). */
 	isDefeated(id) { return this.defeated.has(id); }
 
 	/** A message is "personal" to the acting player if it is 2nd-person feedback ("You …"/"Your …").
@@ -561,4 +656,4 @@ class SwapSession {
 	}
 }
 
-module.exports = { SwapSession };
+module.exports = { SwapSession, KDParseStartRestraints };

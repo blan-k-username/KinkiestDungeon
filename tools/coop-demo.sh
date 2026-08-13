@@ -5,6 +5,11 @@
 # Usage:
 #   tools/coop-demo.sh           # serve on http://localhost:8090
 #   PORT=9000 tools/coop-demo.sh # serve on another port
+#   KD_WEAR_RESTRAINT=MasterworkHeels,HighsecShackles tools/coop-demo.sh   # start WEARING them
+#     (self-equip from the inventory is a delayed action that cannot complete in co-op — use this)
+#   KD_START_RESTRAINT=DuctTapeFeet tools/coop-demo.sh   # seed every player with that loose item
+#     (server-side: goes into each player's BUNDLE, so applying it actually works. The per-window
+#      URL form `#coop=A&startitem=Name` only seeds the browser's client-local Items inventory.)
 #
 # Port 8090 by default (NOT 8080 — that's the stock `npm run serve` / kdrunner).
 #
@@ -26,4 +31,7 @@ exec docker run --rm -it --init \
 	--name kd-coop-demo \
 	-v "$PROJECT_ROOT":/usr/src/app -w /usr/src/app \
 	-p "${PORT}:${PORT}" -e "PORT=${PORT}" \
+	-e "KD_START_RESTRAINT=${KD_START_RESTRAINT:-}" \
+	-e "KD_WEAR_RESTRAINT=${KD_WEAR_RESTRAINT:-}" \
+	-e "KD_MP_DEBUG=${KD_MP_DEBUG:-}" \
 	"$IMAGE" bash -c 'npm i --no-audit --no-fund && npx tsc && exec node tools/mp-server/demo-server.js'
