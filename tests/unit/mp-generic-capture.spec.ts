@@ -103,3 +103,129 @@ describe('KDM-161 · AC3 — a mod\'s new global is per-player with ZERO server 
 		expect(s.world.eval('globalThis.MyModPlayerScore')).toBe(99);
 	}, BOOT_TIMEOUT);
 });
+
+/**
+ * KDM-161 AC1 — Map/Set are the last thing blocking deletion of the hand-written whitelist.
+ *
+ * `JSON.stringify(new Map())` is `"{}"`, so a Map global is watched but can NEVER appear diverged
+ * from baseline: KinkyDungeonInventory, KinkyDungeonFlags and KinkyDungeonStatsChoice are invisible
+ * to the generic layer and ride entirely on `_capturePlayerNamed`. These assert against the GENERIC
+ * slot (`bundle.globals`) on purpose — asserting on the bundle as a whole would pass today via the
+ * named half and prove nothing.
+ */
+describe('KDM-161 · the generic layer carries Map and Set', () => {
+	let h: any;
+	beforeAll(() => {
+		h = new HeadlessHost({ id: 'generic-codec' });
+		h.boot();
+		h.init({ seed: 'kdm161-codec' });
+	}, BOOT_TIMEOUT);
+
+	it('a Map global round-trips through the generic slot and comes back a real Map', () => {
+		h.eval(`(function(){ KinkyDungeonSetFlag('kdm161codec', 5); })()`);
+		const bundle = h.capturePlayer();
+		expect(bundle.globals, 'KinkyDungeonFlags must reach the generic slot')
+			.toHaveProperty('KinkyDungeonFlags');
+
+		h.eval(`(function(){ KinkyDungeonFlags = new Map(); })()`);
+		h._restoreGlobals(bundle.globals);   // generic layer ONLY — no named fallback
+		expect(h.eval(`({
+			isMap: KinkyDungeonFlags instanceof Map,
+			flag: KinkyDungeonFlags.get('kdm161codec'),
+		})`)).toEqual({ isMap: true, flag: 5 });
+	}, BOOT_TIMEOUT);
+
+	it('a Map OF Maps (KinkyDungeonInventory) round-trips with the inner Maps intact', () => {
+		h.addRestraint('DuctTapeFeet');
+		const before = h.eval(`(function(){
+			var o = {}; KinkyDungeonInventory.forEach(function(v, k){ o[k] = v.size; }); return o;
+		})()`);
+		expect(Object.keys(before).length, 'test is meaningless with an empty inventory')
+			.toBeGreaterThan(0);
+
+		const bundle = h.capturePlayer();
+		expect(bundle.globals).toHaveProperty('KinkyDungeonInventory');
+
+		h.eval(`(function(){ KinkyDungeonInventory = new Map(); })()`);
+		h._restoreGlobals(bundle.globals);
+		expect(h.eval(`(function(){
+			var o = {}, allMaps = true;
+			KinkyDungeonInventory.forEach(function(v, k){ if (!(v instanceof Map)) allMaps = false; o[k] = v.size; });
+			return { outer: KinkyDungeonInventory instanceof Map, allMaps: allMaps, shape: o };
+		})()`)).toEqual({ outer: true, allMaps: true, shape: before });
+	}, BOOT_TIMEOUT);
+
+	it('a mod-declared Set is carried and stays private to its owner', () => {
+		const s = new SwapSession({ requiredPlayers: 2, seed: 'kdm161-set' });
+		s.join('A');
+		s.join('B');
+		s.world.loadMod(`globalThis.MyModTags = new Set();`);
+
+		s.world.restorePlayer(s.bundles.get('A'));
+		s.world.eval(`(function(){ globalThis.MyModTags.add('owned-by-A'); })()`);
+		s.bundles.set('A', s.world.capturePlayer());
+
+		s.world.restorePlayer(s.bundles.get('B'));
+		expect(s.world.eval(`(function(){
+			return { isSet: globalThis.MyModTags instanceof Set, has: globalThis.MyModTags.has('owned-by-A') };
+		})()`), 'B must not inherit A\'s Set contents').toEqual({ isSet: true, has: false });
+
+		s.world.restorePlayer(s.bundles.get('A'));
+		expect(s.world.eval(`(function(){
+			return { isSet: globalThis.MyModTags instanceof Set, has: globalThis.MyModTags.has('owned-by-A') };
+		})()`)).toEqual({ isSet: true, has: true });
+	}, BOOT_TIMEOUT);
+});
+
+/**
+ * KDM-161 AC1 — the hand-written whitelist is DELETED, not extended.
+ *
+ * Structural, on purpose: the behavioural guarantees are I1/I2/I3 (mp-parity-oracle,
+ * mp-noninterference), which are mechanism-agnostic. This one pins the mechanism, so the named list
+ * cannot quietly come back as a "just this one field" exception.
+ */
+describe('KDM-161 · AC1 — no hand-written player whitelist survives', () => {
+	let h: any;
+	beforeAll(() => {
+		h = new HeadlessHost({ id: 'ac1-shape' });
+		h.boot();
+		h.init({ seed: 'kdm161-ac1' });
+	}, BOOT_TIMEOUT);
+
+	it('capturePlayer no longer names player globals by hand', () => {
+		expect(typeof h._capturePlayerNamed, '_capturePlayerNamed must be gone').toBe('undefined');
+		const bundle = h.capturePlayer();
+		// The generic slot plus KDGameData's declared bounded exception — nothing else.
+		expect(Object.keys(bundle).sort()).toEqual(['gameData', 'globals', 'v']);
+	}, BOOT_TIMEOUT);
+});
+
+/**
+ * KDM-161 AC4 — the size threshold must fail LOUDLY.
+ *
+ * Globals whose serialised form exceeds BASELINE_MAX_LEN are dropped from the watch set on the theory
+ * that they are static data tables (shared world data by definition). That is a classification, not a
+ * proof, and a silently-dropped per-player global is the exact bug class this epic exists to remove —
+ * so the drop is audited, on the same "report drift, never degrade quietly" contract as the
+ * BUNDLE_PATCHES site counts.
+ */
+describe('KDM-161 · AC4 — an oversize global that mutates is REPORTED, not silently dropped', () => {
+	let h: any;
+	beforeAll(() => {
+		h = new HeadlessHost({ id: 'oversize-audit' });
+		h.boot();
+		h.init({ seed: 'kdm161-oversize' });
+	}, BOOT_TIMEOUT);
+
+	it('reports nothing while the excluded tables really are static', () => {
+		expect(Object.keys(h._oversize).length, 'no global was excluded on size — test is vacuous')
+			.toBeGreaterThan(0);
+		expect(h._auditOversize(true)).toEqual([]);
+	}, BOOT_TIMEOUT);
+
+	it('names the global once it changes', () => {
+		const victim = Object.keys(h._oversize)[0];
+		h.eval(`(function(){ ${victim}.__kdm161AuditProbe = 1; })()`);
+		expect(h._auditOversize(true)).toContain(victim);
+	}, BOOT_TIMEOUT);
+});

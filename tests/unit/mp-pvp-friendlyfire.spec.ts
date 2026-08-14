@@ -8,6 +8,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { SwapSession } = require('../../tools/mp-server/swap-session');
+import { bundleGiveMana } from './helpers/bundle';
 
 const BOOT_TIMEOUT = 240_000;
 const AOE_SPELL = 'Firecracker'; // tags: aoe; aoe:1, power:3.5
@@ -16,7 +17,7 @@ function freshSession() {
 	const s = new SwapSession({ requiredPlayers: 2, seed: 'pvp-ff-seed' });
 	s.join('A');
 	s.join('B');
-	for (const id of ['A', 'B']) { s.bundles.get(id).stats.mana = 100; s.bundles.get(id).stats.manaMax = 100; }
+	for (const id of ['A', 'B']) bundleGiveMana(s.bundles.get(id));
 	return s;
 }
 

@@ -24,6 +24,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 const { HeadlessHost } = require('../../tools/mp-server/headless-host');
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { SwapSession } = require('../../tools/mp-server/swap-session');
+import { bundleGiveMana, bundlePlayer, bundleHasBuff } from './helpers/bundle';
 
 const BOOT_TIMEOUT = 240_000;
 
@@ -103,13 +104,12 @@ describe('Co-op spell casting over the live swap path (KD-089)', () => {
 
 	it('R1/R3 (live): A casts a damaging spell that reduces the shared enemy authoritatively', () => {
 		// Ensure the caster isn't mana-gated — bundle stats round-trip via restorePlayer.
-		s.bundles.get('A').stats.mana = 100;
-		s.bundles.get('A').stats.manaMax = 100;
+		bundleGiveMana(s.bundles.get('A'));
 
 		// Deterministically park the shared enemy adjacent to A's cast origin so the cast is
 		// in-range regardless of the Rat's wandering AI (Firecracker range 3.99; AoE 1 tile
 		// still covers a 1-tile enemy step before detonation).
-		const pa0 = s.bundles.get('A').player;
+		const pa0 = bundlePlayer(s.bundles.get('A'));
 		s.world.moveAvatar(s.enemyId, pa0.x + 1, pa0.y);
 		const enemy0 = s.enemyView();
 		expect(enemy0).toBeTruthy();
@@ -151,11 +151,10 @@ describe('Co-op spell casting over the live swap path (KD-089)', () => {
 	}, BOOT_TIMEOUT);
 
 	it('R4 (live): a self-targeted buff persists on the caster across swaps, and B is unaffected', () => {
-		s.bundles.get('A').stats.mana = 100;
-		s.bundles.get('A').stats.manaMax = 100;
+		bundleGiveMana(s.bundles.get('A'));
 
 		// Self-cast StoneSkin: target = A's own bundle position (selfCast in KinkyDungeonCastSpell).
-		const pa = s.bundles.get('A').player;
+		const pa = bundlePlayer(s.bundles.get('A'));
 		s.submit('A', {
 			kdType: 'tryCastSpell',
 			data: { tx: pa.x, ty: pa.y, spellname: 'StoneSkin', player: { __kdEnt: 'player' } },
@@ -163,7 +162,7 @@ describe('Co-op spell casting over the live swap path (KD-089)', () => {
 		s.submit('B', { kind: 'wait' });
 
 		const hasStoneSkin = (id: string) =>
-			JSON.stringify(s.bundles.get(id).buffs || {}).indexOf('StoneSkin') >= 0;
+			bundleHasBuff(s.bundles.get(id), 'StoneSkin');
 
 		// Buff is on A's bundle right after the cast turn (captured on swap-out)...
 		expect(hasStoneSkin('A')).toBe(true);

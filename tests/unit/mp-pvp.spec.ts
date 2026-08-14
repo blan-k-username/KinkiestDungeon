@@ -11,6 +11,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { SwapSession } = require('../../tools/mp-server/swap-session');
+import { bundlePlayer, bundleStats } from './helpers/bundle';
 
 const BOOT_TIMEOUT = 240_000;
 
@@ -42,21 +43,21 @@ describe('PvP core — A damages B (KD-092)', () => {
 	it('R2/R3: with PvP ON and adjacent, A reduces B’s stats; A is unaffected', () => {
 		s.setPvP(true);
 		// Players spawn adjacent (A at base.x, B avatar at base.x+1).
-		const aStatsBefore = JSON.stringify(s.bundles.get('A').stats);
+		const aStatsBefore = bundleStats(s.bundles.get('A'));
 		const pvp = pvpTurn(s);
 
 		expect(pvp.applied).toBe(true);
 		// the hit changed B's authoritative vitals (measured at apply time, not B's own wait)
 		expect(JSON.stringify(pvp.after)).not.toBe(JSON.stringify(pvp.before));
 		// A's own stats are untouched by attacking (independent bundles)
-		expect(JSON.stringify(s.bundles.get('A').stats)).toBe(aStatsBefore);
+		expect(bundleStats(s.bundles.get('A'))).toBe(aStatsBefore);
 	}, BOOT_TIMEOUT);
 
 	it('R4: with PvP ON but B out of range, the attack is rejected', () => {
 		s.setPvP(true);
 		// Move B far in both the bundle (authoritative pos) and the avatar so it is
 		// out-of-range regardless of random turn order.
-		const bp = s.bundles.get('B').player;
+		const bp = bundlePlayer(s.bundles.get('B'));
 		bp.x = bp.x + 6;
 		s.world.moveAvatar(s.avatars.get('B'), bp.x, bp.y);
 

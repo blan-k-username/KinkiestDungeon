@@ -9,6 +9,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { SwapSession } = require('../../tools/mp-server/swap-session');
+import { bundleStats } from './helpers/bundle';
 
 const BOOT_TIMEOUT = 240_000;
 // DuctTapeFeet has blockfeet:true ⇒ KinkyDungeonCalculateSlowLevel returns >0 once worn.
@@ -39,14 +40,14 @@ describe('PvP binding — A binds B (KD-093)', () => {
 
 	it('R2/R3: with PvP ON + adjacent, A binds B (B gains a restraint); A unaffected', () => {
 		s.setPvP(true);
-		const aStatsBefore = JSON.stringify(s.bundles.get('A').stats);
+		const aStatsBefore = bundleStats(s.bundles.get('A'));
 		const pvp = bindTurn(s);
 
 		expect(pvp.applied).toBe(true);
 		// B gained a worn restraint
 		expect(pvp.after.restraints).toBe(pvp.before.restraints + 1);
 		// A is unchanged by binding B
-		expect(JSON.stringify(s.bundles.get('A').stats)).toBe(aStatsBefore);
+		expect(bundleStats(s.bundles.get('A'))).toBe(aStatsBefore);
 	}, BOOT_TIMEOUT);
 
 	it('persistence: B’s slow level self-heals from the restraint after B’s next turn', () => {

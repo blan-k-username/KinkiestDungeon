@@ -11,6 +11,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { SwapSession } = require('../../tools/mp-server/swap-session');
+import { bundleGiveMana } from './helpers/bundle';
 
 const BOOT_TIMEOUT = 240_000;
 
@@ -24,10 +25,7 @@ describe('Per-player message log over the swap path (KD-090)', () => {
 		s = new SwapSession({ requiredPlayers: 2, seed: 'perplayer-log-seed' });
 		s.join('A');
 		s.join('B');
-		for (const id of ['A', 'B']) {
-			s.bundles.get(id).stats.mana = 100;
-			s.bundles.get(id).stats.manaMax = 100;
-		}
+		for (const id of ['A', 'B']) bundleGiveMana(s.bundles.get(id));
 		// A custom input that emits a unique personal message via the SAME world log path a
 		// real spell uses (KinkyDungeonMessageLog push) — lets us assert log routing without
 		// depending on (colliding, enemy-AI-randomized) real spell message text.

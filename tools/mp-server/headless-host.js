@@ -98,8 +98,26 @@ const MIN_EXPECTED_GLOBALS = 2000;
  * Anything larger is a static data table (enemy/restraint/spell defs), i.e. shared world data — and
  * those are exactly what made an unbounded fingerprint pass slow (109 ms). Measured: every real
  * per-player global except KDGameData is under 2 KB, and KDGameData is carried by its own path.
+ *
+ * ⚠️ DO NOT lower this as a cost optimisation without re-measuring. It was tried: probe9 measured the
+ * pass at 22.6 ms (MAX=20000) versus 12.8 ms (MAX=4096) and the 4 KB–20 KB band looked like nothing
+ * but definition tables — so 4096 looked free. It is NOT. The threshold governs the RESET half of
+ * _restoreGlobals as much as the capture half, and once the codec above made Maps visible, real Maps
+ * landed in that band (KinkyDungeonOutfitCache 16 KB, KDFactionRelations 12 KB). Dropping them from
+ * the watch set stops them being reset, so a player inherits the previous player's copy. That is the
+ * contamination bug class this epic exists to remove — a 10 ms saving is not worth reopening it.
+ *
+ * The exclusion is not silent either way: _auditOversize() re-checks the excluded set and reports
+ * anything that actually mutates.
  */
 const BASELINE_MAX_LEN = 20000;
+
+/**
+ * KDM-161: how many captures between oversize audits (_auditOversize). The audit re-serialises the
+ * globals excluded by BASELINE_MAX_LEN, so it costs about as much as one unbounded pass — fine
+ * occasionally, not on every swap.
+ */
+const OVERSIZE_AUDIT_EVERY = 200;
 
 /**
  * KDM-161: globals that are NOT per-player, by CATEGORY (never per feature — a per-feature entry
@@ -111,6 +129,15 @@ const GLOBAL_BLACKLIST = Object.freeze([
 	'KinkyDungeonCurrentTick', 'KinkyDungeonEnemyID', 'KinkyDungeonSpellID',
 	'AIData', 'KDAwareEnemies', 'KDEnemiesTargetingPlayer', 'KDPathfindingCacheFails',
 	'KDPathfindingCacheHits', 'KDPathCache', 'KDUpdateEnemyCache',
+	// Derived lookup caches over the world's ENTITIES — same category as KDPathCache above, and the
+	// same criterion (a) as KDGAMEDATA_WORLD_KEYS' entity-keyed entries: they describe world entities,
+	// not a player. They only became visible when KDM-161 taught the capture layer about Map, and they
+	// are emphatically NOT per-player: MEASURED, resetting them on swap-in wiped the enemy lookup, so
+	// a PvP bump-attack landed once and then stopped doing damage (mp-pvp-realcombat, -bind-reconcile,
+	// -defeat-recovery all went red). KDEnemiesCache alone is 400 KB after one turn.
+	'KDEnemiesCache', 'KDEnemyCache', 'KDEnemyEventCache', 'KDIDCache', 'KDEntityFlagCache',
+	'KDEntityRestraintMetadata', 'KDThoughtBubbles',
+	'KDBuffedStatTypeMemo', 'KDBuffedStatTypeMemoUpdate',
 	// --- render / dirty flags: the server has no screen ----------------------
 	'KDDrawUpdate', 'KDVisionUpdate', 'KDUpdateChokes', 'KDAlertCD',
 	'lastFloaterRefresh', 'KDParticleid', 'KDCurrentModels', 'KDRefreshCharacter',
@@ -118,9 +145,73 @@ const GLOBAL_BLACKLIST = Object.freeze([
 	'KDMusicToast', 'KDMusicUpdateTime',
 	// --- already managed per-player by swap-session (do NOT double-manage) ---
 	'KinkyDungeonMessageLog', 'KinkyDungeonFloaters',
+	// --- carried by its OWN path, not by divergence (KDM-161 D7) -------------
+	// KDGameData is the one global no mechanical rule can classify: 221 keys mixing per-player
+	// (Guilt, ShieldTokens, RevealedFog) with world (GuardSpawnTimer, JailGuard, ChestsGenerated).
+	// KDM-160 inverted it — capture whole, restore whole minus KDGAMEDATA_WORLD_KEYS — which is a
+	// semantic subtraction, not a whitelist. It is also 27 KB (JourneyMap alone is 21 KB), so the
+	// divergence path would exclude it on size anyway. Listed here so that exclusion is a DECISION.
+	'KDGameData',
 	// --- debug noise ---------------------------------------------------------
 	'KDRestraintDebugLog',
 ]);
+
+/**
+ * KDM-161: a tagged codec for the values plain JSON silently destroys.
+ *
+ * `JSON.stringify(new Map())` is `"{}"`. KD uses Maps heavily for per-player state
+ * (KinkyDungeonInventory is a Map of Maps; KinkyDungeonFlags, KinkyDungeonStatsChoice), so without
+ * this those globals are watched but can NEVER appear diverged from baseline — they were invisible to
+ * the generic layer and rode entirely on the hand-written whitelist. This is what unblocks AC1.
+ *
+ * ⚠️ Applied at the TOP LEVEL ONLY — `v instanceof Map || v instanceof Set`, never to every value.
+ * MEASURED (probes/probe9.js): running the encoder over all ~2,300 watched globals costs 320 ms per
+ * pass versus 23 ms, because it deep-clones every object before serialising. The cheap version is
+ * sound because the only globals holding a Map NESTED inside a plain object are `textProvider`, `PIXI`
+ * and `document` — render infrastructure, none of it player state. `kdEnc` itself stays recursive, so
+ * Maps inside Maps (the inventory) still work.
+ *
+ * A consequence worth relying on: a `__kdT` tag can only ever appear at the top level of a captured
+ * value, so restore can test for it in O(1) instead of walking every global.
+ */
+const KD_CODEC = `
+function kdEnc(v, d){
+	d = d || 0;
+	if (d > 12) return null;                                  // cyclic guard — no player state is this deep
+	if (v instanceof Map) { var a = []; v.forEach(function(val, k){ a.push([kdEnc(k, d+1), kdEnc(val, d+1)]); }); return { __kdT: 'Map', e: a }; }
+	if (v instanceof Set) { var b = []; v.forEach(function(val){ b.push(kdEnc(val, d+1)); }); return { __kdT: 'Set', e: b }; }
+	if (Array.isArray(v)) { var c = new Array(v.length); for (var i = 0; i < v.length; i++) c[i] = kdEnc(v[i], d+1); return c; }
+	if (v && typeof v === 'object') {
+		if (typeof v.toJSON === 'function') return v.toJSON();
+		// A CLASS INSTANCE cannot be carried. JSON would happily flatten it into a plain bag, and the
+		// decoder would hand that bag back to code expecting the real thing — MEASURED: kdSoundCache is
+		// a Map of live Audio objects, and flattening it produced "audio.pause is not a function" in
+		// four specs. Refusing outright means kdSer returns undefined and the global is dropped from the
+		// watch set, exactly as the PIXI/canvas globals already are: not carried beats carried wrong.
+		var p = Object.getPrototypeOf(v);
+		if (p !== null && p !== Object.prototype) throw new Error('kd-nonplain');
+		var o = {}; for (var k in v) if (Object.prototype.hasOwnProperty.call(v, k)) o[k] = kdEnc(v[k], d+1);
+		return o;
+	}
+	return v;
+}
+// Non-mutating on purpose: the input belongs to the player's bundle, which must stay plain JSON and
+// reusable for the next restore. Building fresh values also makes them native to THIS realm, so
+// \`x instanceof Map\` inside the bundle's own code is true.
+function kdDec(v){
+	if (Array.isArray(v)) { var c = new Array(v.length); for (var i = 0; i < v.length; i++) c[i] = kdDec(v[i]); return c; }
+	if (v && typeof v === 'object') {
+		if (v.__kdT === 'Map') { var m = new Map(); for (var i = 0; i < v.e.length; i++) m.set(kdDec(v.e[i][0]), kdDec(v.e[i][1])); return m; }
+		if (v.__kdT === 'Set') { var s = new Set(); for (var i = 0; i < v.e.length; i++) s.add(kdDec(v.e[i])); return s; }
+		var o = {}; for (var k in v) if (Object.prototype.hasOwnProperty.call(v, k)) o[k] = kdDec(v[k]);
+		return o;
+	}
+	return v;
+}
+// Throws 'kd-nonplain' for a Map/Set holding live objects; every caller already treats a throw as
+// "not player state, skip this global", which is the correct outcome.
+function kdSer(v){ return (v instanceof Map || v instanceof Set) ? JSON.stringify(kdEnc(v)) : JSON.stringify(v); }
+`;
 
 /** Sandbox/host bindings that must never be captured or reassigned. */
 const HOST_RESERVED = new Set([
@@ -1170,24 +1261,28 @@ class HeadlessHost {
 		// Pre-filtering here is also what makes per-capture divergence checks affordable: the big
 		// static data tables are excluded once, not re-serialised on every swap.
 		const snap = this.eval(`(function(){
+			${KD_CODEC}
 			var names = ${JSON.stringify(this._globalNames)}, MAX = ${BASELINE_MAX_LEN};
 			function hash(s){ var x = 5381, i = s.length; while (i) { x = (x*33) ^ s.charCodeAt(--i); } return x>>>0; }
-			var watch = [], h = {}, vals = {};
+			var watch = [], h = {}, vals = {}, over = {};
 			for (var i = 0; i < names.length; i++) {
 				var n = names[i], v;
 				try { v = eval(n); } catch (e) { continue; }
 				if (v === undefined || typeof v === 'function') continue;
 				try {
-					var s = JSON.stringify(v);
-					if (s === undefined || s.length > MAX) continue;   // unserialisable or a static table
+					var s = kdSer(v);
+					if (s === undefined) continue;                     // unserialisable (PIXI/canvas)
+					if (s.length > MAX) { over[n] = hash(s); continue; } // a static data table — see _auditOversize
 					watch.push(n); h[n] = hash(s); vals[n] = JSON.parse(s);
 				} catch (e) { /* cyclic / PIXI object — not player state */ }
 			}
-			return { watch: watch, h: h, vals: vals };
+			return { watch: watch, h: h, vals: vals, over: over };
 		})()`);
 		this._watchNames = snap.watch;
 		this._baseline = snap.h;
 		this._baselineValues = snap.vals;
+		this._oversize = snap.over;
+		this._capturesSinceAudit = 0;
 		return this._baseline;
 	}
 
@@ -1210,7 +1305,8 @@ class HeadlessHost {
 	_captureGlobals() {
 		if (!this._baseline) this._captureBaseline();
 		this._context.__KD_BASE_H = this._baseline;
-		return this.eval(`(function(){
+		const out = this.eval(`(function(){
+			${KD_CODEC}
 			var names = ${JSON.stringify(this._watchNames)}, base = globalThis.__KD_BASE_H, out = {};
 			function hash(s){ var x = 5381, i = s.length; while (i) { x = (x*33) ^ s.charCodeAt(--i); } return x>>>0; }
 			for (var i = 0; i < names.length; i++) {
@@ -1218,13 +1314,51 @@ class HeadlessHost {
 				try { v = eval(n); } catch (e) { continue; }
 				if (v === undefined || typeof v === 'function') continue;
 				try {
-					var s = JSON.stringify(v);
+					var s = kdSer(v);
 					if (s === undefined || s.length > ${BASELINE_MAX_LEN}) continue;
 					if (hash(s) !== base[n]) out[n] = JSON.parse(s);   // diverged ⇒ this player's state
 				} catch (e) { /* cyclic / PIXI — not player state */ }
 			}
 			return out;
 		})()`);
+		this._auditOversize();
+		return out;
+	}
+
+	/**
+	 * KDM-161: the size threshold must fail LOUDLY, not silently.
+	 *
+	 * Globals whose serialised form exceeds BASELINE_MAX_LEN are excluded from the watch set as static
+	 * data tables (measured: every one of them is an enemy/restraint/spell/model definition table, and
+	 * they are what made an unbounded pass slow). That reasoning is a classification, not a proof — so
+	 * this re-hashes them periodically and reports any that actually changed. A silently-dropped
+	 * per-player global is precisely the bug class this epic exists to remove; the same drift contract
+	 * as the BUNDLE_PATCHES site counts in demo-server.js.
+	 */
+	_auditOversize(force = false) {
+		if (!this._oversize) return null;
+		if (!force && ++this._capturesSinceAudit < OVERSIZE_AUDIT_EVERY) return null;
+		this._capturesSinceAudit = 0;
+		this._context.__KD_OVER_H = this._oversize;
+		const changed = this.eval(`(function(){
+			${KD_CODEC}
+			var base = globalThis.__KD_OVER_H, out = [];
+			function hash(s){ var x = 5381, i = s.length; while (i) { x = (x*33) ^ s.charCodeAt(--i); } return x>>>0; }
+			for (var n in base) {
+				var v; try { v = eval(n); } catch (e) { continue; }
+				try { var s = kdSer(v); if (s !== undefined && hash(s) !== base[n]) out.push(n); } catch (e) {}
+			}
+			return out;
+		})()`);
+		if (changed && changed.length) {
+			this._oversizeChanged = changed;
+			// eslint-disable-next-line no-console
+			console.warn(`[KDM-161] OVERSIZE GLOBAL CHANGED: ${changed.join(', ')} — excluded from ` +
+				`per-player capture as a static data table (> ${BASELINE_MAX_LEN} bytes) but it MUTATED. ` +
+				'Either it is shared world data (fine, blacklist it explicitly) or it is per-player state ' +
+				'the swap is now losing. Do not ignore this.');
+		}
+		return changed;
 	}
 
 	/**
@@ -1242,13 +1376,32 @@ class HeadlessHost {
 		this._context.__KD_BASE_H = this._baseline;
 		this._context.__KD_BASE_V = this._baselineValues;
 		return this.eval(`(function(){
+			${KD_CODEC}
 			var g = globalThis.__KD_GLOBALS, base = globalThis.__KD_BASE_H, defs = globalThis.__KD_BASE_V;
 			var names = ${JSON.stringify(this._watchNames)};
 			if (!g) return false;
 			function hash(s){ var x = 5381, i = s.length; while (i) { x = (x*33) ^ s.charCodeAt(--i); } return x>>>0; }
 			// Bare assignment inside this direct eval targets the bundle's own binding — the same
 			// mechanism the mod system and _neuterRendering rely on.
-			function assign(n, val){ try { globalThis.__KD_V = val; eval(n + ' = globalThis.__KD_V;'); } catch (e) { /* not assignable */ } }
+			// A __kdT tag can only sit at the TOP level (kdEnc is applied only to top-level Map/Set), so
+			// this O(1) test is enough — untagged values keep the plain, cheap path.
+			// ⚠️ COPY, never alias. \`g\` is the player's stored bundle and \`defs\` the stored post-init
+			// defaults; both live on the host and outlive this call. Assigning one of their objects
+			// directly hands the game a reference it then MUTATES IN PLACE — the bundle and the baseline
+			// defaults silently become whatever the world did next, and two players can end up sharing
+			// one object. MEASURED: this collapsed a peer's KinkyDungeonPlayerEntity onto the baseline
+			// default, parking them at the map origin for the rest of the session (a bump-attack landed
+			// once, then the victim was somewhere else forever). The old hand-written restore happened to
+			// mask it by overwriting the entity with a fresh JSON clone on every swap; nothing masks it now.
+			// kdDec already builds fresh values, so only the untagged path needs the clone.
+			function assign(n, val){
+				try {
+					var out = val;
+					if (val && typeof val === 'object') out = val.__kdT ? kdDec(val) : JSON.parse(JSON.stringify(val));
+					globalThis.__KD_V = out;
+					eval(n + ' = globalThis.__KD_V;');
+				} catch (e) { /* not assignable */ }
+			}
 			var n, i;
 			for (n in g) assign(n, g[n]);
 			// Anything this player does NOT carry must go back to its post-init DEFAULT, not stay at
@@ -1262,7 +1415,7 @@ class HeadlessHost {
 				try { v = eval(n); } catch (e) { continue; }
 				if (v === undefined || typeof v === 'function') continue;
 				try {
-					var s = JSON.stringify(v);
+					var s = kdSer(v);
 					if (s === undefined || s.length > ${BASELINE_MAX_LEN}) continue;
 					if (hash(s) !== base[n]) assign(n, defs[n]);   // dirty from another player ⇒ reset
 				} catch (e) { /* skip */ }
@@ -1300,100 +1453,43 @@ class HeadlessHost {
 	// ----- per-player state swap (KD-085 uniform action model) -----------------
 
 	/**
-	 * Capture the CURRENT player's state bundle (everything that defines a player,
-	 * EXCLUDING the shared world map + render-derived poses/appearance). Mirrors the
-	 * player portion of KinkyDungeonGenerateSaveData. Used by the swap model: one
-	 * authoritative world, players swapped in/out per turn. JSON-safe.
+	 * Capture the CURRENT player's state bundle (everything that defines a player, EXCLUDING the
+	 * shared world). Used by the swap model: one authoritative world, players swapped in/out per turn.
+	 * JSON-safe, so it can go over the wire unchanged.
+	 *
+	 * KDM-161 AC1: there is NO hand-written list of player globals here any more. It used to name ~20
+	 * of them plus a 12-key KDGameData sub-list, and that list could only ever be as complete as our
+	 * knowledge of a 280-file moving target — every KDM-156 bug was a hole in it. Both halves are now
+	 * inversions:
+	 *
+	 *   globals  — everything that DIVERGED from the post-init baseline, minus a category blacklist
+	 *              (world / render / audio). New state, including a mod's, is carried without being named.
+	 *   gameData — KDGameData whole, minus KDGAMEDATA_WORLD_KEYS on restore (KDM-160). Its own path
+	 *              because no mechanical rule can split per-player Guilt from world GuardSpawnTimer,
+	 *              and because at 27 KB it is over the divergence path's size threshold. This is the
+	 *              epic's one declared, bounded exception — not a whitelist reintroduced.
 	 */
 	capturePlayer() {
-		const bundle = this._capturePlayerNamed();
-		// KDM-161: plus everything that has diverged from the post-init baseline — the state we never
-		// enumerated. Kept as a separate slot so a regression is attributable to one half or the other.
-		bundle.globals = this._captureGlobals();
-		return bundle;
+		return {
+			v: 1,
+			gameData: this.eval(
+				'(typeof KDGameData !== "undefined") ? JSON.parse(JSON.stringify(KDGameData)) : undefined'),
+			globals: this._captureGlobals(),
+		};
 	}
 
-	/** The historical, hand-named half of the bundle (KD-085/091). Being replaced by _captureGlobals. */
-	_capturePlayerNamed() {
-		return this.eval(`(function(){
-			function clone(o){ try{ return o===undefined?undefined:JSON.parse(JSON.stringify(o)); }catch(e){ return null; } }
-			function m2o(m){ var o={}; if(m&&m.forEach) m.forEach(function(v,k){ o[k]=(v&&v.forEach)?m2o(v):clone(v); }); return o; }
-			return {
-				v: 1,
-				player: clone(KinkyDungeonPlayerEntity),
-				stats: {
-					stamina: KinkyDungeonStatStamina, staminaMax: KinkyDungeonStatStaminaMax,
-					mana: KinkyDungeonStatMana, manaMax: KinkyDungeonStatManaMax, manaPool: KinkyDungeonStatManaPool,
-					will: KinkyDungeonStatWill, willMax: KinkyDungeonStatWillMax,
-					distraction: KinkyDungeonStatDistraction, distractionMax: KinkyDungeonStatDistractionMax, distractionLower: KinkyDungeonStatDistractionLower,
-				},
-				buffs: clone(KinkyDungeonPlayerBuffs),
-				inventory: m2o(KinkyDungeonInventory),
-				flags: (typeof KinkyDungeonFlags !== 'undefined' && KinkyDungeonFlags.forEach) ? Array.from(KinkyDungeonFlags) : [],
-				perks: (typeof KinkyDungeonStatsChoice !== 'undefined' && KinkyDungeonStatsChoice.forEach) ? Array.from(KinkyDungeonStatsChoice) : [],
-				gold: (typeof KinkyDungeonGold !== 'undefined') ? KinkyDungeonGold : 0,
-				points: (typeof KinkyDungeonSpellPoints !== 'undefined') ? KinkyDungeonSpellPoints : 0,
-				weapon: (typeof KinkyDungeonPlayerWeapon !== 'undefined') ? KinkyDungeonPlayerWeapon : undefined,
-				spellChoices: (typeof KinkyDungeonSpellChoices !== 'undefined') ? clone(KinkyDungeonSpellChoices) : undefined,
-				// KD-091: non-self-healing per-player state (the restraint-DERIVED locks self-heal
-				// from inventory each turn, so they're omitted on purpose — these do NOT).
-				spells: (typeof KinkyDungeonSpells !== 'undefined') ? clone(KinkyDungeonSpells) : undefined,
-				statusCounters: {
-					bind: (typeof KinkyDungeonStatBind !== 'undefined') ? KinkyDungeonStatBind : undefined,
-					freeze: (typeof KinkyDungeonStatFreeze !== 'undefined') ? KinkyDungeonStatFreeze : undefined,
-					sleepiness: (typeof KinkyDungeonSleepiness !== 'undefined') ? KinkyDungeonSleepiness : undefined,
-				},
-				// KDM-160: capture KDGameData WHOLE — no key list.
-				//
-				// This used to name 12 keys by hand. KDGameData has 221, so the other 209 stayed on
-				// the shared world and belonged to whoever was swapped in last: 76 of 108 probed
-				// primitive fields leaked between players (proven by mp-noninterference.spec.ts),
-				// including ShieldTokens/DodgeTokens/BlockTokens, Crouch, Guilt, CurseLevel,
-				// CollectedOrbs, TimesJailed — plus never-restored objects like RevealedFog/
-				// RevealedTiles (per-player VISION), Party, NPCRestraints and PlayerName/PlayerPronoun
-				// (both players shared one name).
-				//
-				// Extending the list to 209 entries was rejected: it is the anti-pattern this work
-				// exists to remove, and it would still be wrong the moment upstream adds field 222.
-				// The world-scoped minority is excluded on RESTORE instead (KDGAMEDATA_WORLD_KEYS) —
-				// one short semantic list in place of a long unknowable one.
-				gameData: (typeof KDGameData !== 'undefined') ? clone(KDGameData) : undefined,
-				// KDM-161: the generic slot is filled in by capturePlayer() after this eval returns.
-				globals: undefined,
-			};
-		})()`);
-	}
-
-	/** Restore a player-state bundle into the world's player globals (swap-in). */
+	/**
+	 * Restore a player-state bundle into the world's player globals (swap-in).
+	 *
+	 * KDM-161 AC1: the ~20 hand-written assignments that used to live here are gone. What remains is
+	 * the two inversions plus one recompute — see capturePlayer for why each is not a whitelist.
+	 * Generic globals go first so the derived recompute at the end still has the last word.
+	 */
 	restorePlayer(bundle) {
-		// KDM-161: generic globals first, so the named/derived handling below (notably the
-		// KinkyDungeonCalculateSlowLevel recompute) still gets the last word on derived state.
 		if (bundle && bundle.globals) this._restoreGlobals(bundle.globals);
 		this._context.__KD_PB = bundle;
 		return this.eval(`(function(){
 			var b = globalThis.__KD_PB; if (!b) return false;
-			if (b.player) KinkyDungeonPlayerEntity = JSON.parse(JSON.stringify(b.player));
-			var s = b.stats || {};
-			KinkyDungeonStatStamina = s.stamina; KinkyDungeonStatStaminaMax = s.staminaMax;
-			KinkyDungeonStatMana = s.mana; KinkyDungeonStatManaMax = s.manaMax; KinkyDungeonStatManaPool = s.manaPool;
-			KinkyDungeonStatWill = s.will; KinkyDungeonStatWillMax = s.willMax;
-			KinkyDungeonStatDistraction = s.distraction; KinkyDungeonStatDistractionMax = s.distractionMax; KinkyDungeonStatDistractionLower = s.distractionLower;
-			KinkyDungeonPlayerBuffs = b.buffs ? JSON.parse(JSON.stringify(b.buffs)) : {};
-			var inv = new Map(); var io = b.inventory || {};
-			for (var t in io) { var sub = new Map(); var st = io[t]; for (var n in st) sub.set(n, JSON.parse(JSON.stringify(st[n]))); inv.set(t, sub); }
-			KinkyDungeonInventory = inv;
-			if (b.flags && typeof KinkyDungeonFlags !== 'undefined') KinkyDungeonFlags = new Map(b.flags);
-			if (b.perks && typeof KinkyDungeonStatsChoice !== 'undefined') KinkyDungeonStatsChoice = new Map(b.perks);
-			if (typeof KinkyDungeonGold !== 'undefined') KinkyDungeonGold = b.gold;
-			if (typeof KinkyDungeonSpellPoints !== 'undefined') KinkyDungeonSpellPoints = b.points;
-			if (b.weapon !== undefined && typeof KinkyDungeonPlayerWeapon !== 'undefined') KinkyDungeonPlayerWeapon = b.weapon;
-			if (b.spellChoices !== undefined && typeof KinkyDungeonSpellChoices !== 'undefined') KinkyDungeonSpellChoices = JSON.parse(JSON.stringify(b.spellChoices));
-			// KD-091: restore the non-self-healing per-player state.
-			if (b.spells !== undefined && typeof KinkyDungeonSpells !== 'undefined') KinkyDungeonSpells = JSON.parse(JSON.stringify(b.spells));
-			var sc = b.statusCounters || {};
-			if (sc.bind !== undefined && typeof KinkyDungeonStatBind !== 'undefined') KinkyDungeonStatBind = sc.bind;
-			if (sc.freeze !== undefined && typeof KinkyDungeonStatFreeze !== 'undefined') KinkyDungeonStatFreeze = sc.freeze;
-			if (sc.sleepiness !== undefined && typeof KinkyDungeonSleepiness !== 'undefined') KinkyDungeonSleepiness = sc.sleepiness;
 			// KDM-160: restore every captured KDGameData key EXCEPT the world-scoped ones.
 			// Inverted from a 12-key allow-list; see capturePlayer and KDGAMEDATA_WORLD_KEYS.
 			if (b.gameData && typeof KDGameData !== 'undefined') {
@@ -1474,4 +1570,5 @@ module.exports = {
 	HeadlessHost, loadSources, REPO_ROOT, BUNDLE_PATH,
 	WORLD_KEYS, KDGAMEDATA_WORLD_KEYS,
 	deriveBundleGlobals, GLOBAL_BLACKLIST, MIN_EXPECTED_GLOBALS, HOST_RESERVED,
+	BASELINE_MAX_LEN, OVERSIZE_AUDIT_EVERY,
 };
