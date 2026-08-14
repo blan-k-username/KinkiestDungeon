@@ -84,6 +84,81 @@ const KDGAMEDATA_WORLD_KEYS = Object.freeze([
 	'NPCRestraints',
 ]);
 
+/**
+ * KDM-161: how many top-level bindings we expect to derive from the bundle.
+ * Measured 2026-08-14: 2,254 `let` + 121 `const` + 6 `var` = 2,381 unique names.
+ * A materially smaller number means the regex no longer matches upstream's output shape — that MUST
+ * be loud, not silently degrade into "this player has almost no state" (same drift contract as
+ * BUNDLE_PATCHES site counts in demo-server.js).
+ */
+const MIN_EXPECTED_GLOBALS = 2000;
+
+/**
+ * KDM-161: only globals whose JSON is at most this long are watched as per-player state.
+ * Anything larger is a static data table (enemy/restraint/spell defs), i.e. shared world data — and
+ * those are exactly what made an unbounded fingerprint pass slow (109 ms). Measured: every real
+ * per-player global except KDGameData is under 2 KB, and KDGameData is carried by its own path.
+ */
+const BASELINE_MAX_LEN = 20000;
+
+/**
+ * KDM-161: globals that are NOT per-player, by CATEGORY (never per feature — a per-feature entry
+ * here would rebuild the whitelist under a new name). Everything not listed is per-player.
+ */
+const GLOBAL_BLACKLIST = Object.freeze([
+	// --- shared world: the dungeon and its inhabitants -----------------------
+	'KDMapData', 'KDMapExtraData', 'KDWorldMap', 'KDCurrentWorldSlot',
+	'KinkyDungeonCurrentTick', 'KinkyDungeonEnemyID', 'KinkyDungeonSpellID',
+	'AIData', 'KDAwareEnemies', 'KDEnemiesTargetingPlayer', 'KDPathfindingCacheFails',
+	'KDPathfindingCacheHits', 'KDPathCache', 'KDUpdateEnemyCache',
+	// --- render / dirty flags: the server has no screen ----------------------
+	'KDDrawUpdate', 'KDVisionUpdate', 'KDUpdateChokes', 'KDAlertCD',
+	'lastFloaterRefresh', 'KDParticleid', 'KDCurrentModels', 'KDRefreshCharacter',
+	// --- client audio: neither player nor world ------------------------------
+	'KDMusicToast', 'KDMusicUpdateTime',
+	// --- already managed per-player by swap-session (do NOT double-manage) ---
+	'KinkyDungeonMessageLog', 'KinkyDungeonFloaters',
+	// --- debug noise ---------------------------------------------------------
+	'KDRestraintDebugLog',
+]);
+
+/** Sandbox/host bindings that must never be captured or reassigned. */
+const HOST_RESERVED = new Set([
+	'globalThis', 'window', 'self', 'top', 'parent', 'console', 'process', 'require',
+	'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'queueMicrotask',
+	'TextEncoder', 'TextDecoder', 'structuredClone', 'AbortController', 'AbortSignal',
+	'Intl', 'Buffer', 'URL', 'URLSearchParams', 'LZString', 'm4', 'PIXIapp',
+]);
+
+/**
+ * KDM-161: derive the bundle's top-level binding NAMES from its source.
+ *
+ * KD declares its globals as top-level `let`/`var` in SCRIPT scope, so they are not properties of
+ * globalThis and `Object.keys(globalThis)` cannot see them — a reflective "capture every global" is
+ * impossible. The names, however, are derivable: tsc output is unminified with declarations at
+ * column 0, so an anchored regex suffices (no JS parser needed).
+ *
+ * This is text coupling to out/main.js, accepted under the plugin rule as a last resort and mitigated
+ * by the drift assertion (`opts.assert`).
+ */
+function deriveBundleGlobals(src, opts = {}) {
+	const text = (src != null) ? src : loadSources().bundle;
+	const names = [];
+	const seen = new Set();
+	const re = /^(?:let|var|const)\s+([A-Za-z_$][\w$]*)/gm;
+	let m;
+	while ((m = re.exec(text)) !== null) {
+		if (!seen.has(m[1])) { seen.add(m[1]); names.push(m[1]); }
+	}
+	if (opts.assert && names.length < MIN_EXPECTED_GLOBALS) {
+		throw new Error(
+			`[KDM-161] bundle-global DRIFT: derived ${names.length} top-level names, expected at least ` +
+			`${MIN_EXPECTED_GLOBALS}. The declaration shape of out/main.js has changed — per-player state ` +
+			`capture would silently lose almost everything. Fix the regex in deriveBundleGlobals().`);
+	}
+	return names;
+}
+
 let _cachedSources = null;
 function loadSources() {
 	if (_cachedSources) return _cachedSources;
@@ -345,6 +420,11 @@ class HeadlessHost {
 		this.eval('typeof KDInitPerks === "function" && KDInitPerks()');
 		this.eval('typeof KDSyncLocalPlayerSlot === "function" && KDSyncLocalPlayerSlot()');
 		this.setServerMode(this.serverMode);
+		// KDM-161: record the post-init fingerprint. Anything that diverges from it later is mutable,
+		// hence a per-player state candidate — this is what lets an unknown feature or mod be captured
+		// without anyone adding it to a list. Must happen AFTER the data tables are loaded and BEFORE
+		// any gameplay, so "differs from baseline" means "gameplay touched it".
+		this._captureBaseline();
 		return this;
 	}
 
@@ -484,6 +564,16 @@ class HeadlessHost {
 	 */
 	loadMod(code) {
 		this.eval(code);
+		// KDM-161: a mod introduces NEW globals, and its freshly-initialised values are the world's new
+		// per-player DEFAULTS. Without re-baselining, those names have no default to reset to, so a
+		// player who never touched the mod's state would inherit the previous player's value — the mod
+		// would silently be shared instead of per-player. Re-baselining is also what puts the mod's
+		// globals into the candidate set in the first place.
+		//
+		// Ordering note: SwapSession loads mods at _start, right after init and before any player has
+		// diverged, so the captured values are true defaults. A mod loaded MID-session re-baselines
+		// against whoever is currently swapped in; that is an accepted edge case, not the normal path.
+		if (this._baseline) this._captureBaseline();
 		return { ok: true };
 	}
 
@@ -1043,6 +1133,144 @@ class HeadlessHost {
 		})()`);
 	}
 
+	// ----- KDM-161: generic per-player globals (no hand-written whitelist) -----
+
+	/** Candidate names: bundle bindings ∪ mod-declared globalThis keys, minus blacklists. */
+	_candidateGlobals() {
+		const modKeys = this.eval('Object.keys(globalThis)') || [];
+		const all = deriveBundleGlobals().concat(modKeys);
+		const out = [];
+		const seen = new Set();
+		for (const n of all) {
+			if (seen.has(n) || HOST_RESERVED.has(n) || GLOBAL_BLACKLIST.includes(n)) continue;
+			if (n.startsWith('__KD')) continue;             // our own bridge/transfer slots
+			seen.add(n);
+			out.push(n);
+		}
+		return out;
+	}
+
+	/**
+	 * Record the post-init fingerprint. Everything that later DIFFERS from this baseline is mutable,
+	 * and therefore a per-player state candidate — which is how a feature or mod we have never heard
+	 * of gets captured without anyone naming it.
+	 *
+	 * Taken at the END of init() on purpose: static data tables are already loaded, and no gameplay
+	 * has happened, so "differs from baseline" means "gameplay touched it".
+	 */
+	_captureBaseline() {
+		this._globalNames = this._candidateGlobals();
+		// One pass produces all three things: the WATCH list (globals that could plausibly be player
+		// state — serialisable and small), their hashes, and their post-init VALUES.
+		//
+		// The values are the per-player DEFAULTS, and they are what makes "absent from a bundle"
+		// meaningful: without them, restoring a player who never touched a global leaves the PREVIOUS
+		// player's value in the world — precisely the contamination this slice removes.
+		//
+		// Pre-filtering here is also what makes per-capture divergence checks affordable: the big
+		// static data tables are excluded once, not re-serialised on every swap.
+		const snap = this.eval(`(function(){
+			var names = ${JSON.stringify(this._globalNames)}, MAX = ${BASELINE_MAX_LEN};
+			function hash(s){ var x = 5381, i = s.length; while (i) { x = (x*33) ^ s.charCodeAt(--i); } return x>>>0; }
+			var watch = [], h = {}, vals = {};
+			for (var i = 0; i < names.length; i++) {
+				var n = names[i], v;
+				try { v = eval(n); } catch (e) { continue; }
+				if (v === undefined || typeof v === 'function') continue;
+				try {
+					var s = JSON.stringify(v);
+					if (s === undefined || s.length > MAX) continue;   // unserialisable or a static table
+					watch.push(n); h[n] = hash(s); vals[n] = JSON.parse(s);
+				} catch (e) { /* cyclic / PIXI object — not player state */ }
+			}
+			return { watch: watch, h: h, vals: vals };
+		})()`);
+		this._watchNames = snap.watch;
+		this._baseline = snap.h;
+		this._baselineValues = snap.vals;
+		return this._baseline;
+	}
+
+	/**
+	 * Capture every watched global that has DIVERGED from the post-init baseline.
+	 *
+	 * Detection and extraction are fused into ONE pass: the baseline hashes go in, only the changed
+	 * name→value pairs come back. Two earlier designs were tried and rejected by measurement:
+	 *
+	 *  - "classify once at boot" — unsound. Nothing has diverged at boot, so the set is empty forever.
+	 *  - "re-discover every K captures" — unsound AND buggy. A capture must reflect what changed BY
+	 *    THAT MOMENT; deferring it silently drops the most recent changes (proven: a mod's global was
+	 *    never captured, so the peer inherited it).
+	 *
+	 * So divergence is computed on every capture. It is affordable because `_watchNames` is pre-filtered
+	 * at baseline to the globals that could plausibly be player state — serialisable and small. The big
+	 * static tables (enemy/restraint/spell defs) are skipped: they are shared world data by definition,
+	 * and they are exactly what made an unbounded pass slow.
+	 */
+	_captureGlobals() {
+		if (!this._baseline) this._captureBaseline();
+		this._context.__KD_BASE_H = this._baseline;
+		return this.eval(`(function(){
+			var names = ${JSON.stringify(this._watchNames)}, base = globalThis.__KD_BASE_H, out = {};
+			function hash(s){ var x = 5381, i = s.length; while (i) { x = (x*33) ^ s.charCodeAt(--i); } return x>>>0; }
+			for (var i = 0; i < names.length; i++) {
+				var n = names[i], v;
+				try { v = eval(n); } catch (e) { continue; }
+				if (v === undefined || typeof v === 'function') continue;
+				try {
+					var s = JSON.stringify(v);
+					if (s === undefined || s.length > ${BASELINE_MAX_LEN}) continue;
+					if (hash(s) !== base[n]) out[n] = JSON.parse(s);   // diverged ⇒ this player's state
+				} catch (e) { /* cyclic / PIXI — not player state */ }
+			}
+			return out;
+		})()`);
+	}
+
+	/**
+	 * Restore captured per-player globals by bare assignment (reaches script-scope `let`s).
+	 *
+	 * Crucially this also RESETS every mutable global the bundle does NOT carry back to its post-init
+	 * default. Assignment alone is not enough: the world keeps whatever the previously swapped-in
+	 * player left there, so a player who never touched a global would inherit their opponent's value.
+	 * That is the whole contamination bug class, and "absent ⇒ default" is what closes it.
+	 */
+	_restoreGlobals(globals) {
+		if (!globals) return false;
+		if (!this._baseline) this._captureBaseline();
+		this._context.__KD_GLOBALS = globals;
+		this._context.__KD_BASE_H = this._baseline;
+		this._context.__KD_BASE_V = this._baselineValues;
+		return this.eval(`(function(){
+			var g = globalThis.__KD_GLOBALS, base = globalThis.__KD_BASE_H, defs = globalThis.__KD_BASE_V;
+			var names = ${JSON.stringify(this._watchNames)};
+			if (!g) return false;
+			function hash(s){ var x = 5381, i = s.length; while (i) { x = (x*33) ^ s.charCodeAt(--i); } return x>>>0; }
+			// Bare assignment inside this direct eval targets the bundle's own binding — the same
+			// mechanism the mod system and _neuterRendering rely on.
+			function assign(n, val){ try { globalThis.__KD_V = val; eval(n + ' = globalThis.__KD_V;'); } catch (e) { /* not assignable */ } }
+			var n, i;
+			for (n in g) assign(n, g[n]);
+			// Anything this player does NOT carry must go back to its post-init DEFAULT, not stay at
+			// whatever the previous player left. Only touch globals that are currently dirty — resetting
+			// all ~2300 watched names on every swap would be pure waste.
+			for (i = 0; i < names.length; i++) {
+				n = names[i];
+				if (Object.prototype.hasOwnProperty.call(g, n)) continue;
+				if (!Object.prototype.hasOwnProperty.call(defs, n)) continue;
+				var v;
+				try { v = eval(n); } catch (e) { continue; }
+				if (v === undefined || typeof v === 'function') continue;
+				try {
+					var s = JSON.stringify(v);
+					if (s === undefined || s.length > ${BASELINE_MAX_LEN}) continue;
+					if (hash(s) !== base[n]) assign(n, defs[n]);   // dirty from another player ⇒ reset
+				} catch (e) { /* skip */ }
+			}
+			return true;
+		})()`);
+	}
+
 	/**
 	 * KDM-160: this player's state as KD's OWN save format, minus the shared world (WORLD_KEYS).
 	 *
@@ -1078,6 +1306,15 @@ class HeadlessHost {
 	 * authoritative world, players swapped in/out per turn. JSON-safe.
 	 */
 	capturePlayer() {
+		const bundle = this._capturePlayerNamed();
+		// KDM-161: plus everything that has diverged from the post-init baseline — the state we never
+		// enumerated. Kept as a separate slot so a regression is attributable to one half or the other.
+		bundle.globals = this._captureGlobals();
+		return bundle;
+	}
+
+	/** The historical, hand-named half of the bundle (KD-085/091). Being replaced by _captureGlobals. */
+	_capturePlayerNamed() {
 		return this.eval(`(function(){
 			function clone(o){ try{ return o===undefined?undefined:JSON.parse(JSON.stringify(o)); }catch(e){ return null; } }
 			function m2o(m){ var o={}; if(m&&m.forEach) m.forEach(function(v,k){ o[k]=(v&&v.forEach)?m2o(v):clone(v); }); return o; }
@@ -1121,12 +1358,17 @@ class HeadlessHost {
 				// The world-scoped minority is excluded on RESTORE instead (KDGAMEDATA_WORLD_KEYS) —
 				// one short semantic list in place of a long unknowable one.
 				gameData: (typeof KDGameData !== 'undefined') ? clone(KDGameData) : undefined,
+				// KDM-161: the generic slot is filled in by capturePlayer() after this eval returns.
+				globals: undefined,
 			};
 		})()`);
 	}
 
 	/** Restore a player-state bundle into the world's player globals (swap-in). */
 	restorePlayer(bundle) {
+		// KDM-161: generic globals first, so the named/derived handling below (notably the
+		// KinkyDungeonCalculateSlowLevel recompute) still gets the last word on derived state.
+		if (bundle && bundle.globals) this._restoreGlobals(bundle.globals);
 		this._context.__KD_PB = bundle;
 		return this.eval(`(function(){
 			var b = globalThis.__KD_PB; if (!b) return false;
@@ -1231,4 +1473,5 @@ class HeadlessHost {
 module.exports = {
 	HeadlessHost, loadSources, REPO_ROOT, BUNDLE_PATH,
 	WORLD_KEYS, KDGAMEDATA_WORLD_KEYS,
+	deriveBundleGlobals, GLOBAL_BLACKLIST, MIN_EXPECTED_GLOBALS, HOST_RESERVED,
 };
