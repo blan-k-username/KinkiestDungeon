@@ -29,6 +29,61 @@ const M4_PATH = path.join(REPO_ROOT, 'Scripts', 'lib', 'webgl', 'resources', 'm4
 const LZSTRING_PATH = path.join(REPO_ROOT, 'Scripts', 'lib', 'LZString.js');
 const BUNDLE_PATH = path.join(REPO_ROOT, 'out', 'main.js');
 
+/**
+ * KDM-160: keys of KD's own save that describe the SHARED WORLD, not a player.
+ *
+ * `player = KinkyDungeonGenerateSaveData() - WORLD_KEYS` — the swap model keeps one authoritative
+ * world and N players, and this is the subtraction that separates them. Deliberately short and
+ * SEMANTIC: it changes only when the world model changes, which is far rarer than feature additions.
+ * (Enumerating the *player* side instead is what produced the KDM-156 bug class — the player side is
+ * large, growing and unknowable; the world side is small and stable.)
+ */
+const WORLD_KEYS = Object.freeze([
+	'KDMapData',              // the map itself: grid, tiles, entities, fog
+	'KDWorldMap',             // the world/floor graph
+	'KDCurrentWorldSlot',     // which world slot is loaded
+	'KinkyDungeonCurrentTick', // the shared lockstep clock
+	'seed',                   // world generation seed
+]);
+
+/**
+ * KDM-160: KDGameData keys that are FLOOR/WORLD scope rather than player scope.
+ *
+ * KDGameData is 221 keys and mixes both — in single-player the distinction does not exist (one
+ * player, one world, one bag), so upstream has no reason to separate them. Everything NOT listed
+ * here is treated as per-player.
+ *
+ * The default is deliberately per-player: a player field wrongly shared is exactly the contamination
+ * bug class this epic exists to remove. Measured evidence: 86 of 123 probed primitive keys leaked
+ * between players before this list existed (KDM-160 §A4).
+ *
+ * CRITERION for adding an entry — one of:
+ *   (a) it is keyed by ENTITY ID (it describes world entities, not the player), or
+ *   (b) it is floor/dungeon generation or population state, or
+ *   (c) a failing test proves sharing is required.
+ * Do NOT add entries speculatively: every one narrows per-player isolation, which is the property
+ * this epic is buying.
+ */
+const KDGAMEDATA_WORLD_KEYS = Object.freeze([
+	// (b) floor population / generation state
+	'GuardTimer', 'GuardTimerMax', 'GuardSpawnTimer', 'GuardSpawnTimerMax', 'GuardSpawnTimerMin',
+	'JailGuard', 'HunterTimer', 'Hunters',
+	'NamesGenerated', 'Regiments', 'RegimentID',
+	'KinkyDungeonSpawnJailers', 'KinkyDungeonSpawnJailersMax',
+	'ChestsGenerated', 'PersistentNPCCache',
+	// (a) NPC/avatar bondage, keyed by ENTITY ID (KDGetNPCRestraints / KDSetNPCRestraints,
+	// NPCRestrain.ts:541/550). It describes world ENTITIES — including the peer avatars that PvP
+	// ties are applied to — so it is world state under criterion (a), not player state.
+	//
+	// Honesty note: this entry was first added on the hypothesis that making it per-player caused an
+	// e2e tie failure ("A should be bound after selecting the owned material"). That hypothesis was
+	// TESTED AND DISPROVED — mp-pvp-tie-clicks and mp-pvp-tie-repeat pass in isolation both WITH and
+	// WITHOUT this entry; those failures were full-suite contention flakes. It is kept purely on
+	// criterion (a). No test currently pins it, so treat it as a reasoned classification rather than
+	// a proven one.
+	'NPCRestraints',
+]);
+
 let _cachedSources = null;
 function loadSources() {
 	if (_cachedSources) return _cachedSources;
@@ -965,6 +1020,55 @@ class HeadlessHost {
 		})()`);
 	}
 
+	/**
+	 * KDM-160: give KinkyDungeonPlayer a ModelContainer so KD's own save serializer can run headless.
+	 *
+	 * KinkyDungeonGenerateSaveData reads `KDCurrentModels.get(KinkyDungeonPlayer).Poses`
+	 * (main.js:18026) WITHOUT a null guard — unlike its four sibling call sites (:1435, :9467, :9472,
+	 * :16524) which all use `?.`. KDCurrentModels is populated only inside DrawCharacterModels
+	 * (:170138), which _neuterRendering() no-ops on purpose: building models headless would drag the
+	 * whole PIXI model rig into the server.
+	 *
+	 * So the container is seeded from the game's OWN class and pose generator — no fabricated data,
+	 * and identical in every instance, so it cancels out in any cross-instance diff. Lazy + idempotent:
+	 * boot() must stay byte-identical for the existing specs.
+	 */
+	_seedHeadlessModel() {
+		return this.eval(`(function(){
+			if (typeof KDCurrentModels === 'undefined' || typeof KinkyDungeonPlayer === 'undefined') return 'no-globals';
+			if (KDCurrentModels.get(KinkyDungeonPlayer)) return 'already';
+			KDCurrentModels.set(KinkyDungeonPlayer,
+				new ModelContainer(KinkyDungeonPlayer, new Map(), new Map(), new Map(), KDGeneratePoseArray()));
+			return 'seeded';
+		})()`);
+	}
+
+	/**
+	 * KDM-160: this player's state as KD's OWN save format, minus the shared world (WORLD_KEYS).
+	 *
+	 * The measuring instrument for the epic's invariants: an upstream-maintained, versioned, complete
+	 * definition of what a player IS (56 top-level keys) — as opposed to the hand-picked subset
+	 * capturePlayer carries. Use it to answer "did the swap lose anything?" (parity) and "did one
+	 * player contaminate another?" (non-interference).
+	 *
+	 * READ-ONLY: measured to leave tick, player position, entity count and KinkyDungeonEnemyID
+	 * untouched, and to return identical results on consecutive calls (~1 ms). GenerateSaveData does
+	 * rebuild KDMapData.RandomPathablePoints via KinkyDungeonGenNavMap, but that is a deterministic
+	 * derived cache and the rebuild is inert.
+	 *
+	 * NOTE: reads whatever player is currently in the player slot — call restorePlayer(bundle) first
+	 * when you want a specific player's save.
+	 */
+	saveOf() {
+		this._seedHeadlessModel();
+		const save = this.eval(`(function(){
+			var s = KinkyDungeonGenerateSaveData();
+			return JSON.parse(JSON.stringify(s));
+		})()`);
+		for (const k of WORLD_KEYS) delete save[k];
+		return save;
+	}
+
 	// ----- per-player state swap (KD-085 uniform action model) -----------------
 
 	/**
@@ -1002,21 +1106,21 @@ class HeadlessHost {
 					freeze: (typeof KinkyDungeonStatFreeze !== 'undefined') ? KinkyDungeonStatFreeze : undefined,
 					sleepiness: (typeof KinkyDungeonSleepiness !== 'undefined') ? KinkyDungeonSleepiness : undefined,
 				},
-				gameData: (typeof KDGameData !== 'undefined') ? {
-					OrgasmStage: KDGameData.OrgasmStage, OrgasmTurns: KDGameData.OrgasmTurns, OrgasmStamina: KDGameData.OrgasmStamina,
-					Balance: KDGameData.Balance, MovePoints: KDGameData.MovePoints, SleepTurns: KDGameData.SleepTurns,
-					KneelTurns: KDGameData.KneelTurns, Outfit: KDGameData.Outfit, ItemID: KDGameData.ItemID,
-					// Per-player movement penalty timers — without these the "you lose a turn" state
-					// bleeds onto whoever swaps in next.
-					SlowMoveTurns: KDGameData.SlowMoveTurns, SprintTurns: KDGameData.SprintTurns,
-					// Per-player action queue: self-equip, consumables and channelled casts all push
-					// here (KinkyDungeonInput.ts:321/386) and commit N turns later. Without it in the
-					// bundle the queue stayed on the shared world — so it never followed the player
-					// across a swap and a co-op player could never finish equipping anything.
-					// Deep-copied so two bundles can't alias the same array.
-					DelayedActions: (KDGameData.DelayedActions
-						? JSON.parse(JSON.stringify(KDGameData.DelayedActions)) : []),
-				} : undefined,
+				// KDM-160: capture KDGameData WHOLE — no key list.
+				//
+				// This used to name 12 keys by hand. KDGameData has 221, so the other 209 stayed on
+				// the shared world and belonged to whoever was swapped in last: 76 of 108 probed
+				// primitive fields leaked between players (proven by mp-noninterference.spec.ts),
+				// including ShieldTokens/DodgeTokens/BlockTokens, Crouch, Guilt, CurseLevel,
+				// CollectedOrbs, TimesJailed — plus never-restored objects like RevealedFog/
+				// RevealedTiles (per-player VISION), Party, NPCRestraints and PlayerName/PlayerPronoun
+				// (both players shared one name).
+				//
+				// Extending the list to 209 entries was rejected: it is the anti-pattern this work
+				// exists to remove, and it would still be wrong the moment upstream adds field 222.
+				// The world-scoped minority is excluded on RESTORE instead (KDGAMEDATA_WORLD_KEYS) —
+				// one short semantic list in place of a long unknowable one.
+				gameData: (typeof KDGameData !== 'undefined') ? clone(KDGameData) : undefined,
 			};
 		})()`);
 	}
@@ -1048,8 +1152,15 @@ class HeadlessHost {
 			if (sc.bind !== undefined && typeof KinkyDungeonStatBind !== 'undefined') KinkyDungeonStatBind = sc.bind;
 			if (sc.freeze !== undefined && typeof KinkyDungeonStatFreeze !== 'undefined') KinkyDungeonStatFreeze = sc.freeze;
 			if (sc.sleepiness !== undefined && typeof KinkyDungeonSleepiness !== 'undefined') KinkyDungeonSleepiness = sc.sleepiness;
+			// KDM-160: restore every captured KDGameData key EXCEPT the world-scoped ones.
+			// Inverted from a 12-key allow-list; see capturePlayer and KDGAMEDATA_WORLD_KEYS.
 			if (b.gameData && typeof KDGameData !== 'undefined') {
-				for (var gk in b.gameData) { if (b.gameData[gk] !== undefined) KDGameData[gk] = b.gameData[gk]; }
+				var __world = ${JSON.stringify(KDGAMEDATA_WORLD_KEYS)};
+				for (var gk in b.gameData) {
+					if (b.gameData[gk] === undefined) continue;
+					if (__world.indexOf(gk) >= 0) continue;   // shared floor/world state — leave the world's
+					KDGameData[gk] = b.gameData[gk];
+				}
 			}
 			// Re-derive the swapped-in player's slow from THEIR restraints. KinkyDungeonSlowLevel is a
 			// world global that KinkyDungeonCalculateSlowLevel writes for whoever is currently in the
@@ -1117,4 +1228,7 @@ class HeadlessHost {
 	}
 }
 
-module.exports = { HeadlessHost, loadSources, REPO_ROOT, BUNDLE_PATH };
+module.exports = {
+	HeadlessHost, loadSources, REPO_ROOT, BUNDLE_PATH,
+	WORLD_KEYS, KDGAMEDATA_WORLD_KEYS,
+};
