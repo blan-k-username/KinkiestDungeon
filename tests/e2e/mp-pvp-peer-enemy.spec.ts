@@ -8,9 +8,10 @@
  * here we only verify the browser-visible faction so the flaky two-browser attack chain is avoided.
  */
 import { test, expect } from '@playwright/test';
+import { bootCoopPair, MP_TEST_TIMEOUT } from './helpers/coop';
 
 test('PvP session: each browser sees the peer avatar as Enemy faction', async ({ browser }) => {
-	test.setTimeout(300_000);
+	test.setTimeout(MP_TEST_TIMEOUT);
 	// Enable PvP for this demo-server instance BEFORE it builds the SwapSession.
 	process.env.KD_PVP = '1';
 	// eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -23,12 +24,7 @@ test('PvP session: each browser sees the peer avatar as Enemy faction', async ({
 	const B = await ctxB.newPage();
 
 	try {
-		await A.goto(`http://127.0.0.1:${port}/#coop=A`);
-		await A.waitForFunction(() => (window as any).__coop && (window as any).__coop.connected, undefined, { timeout: 150_000 });
-		await B.goto(`http://127.0.0.1:${port}/#coop=B`);
-		await A.waitForFunction(() => (window as any).__coop && (window as any).__coop.started, undefined, { timeout: 150_000 });
-		await B.waitForFunction(() => (window as any).__coop && (window as any).__coop.started, undefined, { timeout: 150_000 });
-		await A.waitForTimeout(1500);
+		await bootCoopPair(A, B, port);
 
 		// In A's view, the single RemotePlayer avatar is B; the game must see it as Enemy.
 		const factionForA = await A.evaluate(() => {

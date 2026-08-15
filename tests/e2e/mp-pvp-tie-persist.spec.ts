@@ -6,11 +6,12 @@
  * AUTHORITATIVE/victim view, not the attacker's transient avatar display.
  */
 import { test, expect } from '@playwright/test';
+import { bootCoopPair, MP_TEST_TIMEOUT } from './helpers/coop';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
 
 test('a tie persists on the victim across many turns', async ({ browser }) => {
-	test.setTimeout(300_000);
+	test.setTimeout(MP_TEST_TIMEOUT);
 	process.env.KD_PVP = '1';
 	const { server, bridge, port } = await start(0);
 	const ctxA = await browser.newContext();
@@ -35,12 +36,7 @@ test('a tie persists on the victim across many turns', async ({ browser }) => {
 	};
 
 	try {
-		await A.goto(`http://127.0.0.1:${port}/#coop=A`);
-		await A.waitForFunction(() => (window as any).__coop && (window as any).__coop.connected, undefined, { timeout: 150_000 });
-		await B.goto(`http://127.0.0.1:${port}/#coop=B`);
-		await A.waitForFunction(() => (window as any).__coop && (window as any).__coop.started, undefined, { timeout: 150_000 });
-		await B.waitForFunction(() => (window as any).__coop && (window as any).__coop.started, undefined, { timeout: 150_000 });
-		await A.waitForTimeout(1500);
+		await bootCoopPair(A, B, port);
 		const session = bridge.session;
 
 		for (let i = 0; i < 25 && !session.isDefeated('A'); i++) {

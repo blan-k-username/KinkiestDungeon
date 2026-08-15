@@ -7,6 +7,7 @@
  * Verifies the client carries the item (what the player sees in Items).
  */
 import { test, expect } from '@playwright/test';
+import { bootCoopPair } from './helpers/coop';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
 
@@ -22,11 +23,7 @@ test('KD_START_RESTRAINT seeds a carryable restraint item on the client (no URL 
 	const B = await ctxB.newPage();
 	try {
 		// standard URL — no &startitem=; the server pushes the item name via snapshot.startItem
-		await A.goto(`http://127.0.0.1:${port}/#coop=A`);
-		await A.waitForFunction(() => (window as any).__coop && (window as any).__coop.connected, undefined, { timeout: 150_000 });
-		await B.goto(`http://127.0.0.1:${port}/#coop=B`);
-		await A.waitForFunction(() => (window as any).__coop && (window as any).__coop.started, undefined, { timeout: 150_000 });
-		await B.waitForFunction(() => (window as any).__coop && (window as any).__coop.started, undefined, { timeout: 150_000 });
+		await bootCoopPair(A, B, port);
 		await A.waitForFunction(() => (window as any).__coop && (window as any).__coop._startItemAdded, undefined, { timeout: 30_000 });
 
 		// A carries the loose cuffs ITEM (visible in the Items inventory)

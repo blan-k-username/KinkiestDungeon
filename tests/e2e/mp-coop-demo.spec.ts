@@ -8,13 +8,14 @@
  * submit) advances the shared turn — proving the two-browser UAT path works.
  */
 import { test, expect } from '@playwright/test';
+import { bootCoopPair, MP_TEST_TIMEOUT } from './helpers/coop';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
 
 test('two browser windows play one shared co-op dungeon via the demo server', async ({ browser }) => {
 	// Heavyweight: TWO full game bundles (each preloads ~600 char assets) + the
 	// server's 3 headless instances. Generous timeouts to absorb the cold start.
-	test.setTimeout(300_000);
+	test.setTimeout(MP_TEST_TIMEOUT);
 	const { server, bridge, port } = await start(0);
 
 	const ctxA = await browser.newContext();
@@ -26,14 +27,7 @@ test('two browser windows play one shared co-op dungeon via the demo server', as
 	B.on('pageerror', (e) => errs.push(e.message));
 
 	try {
-		await A.goto(`http://127.0.0.1:${port}/#coop=A`);
-		await A.waitForFunction(() => (window as any).__coop && (window as any).__coop.connected, undefined, { timeout: 150_000 });
-
-		await B.goto(`http://127.0.0.1:${port}/#coop=B`);
-		// both joined → server starts the shared world → both receive their first state
-		await A.waitForFunction(() => (window as any).__coop && (window as any).__coop.started, undefined, { timeout: 150_000 });
-		await B.waitForFunction(() => (window as any).__coop && (window as any).__coop.started, undefined, { timeout: 150_000 });
-		await A.waitForTimeout(1500); // let render frames settle
+		await bootCoopPair(A, B, port);
 
 		// the game actually reaches the dungeon SCREEN (not stuck on the asset
 		// preloader, and not crashed) in both windows.
