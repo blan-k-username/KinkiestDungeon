@@ -29,9 +29,14 @@ describe('render snapshot: movement cost', () => {
 		const a = s.snapshotFor('A');
 		const b = s.snapshotFor('B');
 
-		expect(a.stats.slowLevel).toBeGreaterThan(0);
-		expect(b.stats.slowLevel).toBe(0);
-		// movePoints must be present too — the reticule maths uses both.
-		expect(a.stats).toHaveProperty('movePoints');
+		// KDM-162: `slowLevel` used to be RECOMPUTED server-side and shipped in a curated `stats`
+		// block — a derived value crossing the network, the exact thing that goes stale. It now
+		// travels as ordinary per-player state inside the generic bundle, so this asserts the same
+		// player-visible property at its new address.
+		expect(a.stats, 'the curated stats block must be gone from the wire').toBeUndefined();
+		expect(a.bundle.globals.KinkyDungeonSlowLevel).toBeGreaterThan(0);
+		expect(b.bundle.globals.KinkyDungeonSlowLevel || 0).toBe(0);
+		// The reticule maths needs MovePoints as well (KinkyDungeonDraw.ts:1581).
+		expect(a.bundle.gameData).toHaveProperty('MovePoints');
 	}, BOOT_TIMEOUT);
 });

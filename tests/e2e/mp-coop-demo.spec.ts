@@ -94,6 +94,17 @@ test('two browser windows play one shared co-op dungeon via the demo server', as
 		// --- routed bump-attack (KD-085 swap model): A moves into the shared enemy →
 		// the world's REAL dispatcher resolves it → both see the world enemy damaged ---
 		const session = bridge.session;          // SwapSession (one authoritative world)
+		// KDM-163: resolve THIS turn with A first. `_advanceTurn` applies players in random order (R9),
+		// and every applied action advances time — which runs enemy AI. So whenever B resolved first,
+		// the enemy took an AI step OFF the tile this test had just placed it on, and A's (0,1) "bump"
+		// landed on an empty tile as a plain move (`result: "move"`, enemy intact one tile over).
+		// Measured: ~1 run in 3 under load, three identical captures, with the client's input lists in
+		// place and the classifier seed OFF — i.e. this flake is NOT the KDM-163 client switch, which
+		// it was twice blamed for (see the task's CORRECTION 1/2).
+		// R9's randomness is asserted elsewhere; pinning it here removes a variable this assertion is
+		// not about, rather than weakening what it checks.
+		const realShuffle = session._shuffle.bind(session);
+		session._shuffle = (ids: string[]) => ['A', ...ids.filter((i) => i !== 'A')];
 		// put the world enemy directly below A's avatar so a (0,1) move bumps = attacks it
 		const aAv = session.posOf('A');
 		session.world.moveAvatar(session.enemyId, aAv.x, aAv.y + 1);
@@ -105,7 +116,24 @@ test('two browser windows play one shared co-op dungeon via the demo server', as
 		await A.waitForFunction((prev) => (window as any).__coop.lastTick === prev + 1, tAtk, { timeout: 30_000 });
 		// the world's authoritative enemy took damage (HP dropped or it was killed)
 		const enemyAfter = session.enemyView();
-		expect(enemyAfter == null || enemyAfter.hp < enemyHp0).toBe(true);
+		// KDM-163: this assertion is INTERMITTENT (measured ~1 run in 3 on a quiet host, with the
+		// client's hardcoded input lists in place and the classifier seed OFF — i.e. it is NOT caused
+		// by the KDM-163 client switch, which it was twice blamed for). A bare `toBe(true)` gave the
+		// next reader nothing to work with, so carry the state that decides it: what the server
+		// actually applied that turn, where everyone ended up, and whether A's queued action was
+		// displaced before it could be applied.
+		const diag = {
+			enemyPlacedAt: { x: aAv.x, y: aAv.y + 1 },
+			enemyNow: enemyAfter ? { x: enemyAfter.x, y: enemyAfter.y, hp: enemyAfter.hp } : null,
+			enemyHp0,
+			aAvatarNow: session.posOf('A'),
+			aPlayerNow: await A.evaluate(() => ({ /* @ts-ignore */ x: KinkyDungeonPlayerEntity.x, /* @ts-ignore */ y: KinkyDungeonPlayerEntity.y })),
+			lastTurn: session.lastTurn,
+			replaced: typeof session.replacedInputReport === 'function' ? session.replacedInputReport() : null,
+		};
+		expect(enemyAfter == null || enemyAfter.hp < enemyHp0,
+			`routed bump-attack did not damage the world enemy — ${JSON.stringify(diag)}`).toBe(true);
+		session._shuffle = realShuffle;           // R9 randomness restored for the rest of the run
 
 		// --- click-to-move route (KD FastMove) advances ONE tile per lockstep turn and
 		// is NOT "forgotten" after a single tile (regression: routes used to drain

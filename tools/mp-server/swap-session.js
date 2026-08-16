@@ -18,9 +18,27 @@
  */
 'use strict';
 
-const { HeadlessHost } = require('./headless-host');
+const { HeadlessHost, KDGAMEDATA_WORLD_KEYS } = require('./headless-host');
 
 const PARK = { x: 1, y: 1 };
+
+/**
+ * KDM-162: KDGameData fields the CLIENT owns, because only the client can compute them.
+ *
+ * These three are the OUTPUTS of `KinkyDungeonGetVisionRadius` (`KinkyDungeonVision.ts` →
+ * `KinkyDungeonStats.ts:376`-`378`), which the headless world never runs — it has no screen. Its
+ * values are therefore the post-init defaults, i.e. a DERIVED value that is already wrong at the
+ * source. Shipping one is the exact mistake this slice removes (`stats.slowLevel` was recomputed and
+ * then sent); the browser recomputes vision every frame and is authoritative for it.
+ *
+ * This is the same client-owned category the camera and `KDMapExtraData` (vision/light) are already
+ * in — deliberately not synced, and documented as such in `serializeRenderState`. It is a bounded,
+ * declared exception with a stated reason, NOT a reintroduced whitelist: the rule is "the headless
+ * server cannot compute it", not "we decided these fields matter".
+ *
+ * The vision INPUTS (`visionBlind`, `visionAdjust`, …) are per-player state and stay synced.
+ */
+const CLIENT_OWNED_GAMEDATA_KEYS = ['NightVision', 'MaxVisionDist', 'MinVisionDist'];
 
 /**
  * KD_START_RESTRAINT accepts ONE name or a comma/space-separated list
@@ -66,6 +84,19 @@ class SwapSession {
 		this._armHp = 100;            // per-turn damage-gauge full hp for peer avatars (KD-100)
 		this._joined = [];
 		this._pending = new Map();    // id -> { kdType, data }
+		this.unknownInputs = new Map(); // KDM-163 AC3: input type -> count the world had no handler for
+		// KDM-163 AC3: `_pending` is ONE slot per player, so a second turn-consuming input REPLACES the
+		// first. That is deliberate (a player may change their mind before the peer acts) but it must
+		// never be SILENT — the displaced action was a real action that never happened. Recorded here
+		// and surfaced in the snapshot, exactly like an unhandled type.
+		this.replacedInputs = [];
+		// KDM-163: input type -> "turn" | "ui", LEARNED from real turns (never from a speculative apply,
+		// which would double-apply world-mutating actions — see HeadlessHost.applyInputObserved).
+		this.inputKind = new Map();
+		// KDM-163: pre-seed inputKind by static analysis. OFF by default — the classifier is sound and
+		// unit-tested, but switching the CLIENT to route everything on top of it still destabilises
+		// mp-coop-demo (see KDM-163 § CORRECTION 2). Opt in with { seedInputKinds: true }.
+		this.seedInputKinds = !!opts.seedInputKinds;
 		this.started = false;
 		this.turn = 0;
 		this.enemyId = null;
@@ -98,6 +129,7 @@ class SwapSession {
 		this.world.boot();
 		this.world.init({ seed: this.seed });
 		this.world.setServerMode('world');
+		if (this.seedInputKinds) this._seedInputKinds();
 		// KD-074: load server-side mods into the ONE authoritative world (players are state
 		// bundles — no per-instance engine, so "all instances agree" is automatic). Same eval
 		// path as the browser loader (KDMods.ts) — mods push to KD globals / reassign functions.
@@ -169,9 +201,140 @@ class SwapSession {
 	 * Submit a player's action ({kdType, data} — KD's real input, or a {kind} for the
 	 * built-in move/wait helpers). Returns { advanced, waitingOn } / { advanced, turn }.
 	 */
+	/**
+	 * KDM-163 (option A): THE input entry point. Every input the client produces comes here — there is
+	 * no client-side classification and nothing is ever swallowed.
+	 *
+	 * The split this makes possible: `submit()` used to mean BOTH "here is an input" and "I have
+	 * finished my turn", because `_pending` holds one action per player. So a menu click either
+	 * overwrote the player's queued real action or, if they were the last to submit, advanced the world
+	 * for everyone. That conflation is why the client needed two hand-written lists in the first place.
+	 *
+	 * Now the GAME decides, not us — but it is asked by OBSERVING a real application, never by a
+	 * speculative one:
+	 *
+	 *   unknown type (first time)  → lockstep, the safe default. `_advanceTurn` applies it exactly once
+	 *                                and LEARNS whether it called KinkyDungeonAdvanceTime.
+	 *   learned "ui"               → applied immediately on this player's own bundle. No turn consumed,
+	 *                                no lockstep involvement, menus stay responsive (R6).
+	 *   learned "turn"             → lockstep, preserving R8 lockstep and R9 random order.
+	 *
+	 * ⚠️ An earlier version DID probe speculatively — run it with the advance blocked, then roll the
+	 * player back if it turned out to be turn-consuming. It was rejected by measurement: probes/probe9
+	 * only sampled player-local inputs, and probes/probe11 then showed `doattack` damaging the target
+	 * (hp 1 → -0.575) BEFORE reaching AdvanceTime, which a player-only rollback does not undo — so the
+	 * lockstep replay applied the attack twice. Observing is exactly-once by construction.
+	 *
+	 * Cost of this shape: the FIRST use of each UI type in a session goes through lockstep, so it costs
+	 * one turn. It is applied correctly (never lost, never doubled), and every later use is immediate.
+	 */
+	apply(clientId, action = {}) {
+		if (!this.started) throw new Error('session not started');
+		if (!this._joined.includes(clientId)) throw new Error(`unknown player ${clientId}`);
+		const { kdType, data } = this._toInput(clientId, action);
+		if (!kdType) return { advanced: false, kind: 'noop' };
+
+		// Known NOT to consume a turn (learned from a real turn, below) → apply it now, exactly once.
+		if (this.inputKind.get(kdType) === 'ui') {
+			const bundle = this.bundles.get(clientId);
+			this.world.restorePlayer(bundle);
+			const res = this.world.applyInputObserved(kdType, data) || {};
+			if (res.advanced > 0) {
+				// The classification was wrong for this occurrence — an input that did not advance
+				// before just did. Reclassify loudly rather than silently desynchronising lockstep.
+				this.inputKind.set(kdType, 'turn');
+				this._dbg(`RECLASSIFY "${kdType}" ui -> turn (it advanced time outside lockstep)`);
+			}
+			this.bundles.set(clientId, this.world.capturePlayer());
+			// Leave the world exactly as a resolved turn leaves it. `_advanceTurn` ends with the global
+			// player parked off-field; an immediate apply must restore that same between-turns
+			// invariant, or the world is left with one player swapped in and the next turn (and any
+			// read of avatar/enemy positions) starts from a different state than it used to.
+			this.world.parkGlobalPlayer(PARK.x, PARK.y);
+			this._noteUnknown(kdType, res);
+			return { advanced: false, kind: 'ui', unknownType: !!res.unknownType, error: res.error || null };
+		}
+
+		// Everything else — including every type seen for the first time — goes through lockstep. That
+		// is the SAFE default: the action is applied exactly once, by _advanceTurn, which also learns
+		// this type's kind for next time.
+		return Object.assign({ kind: 'turn' }, this.submit(clientId, action));
+	}
+
+	/**
+	 * KDM-163: pre-seed `inputKind` by STATIC analysis of the bundle, so no input type is ever
+	 * "unlearned" at runtime. Without this, the first use of each type takes the lockstep default and
+	 * costs the player a turn — measured to break click-to-move (`mp-coop-demo`), because
+	 * `KDFastMoveTo` dispatches through KDSendInput.
+	 *
+	 * Text-coupled, so it is verified against the LIVE registry and fails LOUD and SAFE: anything the
+	 * analysis did not classify simply stays unseeded and defaults to turn-consuming.
+	 */
+	_seedInputKinds() {
+		try {
+			const { classifyInputs } = require('./input-classifier');
+			const { loadSources } = require('./headless-host');
+			const { kinds, report } = classifyInputs(loadSources().bundle);
+			const live = this.world.eval('(typeof KDInputTypes !== "undefined" && KDInputTypes) ? Object.keys(KDInputTypes) : []') || [];
+			let seeded = 0;
+			for (const t of live) { if (kinds[t]) { this.inputKind.set(t, kinds[t]); seeded++; } }
+			this.inputSeedReport = { ...report, live: live.length, seeded, missing: live.length - seeded };
+			// Drift: the registry moved and the analysis no longer covers it. Not fatal — the unseeded
+			// types just fall back to the safe default — but it must be visible.
+			if (!report.found || seeded < live.length) {
+				const msg = `[mp-server] KDM-163 input-classifier DRIFT: seeded ${seeded}/${live.length} live input ` +
+					`types (parsed ${report.handlers} handlers from the bundle). Unseeded types default to ` +
+					'turn-consuming, so behaviour is safe but menus may cost a turn until observed.';
+				try { console.warn(msg); } catch (e) { /* ignore */ }
+				this._dbg(msg);
+			} else {
+				this._dbg(`input-classifier seeded ${seeded} types (${report.ui} ui / ${report.turn} turn)`);
+			}
+		} catch (e) {
+			// Never let classification take the session down — an empty cache is merely the old behaviour.
+			try { console.warn('[mp-server] KDM-163 input-classifier failed, falling back to observe-only: ' + e.message); } catch (e2) { /* ignore */ }
+		}
+	}
+
+	/** AC3: an input type the authoritative world has no handler for — never dropped in silence. */
+	_noteUnknown(kdType, res) {
+		if (!res || !res.unknownType) return;
+		this.unknownInputs.set(kdType, (this.unknownInputs.get(kdType) || 0) + 1);
+		this._dbg(`UNKNOWN input type "${kdType}" — no handler in KDInputTypes, it did nothing`);
+	}
+
+	/** Input types the authoritative world had no handler for, with counts (KDM-163 AC3). */
+	unknownInputReport() {
+		return [...this.unknownInputs.entries()].map(([type, count]) => ({ type, count }));
+	}
+
+	/**
+	 * Queued actions that were displaced before they could be applied (KDM-163 AC3). The OTHER way an
+	 * input disappears without a trace: not "the game had no handler" but "the lockstep slot was
+	 * overwritten". Both are silent drops; both are now reportable.
+	 */
+	replacedInputReport() { return this.replacedInputs.slice(); }
+
 	submit(clientId, action = {}) {
 		if (!this.started) throw new Error('session not started');
 		if (!this._joined.includes(clientId)) throw new Error(`unknown player ${clientId}`);
+		// KDM-163 AC3: a queued action being displaced is a real input that will never be applied.
+		// Measured in `tests/unit/mp-ui-chatter-repro.spec.ts`: queue a bump-attack, then send any other
+		// turn-consuming input before the peer acts, and the enemy takes no damage — with nothing
+		// anywhere to find it by. Report it; do not change the last-wins semantics the client relies on.
+		const displaced = this._pending.get(clientId);
+		if (displaced) {
+			const rec = {
+				clientId,
+				turn: this.turn,
+				displaced: this._toInput(clientId, displaced).kdType || displaced.kind || null,
+				by: this._toInput(clientId, action).kdType || action.kind || null,
+			};
+			this.replacedInputs.push(rec);
+			while (this.replacedInputs.length > this.maxLog) this.replacedInputs.shift();
+			this._dbg(`REPLACED pending input for ${clientId}: "${rec.displaced}" never applied, ` +
+				`displaced by "${rec.by}" in turn ${this.turn}`);
+		}
 		this._pending.set(clientId, action);
 		this._dbg(`submit turn=${this.turn} ${clientId} action=${JSON.stringify(action)}`);
 		const waitingOn = this._joined.filter((id) => !this._pending.has(id));
@@ -217,7 +380,23 @@ class SwapSession {
 				// KD-100: run the player's REAL action. A move/attack/spell INTO a peer's avatar (armed
 				// as a real hostile enemy above) auto-runs KD's real attack pipeline — real damage, real
 				// combat text + floaters, real defeat/capture. No interception. Reconciled after the turn.
-				result = this.world.applyInput(kdType, data);
+				// KDM-163: apply for real, and LEARN whether this input type consumes a turn. The
+				// classification comes from a genuine application — never a speculative one, which
+				// would double-apply world-mutating actions (measured, probes/probe11).
+				const obs = this.world.applyInputObserved(kdType, data) || {};
+				result = obs.result;
+				this._noteUnknown(kdType, obs);
+				// Observation beats the static seed, in BOTH directions:
+				//  - a seeded "turn" that demonstrably never advanced is demoted to "ui" (this is what
+				//    repairs the classifier's deliberate conservatism — it over-approximates by design,
+				//    and probe14 measured 12 of 25 known-UI types landing in that bucket);
+				//  - a "ui" that did advance is promoted straight back to "turn".
+				const seen = obs.advanced > 0 ? 'turn' : 'ui';
+				if (this.inputKind.get(kdType) !== seen) {
+					const had = this.inputKind.get(kdType);
+					this.inputKind.set(kdType, seen);
+					this._dbg(`${had ? 'reclassified' : 'learned'} "${kdType}"${had ? ' ' + had + ' ->' : ' ='} ${seen}`);
+				}
 				// KD-096: an AOE cast whose footprint covers a partner splashes them (co-op friendly-fire).
 				const ff = this._applyFriendlyFire(id, kdType, data);
 				if (ff && ff.length) result = { cast: result, friendlyFire: ff };
@@ -538,6 +717,41 @@ class SwapSession {
 		this.logs.set(id, lg);
 	}
 
+	/**
+	 * KDM-162: read a player's live vitals (Will, stamina, distraction, …) on the server.
+	 *
+	 * Callers used to reach these through `snapshotFor(id).stats.will`, which made the RENDER WIRE
+	 * FORMAT double as the server's read API — so a field could not be removed from the wire without
+	 * breaking server-side callers, which is half of why the curated `stats` block survived so long.
+	 * This is a server-side query with the same semantics (swap the player in, read live) and no
+	 * bearing on what crosses the network.
+	 */
+	vitalsFor(clientId) {
+		if (!this.started) throw new Error('session not started');
+		const bundle = this.bundles.get(clientId);
+		if (!bundle) throw new Error(`unknown player ${clientId}`);
+		this.world.restorePlayer(bundle);
+		return this.world.getVitals();
+	}
+
+	/**
+	 * KDM-162: the wire form of a player's state bundle — the capture minus the shared world.
+	 *
+	 * Same split `restorePlayer` applies on the server (`KDGAMEDATA_WORLD_KEYS`), applied once here so
+	 * the client can adopt everything it receives without knowing the rule. Shallow copy: the bundle
+	 * belongs to the session and must not be mutated by preparing a snapshot.
+	 */
+	_clientBundle(bundle) {
+		if (!bundle) return null;
+		const gameData = {};
+		for (const k of Object.keys(bundle.gameData || {})) {
+			if (KDGAMEDATA_WORLD_KEYS.includes(k)) continue;
+			if (CLIENT_OWNED_GAMEDATA_KEYS.includes(k)) continue;
+			gameData[k] = bundle.gameData[k];
+		}
+		return { v: bundle.v, gameData, globals: bundle.globals };
+	}
+
 	/** Map a submitted action to a KD input {kdType, data}. */
 	_toInput(id, action) {
 		if (action.kdType) return { kdType: action.kdType, data: action.data || {} };
@@ -594,6 +808,22 @@ class SwapSession {
 		if (!bundle) throw new Error(`unknown player ${clientId}`);
 		this.world.restorePlayer(bundle);
 		const snap = this.world.serializeRenderState();
+		// KDM-162: ship this player's OWN state bundle — the same generic capture the swap model uses
+		// (KDM-161), not a curated view of it. The browser runs a full KD instance; it needs its state,
+		// not our summary of it. Measured (KDM-162 probe6): a client that adopts this has ZERO wrong
+		// player-state fields across 4949 candidate globals, and needs no re-derivation at all.
+		//
+		// World-scoped KDGameData keys are stripped HERE rather than skipped on the client, so the
+		// client needs no copy of the world-key list — the server stays the single source of truth for
+		// the player/world split (the mistake the `stats` block made was giving the client a contract
+		// to maintain).
+		snap.bundle = this._clientBundle(bundle);
+		// KDM-163 AC3: input types the world had no handler for, so a dropped input is visible in the
+		// browser instead of being an indistinguishable no-op.
+		snap.unknownInputs = this.unknownInputReport();
+		// KDM-163 AC3: …and the other silent-drop path — an action displaced out of the lockstep slot
+		// before it could ever be applied.
+		snap.replacedInputs = this.replacedInputReport();
 		// KD-098: the headless world never runs the draw-ease loop, so entities' visual_x/visual_y
 		// stay stuck near spawn while x/y jump via AI — the client then re-eases from the stale
 		// spot each turn (the "Rat teleports from its initial tile through several tiles"). Snap

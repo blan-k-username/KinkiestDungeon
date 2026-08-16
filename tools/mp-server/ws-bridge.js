@@ -87,7 +87,11 @@ function decodeFrames(buf) {
 class WSBridge {
 	/** @param {object} opts { requiredPlayers=2, seed, enemyType } */
 	constructor(opts = {}) {
-		this.session = new SwapSession(opts);
+		// KDM-163 AC1: the client no longer classifies input — it routes everything — so no type may be
+		// unlearned when it first arrives. Pre-seeding is what makes that affordable: without it the
+		// first use of each type takes the lockstep default and costs the player a turn, which breaks
+		// click-to-move (`KDFastMoveTo` dispatches through `KDSendInput`). Callers may still override.
+		this.session = new SwapSession(Object.assign({ seedInputKinds: true }, opts));
 		this.sockets = new Map();          // clientId -> socket
 		this._server = null;
 		this.port = null;
@@ -171,7 +175,24 @@ class WSBridge {
 		}
 		if (msg.type === 'input' && clientId && this.session.started) {
 			try {
-				let res = this.session.submit(clientId, msg.action || {});
+				// KDM-163 (option A): the client routes EVERY input and classifies nothing. `apply`
+				// asks the GAME whether the input consumes a turn; only then does it enter lockstep.
+				let res = this.session.apply(clientId, msg.action || {});
+				if (res.kind === 'ui') {
+					// A menu/UI input: applied to this player's own state, no turn consumed. Push their
+					// updated snapshot straight back so the UI responds without waiting for the partner
+					// — this is what keeps R6 true now that nothing runs locally on the client.
+					// KDM-163: TAGGED `kind:'ui'`. Without it this is indistinguishable from a resolved
+					// turn, and the client's turn bookkeeping (submitted / route / tick) fires on it.
+					// That matters enormously once the client routes everything: `setMoveDirection` is
+					// sent from KD's draw loop EVERY FRAME, so an untagged push would reset the
+					// per-turn state ~60×/s and no click-to-move route could survive a single frame.
+					this._send(socket, {
+						type: 'state', kind: 'ui', tick: this.session.turn,
+						snapshot: this.session.snapshotFor(clientId),
+					});
+					return clientId;
+				}
 				// demo mode: auto-"wait" for any player who hasn't submitted so a single
 				// player's move advances the turn (easy to validate sync solo).
 				if (!res.advanced && this.autoAdvance) {

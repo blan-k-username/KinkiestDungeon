@@ -46,13 +46,13 @@ describe('PvP render-state mappings (KD-098)', () => {
 	it("the peer's HP bar tracks their real Will fraction, not a static 100", () => {
 		const before = peerAvatarInAsView(s);
 		expect(before).not.toBeNull();
-		const willBefore = s.snapshotFor('B').stats.will;
+		const willBefore = s.vitalsFor('B').will;
 
 		bumpB(s); bumpB(s);   // wear B's Will down with real hits
 
 		const after = peerAvatarInAsView(s);
-		const willAfter = s.snapshotFor('B').stats.will;
-		const willMax = s.snapshotFor('B').stats.willMax;
+		const willAfter = s.vitalsFor('B').will;
+		const willMax = s.vitalsFor('B').willMax;
 
 		expect(willAfter).toBeLessThan(willBefore);
 		expect(after!.hp).toBeLessThan(before!.hp);

@@ -39,40 +39,37 @@
 	var clientMode = false;   // closure flag — NOT the game-source KDServerRole (reverted, KD-085)
 	var _lastRestraintSig = null;   // KD-101: re-dress the player paper-doll only when worn restraints change
 
-	// Input classification (KD-085/088). KD funnels every action through KDSendInput;
-	// under the thin client we split it three ways:
-	//   ROUTED    — turn-consuming gameplay: forward {kdType,data} to the authoritative
-	//               server (it replays through KD's REAL dispatcher). NOT run locally.
-	//   LOCAL_UI  — menus/choices/toggles that don't advance the shared turn: run LOCALLY
-	//               so UI stays responsive (R6).
-	//   (other)   — unknown type: SWALLOW (don't run locally, don't send) — no divergence.
-	// The KinkyDungeonAdvanceTime guard backstops anything that slips through (R1).
-	var ROUTED_INPUTS = {
-		// movement / combat
-		move: 1, movestairs: 1, doattack: 1, dospecial: 1, doaggro: 1, docapture: 1, swipe: 1,
-		tick: 1, crouch: 1, noise: 1, sleep: 1, scan: 1,
-		// restraints / struggle
-		struggle: 1, struggleCurse: 1, curseUnlock: 1, quickRestraint: 1,
-		equip: 1, equipRestraintGeneric: 1, dress: 1,
-		// items / weapons
-		consumable: 1, drop: 1, switchWeapon: 1, unequipWeapon: 1, offhandswitch: 1,
-		// world / locks / interact
-		interact: 1, pick: 1, unlock: 1, commandunlock: 1, hack: 1, closeDoor: 1,
-		shrineBuy: 1, shrineUse: 1, shrineQuest: 1, shrineDevote: 1, shrinePray: 1, shrineDrink: 1, shrineBottle: 1,
-		tabletInteract: 1, foodInteract: 1, chargerInteract: 1, recycleBuild: 1, recycle: 1,
-		// self / play
-		tryOrgasm: 1, tryPlay: 1, aid: 1, rescue: 1, penance: 1,
-		// NPC management
-		releaseNPC: 1, removeGuest: 1, ransomNPC: 1, freeNPCRestraint: 1, addNPCRestraint: 1, tightenNPCRestraint: 1,
-		// spells (targeted-entity re-resolution handled server-side via __kdEnt tags) — see KD-089
-		tryCastSpell: 1, spellCastFromBook: 1, upcast: 1,
-	};
-	var LOCAL_UI_INPUTS = {
-		setMoveDirection: 1, toggleSpell: 1, buffclick: 1, inventoryAction: 1, focusControlToggle: 1,
-		upcastcancel: 1, select: 1, selectOnly: 1, cancelParty: 1, onMe: 1, spellChoice: 1, itemChoice: 1,
-		spellRemove: 1, spellLearn: 1, perkorb: 1, orb: 1, heart: 1, champion: 1, renamenpc: 1,
-		changeAutorelease: 1, autoprune: 1, ghostNegotiate: 1, dialogue: 1, talk: 1, safeword: 1,
-	};
+	/*
+	 * KDM-163 AC1 — the two hardcoded input lists that used to live here are GONE.
+	 *
+	 * They were `ROUTED_INPUTS` (~56 keys) and `LOCAL_UI_INPUTS` (~25 keys), and anything on neither
+	 * was dropped in SILENCE: a mod's action, or any type upstream added, did nothing at all — no
+	 * effect, no error, no log. The game's registry has 85 types, so `defeat`, `lose`, `lock` and
+	 * `setrestraintpalette` were being swallowed outright. The lists were also partly WRONG, not just
+	 * incomplete: `offhandswitch` and `aid` were listed turn-consuming and neither advances time.
+	 *
+	 * This client now classifies NOTHING. Every input is routed, and the server asks the GAME what it
+	 * is (`SwapSession.apply` + `HeadlessHost.applyInputObserved`): the kind is pre-seeded from static
+	 * reachability of `KinkyDungeonAdvanceTime` over the bundle and corrected from real turns, so a UI
+	 * type is applied immediately (menus stay responsive, R6) and a turn-consuming one goes through
+	 * lockstep (R8/R9). A mod's input type needs no entry anywhere — that is AC2/I5.
+	 *
+	 * ⚠️ History worth not repeating. This deletion was tried and reverted TWICE on a red
+	 * `mp-coop-demo`, and the red was never measured — it was assumed to be caused by the change:
+	 *   - CORRECTION 1's red (`afterKick`, click-to-move) WAS real and IS fixed, by pre-seeding: no
+	 *     type is unlearned at runtime, so no UI input takes the lockstep default and costs a turn.
+	 *   - CORRECTION 2's red (`:108`, the bump-attack) was NOT this change at all. It is an
+	 *     intermittent race in the test itself — whenever the peer resolves first in the random turn
+	 *     order, the enemy takes an AI step off the tile the test placed it on and A's bump lands on
+	 *     an empty tile. Reproduced ~1 run in 3 with these lists still IN PLACE and the seed OFF.
+	 *
+	 * The speculative alternative — run an input with the advance BLOCKED and roll back if it turned
+	 * out to be turn-consuming — was implemented and REJECTED by measurement: probes/probe11 showed
+	 * `doattack` damaging the target (hp 1 → -0.575) BEFORE reaching AdvanceTime, which a player-only
+	 * rollback does not undo, so the lockstep replay applied the attack twice. Observe, never block.
+	 *
+	 * The `KinkyDungeonAdvanceTime` guard below remains the backstop (R1).
+	 */
 
 	/**
 	 * Best-effort JSON-safe clone of an input's data so it can ship over the wire.
@@ -148,6 +145,75 @@
 		if (added && typeof KinkyDungeonRefreshEnemiesCache === 'function') KinkyDungeonRefreshEnemiesCache();
 	}
 
+	/**
+	 * KDM-162: adopt this player's own STATE BUNDLE — the browser analogue of
+	 * HeadlessHost.restorePlayer.
+	 *
+	 * The browser already runs a full KD instance. It does not need a curated view of the game; it
+	 * needs its own state. The server ships the same generic capture the swap model uses (KDM-161),
+	 * already stripped of world-scoped KDGameData keys, so there is nothing to classify here and no
+	 * field list to keep in step with the host — which is exactly what the old `stats` block was, in
+	 * four places and two languages.
+	 *
+	 * Mechanism: KD's globals are top-level `let`/`var` in SCRIPT scope, so they are not properties of
+	 * globalThis and cannot be assigned through it. A DIRECT eval from this classic script resolves a
+	 * bare name up the scope chain into that same global lexical environment — the identical trick the
+	 * host uses inside the bundle's vm scope.
+	 *
+	 * ⚠️ COPY, never alias (measured on the host, KDM-161): `b` is the snapshot object and is reused;
+	 * handing the game a reference into it means the game mutates the snapshot in place.
+	 */
+	/**
+	 * KDM-163 AC3: input types the AUTHORITATIVE WORLD had no handler for.
+	 *
+	 * Under option A the client classifies nothing, so it cannot know: it routes every type, and the
+	 * server — which owns the real registry, `KDInputTypes` (`KinkyDungeonInput.ts:10`) — reports back
+	 * anything it could not dispatch. A non-empty list means the caller sent a type no handler exists
+	 * for anywhere, which is a real bug and now visible instead of a silent `return ''`.
+	 */
+	var _unhandled = [];                 // [{type, count}] — reported BY THE SERVER, see below
+	var _warned = {};
+
+	/*
+	 * KDM-163 AC3: the client-side drop RECORDER that used to live here is gone with the lists that
+	 * made drops possible. There is no longer a "type on neither list" case to record — every input is
+	 * routed, so the only place an input can go unhandled is the authoritative world, and the server
+	 * reports that in `snapshot.unknownInputs` (SwapSession.unknownInputReport).
+	 */
+
+	var _adoptVal;                       // transfer slot for the direct eval below
+	function adoptBundle(b) {
+		if (!b) return 0;
+		var codec = (typeof window !== 'undefined' && window.KDCodec) ? window.KDCodec : null;
+		var dec = (codec && codec.kdDec) ? codec.kdDec : function (v) { return v; };
+		var n = 0;
+		if (b.gameData && typeof KDGameData !== 'undefined' && KDGameData) {
+			for (var gk in b.gameData) {
+				if (!Object.prototype.hasOwnProperty.call(b.gameData, gk)) continue;
+				if (b.gameData[gk] === undefined) continue;
+				try { KDGameData[gk] = dec(b.gameData[gk]); n++; } catch (e) { /* not assignable */ }
+			}
+		}
+		var g = b.globals;
+		if (g) {
+			for (var name in g) {
+				if (!Object.prototype.hasOwnProperty.call(g, name)) continue;
+				var v = g[name];
+				if (v === undefined) continue;
+				try {
+					// A __kdT tag only ever sits at the TOP level, so this O(1) test is enough.
+					_adoptVal = (v && typeof v === 'object')
+						? (v.__kdT ? dec(v) : JSON.parse(JSON.stringify(v)))
+						: v;
+					// eslint-disable-next-line no-eval
+					eval(name + ' = _adoptVal;');
+					n++;
+				} catch (e) { /* const / not a bundle binding — skip, same as the host */ }
+			}
+		}
+		return n;
+	}
+
 	var KDRenderClient = {
 		/** Snapshot the current render globals (render-state v1). Mirrors the host. */
 		serialize: function () {
@@ -166,14 +232,8 @@
 					camY: (typeof KinkyDungeonCamY !== 'undefined') ? KinkyDungeonCamY : 0,
 				},
 				player: P ? entSnap(P) : null,
-				stats: {
-					will: KinkyDungeonStatWill, willMax: KinkyDungeonStatWillMax,
-					stamina: KinkyDungeonStatStamina, staminaMax: KinkyDungeonStatStaminaMax,
-					mana: KinkyDungeonStatMana, manaMax: KinkyDungeonStatManaMax,
-					manaPool: (typeof KinkyDungeonStatManaPool !== 'undefined') ? KinkyDungeonStatManaPool : 0,
-					distraction: KinkyDungeonStatDistraction, distractionMax: KinkyDungeonStatDistractionMax,
-					distractionLower: (typeof KinkyDungeonStatDistractionLower !== 'undefined') ? KinkyDungeonStatDistractionLower : 0,
-				},
+				// KDM-162: no `stats` block — it was the host's copy of a hand-kept HUD contract. See
+				// headless-host.serializeRenderState; per-player state travels in the bundle now.
 				// full authoritative map (adopted wholesale on apply) — see headless-host
 				map: clone(KDMapData),
 				messages: {
@@ -193,28 +253,34 @@
 		apply: function (s) {
 			if (!s) return { ok: false, error: 'no snapshot' };
 			ensureAvatarDef();   // so peer avatars (RemotePlayer) re-link to a real def
+			// KDM-162: adopt this player's own state FIRST, so the explicit assignments below (which
+			// carry snapshot-time render fixups like snapped visual_x/visual_y) still have the last word.
+			KDRenderClient.lastBundleFields = adoptBundle(s.bundle);
+			// KDM-163 AC3: surface what the authoritative world could not dispatch. Warned once per
+			// type so a mistyped/removed input is loud in the console instead of doing nothing.
+			if (Array.isArray(s.unknownInputs)) {
+				_unhandled = s.unknownInputs;
+				for (var ui = 0; ui < _unhandled.length; ui++) {
+					var ut = _unhandled[ui] && _unhandled[ui].type;
+					if (ut && !_warned[ut]) {
+						_warned[ut] = 1;
+						try { console.warn('[mp-client] input "' + ut + '" has NO handler in the game (KDInputTypes) — it did nothing.'); } catch (e) { /* ignore */ }
+					}
+				}
+			}
 			// NOTE: deliberately IGNORE s.camera. The snapshot's camera/grid-size come
 			// from the HEADLESS server (no real screen → bogus scale), and adopting them
 			// distorts the client's rendering. The browser keeps its OWN window-based
 			// KinkyDungeonGridSizeDisplay and recomputes the camera each frame to centre
 			// on its player. (Camera stays in the snapshot for the node round-trip test.)
-			KinkyDungeonStatWill = s.stats.will; KinkyDungeonStatWillMax = s.stats.willMax;
-			KinkyDungeonStatStamina = s.stats.stamina; KinkyDungeonStatStaminaMax = s.stats.staminaMax;
-			KinkyDungeonStatMana = s.stats.mana; KinkyDungeonStatManaMax = s.stats.manaMax;
-			if (typeof KinkyDungeonStatManaPool !== 'undefined') KinkyDungeonStatManaPool = s.stats.manaPool;
-			KinkyDungeonStatDistraction = s.stats.distraction; KinkyDungeonStatDistractionMax = s.stats.distractionMax;
-			if (typeof KinkyDungeonStatDistractionLower !== 'undefined') KinkyDungeonStatDistractionLower = s.stats.distractionLower;
-			// Movement cost state. The client draws the "xN" reticule itself
-			// (KinkyDungeonDraw.ts:1581 reads KDGameData.MovePoints; the tile cost comes from
-			// KinkyDungeonSlowLevel), so without adopting these it always showed x1 no matter how
-			// hobbled the player was — the number disagreed with the "You are slowed!" message.
-			if (typeof KDGameData !== 'undefined' && KDGameData) {
-				if (s.stats.movePoints != null) KDGameData.MovePoints = s.stats.movePoints;
-				if (s.stats.slowMoveTurns != null) KDGameData.SlowMoveTurns = s.stats.slowMoveTurns;
-				if (s.stats.sprintTurns != null) KDGameData.SprintTurns = s.stats.sprintTurns;
-			}
-			if (s.stats.slowLevel != null && typeof KinkyDungeonSlowLevel !== 'undefined')
-				KinkyDungeonSlowLevel = s.stats.slowLevel;
+			// KDM-162: the ~12 hand-assigned HUD stats that used to be here are gone, and so is the
+			// movement-cost patch-up below them (KDGameData.MovePoints/SlowMoveTurns/SprintTurns and
+			// KinkyDungeonSlowLevel). All of it is per-player state that `adoptBundle` above installs
+			// from the server's own capture — including KinkyDungeonSlowLevel, which used to be
+			// recomputed server-side and shipped as a derived value.
+			//
+			// The `xN` move reticule (KinkyDungeonDraw.ts:1581) and the "You are slowed!" line now read
+			// the same adopted state, so they cannot disagree the way they did.
 			// adopt the authoritative KDMapData WHOLESALE (internally consistent — a
 			// field-subset splice over the client's local map renders broken). Entities
 			// carry their full Enemy defs in the clone, so no def re-link is needed.
@@ -241,11 +307,26 @@
 			if (s.player && KinkyDungeonPlayerEntity) {
 				for (var k in s.player) { if (k !== 'enemyName' && k !== 'Enemy') KinkyDungeonPlayerEntity[k] = s.player[k]; }
 			}
+			/*
+			 * KDM-162: the DERIVATIONS that used to live here are gone.
+			 *
+			 * This block used to hand-call `KinkyDungeonRefreshRestraintsCache`, `KinkyDungeonUpdateRestraints`
+			 * (→ `KinkyDungeonPlayerTags`) and `KinkyDungeonUpdateStruggleGroups` — a partial reimplementation
+			 * of KD's per-turn pass, each call added reactively after a bug (KD-103 arm pose, KDM-156 struggle-
+			 * group crash). They are unnecessary now: those globals are per-player state that the bundle
+			 * carries, so `adoptBundle` above installs the SERVER's already-correct values.
+			 *
+			 * Measured before deleting (KDM-162 probe6): across 4949 candidate globals, a client that adopts
+			 * the bundle has ZERO wrong player-state fields, and running the derivation subset afterwards
+			 * changes nothing. And never call `KinkyDungeonUpdateStats` here — probes 1/4 measured it
+			 * regenerating mana cumulatively and executing a real edge/orgasm event that drains Will, none of
+			 * which the `KinkyDungeonAdvanceTime` guard catches.
+			 *
+			 * What REMAINS is render-only and genuinely client-owned: the paper doll. `KDRefreshCharacter` /
+			 * `KinkyDungeonDressPlayer` build the model + appearance, which the headless server has no
+			 * equivalent of and cannot ship — the same category as the camera and the vision radius.
+			 */
 			if (Array.isArray(s.restraints) && typeof KinkyDungeonInventory !== 'undefined' && typeof Restraint !== 'undefined') {
-					// KD-101: mirror the authoritative worn-restraint list onto this client's player so a
-					// peer-applied tie is VISIBLE here (server reconcile binds the bundle + the snapshot
-					// carries the full items; without this the victim's screen shows nothing). Rebuild the
-					// real inventory Map + refresh the game's own caches/dress — no reimplementation.
 					try {
 						var rmap = new Map();
 						var sig = '';
@@ -254,35 +335,13 @@
 							if (rit && rit.name) { rmap.set(rit.name, rit); sig += rit.name + '|' + (rit.id || '') + ';'; }
 						}
 						KinkyDungeonInventory.set(Restraint, rmap);
-						// Only rebuild caches + the paper-doll when the worn set actually changed (avoids a
-						// per-turn re-dress flicker / cost). KD-101: the thin client never runs KD's own
-						// input-queue re-dress, so worn restraints stayed INVISIBLE — setting
-						// KinkyDungeonCheckClothesLoss alone doesn't re-dress; we must flag KDRefreshCharacter
-						// for the player and call KinkyDungeonDressPlayer to strip+re-apply from the worn Map.
+						// Re-dress only when the worn set actually changed (avoids a per-turn re-dress
+						// flicker / cost). Setting KinkyDungeonCheckClothesLoss alone does NOT re-dress:
+						// KDRefreshCharacter must be flagged for the player and KinkyDungeonDressPlayer
+						// called to strip + re-apply from the worn Map.
 						if (sig !== _lastRestraintSig) {
 							_lastRestraintSig = sig;
-							if (typeof KinkyDungeonRefreshRestraintsCache === 'function') KinkyDungeonRefreshRestraintsCache();
-							if (typeof KinkyDungeonUpdateRestraints === 'function' && typeof KinkyDungeonPlayer !== 'undefined') {
-									// KD-103: run the game's OWN per-turn restraint computation so KinkyDungeonPlayerTags
-									// gains the "<Group>Full"/"<name>Worn" tags that drive KinkyDungeonIsArmsBound and thus
-									// the bound ARM POSE (KinkyDungeonDress.ts:646/689/702). RefreshRestraintsCache alone
-									// rebuilds only the def cache, not player tags — so the victim stayed armsBound=false and
-									// arms rendered "Free" despite the rope overlay. Real per-turn call (KinkyDungeonStats.ts:1749),
-									// no reimplementation. Proven: tests/e2e/mp-bind-victim-modelstate (armsBound false→true).
-									try { KinkyDungeonPlayerTags = KinkyDungeonUpdateRestraints(KinkyDungeonPlayer, -1, 1); } catch (eUR) { /* ignore */ }
-								}
-								// KDM-156: rebuild the struggle-group list from the worn set. Vanilla does this in
-								// its per-turn stats pass (KinkyDungeonUpdateStats → KinkyDungeonUpdateStruggleGroups,
-								// KinkyDungeonStats.ts:1774) — which the thin client never runs, local sim being off.
-								// While it was stale, KinkyDungeonStruggleGroups had no entry for a restraint the
-								// player visibly wore, so every inventory action on it hit an undefined `.find()`
-								// result and CRASHED: `sg.noCut` when drawing the worn screen
-								// (KDInventoryActions.ts:424) and `sg.group` when clicking struggle/remove (:408).
-								// The serve-time guards keep those from being fatal; this is the actual cause.
-								if (typeof KinkyDungeonUpdateStruggleGroups === 'function') {
-									try { KinkyDungeonUpdateStruggleGroups(); } catch (eSG) { /* ignore */ }
-								}
-								if (typeof KinkyDungeonCheckClothesLoss !== 'undefined') KinkyDungeonCheckClothesLoss = true;
+							if (typeof KinkyDungeonCheckClothesLoss !== 'undefined') KinkyDungeonCheckClothesLoss = true;
 							if (typeof KDRefreshCharacter !== 'undefined' && typeof KinkyDungeonPlayer !== 'undefined') {
 								try { KDRefreshCharacter.set(KinkyDungeonPlayer, true); } catch (e2) { /* ignore */ }
 							}
@@ -329,32 +388,53 @@
 				KDSendInput = function (type, data) {
 					if (clientMode) {
 						// KD-098 diagnostics: trace turn-consuming inputs + dropped ones. We log only
-						// ROUTE (sent to server) and SWALLOW (dropped) — NOT local-ui, which includes
-						// per-frame chatter like setMoveDirection (mouse tracking) that would spam the
-						// console. Toggle window.__KDMP_DEBUG.
-						if (typeof window !== 'undefined' && window.__KDMP_DEBUG && !LOCAL_UI_INPUTS[type]) {
-							var decision = ROUTED_INPUTS[type] ? 'ROUTE' : 'SWALLOW';
-							try { console.log('[mp-client] KDSendInput', type, '->', decision, (data && data.id != null) ? ('id=' + data.id) : ''); } catch (e) { /* ignore */ }
+						// KD-098 diagnostics: every input now takes one path, so the trace is just the
+						// type. `setMoveDirection` is per-frame mouse chatter, so it is excluded to keep
+						// the console readable. Toggle window.__KDMP_DEBUG.
+						if (typeof window !== 'undefined' && window.__KDMP_DEBUG && type !== 'setMoveDirection') {
+							try { console.log('[mp-client] KDSendInput', type, '-> ROUTE', (data && data.id != null) ? ('id=' + data.id) : ''); } catch (e) { /* ignore */ }
 						}
-						// KD-101: the Bondage cast OPENS the game's real "tie" submenu (a local UI), unlike
-						// other turn-consuming casts. Run it LOCALLY so the submenu appears on the attacker's
-						// screen; the submenu's own apply (addNPCRestraint) is routed separately (below).
+						/*
+						 * ⚠️ KNOWN COUPLING — the ONE input still run locally (KD-101, owned by KDM-164).
+						 *
+						 * The Bondage cast opens KD's real "tie" SUBMENU, which is a purely client-side UI
+						 * construct: measured (KDM-162 probes/probe10) the headless world returns "Fail"
+						 * for this cast and touches no submenu state whatsoever — only text-message
+						 * globals. So there is nothing for the server to send back and nothing the state
+						 * bundle can carry; it is the same client-owned category as the paper doll, the
+						 * camera and the vision radius.
+						 *
+						 * Routing it therefore loses the submenu ("tie submenu should be open" in
+						 * tests/e2e/mp-pvp-tie.spec.ts). The submenu's own apply (`addNPCRestraint`) is
+						 * routed normally, so the authoritative tie still happens server-side.
+						 *
+						 * This is recorded as a known coupling rather than kept quietly, per KDM-163. Its
+						 * cause is the synthetic PvP/bondage model, which KDM-164 removes; delete this
+						 * branch when that lands.
+						 */
 						if (type === 'tryCastSpell' && data && data.spellname === 'Bondage') {
 							return _origSend.apply(this, arguments);
 						}
-						if (ROUTED_INPUTS[type]) {
-							KDRenderClient.sendInput({ kdType: type, data: sanitizeInputData(data) });
-							return '';
-						}
-						// unknown (non-UI) type → swallow: never simulate locally (no divergence)
-						if (!LOCAL_UI_INPUTS[type]) return '';
-						// LOCAL_UI types fall through to run locally (menus stay responsive, R6)
+						// KDM-163 AC1 — DEFAULT = ROUTE. This client classifies nothing and swallows
+						// nothing; the server asks the GAME what each input is. See the block comment at
+						// the top of this file for the two reds this was reverted on and why neither
+						// was this change.
+						KDRenderClient.sendInput({ kdType: type, data: sanitizeInputData(data) });
+						return '';
 					}
 					return _origSend.apply(this, arguments);
 				};
 				KDSendInput.__kdClientGuard = true;
 			}
 			return clientMode;
+		},
+
+		/**
+		 * KDM-163 AC3: every input type this client could not handle, with whether the GAME's own
+		 * registry knows it. Empty is the healthy state; a non-empty list is a to-do, not a mystery.
+		 */
+		unhandledInputs: function () {
+			return _unhandled.slice();
 		},
 
 		/** True once disableLocalSim() has marked this browser render-only (KD-085). */

@@ -31,6 +31,8 @@
 	var coop = window.__coop = {
 		id: id, connected: false, started: false, submitted: false,
 		lastTick: null, peers: [], status: 'init', route: null,
+		// KDM-163: route-ness of each in-flight send, in order (see submit()).
+		_sentRoute: [],
 		// Test hooks (deterministic). Real play uses KD's default controls → the routed
 		// KDSendInput wrapper → submit(). These build the same {kdType,data} actions.
 		sendMove: function (dx, dy) {
@@ -214,9 +216,26 @@
 		ws.onmessage = function (e) {
 			var m; try { m = JSON.parse(e.data); } catch (_) { return; }
 			if (m.type === 'joined') { coop.peers = m.players || []; }
+			else if (m.type === 'state' && m.kind === 'ui') {
+				// KDM-163: a UI input of OURS was applied — no turn resolved. Adopt the fresh state so
+				// the menu responds (R6), and touch NOTHING that is per-turn. Treating this as a turn
+				// is what used to kill click-to-move: with every input routed, KD's draw loop sends
+				// `setMoveDirection` each frame, so this branch runs ~60×/s.
+				coop.started = true;
+				coop._sentRoute.shift();          // this reply consumed one send: it was a UI input
+				window.KDRenderClient.apply(m.snapshot);
+				pinGameScreen();
+			}
 			else if (m.type === 'state') {
 				coop.started = true;
 				coop.submitted = false;
+				// A turn resolved. If OUR action in it was a MANUAL one (not a route step), it cancels
+				// any in-progress route — the player changed their mind. Deciding this here rather than
+				// at send time is the point: at send time the client cannot know whether an input
+				// consumes a turn at all, and per-frame UI chatter would cancel every route.
+				// An empty queue means this turn was resolved by the PEER while we sent nothing.
+				if (coop._sentRoute.length && coop._sentRoute.shift() === false) coop.route = null;
+				coop._sentRoute.length = 0;       // per-turn: nothing sent before now is still pending
 				coop.lastTick = m.tick;
 				if (window.__KDMP_DEBUG && m.serverLog && m.serverLog.length) {
 					// KD-098: echo the server's per-turn diagnostics into THIS browser console
@@ -236,6 +255,11 @@
 				if (coop.route) stepRoute();   // advance a click-to-move route by one tile this turn
 				setStatus('Co-op ' + id + '  turn ' + m.tick + '\n[arrows/WASD] move · [space] wait');
 			} else if (m.type === 'waiting') {
+				// KDM-163: the server has confirmed our input entered LOCKSTEP — that, and not the act
+				// of sending, is what means "I have acted this turn".
+				coop.submitted = true;
+				// a MANUAL action (not a route step) cancels an in-progress route
+				if (coop._sentRoute.length && coop._sentRoute.shift() === false) coop.route = null;
 				setStatus('Co-op ' + id + ': submitted, waiting for ' + (m.waitingOn || []).join(', ') + '…');
 			} else if (m.type === 'await') {
 				// a peer has acted and is waiting on US — act so the turn can resolve.
@@ -263,8 +287,17 @@
 			}
 			return;
 		}
-		if (!fromRoute) coop.route = null;   // a manual action cancels an in-progress route
-		coop.submitted = true;
+		// KDM-163: do NOT decide "I have acted" or "cancel the route" here. Once the client routes every
+		// input it cannot tell a turn-consuming action from KD's per-frame `setMoveDirection`, and
+		// guessing at send time cancelled every route within one frame.
+		//
+		// Instead queue this send's route-ness. The bridge replies to each input EXACTLY once and in
+		// order — `kind:'ui'` for one applied immediately, `waiting` or a turn-resolving `state` for one
+		// that entered lockstep — so shifting the queue on each reply tells us the route-ness of the
+		// input the server actually acted on. A single slot was not enough: one frame of mouse chatter
+		// after a route step would overwrite it and cancel the route when the turn resolved.
+		coop._sentRoute.push(!!fromRoute);
+		while (coop._sentRoute.length > 64) coop._sentRoute.shift();   // bounded; a stall must not grow it
 		if (window.__KDMP_DEBUG) { try { console.log('[coop ' + id + '] submit ->', JSON.stringify(action)); } catch (e) { /* ignore */ } }
 		ws.send(JSON.stringify({ type: 'input', action: action }));
 	}

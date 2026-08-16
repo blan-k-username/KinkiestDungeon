@@ -48,11 +48,13 @@ test('a tie applied after already acting this turn still lands (manual re-submit
 		const peer = await peerOfB();
 
 		// B acts FIRST (uses up the turn under the old gate), THEN applies the tie — must still work
-		const acted = await B.evaluate(() => {
-			(window as any).__coop.sendAction({ kind: 'wait' });
-			return (window as any).__coop.submitted === true;
-		});
-		expect(acted, 'B should be in the submitted/waiting state before tying').toBe(true);
+		await B.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
+		// KDM-163: `submitted` is no longer set optimistically at send time — the client cannot tell a
+		// turn-consuming input from KD's per-frame UI chatter, so it waits for the server to confirm the
+		// input entered lockstep. Same precondition, one round-trip later; the behaviour under test
+		// (a manual re-submit still overrides an already-queued action) is unchanged.
+		await B.waitForFunction(() => (window as any).__coop.submitted === true, undefined, { timeout: 30_000 })
+			.catch(() => { throw new Error('B should be in the submitted/waiting state before tying'); });
 
 		await B.evaluate((p) => {
 			// @ts-ignore — open the tie submenu (quick-bind pre-selected the rope) and apply

@@ -174,43 +174,35 @@ const GLOBAL_BLACKLIST = Object.freeze([
  * A consequence worth relying on: a `__kdT` tag can only ever appear at the top level of a captured
  * value, so restore can test for it in O(1) instead of walking every global.
  */
-const KD_CODEC = `
-function kdEnc(v, d){
-	d = d || 0;
-	if (d > 12) return null;                                  // cyclic guard — no player state is this deep
-	if (v instanceof Map) { var a = []; v.forEach(function(val, k){ a.push([kdEnc(k, d+1), kdEnc(val, d+1)]); }); return { __kdT: 'Map', e: a }; }
-	if (v instanceof Set) { var b = []; v.forEach(function(val){ b.push(kdEnc(val, d+1)); }); return { __kdT: 'Set', e: b }; }
-	if (Array.isArray(v)) { var c = new Array(v.length); for (var i = 0; i < v.length; i++) c[i] = kdEnc(v[i], d+1); return c; }
-	if (v && typeof v === 'object') {
-		if (typeof v.toJSON === 'function') return v.toJSON();
-		// A CLASS INSTANCE cannot be carried. JSON would happily flatten it into a plain bag, and the
-		// decoder would hand that bag back to code expecting the real thing — MEASURED: kdSoundCache is
-		// a Map of live Audio objects, and flattening it produced "audio.pause is not a function" in
-		// four specs. Refusing outright means kdSer returns undefined and the global is dropped from the
-		// watch set, exactly as the PIXI/canvas globals already are: not carried beats carried wrong.
-		var p = Object.getPrototypeOf(v);
-		if (p !== null && p !== Object.prototype) throw new Error('kd-nonplain');
-		var o = {}; for (var k in v) if (Object.prototype.hasOwnProperty.call(v, k)) o[k] = kdEnc(v[k], d+1);
+// KDM-162: the codec moved to its own module — the BROWSER thin client needs the same decoder to
+// adopt a state bundle, and two hand-kept copies in two runtimes is the drift this epic deletes.
+const { KD_CODEC } = require('./kd-codec');
+
+/**
+ * KD-088 entity re-resolution + the dispatch call, shared by applyInput and applyInputObserved
+ * (KDM-163). The thin client cannot ship live entity object refs, so it sends {__kdEnt:id} (or
+ * {__kdEnt:'player'}); these are replaced with THIS world's authoritative entities before dispatch.
+ *
+ * One copy on purpose: the probed and unprobed paths must dispatch IDENTICALLY, or the classification
+ * the probe reports would not describe what the real apply does.
+ */
+const KD_ENT_RESOLVE = `
+	function resolve(o){
+		if (!o || typeof o !== 'object') return o;
+		if (o.__kdEnt !== undefined) {
+			return (o.__kdEnt === 'player') ? KinkyDungeonPlayerEntity
+				: (typeof KinkyDungeonFindID === 'function' ? KinkyDungeonFindID(o.__kdEnt) : undefined);
+		}
+		if (Array.isArray(o)) { for (var i=0;i<o.length;i++) o[i] = resolve(o[i]); return o; }
+		for (var k in o) if (Object.prototype.hasOwnProperty.call(o,k)) o[k] = resolve(o[k]);
 		return o;
 	}
-	return v;
-}
-// Non-mutating on purpose: the input belongs to the player's bundle, which must stay plain JSON and
-// reusable for the next restore. Building fresh values also makes them native to THIS realm, so
-// \`x instanceof Map\` inside the bundle's own code is true.
-function kdDec(v){
-	if (Array.isArray(v)) { var c = new Array(v.length); for (var i = 0; i < v.length; i++) c[i] = kdDec(v[i]); return c; }
-	if (v && typeof v === 'object') {
-		if (v.__kdT === 'Map') { var m = new Map(); for (var i = 0; i < v.e.length; i++) m.set(kdDec(v.e[i][0]), kdDec(v.e[i][1])); return m; }
-		if (v.__kdT === 'Set') { var s = new Set(); for (var i = 0; i < v.e.length; i++) s.add(kdDec(v.e[i])); return s; }
-		var o = {}; for (var k in v) if (Object.prototype.hasOwnProperty.call(v, k)) o[k] = kdDec(v[k]);
-		return o;
+	function __kdDispatch(type){
+		var d = resolve(globalThis.__KD_INDATA);
+		if (typeof KDSendInput === 'function') return KDSendInput(type, d);
+		if (typeof KDProcessInput === 'function') return KDProcessInput(type, d);
+		return null;
 	}
-	return v;
-}
-// Throws 'kd-nonplain' for a Map/Set holding live objects; every caller already treats a throw as
-// "not player state, skip this global", which is the correct outcome.
-function kdSer(v){ return (v instanceof Map || v instanceof Set) ? JSON.stringify(kdEnc(v)) : JSON.stringify(v); }
 `;
 
 /** Sandbox/host bindings that must never be captured or reassigned. */
@@ -994,28 +986,12 @@ class HeadlessHost {
 					camY: (typeof KinkyDungeonCamY !== 'undefined') ? KinkyDungeonCamY : 0,
 				},
 				player: P ? entSnap(P) : null,
-				stats: {
-					will: KinkyDungeonStatWill, willMax: KinkyDungeonStatWillMax,
-					stamina: KinkyDungeonStatStamina, staminaMax: KinkyDungeonStatStaminaMax,
-					mana: KinkyDungeonStatMana, manaMax: KinkyDungeonStatManaMax,
-					manaPool: (typeof KinkyDungeonStatManaPool !== 'undefined') ? KinkyDungeonStatManaPool : 0,
-					distraction: KinkyDungeonStatDistraction, distractionMax: KinkyDungeonStatDistractionMax,
-					distractionLower: (typeof KinkyDungeonStatDistractionLower !== 'undefined') ? KinkyDungeonStatDistractionLower : 0,
-					// Movement-cost state. The client DRAWS the "xN" move reticule itself
-					// (KinkyDungeonDraw.ts:1581) from KDGameData.MovePoints and the tile cost derived
-					// from KinkyDungeonSlowLevel. Anything the client renders has to be in this
-					// contract; while these were missing it drew its own untouched defaults and
-					// always said x1 — contradicting the "You are slowed!" line beside it.
-					// Recomputed, not read ambient: KinkyDungeonSlowLevel is a world global holding
-					// whoever was last in the player slot, and this snapshot must describe THIS player.
-					slowLevel: (function(){
-						if (typeof KinkyDungeonCalculateSlowLevel === 'function') KinkyDungeonCalculateSlowLevel(0);
-						return (typeof KinkyDungeonSlowLevel !== 'undefined') ? KinkyDungeonSlowLevel : 0;
-					})(),
-					movePoints: (typeof KDGameData !== 'undefined' && KDGameData) ? KDGameData.MovePoints : null,
-					slowMoveTurns: (typeof KDGameData !== 'undefined' && KDGameData) ? KDGameData.SlowMoveTurns : null,
-					sprintTurns: (typeof KDGameData !== 'undefined' && KDGameData) ? KDGameData.SprintTurns : null,
-				},
+				// KDM-162: the curated stats block is GONE. It named ~12 HUD fields by hand, in TWO
+				// languages (here and client/render-client.js), and shipped slowLevel — a value it
+				// RECOMPUTED and then sent, i.e. derived state crossing the network, which is exactly
+				// what goes stale. Every one of those fields is per-player state the generic bundle
+				// already carries (snapshotFor attaches it), so adding a HUD value upstream now needs
+				// no change here at all. Measured: KDM-162 probe6 + tests/e2e/mp-render-completeness.
 				// Full authoritative KDMapData (JSON-clones cleanly headless, ~10KB). The
 				// client adopts it WHOLESALE — a field-subset splice leaves a half-local/
 				// half-server map that renders broken. Entities carry their full Enemy
@@ -1045,6 +1021,10 @@ class HeadlessHost {
 	 * summary for assertions.
 	 */
 	applyRenderState(snap) {
+		// KDM-162: per-player state arrives as the generic bundle, adopted through the SAME path the
+		// swap model uses. This is what removed the curated `stats` block from both apply sites: there
+		// is no longer a per-field contract here to keep in step with the serializer.
+		if (snap && snap.bundle) this.restorePlayer(snap.bundle);
 		this._context.__KD_RENDER_IN = snap;
 		return this.eval(`(function(){
 			var s = globalThis.__KD_RENDER_IN;
@@ -1056,13 +1036,8 @@ class HeadlessHost {
 			if (typeof KinkyDungeonGridHeightDisplay !== 'undefined') KinkyDungeonGridHeightDisplay = s.camera.gridHeightDisplay;
 			if (typeof KinkyDungeonCamX !== 'undefined') KinkyDungeonCamX = s.camera.camX;
 			if (typeof KinkyDungeonCamY !== 'undefined') KinkyDungeonCamY = s.camera.camY;
-			// HUD stats
-			KinkyDungeonStatWill = s.stats.will; KinkyDungeonStatWillMax = s.stats.willMax;
-			KinkyDungeonStatStamina = s.stats.stamina; KinkyDungeonStatStaminaMax = s.stats.staminaMax;
-			KinkyDungeonStatMana = s.stats.mana; KinkyDungeonStatManaMax = s.stats.manaMax;
-			if (typeof KinkyDungeonStatManaPool !== 'undefined') KinkyDungeonStatManaPool = s.stats.manaPool;
-			KinkyDungeonStatDistraction = s.stats.distraction; KinkyDungeonStatDistractionMax = s.stats.distractionMax;
-			if (typeof KinkyDungeonStatDistractionLower !== 'undefined') KinkyDungeonStatDistractionLower = s.stats.distractionLower;
+			// KDM-162: the hand-assigned HUD stats are gone — per-player state arrives in the bundle,
+			// which restorePlayer() has already applied before this eval runs (see below).
 			// adopt the authoritative KDMapData WHOLESALE (internally consistent).
 			if (s.map) KDMapData = s.map;
 			if (typeof KDUpdateEnemyCache !== 'undefined') KDUpdateEnemyCache = true;
@@ -1519,23 +1494,48 @@ class HeadlessHost {
 	applyInput(type, data) {
 		this._context.__KD_INDATA = (data === undefined) ? {} : data;
 		return this.eval(`(function(){
-			// Re-resolve client entity placeholders (KD-088): the thin client can't ship
-			// live entity object refs, so it sends {__kdEnt:id} (or {__kdEnt:'player'}).
-			// Replace them with THIS world's authoritative entities before dispatch.
-			function resolve(o){
-				if (!o || typeof o !== 'object') return o;
-				if (o.__kdEnt !== undefined) {
-					return (o.__kdEnt === 'player') ? KinkyDungeonPlayerEntity
-						: (typeof KinkyDungeonFindID === 'function' ? KinkyDungeonFindID(o.__kdEnt) : undefined);
-				}
-				if (Array.isArray(o)) { for (var i=0;i<o.length;i++) o[i] = resolve(o[i]); return o; }
-				for (var k in o) if (Object.prototype.hasOwnProperty.call(o,k)) o[k] = resolve(o[k]);
-				return o;
-			}
-			var d = resolve(globalThis.__KD_INDATA);
-			if (typeof KDSendInput === 'function') return KDSendInput(${JSON.stringify(type)}, d);
-			if (typeof KDProcessInput === 'function') return KDProcessInput(${JSON.stringify(type)}, d);
-			return null;
+			${KD_ENT_RESOLVE}
+			return __kdDispatch(${JSON.stringify(type)});
+		})()`);
+	}
+
+	/**
+	 * KDM-163 (option A): run an input for real and REPORT whether it advanced the shared turn.
+	 *
+	 * This is what lets the server route every input without a whitelist — the game itself says
+	 * whether an input is turn-consuming, by calling KinkyDungeonAdvanceTime. The caller caches that
+	 * per type (SwapSession), so a mod's input needs no list anywhere.
+	 *
+	 * ⚠️ It OBSERVES; it must never BLOCK. A blocking "probe, then roll back if it turned out to be
+	 * turn-consuming" version was implemented and REJECTED by measurement:
+	 *   - probes/probe9 tested move/tick/crouch/setMoveDirection/toggleSpell/inventoryAction/select and
+	 *     found a player-bundle rollback sufficient — but every one of those is player-local;
+	 *   - probes/probe11 then tested `doattack`, which damages ANOTHER ENTITY before reaching
+	 *     AdvanceTime: the probe took the Rat from hp 1 to -0.575 and the player-only rollback did NOT
+	 *     undo it, so the lockstep replay would have applied the attack a SECOND time.
+	 * Undoing that properly needs a whole-world rollback (KDMapData + live Enemy defs), which is both
+	 * expensive and exactly the kind of thing that breaks the per-turn pass. Observing costs nothing
+	 * and is exactly-once by construction.
+	 *
+	 * `unknownType` reports that the game's own registry has no handler at all, which is how an input
+	 * stops being silently dropped (AC3) without anyone maintaining a list of valid types.
+	 */
+	applyInputObserved(type, data) {
+		this._context.__KD_INDATA = (data === undefined) ? {} : data;
+		return this.eval(`(function(){
+			${KD_ENT_RESOLVE}
+			var known = (typeof KDInputTypes !== 'undefined' && KDInputTypes) ? !!KDInputTypes[${JSON.stringify(type)}] : false;
+			var advanced = 0, res = null, err = null;
+			var orig = KinkyDungeonAdvanceTime;
+			// OBSERVE, never block. Blocking was tried and rejected — see the doc comment above.
+			KinkyDungeonAdvanceTime = function(delta){
+				if ((delta|0) > 0) advanced += 1;
+				return orig.apply(this, arguments);
+			};
+			try { res = __kdDispatch(${JSON.stringify(type)}); }
+			catch (e) { err = String((e && e.message) || e); }
+			finally { KinkyDungeonAdvanceTime = orig; }
+			return { advanced: advanced, result: (typeof res === 'string') ? res : null, error: err, unknownType: !known };
 		})()`);
 	}
 

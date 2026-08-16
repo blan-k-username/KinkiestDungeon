@@ -68,9 +68,9 @@ describe('PvP real tie — avatar restraint reconciles to the victim (KD-101)', 
 	}, BOOT_TIMEOUT);
 
 	it("a SUBDUED (low-Will) peer's avatar IS disabled, so the real bind gate allows tying", () => {
-		const willMax = s.snapshotFor('B').stats.willMax;
-		for (let i = 0; i < 12 && s.snapshotFor('B').stats.will > 0.5 * willMax; i++) bumpB(s);
-		expect(s.snapshotFor('B').stats.will).toBeLessThanOrEqual(0.5 * willMax);
+		const willMax = s.vitalsFor('B').willMax;
+		for (let i = 0; i < 12 && s.vitalsFor('B').will > 0.5 * willMax; i++) bumpB(s);
+		expect(s.vitalsFor('B').will).toBeLessThanOrEqual(0.5 * willMax);
 		s.world.restorePlayer(s.bundles.get('A'));
 		s._armPeerEnemies('A');
 		expect(avatarDisabled(s, 'B')).toBe(true);

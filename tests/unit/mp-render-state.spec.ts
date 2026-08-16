@@ -34,6 +34,11 @@ describe('render-state snapshot (KD-067)', () => {
 		A.summonEnemy(t.x + 2, t.y, 'Rat', { rad: 4 });
 		A.step(3);
 		snap = A.serializeRenderState();
+		// KDM-162: per-player state travels as the generic bundle, not as a curated `stats` block.
+		// `serializeRenderState` carries the shared world; the bundle is attached by whoever knows
+		// WHICH player the snapshot is for (SwapSession.snapshotFor does it from its stored bundles,
+		// so it costs nothing there). This spec drives the raw host, so it attaches one explicitly.
+		snap.bundle = A.capturePlayer();
 
 		// B: a DIFFERENT fresh game (other seed) → adopting A's render state must
 		// overwrite B's own map/stats/entities. This is the client-adopt path.
@@ -79,11 +84,20 @@ describe('render-state snapshot (KD-067)', () => {
 		expect(bp.y).toBe(ap.y);
 	});
 
-	it('round-trips the HUD stats', () => {
-		expect(B.eval('KinkyDungeonStatWill')).toBe(snap.stats.will);
-		expect(B.eval('KinkyDungeonStatWillMax')).toBe(snap.stats.willMax);
-		expect(B.eval('KinkyDungeonStatStamina')).toBe(snap.stats.stamina);
-		expect(B.eval('KinkyDungeonStatDistraction')).toBe(snap.stats.distraction);
+	/**
+	 * KDM-162: this used to assert a curated `stats` block field-by-field — the wire contract that had
+	 * to be hand-maintained in four places. It now asserts the property that REPLACED it: adopting the
+	 * snapshot's bundle reproduces the source player's state on a different instance. Same guarantee,
+	 * no field list, so a HUD value added upstream is covered without touching this spec.
+	 */
+	it('round-trips the player state via the generic bundle (no curated stats block)', () => {
+		expect(snap.stats, 'the curated stats block must be gone from the wire').toBeUndefined();
+		const a = A.getVitals();
+		const b = B.getVitals();
+		expect(b.will).toBe(a.will);
+		expect(b.willMax).toBe(a.willMax);
+		expect(b.stamina).toBe(a.stamina);
+		expect(b.distraction).toBe(a.distraction);
 	});
 
 	it('round-trips entities incl. the summoned enemy (full KDMapData adopt)', () => {

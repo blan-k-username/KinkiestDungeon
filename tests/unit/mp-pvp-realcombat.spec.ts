@@ -29,7 +29,7 @@ describe('PvP via the REAL combat pipeline (KD-100)', () => {
 		sess.submit('A', { kdType: 'move', data: { dir, delta: 1, AllowInteract: true } });
 		sess.submit('B', { kind: 'wait' });
 	}
-	const willB = (sess: any) => sess.snapshotFor('B').stats.will;
+	const willB = (sess: any) => sess.vitalsFor('B').will;
 	const aLog = (sess: any) => (sess.logs.get('A') || []).map((m: any) => (m && m.text) || '').join('\n');
 
 	it("a real bump-attack drops the victim's Will via the game's own damage", () => {

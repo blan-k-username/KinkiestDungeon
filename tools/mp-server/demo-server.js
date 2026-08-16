@@ -25,6 +25,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { WSBridge } = require('./ws-bridge');
+const { KD_CODEC } = require('./kd-codec');
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 // Default :8090 (not :8080 — that's the stock `npm run serve` / kdrunner port).
@@ -40,8 +41,21 @@ const MIME = {
 	'.mp3': 'audio/mpeg', '.ogg': 'audio/ogg', '.wav': 'audio/wav', '.txt': 'text/plain; charset=utf-8',
 };
 
+/**
+ * KDM-162: the state codec, served to the browser from the SAME source text the headless host evals
+ * into the bundle's vm scope (`kd-codec.js`). The thin client needs `kdDec` to adopt a per-player
+ * state bundle, and a second hand-kept copy in the browser is precisely the drift this epic deletes.
+ *
+ * Synthetic route — there is no such file on disk, and there must not be: a real file under `client/`
+ * would be a copy that can go stale against the host's.
+ */
+const CODEC_ROUTE = '/mp/kd-codec.js';
+const CODEC_BODY = `${KD_CODEC}\n;(typeof window !== 'undefined' ? window : globalThis).KDCodec = ` +
+	`{ kdEnc: kdEnc, kdDec: kdDec, kdSer: kdSer };\n`;
+
 // Scripts injected just before </body> in index.html (in order).
 const INJECT = [
+	CODEC_ROUTE,                    // must precede render-client.js — it consumes window.KDCodec
 	'/tools/mp-server/client/render-client.js',
 	'/tools/mp-server/client/coop-bootstrap.js',
 ];
@@ -119,6 +133,11 @@ function safeJoin(root, urlPath) {
 function serveStatic(req, res) {
 	let urlPath = req.url.split('?')[0].split('#')[0];
 	if (urlPath === '/' || urlPath === '') urlPath = '/index.html';
+	if (urlPath === CODEC_ROUTE) {                       // KDM-162: generated, not on disk
+		res.writeHead(200, { 'Content-Type': MIME['.js'], 'Cache-Control': 'no-cache' });
+		res.end(CODEC_BODY);
+		return;
+	}
 	const filePath = safeJoin(REPO_ROOT, urlPath);
 	if (!filePath) { res.writeHead(400); res.end('bad path'); return; }
 
