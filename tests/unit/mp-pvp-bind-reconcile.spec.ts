@@ -67,12 +67,24 @@ describe('PvP real tie — avatar restraint reconciles to the victim (KD-101)', 
 		expect(avatarDisabled(s, 'B')).toBe(false);
 	}, BOOT_TIMEOUT);
 
-	it("a SUBDUED (low-Will) peer's avatar IS disabled, so the real bind gate allows tying", () => {
-		const willMax = s.vitalsFor('B').willMax;
-		for (let i = 0; i < 12 && s.vitalsFor('B').will > 0.5 * willMax; i++) bumpB(s);
-		expect(s.vitalsFor('B').will).toBeLessThanOrEqual(0.5 * willMax);
+	/**
+	 * KDM-164: this used to assert that a peer at HALF Will is already bindable — an MP-only rule we
+	 * invented (`will <= 0.5 * willMax`). The owner's directive is narrower and is the whole feature:
+	 * *default behaviour unchanged, PLUS a 0-WP peer may be tied.* So the line is KD's own floor.
+	 *
+	 * Both halves are asserted, because "bindable at zero" is only meaningful if it is NOT bindable
+	 * before that — otherwise the rule has quietly become "always bindable".
+	 */
+	it('a peer is bindable at KD\'s own floor (0 Will) — and not while still standing', () => {
 		s.world.restorePlayer(s.bundles.get('A'));
 		s._armPeerEnemies('A');
-		expect(avatarDisabled(s, 'B')).toBe(true);
+		expect(avatarDisabled(s, 'B'), 'a peer who is still up must not be bindable').toBe(false);
+
+		for (let i = 0; i < 40 && s.vitalsFor('B').will > 0; i++) bumpB(s);
+		expect(s.vitalsFor('B').will, 'wear the peer down to the floor').toBeLessThanOrEqual(0);
+
+		s.world.restorePlayer(s.bundles.get('A'));
+		s._armPeerEnemies('A');
+		expect(avatarDisabled(s, 'B'), 'at 0 WP the real bind gate must allow the tie').toBe(true);
 	}, BOOT_TIMEOUT);
 });

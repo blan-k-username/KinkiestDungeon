@@ -85,6 +85,8 @@ test('PvP via the real context menu: sneak then repeated attacks keep landing', 
 		await bootCoopPair(A, B, port);
 
 		let prevWill = await willOfB();
+		const willAtStart = prevWill;
+		let landedTurns = 0;
 		const trace: any[] = [];
 		let attackTurns = 0;
 
@@ -105,15 +107,24 @@ test('PvP via the real context menu: sneak then repeated attacks keep landing', 
 			// lands on the FOLLOW-UP Attack (doattack), boosted by `vulnerable`. So Will only drops
 			// on Attack/Tease/Capture turns, not the sneak-transition turn. (The synthetic KD-098/099
 			// path dealt sneak damage directly; KD-100 moved PvP to the real pipeline — KD-102.)
+			// KDM-164: this used to require EVERY non-Aggro turn to reduce Will. That was the synthetic
+			// combat model's guarantee — it converted any avatar hp delta into Will, so an attack could
+			// never come up empty. PvP now runs KD's real pipeline, where an attack can miss or roll
+			// zero: measured 1 zero-damage turn in 8 bump-attacks, with damage varying (1.5 … 1.0).
+			// Asserting every swing lands is asserting the deleted model, and made this spec flaky.
 			if (r.key !== 'Aggro') {
 				attackTurns++;
-				expect(will, `turn ${t}: B Will did not drop (was ${prevWill}, now ${will}) after menu sent '${r.key}'. trace=${JSON.stringify(trace)}`).toBeLessThan(prevWill);
+				if (will < prevWill) landedTurns++;
 			}
 			prevWill = will;
 		}
-		// the whole point ("repeated attacks keep landing"): the menu must transition past the sneak
-		// to real attacks that each land — otherwise the peer is stuck un-attackable.
+		// The point of the spec ("repeated attacks keep landing") survives intact, stated so a real
+		// miss cannot fail it while a broken pipeline still does: the menu must reach real attacks,
+		// they must do NET damage, and misses must be the exception rather than the rule.
 		expect(attackTurns, `menu never transitioned from sneak to landing attacks. trace=${JSON.stringify(trace)}`).toBeGreaterThan(0);
+		expect(prevWill, `repeated attacks did no net damage. trace=${JSON.stringify(trace)}`).toBeLessThan(willAtStart);
+		expect(landedTurns * 2, `most attack turns must land (${landedTurns}/${attackTurns}). ` +
+			`trace=${JSON.stringify(trace)}`).toBeGreaterThan(attackTurns);
 	} finally {
 		await ctxA.close();
 		await ctxB.close();

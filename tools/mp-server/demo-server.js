@@ -191,7 +191,15 @@ function start(port = PORT) {
 	// from the inventory is a delayed action that cannot complete in co-op (see SwapSession), so this
 	// is the way to UAT anything about being bound — e.g. movement speed in heels + ankle shackles.
 	const wearRestraint = process.env.KD_WEAR_RESTRAINT || '';
-	const bridge = new WSBridge({ requiredPlayers: 2, seed: 'coop-demo-seed', idleGraceMs: graceMs, pvp, startRestraint, wearRestraint });
+	// KDM-164: KD_CLASSIC_HEELS=1 turns on the stock ClassicHeels perk, which is what makes
+	// `heelpower` count toward slow (KinkyDungeonCalculateSlowLevel ignores it otherwise). Seeding a
+	// restraint used to switch this on implicitly — the MP layer choosing a perk for the player. Now
+	// you ask for it, or it stays off.
+	const classicHeels = /^(1|true|on)$/i.test(process.env.KD_CLASSIC_HEELS || '');
+	const bridge = new WSBridge({
+		requiredPlayers: 2, seed: 'coop-demo-seed', idleGraceMs: graceMs,
+		pvp, startRestraint, wearRestraint, classicHeels,
+	});
 	const server = http.createServer(serveStatic);
 	bridge.attach(server);
 	return new Promise((resolve) => {

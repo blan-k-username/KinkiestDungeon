@@ -683,6 +683,49 @@ class HeadlessHost {
 		}; })()`);
 	}
 
+	/**
+	 * KDM-164: record every hit the game lands on a peer AVATAR, with the damage info the game itself
+	 * produced — `{damage, type}` — so the victim can take it through KD's own player pipeline instead
+	 * of us converting avatar hp into Will by hand.
+	 *
+	 * Measured (KDM-164 POC): the real chain is
+	 * `KinkyDungeonMove → KDDoAttack → KinkyDungeonAttackEnemy → KinkyDungeonDamageEnemy → KDDamageEnemy`,
+	 * the damageInfo arrives intact WITH its type, and the call is NOT inside `KinkyDungeonEnemyLoop`
+	 * (so this wrap is not re-entrant with KD's enemy iteration).
+	 *
+	 * ⚠️ The tally lives ON THE WRAPPER FUNCTION, not in a global. `restorePlayer` resets globals to
+	 * their post-init baseline on every swap, which would silently empty a global tally and make a live
+	 * wrap look as if it had never fired.
+	 */
+	installPeerDamageRecorder() {
+		return this.eval(`(function(){
+			if (KinkyDungeonDamageEnemy.__kdPeerRec) return { ok: true, already: true };
+			var _dmg = KinkyDungeonDamageEnemy;
+			KinkyDungeonDamageEnemy = function (E, D) {
+				var nm = (E && E.Enemy && E.Enemy.name) || '';
+				if (D && E && E.id != null && nm.indexOf('RemotePlayer') === 0) {
+					var w = KinkyDungeonDamageEnemy;
+					if (!w.__hits) w.__hits = {};
+					if (!w.__hits[E.id]) w.__hits[E.id] = [];
+					w.__hits[E.id].push({ damage: Number(D.damage) || 0, type: D.type || 'pain' });
+				}
+				return _dmg.apply(this, arguments);
+			};
+			KinkyDungeonDamageEnemy.__kdPeerRec = 1;
+			KinkyDungeonDamageEnemy.__hits = {};
+			return { ok: true };
+		})()`);
+	}
+
+	/** KDM-164: take (and clear) the hits recorded against one peer avatar this turn. */
+	takePeerHits(entityId) {
+		return this.eval(`(function(){
+			var w = KinkyDungeonDamageEnemy, k = ${entityId | 0};
+			if (!w || !w.__hits || !w.__hits[k]) return [];
+			var out = w.__hits[k]; delete w.__hits[k]; return out;
+		})()`) || [];
+	}
+
 	/** Deal damage to THIS instance's player (a PvP hit landing on this instance). */
 	dealDamage(amount, type = 'pain') {
 		this.eval(`KinkyDungeonDealDamage({ damage: ${Number(amount) || 0}, type: ${JSON.stringify(type)} })`);

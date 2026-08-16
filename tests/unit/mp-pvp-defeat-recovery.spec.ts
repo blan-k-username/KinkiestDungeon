@@ -71,12 +71,17 @@ describe('defeat recovery (KD-099 "freed")', () => {
 		moveTurn(s, 'A');
 		expect(s.isDefeated('A')).toBe(true);
 
-		// Low Will arms A's avatar as stunned so the game's own KDCanApplyBondage gate passes.
 		expect(s.snapshotFor('B').defeatedPlayers).toContain('A');
-		s.submit('B', { kind: 'pvpBind', target: 'A', restraint: 'DuctTapeFeet' });
-		const r = s.submit('A', { kind: 'wait' });
-		const bind = r.turn.applied.find((e: any) => e.id === 'B').result;
-		expect(bind.applied).toBe(true);
+		// KDM-164: the synthetic `pvpBind` primitive is gone. What makes the tie possible is the
+		// GAME's own gate — being at the floor stuns the avatar, so `KDCanApplyBondage` passes. Assert
+		// that condition directly rather than a deleted primitive's return value.
+		s.world.restorePlayer(s.bundles.get('B'));
+		s._armPeerEnemies('B');
+		const eid = s.avatars.get('A');
+		const disabled = s.world.eval(`(function(){ var e=KDMapData.Entities.find(function(x){return x.id===${eid};});
+			return e ? !!(typeof KinkyDungeonIsDisabled==='function' && KinkyDungeonIsDisabled(e)) : null; })()`);
+		expect(disabled, "a downed peer's avatar is disabled, so the game's own bind gate allows the tie")
+			.toBe(true);
 	}, BOOT_TIMEOUT);
 
 	it('after recovery: Will back up clears the flag and the player can act again', () => {
@@ -102,14 +107,25 @@ describe('defeat recovery (KD-099 "freed")', () => {
 		expect(s.snapshotFor('B').defeatedPlayers).not.toContain('A');
 	}, BOOT_TIMEOUT);
 
-	it('does not flap: a sliver of Will above the floor is still down (still bindable)', () => {
+	/**
+	 * KDM-164: this used to assert HYSTERESIS — that a sliver of Will above the 0.52 line left you
+	 * still down until you climbed back to a fraction of WillMax. Both numbers were ours, not KD's,
+	 * and the epic's constraint is that the MP layer owns no gameplay thresholds.
+	 *
+	 * Down is now exactly KD's own floor: at zero you are down, above zero you are up. The hysteresis
+	 * existed to stop a HUD marker flickering on a point of regen, and it cost a whole invented rule to
+	 * buy that — `down` gates no action (KD has no "Will 0 ⇒ cannot act" rule), so a flicker costs a
+	 * marker and bindability, not agency.
+	 */
+	it('recovery is KD\'s own floor: any Will above zero is up again', () => {
 		setWill(s, 'A', 0);
 		moveTurn(s, 'A');
+		expect(s.isDefeated('A'), 'at the floor the player is down').toBe(true);
 
-		setWill(s, 'A', 0.6);                   // above the 0.52 defeat line, nowhere near recovered
+		setWill(s, 'A', 0.6);
 		moveTurn(s, 'A');
 
-		expect(s.isDefeated('A')).toBe(true);
-		expect(s.snapshotFor('B').defeatedPlayers).toContain('A');
+		expect(s.isDefeated('A'), 'above the floor the player is up — no MP-specific threshold').toBe(false);
+		expect(s.snapshotFor('B').defeatedPlayers).not.toContain('A');
 	}, BOOT_TIMEOUT);
 });

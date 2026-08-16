@@ -49,10 +49,18 @@ function KDParseStartRestraints(spec) {
 	return String(spec || '').split(/[,\s]+/).map((s) => s.trim()).filter(Boolean);
 }
 
-// KD-099: Will at/below which a player goes down; and the fraction of WillMax they must
-// climb back to before they act again (see SwapSession._reviveWill for the hysteresis).
-const DEFEAT_WILL = 0.52;
-const REVIVE_WILL_FRACTION = 0.25;
+/*
+ * KDM-164: the invented `DEFEAT_WILL = 0.52` / `REVIVE_WILL_FRACTION = 0.25` hysteresis is GONE.
+ *
+ * Those were our numbers, not KD's. "Down" is now KD's own floor — Will at zero — and a player is up
+ * again the moment Will is above it. That is the owner's directive in full: default behaviour
+ * unchanged, PLUS a 0-WP peer may be tied. Nothing else about defeat is an MP rule.
+ *
+ * The old hysteresis existed to stop a player flickering between down and up on a point of regen. It
+ * is not needed at the floor: `down` no longer gates anything the player does (KD has no "Will 0 ⇒
+ * cannot act" rule — KinkyDungeonMove has no Will check, KDPlayerCanMove is terrain-only), so a flicker
+ * costs a HUD marker and bindability, not agency.
+ */
 
 class SwapSession {
 	/** @param {object} opts { requiredPlayers=2, seed, enemyType='Rat' } */
@@ -63,7 +71,9 @@ class SwapSession {
 		this.maxLog = opts.maxLog || 100;
 		this.pvp = !!opts.pvp;        // global PvP toggle (KD-092) — OFF by default (co-op)
 		this.pvpPairs = new Set();    // per-pair PvP relationships (KD-094) — "A|B" sorted keys
-		this.friendlyFire = !!opts.friendlyFire; // incidental AOE hits partners (KD-096) — OFF by default
+		// KDM-164: the `friendlyFire` toggle is gone with the approximation it gated. Under the real
+		// path the GAME decides who its AOE hits — walls, line of sight and the actual bullet — and a
+		// server-side switch could only re-impose our own answer over the game's.
 		this.mods = Array.isArray(opts.mods) ? opts.mods.slice() : []; // server-side mod code (KD-074)
 		this.startRestraint = opts.startRestraint || ''; // KD-101 UAT: give every player this CARRYABLE loose item at start (e.g. "HingedCuffs")
 		// UAT: put items straight ON the player at start (KD_WEAR_RESTRAINT). Self-equip from the
@@ -72,6 +82,9 @@ class SwapSession {
 		// drive lockstep turns — so it never commits in co-op. Wearing at start sidesteps that
 		// entirely, which is what you want when testing movement speed while bound.
 		this.wearRestraint = opts.wearRestraint || '';
+		// KDM-164 UAT: enable the stock ClassicHeels perk. OPT-IN — the MP layer does not choose a
+		// player's perks; it used to be switched on implicitly whenever a restraint was seeded.
+		this.classicHeels = !!opts.classicHeels;
 		this.world = new HeadlessHost({ id: 'world' });
 		this.bundles = new Map();     // id -> player-state bundle
 		this.avatars = new Map();     // id -> world avatar entity id
@@ -81,7 +94,9 @@ class SwapSession {
 		this.vitalsOf = new Map();    // id -> {will,willMax,...} last-known vitals (KD-098 HP bar)
 		this.defeated = new Set();    // ids whose Will hit 0 — incapacitated (KD-099)
 		this.tiedOf = new Map();      // id -> Set of restraint NAMES already reconciled onto this peer (KD-101)
-		this._armHp = 100;            // per-turn damage-gauge full hp for peer avatars (KD-100)
+		// KDM-164: the `_armHp = 100` damage gauge is gone. A peer avatar's hp no longer measures
+		// anything — the game's own damageInfo is recorded per hit and replayed through the victim's
+		// real player pipeline (see installPeerDamageRecorder / _reconcilePeers).
 		this._joined = [];
 		this._pending = new Map();    // id -> { kdType, data }
 		this.unknownInputs = new Map(); // KDM-163 AC3: input type -> count the world had no handler for
@@ -134,6 +149,10 @@ class SwapSession {
 		// bundles — no per-instance engine, so "all instances agree" is automatic). Same eval
 		// path as the browser loader (KDMods.ts) — mods push to KD globals / reassign functions.
 		for (const code of this.mods) { try { this.world.loadMod(code); } catch (e) { /* keep going */ } }
+		// KDM-164: record the damage the GAME produces for each peer-avatar hit, so `_reconcilePeers`
+		// can hand it to the victim's own `KinkyDungeonDealDamage` instead of converting avatar hp into
+		// Will with arithmetic KD does not have.
+		this.world.installPeerDamageRecorder();
 		// KD-101 UAT aid: give the (shared) starting player a CARRYABLE loose-restraint ITEM (Items
 		// inventory) BEFORE capturing each bundle, so the server can apply it; every capturePlayer below
 		// inherits it. The CLIENT shows it via coop-bootstrap (snapshots don't sync the loose inventory).
@@ -142,17 +161,13 @@ class SwapSession {
 				const r = this.world.addLooseRestraint(name);
 				this._dbg(`start-restraint(loose) ${name} -> ${JSON.stringify(r)}`);
 			}
-			// UAT: heels only slow you down when the ClassicHeels toggle is ON — without it
-			// KinkyDungeonCalculateSlowLevel (KinkyDungeonStats.ts:2065) ignores `heelpower`
-			// entirely, so seeded heels would feel like nothing. Stock perk, set at runtime.
-			try {
-				this.world.eval(`(function(){
-					if (typeof KinkyDungeonStatsChoice !== 'undefined' && KinkyDungeonStatsChoice)
-						KinkyDungeonStatsChoice.set("ClassicHeels", true);
-				})()`);
-				this._dbg('start-restraint: ClassicHeels toggle enabled (heelpower counts toward slow)');
-			} catch (e) { this._dbg('start-restraint: could not enable ClassicHeels — ' + e.message); }
 		}
+		// KDM-164: `ClassicHeels` is a PLAYER PERK, and the server was switching it on behind the
+		// player's back as a side effect of seeding a restraint. Convenient for one UAT scenario
+		// (without it `KinkyDungeonCalculateSlowLevel` ignores `heelpower`, so seeded heels feel like
+		// nothing) — but the MP layer does not get to choose a player's perks. It is now an explicit,
+		// opt-in flag and nothing turns it on implicitly.
+		this._setClassicHeels();
 		// Worn-at-start items: applied BEFORE each bundle is captured below, so every player
 		// starts wearing them (and their slow level is already derived from them).
 		for (const name of KDParseStartRestraints(this.wearRestraint)) {
@@ -160,14 +175,12 @@ class SwapSession {
 			this._dbg(`wear-restraint ${name} -> ${JSON.stringify(r)}`);
 		}
 		if (this.wearRestraint) {
+			// Re-derive slow from what is now worn. Not a perk change — just recomputing a DERIVED
+			// value after changing its input, which is the opposite of inventing a rule.
 			try {
-				this.world.eval(`(function(){
-					if (typeof KinkyDungeonStatsChoice !== 'undefined' && KinkyDungeonStatsChoice)
-						KinkyDungeonStatsChoice.set("ClassicHeels", true);
-					if (typeof KinkyDungeonCalculateSlowLevel === 'function') KinkyDungeonCalculateSlowLevel(0);
-				})()`);
-				this._dbg(`wear-restraint: ClassicHeels on, slowLevel now ${JSON.stringify(this.world.playerSlowLevel())}`);
-			} catch (e) { this._dbg('wear-restraint: perk/slow refresh failed — ' + e.message); }
+				this.world.eval('if (typeof KinkyDungeonCalculateSlowLevel === "function") KinkyDungeonCalculateSlowLevel(0);');
+				this._dbg(`wear-restraint: slowLevel now ${JSON.stringify(this.world.playerSlowLevel())}`);
+			} catch (e) { this._dbg('wear-restraint: slow refresh failed — ' + e.message); }
 		}
 		const base = this.world.findOpenTile();
 		let i = 0;
@@ -371,12 +384,11 @@ class SwapSession {
 			const logLen0 = this.world.messageLogLength();
 			const lvl0 = this.world.getLevel();
 			let result = null;
-			if (action && (action.kind === 'pvpAttack' || action.kind === 'pvpBind')) {
-				// Low-level PvP primitive (KD-092/093) — explicit synthetic apply onto the target's
-				// bundle. Retained for the PoC orchestrator + unit tests; NOT the gameplay path. Real
-				// play goes through the REAL pipeline below (KD-100).
-				result = this._applyPvP(id, action);
-			} else if (kdType) {
+			// KDM-164: the synthetic `pvpAttack` / `pvpBind` primitive is GONE. It computed its own
+			// attack and wrote the result onto the target's bundle, bypassing the game entirely — a
+			// second, parallel combat model kept alive "for tests". There is now exactly one path:
+			// the player's real action through KD's own pipeline.
+			if (kdType) {
 				// KD-100: run the player's REAL action. A move/attack/spell INTO a peer's avatar (armed
 				// as a real hostile enemy above) auto-runs KD's real attack pipeline — real damage, real
 				// combat text + floaters, real defeat/capture. No interception. Reconciled after the turn.
@@ -397,9 +409,12 @@ class SwapSession {
 					this.inputKind.set(kdType, seen);
 					this._dbg(`${had ? 'reclassified' : 'learned'} "${kdType}"${had ? ' ' + had + ' ->' : ' ='} ${seen}`);
 				}
-				// KD-096: an AOE cast whose footprint covers a partner splashes them (co-op friendly-fire).
-				const ff = this._applyFriendlyFire(id, kdType, data);
-				if (ff && ff.length) result = { cast: result, friendlyFire: ff };
+				// KDM-164: the hand-rolled friendly-fire splash is GONE. KD's own AOE already reaches
+				// peer avatars — measured: an AOE cast produced a real bullet whose blast damaged a peer
+				// avatar via `KinkyDungeonDamageEnemy`, which the peer-damage recorder captures like any
+				// other hit, so `_reconcilePeers` applies it through that player's real pipeline
+				// (probe: `KDM-164/probes/aoe-real-path.spec.ts` — Will 10 → 6.5, `updateBullets` 16).
+				// Splash is now whatever the GAME does: real bullet travel, real walls, real LoS.
 			}
 			// Capture the delta; if the log was reset this turn (e.g. a floor transition
 			// clears it), take the whole new log as the delta.
@@ -465,16 +480,19 @@ class SwapSession {
 			if (cid === actorId || !this._isPvP(actorId, cid)) continue;
 			// Reset the avatar to FULL hp before the attacker acts — it's a per-turn DAMAGE GAUGE, not
 			// the peer's health. _reconcilePeers reads `ARM_HP - hp` as the real damage dealt and
-			// subtracts THAT from the victim's Will directly (so the pace is the same whether the real
-			// weapon does ~1.5 vs a weak player or ~16 vs a strong one). The avatar never dies.
-			// KD-101: a peer is "subdued" (bindable) once their Will is worn low or they're defeated —
-			// stun the avatar so the game's real KDCanApplyBondage gate (needs the target disabled) lets
-			// the attacker tie them. A healthy peer can't be tied — wear them down first (real rule).
+			// KDM-164: the avatar is a STAND-IN the attacker's real weapon can reach — nothing about the
+			// victim's health is encoded in it, and `_reconcilePeers` no longer reads its hp. It is
+			// simply kept alive (restored to its own def's maxhp, not to a number we invented) so the
+			// peer stays targetable and combat keeps working.
+			// A peer is bindable at KD's own floor — Will zero — which is the owner's directive
+			// ("0 WP allows another co-op player to use the tie action") and nothing more. The stun is
+			// what the game's real KDCanApplyBondage gate needs to see; a peer who is up cannot be tied.
 			const v = this.vitalsOf.get(cid) || {};
-			const willMax = (v.willMax != null && v.willMax > 0) ? v.willMax : 10;
-			const subdued = this.defeated.has(cid) || (v.will != null && v.will <= 0.5 * willMax);
-			this.world.setAvatarEnemy(eid, this._armHp, this._armHp, subdued ? 6 : 0);
-			this._dbg(`arm ${cid} subdued=${subdued} -> stun=${subdued ? 6 : 0} (will=${v.will != null ? v.will.toFixed(1) : '?'}/${willMax})`);
+			const cur = this.world.getEntityCombat(eid);
+			const full = (cur && cur.maxhp != null && cur.maxhp > 0) ? cur.maxhp : 10;
+			const down = this.defeated.has(cid) || this._isDown(v);
+			this.world.setAvatarEnemy(eid, full, full, down ? 6 : 0);
+			this._dbg(`arm ${cid} down=${down} -> stun=${down ? 6 : 0} (will=${v.will != null ? v.will.toFixed(1) : '?'})`);
 			// KD-101: clear the avatar's bondage gauge each turn so reconcile reads only THIS turn's new
 			// ties. The avatar must NOT accumulate restraints — its binding slots would fill up and the
 			// stock submenu apply (KDGetNPCBindingSlotForItem(...).sgroup, no null guard) crashes after a
@@ -496,9 +514,12 @@ class SwapSession {
 			if (eid == null) continue;
 			const ec = this.world.getEntityCombat(eid);
 			const v = this.vitalsOf.get(id) || {};
-			// Avatar is a full-hp damage gauge; ARM_HP - hp = real damage dealt to this peer this turn.
-			// A missing avatar (shouldn't happen now it never dies) counts as full damage.
-			const dmg = (!ec || ec.hp == null) ? this._armHp : Math.max(0, this._armHp - ec.hp);
+			// KDM-164: the damage is whatever the GAME produced for each hit on this avatar — taken
+			// verbatim, WITH its type — not `ARM_HP − hp` converted into Will by us. That conversion was
+			// the invented model: it stitched KD's two damage pipelines (entity vs player) together with
+			// arithmetic the game does not have, threw the damage type away, and bypassed the victim's
+			// own resistances. It is also what caused the KDM-156 potion bug.
+			const hits = this.world.takePeerHits(eid) || [];
 			// KD-101: restraints the attacker tied onto the avatar THIS turn (avatar is cleared each turn,
 			// so this is the per-turn delta). De-dup against what's already on the victim's bundle so a
 			// re-detected name isn't double-applied; mirror new ones via the game's real KinkyDungeonAddRestraint.
@@ -506,14 +527,16 @@ class SwapSession {
 			let tied = this.tiedOf.get(id);
 			if (!tied) { tied = new Set(); this.tiedOf.set(id, tied); }
 			const newRestraints = restraints.filter((rn) => !tied.has(rn));
-			if (dmg > 1e-6 || newRestraints.length) {
+			if (hits.length || newRestraints.length) {
 				this.world.restorePlayer(this.bundles.get(id));   // swap victim in once for both effects
-				if (dmg > 1e-6) {
-					const willMax = (v.willMax != null && v.willMax > 0) ? v.willMax : 10;
-					const oldWill = (v.will != null) ? v.will : willMax;
-					const newWill = Math.max(0, oldWill - dmg);   // apply REAL damage straight to Will
-					this._dbg(`reconcile ${id} dmg=${dmg.toFixed(2)} will ${oldWill.toFixed(2)} -> ${newWill.toFixed(2)}`);
-					this.world.setWill(newWill);
+				for (const h of hits) {
+					// The victim is in the player slot, so this is KD's REAL player-damage pipeline
+					// applying the game's own damage — the victim's resistances, events and message
+					// lines all apply, exactly as when anything else in the game hurts a player.
+					const before = this.world.getVitals().will;
+					this.world.dealDamage(h.damage, h.type);
+					this._dbg(`reconcile ${id} real damage ${h.damage} ${h.type}: will ` +
+						`${before != null ? before.toFixed(2) : '?'} -> ${(this.world.getVitals().will ?? 0).toFixed(2)}`);
 				}
 				for (const rname of newRestraints) {
 					// mirror the tie onto the victim's real player via the game's real KinkyDungeonAddRestraint
@@ -525,16 +548,16 @@ class SwapSession {
 				this.vitalsOf.set(id, this.world.getVitals());
 			}
 			// KDM-156: CONSUME the gauge. It measures damage dealt to this peer THIS TURN
-			// (ARM_HP - hp), so it must be zeroed once charged. _armPeerEnemies resets it only for
-			// peers of an ACTING PvP player — but the avatar also takes hits from WORLD enemies, and
-			// with PvP off it is never armed at all. Left standing, the same hit was re-charged every
-			// single turn: a downed player was pinned at 0 Will and any healing (a Willpower potion)
-			// was wiped by the stale hit on the very turn they drank it.
-			if (eid != null) this.world.setAvatarEnemy(eid, this._armHp, this._armHp, 0);
+			// KDM-164: the gauge is gone, and with it the KDM-156 bug class by construction. Hits are
+			// TAKEN from the recorder (`takePeerHits` clears as it reads), so a hit can only ever be
+			// charged once — there is no standing hp delta left to re-read on a later turn. The avatar
+			// is still restored to full so it never dies and the peer stays targetable; that is a
+			// representation detail now, not a measurement.
+			if (eid != null && ec && ec.maxhp != null) this.world.setAvatarEnemy(eid, ec.maxhp, ec.maxhp, 0);
 			const cur = this.vitalsOf.get(id) || {};
-			if (!this.defeated.has(id) && cur.will != null && cur.will <= DEFEAT_WILL) {
+			if (!this.defeated.has(id) && this._isDown(cur)) {
 				this._markDefeated(id, `will=${cur.will.toFixed(2)}`);
-			} else if (this.defeated.has(id) && cur.will != null && cur.will >= this._reviveWill(cur)) {
+			} else if (this.defeated.has(id) && cur.will != null && !this._isDown(cur)) {
 				// KD-099 "freed": defeat is a state, not a life sentence. Once Will has recovered
 				// well clear of the floor the player acts again. Hysteresis (a fraction of WillMax,
 				// not the defeat line) so a sliver of regen doesn't flap them up and down.
@@ -543,14 +566,24 @@ class SwapSession {
 		}
 	}
 
+	/** KDM-164: "down" is KD's own floor — Will at zero. No MP-specific threshold, no hysteresis. */
+	_isDown(vitals) { return !!vitals && vitals.will != null && vitals.will <= 0; }
+
 	/**
-	 * Will at/below which a player goes down, and the (higher) Will at which they get back up.
-	 * The gap is deliberate hysteresis — recovering exactly to the defeat line would let a
-	 * player flicker between down and up on every point of regen.
+	 * KDM-164: opt-in ONLY (`classicHeels: true` / `KD_CLASSIC_HEELS=1`). This is a stock PLAYER PERK;
+	 * the server used to switch it on implicitly whenever a restraint was seeded, which is the MP layer
+	 * making a gameplay choice on the player's behalf. Off unless asked for.
 	 */
-	_reviveWill(vitals) {
-		const willMax = (vitals && vitals.willMax != null && vitals.willMax > 0) ? vitals.willMax : 10;
-		return Math.max(DEFEAT_WILL * 2, REVIVE_WILL_FRACTION * willMax);
+	_setClassicHeels() {
+		if (!this.classicHeels) return;
+		try {
+			this.world.eval(`(function(){
+				if (typeof KinkyDungeonStatsChoice !== 'undefined' && KinkyDungeonStatsChoice)
+					KinkyDungeonStatsChoice.set("ClassicHeels", true);
+				if (typeof KinkyDungeonCalculateSlowLevel === 'function') KinkyDungeonCalculateSlowLevel(0);
+			})()`);
+			this._dbg('ClassicHeels perk enabled BY REQUEST (heelpower counts toward slow)');
+		} catch (e) { this._dbg('could not enable ClassicHeels — ' + e.message); }
 	}
 
 	/** Clear a player's defeat + broadcast a shared "recovered" message to everyone. KD-099 "freed". */
@@ -585,8 +618,6 @@ class SwapSession {
 		return /^you\b|^your\b|^you'/i.test(t);
 	}
 
-	/** Enable/disable incidental AOE friendly-fire between partners (KD-096). */
-	setFriendlyFire(on) { this.friendlyFire = !!on; return this.friendlyFire; }
 
 	/**
 	 * Load a mod's code server-side (KD-074). Before the session starts it's queued and loaded at
@@ -601,37 +632,6 @@ class SwapSession {
 	/** Look up an enemy def by name in the authoritative world (verify a mod took effect). */
 	getEnemyByName(name) { return this.world.getEnemyByName(name); }
 
-	/**
-	 * If `id` cast an AOE spell whose footprint covers a partner's position, apply splash to that
-	 * partner's bundle (KD-096). The caster is swapped in; we save it, apply to each covered peer
-	 * (swap in / applyEnemyHit / capture), then restore the caster. Returns [{id,before,after}].
-	 * Approximate (Chebyshev radius around the target tile; ignores walls/LoS/the real bullet).
-	 */
-	_applyFriendlyFire(id, kdType, data) {
-		if (!this.friendlyFire || kdType !== 'tryCastSpell') return [];
-		const d = data || {};
-		const info = (d.spellname != null) ? this.world.getSpellInfo(d.spellname) : null;
-		if (!info || !(info.aoe > 0)) return [];
-		const tx = d.tx, ty = d.ty;
-		if (tx == null || ty == null) return [];
-		const ents = this.world.listEntities();
-		const caster = this.world.capturePlayer();
-		const splashed = [];
-		for (const pid of this._joined) {
-			if (pid === id) continue;
-			const av = ents.find((e) => e.id === this.avatars.get(pid));
-			if (!av) continue;
-			if (Math.max(Math.abs(av.x - tx), Math.abs(av.y - ty)) > info.aoe) continue;
-			this.world.restorePlayer(this.bundles.get(pid));
-			const before = this.world.getVitals();
-			this.world.applyEnemyHit({ damage: info.power, type: info.type });
-			const after = this.world.getVitals();
-			this.bundles.set(pid, this.world.capturePlayer());
-			splashed.push({ id: pid, before, after });
-		}
-		this.world.restorePlayer(caster);
-		return splashed;
-	}
 
 	/** Enable/disable PvP between a specific PAIR of players (KD-094, "PvP starts between A and B"). */
 	setPvPPair(a, b, on) {
@@ -646,68 +646,6 @@ class SwapSession {
 		return this.pvpPairs.has([a, b].sort().join('|'));
 	}
 
-	/**
-	 * Low-level synthetic PvP primitive (KD-092/093). Retained for the PoC orchestrator + unit tests
-	 * that drive {kind:'pvpAttack'|'pvpBind'} directly. NOT the gameplay path — real play runs the
-	 * game's REAL combat pipeline (KD-100, see _armPeerEnemies/_reconcilePeers).
-	 * Route attacker `id`'s attack/bind onto target `action.target`. The
-	 * attacker is ALREADY swapped in. Gated by the session PvP toggle and world adjacency. For
-	 * `pvpAttack`: computes the attacker's weapon attack and applies damage via the player path
-	 * (applyEnemyHit → KinkyDungeonDealDamage). For `pvpBind`: applies a restraint via the player
-	 * path (addRestraint → KinkyDungeonAddRestraint). Either way: swap the target in, apply,
-	 * capture the target, then restore the attacker (so the turn loop's capture stays correct).
-	 * The target's restraint-derived locks (slow/blind/tags) self-heal from the captured inventory
-	 * on the target's next turn (KD-073 §B) — see HeadlessHost.playerSlowLevel.
-	 */
-	_applyPvP(id, action) {
-		const targetId = action.target;
-		if (!this._joined.includes(targetId) || targetId === id) {
-			return { applied: false, reason: 'bad-target' };
-		}
-		if (!this._isPvP(id, targetId)) return { applied: false, reason: 'pvp-off' };
-		// adjacency: attacker (swapped in) vs the target's avatar entity
-		const a = this.world.getPlayerPos();
-		const bEnt = this.world.listEntities().find((e) => e.id === this.avatars.get(targetId));
-		if (!bEnt) { this._dbg(`pvp ${id}->${targetId}: REJECT no-target-avatar`); return { applied: false, reason: 'no-target-avatar' }; }
-		const dist = Math.max(Math.abs(a.x - bEnt.x), Math.abs(a.y - bEnt.y));
-		this._dbg(`pvp ${id}->${targetId}: aPos=${a.x},${a.y} bAvatar=${bEnt.x},${bEnt.y} dist=${dist}`);
-		if (dist > 1) return { applied: false, reason: 'out-of-range', dist };
-
-		// compute the attacker's outgoing attack while they are swapped in
-		const atk = this.world.computePlayerAttack();
-		// swap the attacker out, the target in, apply, capture target, swap attacker back in
-		const aBundle = this.world.capturePlayer();
-		this.world.restorePlayer(this.bundles.get(targetId));
-		const before = this.world.getVitals();
-		let restraint = null;
-		if (action.kind === 'pvpBind') {
-			restraint = this.world.addRestraint(action.restraint || atk.bindType || 'DuctTapeFeet');
-		} else {
-			this.world.applyEnemyHit({ damage: atk.damage, type: atk.type });
-		}
-		const after = this.world.getVitals();
-		this.vitalsOf.set(targetId, after);   // KD-098: refresh victim's HP bar immediately on hit
-		// KD-098: emit REAL combat feedback (KinkyDungeonSendTextMessage via host.sendFeedback)
-		// for the VICTIM while they are still swapped in, and route it straight to the victim's
-		// personal log + floating text — the silent KinkyDungeonDealDamage path emits nothing.
-		const dmgN = Math.round((atk.damage || 0) * 10) / 10;
-		const victimText = (action.kind === 'pvpBind')
-			? `Player ${id} restrains you! (${restraint || atk.bindType || 'bondage'})`
-			: `Player ${id} attacks you for ${dmgN} ${atk.type}!`;
-		const vfb = this.world.sendFeedback(victimText, '#ff5555', 10);
-		this._pushLog(targetId, vfb && vfb.entries);
-		this.actionMsgOf.set(targetId, { text: victimText, color: '#ff5555' });
-		this.bundles.set(targetId, this.world.capturePlayer());
-		this.world.restorePlayer(aBundle);
-		// attacker-facing line, generated while the attacker is swapped back in
-		const attackerText = (action.kind === 'pvpBind')
-			? `You restrain Player ${targetId}.`
-			: `You attack Player ${targetId} for ${dmgN} ${atk.type}.`;
-		const afb = this.world.sendFeedback(attackerText, '#ffcc55', 10);
-		this._pushLog(id, afb && afb.entries);
-		this.actionMsgOf.set(id, { text: attackerText, color: '#ffcc55' });
-		return { applied: true, kind: action.kind, dist, atk, before, after, restraint, feedbackRouted: true };
-	}
 
 	/** Append message-log entries to a player's personal log, trimmed to maxLog (KD-098). */
 	_pushLog(id, entries) {
@@ -864,15 +802,12 @@ class SwapSession {
 				}
 				// KD-094: PvP peers render+target as Enemy faction (red bar; stock attack mechanics).
 				if (this._isPvP(clientId, cid)) { ent.faction = 'Enemy'; ent.hostile = 9999; }
-				// KD-101: set the avatar's disabled state DIRECTLY in the snapshot from the peer's
-				// subdued state (defeated / Will ≤ half). The world avatar's `stun` is armed per-turn
-				// and may decay before snapshot time; setting it here guarantees the CLIENT sees the
-				// peer as disabled so its real KDCanApplyBondage gate allows the tie.
-				{
-					const willMax = (v && v.willMax > 0) ? v.willMax : 10;
-					const subdued = this.defeated.has(cid) || (v && v.will != null && v.will <= 0.5 * willMax);
-					if (subdued) ent.stun = Math.max(ent.stun || 0, 6);
-				}
+				// KD-101: set the avatar's disabled state DIRECTLY in the snapshot from whether the peer
+				// is down. The world avatar's `stun` is armed per-turn and may decay before snapshot
+				// time; setting it here guarantees the CLIENT sees the peer as disabled so its real
+				// KDCanApplyBondage gate allows the tie.
+				// KDM-164: "down" is KD's own floor (Will zero), not an invented fraction of WillMax.
+				if (this.defeated.has(cid) || this._isDown(v)) ent.stun = Math.max(ent.stun || 0, 6);
 			}
 		}
 		// KD-099: expose the defeated players so the client HUD can mark them (down/incapacitated).
