@@ -420,25 +420,23 @@ class SwapSession {
 			// clears it), take the whole new log as the delta.
 			const newLen = this.world.messageLogLength();
 			const added = (newLen >= logLen0) ? this.world.messagesSince(logLen0) : this.world.messageLog();
-			if (added && added.length && !(result && result.feedbackRouted)) {
-				// KD-098: PvP feedback is generated + routed inside _applyPvP (to the victim and
-				// attacker explicitly); skip the generic delta here so it isn't re-credited to the
-				// acting player (the KD-097 misroute that left the victim with no message).
-				// KD-097: messages are SHARED with all players by default (world/enemy/tutorial
-				// events everyone should see); only the acting player's PERSONAL 2nd-person lines
-				// ("You …"/"Your …") stay private to them. A floor change forces all-broadcast.
-				const floorEvent = this.world.getLevel() !== lvl0;
-				for (const m of added) {
-					const personal = !floorEvent && this._isPersonalMessage(m);
-					const targets = personal ? [id] : this._joined;
-					for (const tid of targets) {
-						const lg = this.logs.get(tid) || [];
-						lg.push(m);
-						while (lg.length > this.maxLog) lg.shift();
-						this.logs.set(tid, lg);
-					}
-				}
-			}
+			// KDM-165: the delta captured while THIS player was swapped in is THIS player's. No text is
+			// inspected to guess an audience — the swap window is engine truth, and it is what the game
+			// means by emitting those lines at that moment.
+			//
+			// The old rule ran `/^you\b|^your\b/i` over the rendered text and broadcast everything else.
+			// It was English-only, so in CN/DE/ES/JP/KR/RU nothing matched and every private line leaked
+			// to the peer. It was also wrong in the other direction: KD gates messages by VISION at the
+			// source (`KinkyDungeonGame.ts:2602`), so a line only reaches the log if the ACTING player
+			// can see its subject — broadcasting it showed the peer things they may not be able to see.
+			//
+			// Genuinely session-level events are broadcast EXPLICITLY (see `_markDefeated`,
+			// `_markRecovered`, `_announceFloorChange`) — a concern the proxy legitimately owns, and one
+			// that never depends on reading game content.
+			if (added && added.length) this._pushLog(id, added);
+			// A floor change moves the whole party, so say so — once, in our own words, to everyone.
+			// This is a state comparison, not an inference over message text.
+			if (this.world.getLevel() !== lvl0) this._announceFloorChange(id, this.world.getLevel());
 			// swap out: persist this player's new state + move their avatar to its new spot
 			this.bundles.set(id, this.world.capturePlayer());
 			this.vitalsOf.set(id, this.world.getVitals());   // KD-098: refresh for the HP bar
@@ -611,12 +609,27 @@ class SwapSession {
 	/** Has this player been defeated (real capture / Will floor)? Cleared once Will recovers (_markRecovered). */
 	isDefeated(id) { return this.defeated.has(id); }
 
-	/** A message is "personal" to the acting player if it is 2nd-person feedback ("You …"/"Your …").
-	 *  Everything else (enemy/world/tutorial lines) is shared with all players (KD-097). Heuristic. */
-	_isPersonalMessage(m) {
-		const t = (m && m.text != null) ? String(m.text).trim() : '';
-		return /^you\b|^your\b|^you'/i.test(t);
+	/**
+	 * KDM-165: a floor change moves the whole party, so tell everyone — EXPLICITLY, in the proxy's own
+	 * words. This replaces the old behaviour of duplicating whatever game text happened to be emitted
+	 * during the transition into every player's log: those lines are the acting player's (they passed
+	 * that player's vision check), while "we are all on floor N now" is genuinely session-level and is
+	 * ours to say.
+	 */
+	_announceFloorChange(id, level) {
+		const txt = `The party descends to floor ${level}.`;
+		const fb = this.world.sendFeedback(txt, '#88ccff', 10);
+		const entries = (fb && fb.entries) || [];
+		for (const pid of this._joined) this._pushLog(pid, entries);
+		this._dbg(`FLOOR ${id} -> ${level} (announced to all)`);
 	}
+
+	/*
+	 * KDM-165: the `_isPersonalMessage` heuristic that lived here is DELETED. It decided a message's
+	 * audience by matching `/^you\b|^your\b|^you'/i` against the rendered text — the gateway
+	 * interpreting game content, in one language, to guess something the swap window already knows
+	 * exactly. See `_advanceTurn` for what replaced it.
+	 */
 
 
 	/**

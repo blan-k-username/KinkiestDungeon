@@ -35,7 +35,16 @@ describe('Per-player message log over the swap path (KD-090)', () => {
 		};`);
 	}, BOOT_TIMEOUT);
 
-	it('a player’s PERSONAL ("You …") line is private; SHARED lines reach both (KD-097)', () => {
+	/**
+	 * KDM-165: this used to assert that a NON-second-person line emitted in A's turn reached B, while a
+	 * "You …" line stayed private — a split only expressible by matching the message TEXT, in English.
+	 * That rule is deleted: the swap window decides, so everything emitted in A's turn is A's.
+	 *
+	 * The bug this test was written for (KD-090: both clients saw one identical log) is unchanged and
+	 * still asserted — the logs must diverge, and A's lines must not appear in B's log. Language
+	 * independence is covered in `mp-log-attribution.spec.ts`.
+	 */
+	it('a player’s lines are private to them; the two logs diverge (KD-090)', () => {
 		// Both start from the same shared intro log (seeded equally).
 		const a0 = logTexts(s, 'A');
 		const b0 = logTexts(s, 'B');
@@ -52,12 +61,12 @@ describe('Per-player message log over the swap path (KD-090)', () => {
 
 		// the logs diverge...
 		expect(a1).not.toEqual(b1);
-		// A's personal "You …" line is private to A...
+		// Both of A's lines are A's — the wording is irrelevant, the window decides.
 		expect(a1.join('\n')).toContain('A_PERSONAL_1');
 		expect(b1.join('\n')).not.toContain('A_PERSONAL_1');
-		// ...but the shared (non-2nd-person) line reaches BOTH (fixes "P1 empty log").
 		expect(a1.join('\n')).toContain('A_SHARED_1');
-		expect(b1.join('\n')).toContain('A_SHARED_1');
+		expect(b1.join('\n'), 'a line emitted in A’s turn is A’s, however it is phrased')
+			.not.toContain('A_SHARED_1');
 	}, BOOT_TIMEOUT);
 
 	it('symmetric: B’s "You …" line is private to B', () => {
@@ -90,9 +99,13 @@ describe('Per-player message log over the swap path (KD-090)', () => {
 		const a1 = logTexts(s, 'A');
 		const b1 = logTexts(s, 'B');
 
-		// The shared floor-clear line is in BOTH logs even though only A triggered it.
-		expect(a1).toContain('FLOOR_CLEARED_MARKER');
-		expect(b1).toContain('FLOOR_CLEARED_MARKER');
+		// KDM-165: the party-wide event still reaches everyone, but as an EXPLICIT session
+		// announcement rather than by duplicating whatever game text the transition happened to emit.
+		// Those game lines are the acting player's (they passed that player's vision check); "we are
+		// all on floor N now" is session-level and is the proxy's to say.
+		expect(a1.join('\n'), "the actor keeps the game's own line").toContain('FLOOR_CLEARED_MARKER');
+		expect(b1.join('\n'), 'the peer is told the party changed floor').toMatch(/floor \d+/i);
+		expect(a1.join('\n'), 'the actor is told too').toMatch(/floor \d+/i);
 		// (sanity) it wasn't already there before the event.
 		expect(a0).not.toContain('FLOOR_CLEARED_MARKER');
 		expect(b0).not.toContain('FLOOR_CLEARED_MARKER');
