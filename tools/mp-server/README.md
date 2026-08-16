@@ -127,3 +127,51 @@ instance).
   save/load round-trip is production host scope (KD-067).
 - The shim layer tracks the bundle's PIXI/DOM surface as of this build; it must be
   updated as the game's rendering surface changes.
+
+## Bundle-patch policy (KDM-166)
+
+`demo-server.js` rewrites the compiled bundle on the way out (`BUNDLE_PATCHES`) to guard genuine
+**upstream** crashes. This is the **last resort** in the plugin rule's preference order — runtime
+wrapping > stock API/data selection > serve-time text rewrite — and it is deliberately not
+open-ended. A patch table with no expiry only grows.
+
+**Before adding an entry**
+
+1. Prove the bug is upstream's, not ours (diff the file against `upstream/<version>`; if our own code
+   is what reaches the bad state, fix that instead).
+2. Try the two cheaper options first. Text coupling breaks silently on an upstream bump.
+3. Decide whether the bug *should* be swallowed. Guarding a genuinely-missing value can push
+   `undefined` downstream and hide a real defect — that is why the 14 `sg.group` sites are **not**
+   patched. Real state beats text coupling.
+
+**Every entry must carry**
+
+| Field | Meaning |
+|---|---|
+| `id` | stable handle a verdict is reported against |
+| `find` / `repl` | the rewrite — `split`/`join`, so it must be **idempotent** |
+| `sites` | expected match count in `out/main.js` |
+| `repro` | how a human reaches the crash this entry prevents |
+| `upstream` | `unfiled: tools/mp-server/UPSTREAM_ISSUES.md` — the local write-up of whose bug it is (an issue URL instead, if one was ever filed) |
+| `removeWhen` | the condition under which this entry MUST be deleted |
+
+`validateBundlePatchPolicy()` enforces the shape at boot (loud console line) and in
+`tests/unit/mp-bundle-patch-policy.spec.ts` (hard assertion), so an entry cannot be added without
+the metadata that makes it retirable.
+
+**Every entry has an expiry.** `auditBundlePatches(js)` counts each entry's sites in the real bundle
+and returns a verdict:
+
+| Verdict | Meaning | What to do |
+|---|---|---|
+| `ok` | expected site count found | nothing |
+| `stale` | some other non-zero count | our number is wrong — we may be missing a site |
+| `delete-me` | **zero** sites | upstream fixed it (or the emitted text changed shape). The entry is dead code — **delete it**, along with its docs and its row in `UPSTREAM_ISSUES.md` |
+
+Both `stale` and `delete-me` fail the policy spec and print at bundle-serve time. That failing test
+*is* the expiry: it is what tells you an upstream bump retired a workaround.
+
+**Writing the report is part of adding the patch.** Never fix the bug in the game tree — write it up in
+`UPSTREAM_ISSUES.md` (repro, why it is upstream's, the one-line fix) and point the entry's `upstream:`
+field at that file. The report stays **local**: publishing it on the upstream tracker is the owner's
+call, not a step of this workflow. If one is ever filed, replace the `unfiled:` marker with the URL.

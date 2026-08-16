@@ -22,7 +22,7 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { patchServedBundle, SGROUP_PATCH_SITES } = require('../../tools/mp-server/demo-server');
+const { patchServedBundle } = require('../../tools/mp-server/demo-server');
 
 const UNGUARDED = 'KDGetNPCBindingSlotForItem(restraint, npcID).sgroup';
 const GUARDED = 'KDGetNPCBindingSlotForItem(restraint, npcID)?.sgroup';
@@ -72,15 +72,11 @@ describe('serve-time bundle patch: NPCRestrain null-slot crash', () => {
 		expect(patchServedBundle(src)).toBe(src);
 	});
 
-	it('finds exactly the expected number of sites in the real bundle', () => {
+	it('actually removes the unguarded read from the real bundle', () => {
 		const bundle = path.resolve(__dirname, '../../out/main.js');
 		if (!fs.existsSync(bundle)) return;  // bundle not built in this environment
-		const js = fs.readFileSync(bundle, 'utf8');
-		const found = js.split(UNGUARDED).length - 1;
-		// 0 ⇒ upstream fixed it (or the emitted text drifted) — the patch is then dead
-		// code and this whole workaround should be removed; anything else ⇒ our count
-		// is stale and the workaround may be missing a site.
-		expect([0, SGROUP_PATCH_SITES]).toContain(found);
-		expect(patchServedBundle(js)).not.toContain(UNGUARDED);
+		expect(patchServedBundle(fs.readFileSync(bundle, 'utf8'))).not.toContain(UNGUARDED);
+		// Site COUNTS (stale / upstream-fixed) are policed by mp-bundle-patch-policy.spec.ts —
+		// one audit for every entry, rather than a per-entry copy of the same assertion here.
 	});
 });

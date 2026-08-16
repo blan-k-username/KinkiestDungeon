@@ -34,6 +34,14 @@
 !/tools/*
 /tools/*.cache
 
+# feature/mp-server: the blanket `*` on line 1 hides every NEW file in these two trees, so a
+# freshly written spec or doc is invisible to git until someone remembers `git add -f`.
+# Allow-list the SOURCE extensions only — generated Playwright output stays ignored below.
+!/tests/**/*.ts
+/tests/_artifacts/
+!/tools/mp-server/**/*.js
+!/tools/mp-server/**/*.md
+
 *.wav
 
 .DS_Store

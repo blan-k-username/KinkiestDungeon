@@ -60,44 +60,112 @@ const INJECT = [
 	'/tools/mp-server/client/coop-bootstrap.js',
 ];
 
-/* ── Serve-time workaround for an UPSTREAM crash (see tests/unit/mp-bundle-sgroup-patch.spec.ts)
+/* ── Serve-time workarounds for UPSTREAM crashes ──────────────────────────────────────────────
  *
- * `NPCRestrain.ts:310` / `:402` read `KDGetNPCBindingSlotForItem(...).sgroup` without a guard,
- * but that helper returns null when no binding row accepts the item on that NPC
- * (`KDGenRestraintUniform.ts:38`, `:48`). Clicking such an item in the bind menu — easy to hit in
- * PvP, where the peer is an Enemy — throws "Cannot read properties of null (reading 'sgroup')".
- * The sibling call sites are already guarded (`:877` `?.sgroup`, `:445` null-check), so `?.` is
- * the intended shape and `if (slot_temp)` on the next line already handles null: the click
- * becomes the no-op it should have been.
+ * Rewriting the compiled bundle on the way out is the LAST resort in the plugin rule's preference
+ * order (runtime wrapping > stock API/data > text rewrite). It stays, but it is not open-ended:
+ * every entry is governed by the policy in `README.md` → "Bundle-patch policy", enforced by
+ * `tests/unit/mp-bundle-patch-policy.spec.ts`.
  *
- * Patched on the way OUT rather than on disk, so Game/src/** stays byte-identical to upstream
- * (zero game-source edits). Delete this once upstream ships the guard — the spec's site-count
- * assertion is what tells you that happened.
+ *   id          stable handle a verdict is reported against
+ *   find/repl   the rewrite (`split`/`join`, so it must be idempotent)
+ *   sites       expected match count in the bundle — drift is reported loudly
+ *   repro       how a human reaches the crash this entry prevents
+ *   upstream    issue URL, or `unfiled: <path>` pointing at the drafted report in this repo
+ *   removeWhen  the condition under which this entry MUST be deleted
+ *
+ * Patched on the way OUT rather than on disk, so `Game/src/**` stays byte-identical to upstream
+ * (zero game-source edits). Every entry below is the same defect shape: an unguarded lookup result
+ * (`.find()` / a helper returning null) dereferenced without `?.`. Optional chaining only changes
+ * behaviour where the code currently THROWS, so guarding is safe; the callers already handle a
+ * falsy value.
  * ─────────────────────────────────────────────────────────────────────────────────────────── */
-// Every entry is the same defect: an unguarded lookup result (`.find()` / a helper returning null)
-// dereferenced without `?.`. Optional chaining only changes behaviour where the code currently
-// THROWS, so guarding is safe; the callers already handle a falsy value.
+const UPSTREAM_DRAFTS = 'unfiled: tools/mp-server/UPSTREAM_ISSUES.md';
+
 const BUNDLE_PATCHES = [
 	{
+		id: 'npcrestrain-null-slot-sgroup',
 		// NPCRestrain.ts:310, :402 — KDGetNPCBindingSlotForItem returns null when no binding row
-		// accepts the item on that NPC (KDGenRestraintUniform.ts:38, :48). Crashes on CLICK in the
-		// bind menu. Siblings :877/:445 are already guarded, so `?.` is the intended shape.
+		// accepts the item on that NPC (KDGenRestraintUniform.ts:38, :48). Siblings :877/:445 are
+		// already guarded, so `?.` is the intended shape, and the next line's `if (slot_temp)`
+		// already handles null: the click becomes the no-op it should have been.
 		find: 'KDGetNPCBindingSlotForItem(restraint, npcID).sgroup',
 		repl: 'KDGetNPCBindingSlotForItem(restraint, npcID)?.sgroup',
 		sites: 2,
+		repro: 'PvP: open the bind menu on the peer (an Enemy) and CLICK an item no binding row on ' +
+			'that NPC accepts → "Cannot read properties of null (reading \'sgroup\')".',
+		upstream: UPSTREAM_DRAFTS,
+		removeWhen: 'NPCRestrain.ts guards both reads with `?.` — observable here as this entry ' +
+			'matching 0 sites in out/main.js (audit verdict "delete-me").',
 	},
 	{
+		id: 'kdinventoryactions-sg-nocut',
 		// KDInventoryActions.ts:424 ("Cut".show) — KinkyDungeonStruggleGroups.find(...) is undefined
-		// when no struggle group matches the worn item's Group. Crashes while the Inventory screen is
-		// being DRAWN, so the game dies every frame rather than on interaction.
+		// when no struggle group matches the worn item's Group.
 		find: '!sg.noCut', repl: '!sg?.noCut', sites: 3,
+		repro: 'Open the Inventory screen while a worn item has no matching struggle group → throws ' +
+			'while the screen is being DRAWN, so the game dies every frame, not just on interaction.',
+		upstream: UPSTREAM_DRAFTS,
+		removeWhen: 'KDInventoryActions.ts guards the find() result — this entry matches 0 sites. ' +
+			'Our own trigger (a client that never rebuilt KinkyDungeonStruggleGroups) was fixed in ' +
+			'KDM-156; this remains only as belt-and-braces for the genuine upstream hole.',
 	},
 	{
+		id: 'kdinventoryactions-sg-blocked',
 		// KDInventoryActions.ts:429 ("Cut".valid) — same `sg`, same miss, one line later.
 		find: '!sg.blocked', repl: '!sg?.blocked', sites: 14,
+		repro: 'Same screen and same missing struggle group as `kdinventoryactions-sg-nocut`, one ' +
+			'line later in the same action definition.',
+		upstream: UPSTREAM_DRAFTS,
+		removeWhen: 'Same as `kdinventoryactions-sg-nocut` — deleted together when upstream guards ' +
+			'the lookup and this entry matches 0 sites.',
 	},
 ];
-const SGROUP_PATCH_SITES = BUNDLE_PATCHES[0].sites;   // kept for the spec's real-bundle assertion
+
+// The policy, as data: an entry missing any of these is not a patch, it is a mystery.
+const PATCH_POLICY_FIELDS = ['id', 'find', 'repl', 'sites', 'repro', 'upstream', 'removeWhen'];
+
+/**
+ * Policy check — returns a list of human-readable violations ([] means compliant).
+ * Called at boot (`start`) and asserted by the policy spec, so a new entry cannot be added
+ * without its repro, upstream report and removal condition.
+ */
+function validateBundlePatchPolicy(patches = BUNDLE_PATCHES) {
+	const out = [];
+	for (const [i, p] of patches.entries()) {
+		const id = p && p.id ? `"${p.id}"` : `#${i}`;
+		for (const field of PATCH_POLICY_FIELDS) {
+			const v = p ? p[field] : undefined;
+			const blank = v === undefined || v === null ||
+				(typeof v === 'string' && v.trim() === '');
+			if (blank) out.push(`patch ${id}: missing or blank required field "${field}"`);
+		}
+	}
+	return out;
+}
+
+/**
+ * Expiry check — count each entry's sites in the given bundle text and return a verdict per entry:
+ *   'ok'        the expected number of sites is present
+ *   'delete-me' ZERO sites — upstream fixed it (or the emitted text changed shape); the entry is
+ *               dead code and must be removed, along with its workaround docs
+ *   'stale'     some other count — our number is wrong and we may be missing a site
+ * Structured on purpose: a console line is not a signal, a verdict a test can assert on is.
+ */
+function auditBundlePatches(js, patches = BUNDLE_PATCHES) {
+	return patches.map((p) => {
+		const found = js.split(p.find).length - 1;
+		const verdict = found === 0 ? 'delete-me' : (found === p.sites ? 'ok' : 'stale');
+		const tail = verdict === 'delete-me'
+			? ' — upstream fixed it; DELETE this entry (see its removeWhen).'
+			: (verdict === 'stale' ? ' — COUNT IS STALE, check the bundle.' : '');
+		return {
+			id: p.id, find: p.find, expected: p.sites, found, verdict,
+			message: verdict === 'ok' ? ''
+				: `[patch] ${p.id}: expected ${p.sites} site(s), found ${found}${tail}`,
+		};
+	});
+}
 
 function patchServedBundle(js) {
 	let out = js;
@@ -111,12 +179,9 @@ let bundleCache = null;   // { mtimeMs, body }
 function serveBundle(filePath, stat) {
 	if (!bundleCache || bundleCache.mtimeMs !== stat.mtimeMs) {
 		const raw = fs.readFileSync(filePath, 'utf8');
-		for (const p of BUNDLE_PATCHES) {
-			const found = raw.split(p.find).length - 1;
-			if (found !== p.sites) {
-				console.log(`  [patch] "${p.find}": expected ${p.sites} site(s), found ${found}` +
-					(found === 0 ? ' — upstream may have fixed it; drop this entry.' : ' — COUNT IS STALE, check the bundle.'));
-			}
+		for (const row of auditBundlePatches(raw)) {
+			// eslint-disable-next-line no-console
+			if (row.message) console.log(`  ${row.message}`);
 		}
 		bundleCache = { mtimeMs: stat.mtimeMs, body: patchServedBundle(raw) };
 	}
@@ -172,6 +237,12 @@ function serveStatic(req, res) {
 }
 
 function start(port = PORT) {
+	// Boot-time policy gate: a BUNDLE_PATCHES entry without its repro/upstream report/removal
+	// condition is a patch nobody can ever retire. Loud, not fatal — the demo must still start.
+	for (const v of validateBundlePatchPolicy()) {
+		// eslint-disable-next-line no-console
+		console.log(`  [patch] POLICY VIOLATION — ${v}`);
+	}
 	// True lockstep (KD-085 R8): the shared turn advances only when BOTH players have
 	// acted — required for random conflict resolution (need all actions in hand). So
 	// act in BOTH windows each turn (move/attack/wait). (autoAdvance is left available
@@ -210,7 +281,10 @@ function start(port = PORT) {
 	});
 }
 
-module.exports = { start, patchServedBundle, SGROUP_PATCH_SITES };
+module.exports = {
+	start, patchServedBundle,
+	BUNDLE_PATCHES, PATCH_POLICY_FIELDS, validateBundlePatchPolicy, auditBundlePatches,
+};
 
 // Bump this when server-side MP code changes, so a stale-process restart is obvious.
 const MP_BUILD = 'KD-101 stun-gate + real-tie';
