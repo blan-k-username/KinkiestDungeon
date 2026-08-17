@@ -772,6 +772,37 @@ class HeadlessHost {
 		})()`);
 	}
 
+	/**
+	 * KDM-196 — drain the game's NOISE presentation queues; the sibling of takeDamageFloaters above.
+	 *
+	 * `KDEventData.shockwaves` and `KDEventData.sounddesc` are consume-once presentation output: the
+	 * enemy-noise path pushes them (`KinkyDungeonEnemies.ts:9607`) and the DRAW layer drains them
+	 * (`KinkyDungeonEvents.ts` → `afterDrawFrame`/`shockwave`, which clears the array after emitting).
+	 * A headless world has no draw loop, so nothing ever drained them: MEASURED, six real turns left
+	 * six undrained shockwaves in the capture and every snapshot re-shipped all six — the "spam of
+	 * sound echo animation while the mouse moves" from UAT, and exactly the KDDamageQueue shape.
+	 *
+	 * So the server drains them HERE instead, at the same point in the turn as the damage floaters,
+	 * and they travel as sequenced events rather than as replicated state.
+	 *
+	 * `sounddesc` is per-turn by design (`KinkyDungeonAdvanceTime` resets it at delta > 0), so it is
+	 * taken WHOLE and replaces the client's list; `shockwaves` is a one-shot backlog and is appended.
+	 */
+	takeNoisePresentation() {
+		return this.eval(`(function(){
+			if (typeof KDEventData === 'undefined' || !KDEventData) return { shockwaves: [], sounddesc: [] };
+			var sw = Array.isArray(KDEventData.shockwaves) ? KDEventData.shockwaves : [];
+			var sd = Array.isArray(KDEventData.sounddesc) ? KDEventData.sounddesc : [];
+			var out = {
+				shockwaves: JSON.parse(JSON.stringify(sw)),
+				sounddesc: JSON.parse(JSON.stringify(sd)),
+			};
+			KDEventData.shockwaves = [];
+			KDEventData.sounddesc = [];
+			return out;
+		})()`) || { shockwaves: [], sounddesc: [] };
+	}
+
 	takePeerHits(entityId) {
 		return this.eval(`(function(){
 			var w = KinkyDungeonDamageEnemy, k = ${entityId | 0};

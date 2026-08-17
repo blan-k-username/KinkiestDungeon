@@ -41,6 +41,23 @@ const PARK = { x: 1, y: 1 };
 const CLIENT_OWNED_GAMEDATA_KEYS = ['NightVision', 'MaxVisionDist', 'MinVisionDist'];
 
 /**
+ * KDM-196: CONSUME-ONCE presentation members of an otherwise per-player global.
+ *
+ * The criterion is KDM-186's: if only the presentation layer consumes it, the server must not
+ * replicate it. `KDDamageQueue` could satisfy that by name, in GLOBAL_BLACKLIST, because the whole
+ * global is presentation. These cannot — they are sub-keys of `KDEventData`, which also holds real
+ * accumulating sim state (`SlimeLevel`, `CurseHintTick`, …). One entry per (global, key) so the rule
+ * stays "this VALUE is consume-once presentation", never "this feature is special".
+ *
+ * See `_stripPresentation` for why this is the invariant rather than the mechanism.
+ */
+const PRESENTATION_SUBKEYS = Object.freeze({
+	// pushed by the enemy-noise path (KinkyDungeonEnemies.ts:9607), drained by the draw layer
+	// (KinkyDungeonEvents.ts, afterDrawFrame/shockwave) — the ripple + sound echo.
+	KDEventData: ['sounddesc', 'shockwaves'],
+});
+
+/**
  * KD_START_RESTRAINT accepts ONE name or a comma/space-separated list
  * (e.g. "MasterworkHeels,HighsecShackles"). Single source of truth for the
  * server seeding and the client's copy in coop-bootstrap.js.
@@ -103,6 +120,9 @@ class SwapSession {
 		// construction: neither side enumerates which events exist — one counter, one comparison.
 		this._eventSeq = new Map();      // clientId -> last event id issued
 		this.pendingEvents = new Map();  // clientId -> events awaiting delivery
+		// KDM-196: whether this client's last delivered `sounddesc` list was non-empty, so a list that
+		// has just emptied is still sent once (to clear theirs) and silence stays silent afterwards.
+		this._sentSoundDesc = new Map();
 		this.vitalsOf = new Map();    // id -> {will,willMax,...} last-known vitals (KD-098 HP bar)
 		this.defeated = new Set();    // ids whose Will hit 0 — incapacitated (KD-099)
 		this.tiedOf = new Map();      // id -> Set of restraint NAMES already reconciled onto this peer (KD-101)
@@ -773,7 +793,36 @@ class SwapSession {
 			if (CLIENT_OWNED_GAMEDATA_KEYS.includes(k)) continue;
 			gameData[k] = bundle.gameData[k];
 		}
-		return { v: bundle.v, gameData, globals: bundle.globals };
+		return { v: bundle.v, gameData, globals: this._stripPresentation(bundle.globals) };
+	}
+
+	/**
+	 * KDM-196 — presentation output never crosses the wire as STATE, only as a sequenced event.
+	 *
+	 * KDDamageQueue could be excluded wholesale (GLOBAL_BLACKLIST) because the whole global is
+	 * presentation. `KDEventData` is a MIXED bag — `SlimeLevel`/`SlimeLevelStart`/`CurseHintTick`/
+	 * `ActivationsThisTurn` are real per-player sim state that accumulates across turns, while
+	 * `sounddesc`/`shockwaves` are consume-once draw queues. Blacklisting the global would silently
+	 * drop the sim half; naming the sub-keys keeps the criterion (not the name) as the rule.
+	 *
+	 * `_harvestNoise` already drains these every turn, so in practice they are empty here. This is the
+	 * INVARIANT, not the mechanism: any future path that queues presentation without a harvest is
+	 * stopped at the wire instead of becoming another snapshot-rate animation spam.
+	 */
+	_stripPresentation(globals) {
+		if (!globals) return globals;
+		let out = globals;
+		for (const name of Object.keys(PRESENTATION_SUBKEYS)) {
+			const v = out[name];
+			if (!v || typeof v !== 'object') continue;
+			const drop = PRESENTATION_SUBKEYS[name].filter((k) => k in v);
+			if (!drop.length) continue;
+			if (out === globals) out = Object.assign({}, globals);      // shallow copy: the bundle is the session's
+			const copy = Object.assign({}, v);
+			for (const k of drop) delete copy[k];
+			out[name] = copy;
+		}
+		return out;
 	}
 
 	/** Map a submitted action to a KD input {kdType, data}. */
@@ -849,8 +898,32 @@ class SwapSession {
 	 */
 	_harvestFloaters(clientId) {
 		let out = [];
-		try { out = this.world.takeDamageFloaters() || []; } catch (e) { return; }
+		try { out = this.world.takeDamageFloaters() || []; } catch (e) { out = []; }
 		for (const f of out) this._emitEvent(clientId, { kind: 'floater', floater: f });
+		this._harvestNoise(clientId);
+	}
+
+	/**
+	 * KDM-196 — the same harvest for the NOISE presentation queues (ripples + the sound echo).
+	 *
+	 * Same criterion as the floaters, same two call sites, so a queue cannot be drained on one path
+	 * and left to accumulate on the other: whatever the draw layer would have consumed is taken here
+	 * and re-delivered as ONE sequenced event, applied at most once by the client.
+	 *
+	 * Emitted only when there is something to say. The exception is a `sounddesc` list that has just
+	 * gone empty: it REPLACES the client's list (the game resets it per turn, and the client's own
+	 * `KinkyDungeonAdvanceTime` is guarded off in render-only mode), so the client must be told to
+	 * clear it or last turn's echo would repeat forever.
+	 */
+	_harvestNoise(clientId) {
+		let p;
+		try { p = this.world.takeNoisePresentation(); } catch (e) { return; }
+		const shockwaves = (p && p.shockwaves) || [];
+		const sounddesc = (p && p.sounddesc) || [];
+		const hadSound = this._sentSoundDesc.get(clientId) || false;
+		if (!shockwaves.length && !sounddesc.length && !hadSound) return;
+		this._sentSoundDesc.set(clientId, sounddesc.length > 0);
+		this._emitEvent(clientId, { kind: 'noise', shockwaves, sounddesc });
 	}
 
 	/** Events not yet delivered to this client. Take-once: delivered is delivered. */

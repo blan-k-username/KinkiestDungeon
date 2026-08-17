@@ -181,6 +181,26 @@
 	 * reports that in `snapshot.unknownInputs` (SwapSession.unknownInputReport).
 	 */
 
+	/**
+	 * KDM-196 — presentation ACCUMULATORS the client owns, keyed by the global they live on.
+	 *
+	 * Same criterion as the queues, one step further in: `KinkyDungeonPlayerEntity.visual_stamina` /
+	 * `visual_mana` are not state, they are where the DRAW loop keeps a bar part-way through its
+	 * animation (`KinkyDungeonDraw.ts:1814/1825`, via `KDEaseValue`). A headless server never runs
+	 * that loop, so its capture of `KinkyDungeonPlayerEntity` simply has no such field — and
+	 * `adoptBundle` replaces the whole object, so every snapshot DELETED the client's value. The draw
+	 * then re-seeds it from `…StaminaMax` and eases down again: the SP bar visibly re-drains from full
+	 * once per snapshot. The bar only draws while the pointer is in the playable area, which is why
+	 * UAT saw it "when I move my mouse".
+	 *
+	 * So: the server's value wins whenever it HAS one, and the client keeps its own when it does not.
+	 * `visual_x`/`visual_y` are deliberately NOT here — the server snaps those to the authoritative
+	 * tile on purpose (KD-098), which is a value, not an absence.
+	 */
+	var CLIENT_OWNED_ENTITY_FIELDS = {
+		KinkyDungeonPlayerEntity: ['visual_stamina', 'visual_mana'],
+	};
+
 	var _adoptVal;                       // transfer slot for the direct eval below
 	function adoptBundle(b) {
 		if (!b) return 0;
@@ -205,6 +225,20 @@
 					_adoptVal = (v && typeof v === 'object')
 						? (v.__kdT ? dec(v) : JSON.parse(JSON.stringify(v)))
 						: v;
+					// KDM-196: carry over the client-owned animation accumulators the server has no
+					// value for, so the wholesale replace below does not restart the bar every snapshot.
+					var owned = CLIENT_OWNED_ENTITY_FIELDS[name];
+					if (owned && _adoptVal && typeof _adoptVal === 'object') {
+						// eslint-disable-next-line no-eval
+						var prev = eval(name);
+						if (prev && typeof prev === 'object') {
+							for (var oi = 0; oi < owned.length; oi++) {
+								if (_adoptVal[owned[oi]] === undefined && prev[owned[oi]] !== undefined) {
+									_adoptVal[owned[oi]] = prev[owned[oi]];
+								}
+							}
+						}
+					}
 					// eslint-disable-next-line no-eval
 					eval(name + ' = _adoptVal;');
 					n++;
@@ -398,6 +432,29 @@
 						if (ev.kind === 'floater' && ev.floater && typeof KinkyDungeonSendFloater === 'function') {
 							var f = ev.floater;
 							KinkyDungeonSendFloater({ x: f.x, y: f.y }, f.text, f.color, f.time);
+						} else if (ev.kind === 'noise' && typeof KDEventData !== 'undefined' && KDEventData) {
+							// KDM-196: the ripple + sound echo, on the same exactly-once channel as the
+							// floaters and for the same reason (they used to ride the state wire and were
+							// re-drawn once per SNAPSHOT — spam while the mouse moved).
+							//
+							// `shockwaves` is a one-shot backlog the local draw layer drains, so APPEND.
+							if (ev.shockwaves && ev.shockwaves.length) {
+								if (!Array.isArray(KDEventData.shockwaves)) KDEventData.shockwaves = [];
+								for (var si = 0; si < ev.shockwaves.length; si++) KDEventData.shockwaves.push(ev.shockwaves[si]);
+							}
+							// `sounddesc` is a per-turn list the draw layer re-reads (it echoes every
+							// `shockwavePeriod` ms), so REPLACE — including with an empty list, which is how
+							// last turn's echo stops. This client cannot clear it itself: the game clears it
+							// in KinkyDungeonAdvanceTime, which `disableLocalSim` guards off.
+							if (ev.sounddesc) {
+								var now = (typeof CommonTime === 'function') ? CommonTime() : 0;
+								for (var di = 0; di < ev.sounddesc.length; di++) {
+									// stamp with LOCAL time: the server's is from another clock entirely, and a
+									// timestamp in the past re-fires the echo immediately.
+									ev.sounddesc[di].lastShockwave = now;
+								}
+								KDEventData.sounddesc = ev.sounddesc;
+							}
 						}
 					} catch (e) { /* an event must never break the render path */ }
 				}
