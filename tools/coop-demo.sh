@@ -16,7 +16,8 @@
 # Then open TWO browser windows:
 #   http://localhost:8090/#coop=A    (window 1 — creates the session, waits)
 #   http://localhost:8090/#coop=B    (window 2 — both in → shared dungeon starts)
-# Move with arrow keys / WASD, [space] to wait. BOTH players must act each turn
+# Move with WASD (+ QEZC diagonals), [X] to wait. Arrow keys are NOT bound by the game, and
+# [Space] is Skip, not Wait (KinkyDungeon.ts:162-167). BOTH players must act each turn
 # (lockstep co-op). You see the other player's avatar and a shared enemy.
 set -euo pipefail
 
@@ -27,7 +28,14 @@ IMAGE="node:23-slim"
 # --init runs a tiny init (tini) as PID 1 that forwards signals + reaps children, and
 # `exec node` makes node the direct foreground process — together they make Ctrl-C
 # actually stop the server (without --init, SIGINT never reaches node).
-exec docker run --rm -it --init \
+#
+# KD_DETACH=1 runs it in the background instead (-d, no TTY) — for starting the demo from a
+# non-interactive shell. Same container, same args: follow it with `docker logs -f kd-coop-demo`,
+# stop it with `docker rm -f kd-coop-demo`.
+MODE=(--rm -it)
+if [ "${KD_DETACH:-0}" = "1" ]; then MODE=(--rm -d); fi
+
+exec docker run "${MODE[@]}" --init \
 	--name kd-coop-demo \
 	-v "$PROJECT_ROOT":/usr/src/app -w /usr/src/app \
 	-p "${PORT}:${PORT}" -e "PORT=${PORT}" \
