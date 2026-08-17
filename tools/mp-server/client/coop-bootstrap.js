@@ -521,7 +521,14 @@
 		pinGameScreen();
 	}
 
-	/** Cheap per-frame guard: keep the dungeon on screen (don't regen the map). */
+	/**
+	 * Keep the dungeon on screen (don't regen the map).
+	 *
+	 * NOT per-frame, despite what this comment used to claim (KDM-205): the call sites are boot
+	 * (`forceGameScreen`) and the two `ws.onmessage` state branches, so an UNPAIRED client runs it
+	 * exactly once. The stale wording cost a wrong hypothesis — that the `KinkyDungeonUpdateLightGrid`
+	 * flag below was forcing a vision recompute every frame and starving the loop. It is not.
+	 */
 	function pinGameScreen() {
 		KinkyDungeonState = 'Game';
 		KinkyDungeonDrawState = 'Game';
