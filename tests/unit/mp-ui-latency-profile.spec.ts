@@ -294,6 +294,11 @@ describe('KDM-186 — per-transaction cost of one `ui` input', () => {
 	 * already known to be warning about a real `KinkyDungeonEnemies` divergence. At ~60 captures/s that
 	 * fires every ~3 s, and a multi-hundred-ms stall would show up exactly as the owner's spread
 	 * (median 1067 ms, samples 642-1920 ms) rather than as a raised floor.
+	 *
+	 * ⚠️ HISTORICAL SHAPE. KDM-195 fixed what this measured: KinkyDungeonEnemies is blacklisted (it was
+	 * OUR spawnAvatar appending a def) and the audit is now a budgeted round robin, so the request path
+	 * no longer takes the full pass. This still forces a COMPLETE pass, so the number it prints is the
+	 * whole-set cost — the ceiling of a full cycle, no longer the size of a single stall.
 	 */
 	it('measures the periodic oversize audit stall', () => {
 		const s: any = new SwapSession({ requiredPlayers: 2, seed: 'ui-latency-audit', seedInputKinds: true });

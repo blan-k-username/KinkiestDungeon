@@ -113,11 +113,44 @@ const MIN_EXPECTED_GLOBALS = 2000;
 const BASELINE_MAX_LEN = 20000;
 
 /**
- * KDM-161: how many captures between oversize audits (_auditOversize). The audit re-serialises the
- * globals excluded by BASELINE_MAX_LEN, so it costs about as much as one unbounded pass — fine
- * occasionally, not on every swap.
+ * KDM-161/KDM-195: how many captures between oversize audit SLICES (_auditOversize).
+ *
+ * It used to be one UNBOUNDED pass every 200 captures. Measured 2026-08-17: 22 globals / 5.53 MB,
+ * one pass 59-90 ms — a synchronous stall of a single-threaded server that is already the bottleneck,
+ * every ~3.3 s at the observed ~60 captures/s. The audit is now a time-budgeted round-robin: each
+ * invocation resumes at a cursor and hashes names until OVERSIZE_AUDIT_BUDGET_MS is spent.
+ *
+ * MEASURED after the change (quiet host, 21 globals): a full cycle is 7 slices / ~82 ms, per-slice
+ * 6.8, 36.7, 3.5, 4.0, 8.7, 15.6, 6.3 ms — median 6.8, worst 36.7. 30 captures between slices puts a
+ * cycle at ~210 captures: the same coverage latency and the same amortised cost as the old 90 ms/200,
+ * with the single 90 ms stall replaced by a ~7 ms median one. The worst slice is still ~37 ms because
+ * ModelDefs (1878 KB) is ONE name and a time budget cannot split it — see KDM-194.
+ *
+ * `_auditOversize(true)` still runs a COMPLETE pass, ignoring the budget — that is the diagnostic and
+ * test entry point, never the request path.
  */
-const OVERSIZE_AUDIT_EVERY = 200;
+const OVERSIZE_AUDIT_EVERY = 30;
+
+/**
+ * KDM-195: wall-clock budget, inside the vm, for ONE audit slice.
+ *
+ * The budget is checked AFTER each name, so a slice always hashes at least one — the true worst case
+ * is therefore the single largest oversize global, not this number. Measured with this budget: slices
+ * of 2-5 names, median ~7 ms, worst ~37 ms (the slice that contains ModelDefs, 1878 KB). Splitting one
+ * global into sub-chunks would bound that too, at the cost of per-chunk baseline hashes; not worth it
+ * until it shows up in a measurement of the real path — see KDM-194.
+ */
+const OVERSIZE_AUDIT_BUDGET_MS = 4;
+
+/**
+ * KDM-195: the ONE definition of the divergence hash, shared by every vm payload that needs it.
+ *
+ * It is a source string rather than a function because these payloads run inside the bundle's own
+ * `vm.Context` — nothing from this module is in scope there. It was copy-pasted into four payloads
+ * (baseline, capture, oversize audit, restore); a hash that drifts between the pass that WRITES a
+ * baseline and the pass that COMPARES against it would silently report everything as changed.
+ */
+const KD_HASH_FN = 'function hash(s){ var x = 5381, i = s.length; while (i) { x = (x*33) ^ s.charCodeAt(--i); } return x>>>0; }';
 
 /**
  * KDM-161: globals that are NOT per-player, by CATEGORY (never per feature — a per-feature entry
@@ -135,6 +168,15 @@ const GLOBAL_BLACKLIST = Object.freeze([
 	// are emphatically NOT per-player: MEASURED, resetting them on swap-in wiped the enemy lookup, so
 	// a PvP bump-attack landed once and then stopped doing damage (mp-pvp-realcombat, -bind-reconcile,
 	// -defeat-recovery all went red). KDEnemiesCache alone is 400 KB after one turn.
+	// The enemy DEFINITION table — the templates every entity's `.Enemy` points at, not any entity's
+	// state. Same category as the entity caches above, and KDM-195 settled it with evidence rather
+	// than argument: the audit reported it CHANGED on every pass, and the writer turned out to be
+	// OURS. `spawnAvatar` pushes a `RemotePlayer_<peer>` def clone into it (measured: 337 → 338 defs)
+	// so the peer avatar renders as a real character. That is world content shared by both players —
+	// proven, not assumed: the def appears in NO player bundle, and it survives swapping the other
+	// player in. Excluded before this only by its 386 KB size, which meant a one-time append warned
+	// forever (the audit never re-baselines) while costing 3.9 ms of every audit.
+	'KinkyDungeonEnemies',
 	'KDEnemiesCache', 'KDEnemyCache', 'KDEnemyEventCache', 'KDIDCache', 'KDEntityFlagCache',
 	'KDEntityRestraintMetadata', 'KDThoughtBubbles',
 	'KDBuffedStatTypeMemo', 'KDBuffedStatTypeMemoUpdate',
@@ -1422,7 +1464,7 @@ class HeadlessHost {
 		const snap = this.eval(`(function(){
 			${KD_CODEC}
 			var names = ${JSON.stringify(this._globalNames)}, MAX = ${BASELINE_MAX_LEN};
-			function hash(s){ var x = 5381, i = s.length; while (i) { x = (x*33) ^ s.charCodeAt(--i); } return x>>>0; }
+			${KD_HASH_FN}
 			var watch = [], h = {}, vals = {}, over = {};
 			for (var i = 0; i < names.length; i++) {
 				var n = names[i], v;
@@ -1442,6 +1484,10 @@ class HeadlessHost {
 		this._baselineValues = snap.vals;
 		this._oversize = snap.over;
 		this._capturesSinceAudit = 0;
+		// KDM-195: the audit is a round robin over _oversize, so a new baseline restarts the cycle.
+		this._oversizeCursor = 0;
+		this._lastAuditNames = null;
+		this._oversizeChanged = [];
 		return this._baseline;
 	}
 
@@ -1467,7 +1513,7 @@ class HeadlessHost {
 		const out = this.eval(`(function(){
 			${KD_CODEC}
 			var names = ${JSON.stringify(this._watchNames)}, base = globalThis.__KD_BASE_H, out = {};
-			function hash(s){ var x = 5381, i = s.length; while (i) { x = (x*33) ^ s.charCodeAt(--i); } return x>>>0; }
+			${KD_HASH_FN}
 			for (var i = 0; i < names.length; i++) {
 				var n = names[i], v;
 				try { v = eval(n); } catch (e) { continue; }
@@ -1485,7 +1531,7 @@ class HeadlessHost {
 	}
 
 	/**
-	 * KDM-161: the size threshold must fail LOUDLY, not silently.
+	 * KDM-161/KDM-195: the size threshold must fail LOUDLY, not silently — affordably, and once per drift.
 	 *
 	 * Globals whose serialised form exceeds BASELINE_MAX_LEN are excluded from the watch set as static
 	 * data tables (measured: every one of them is an enemy/restraint/spell/model definition table, and
@@ -1493,24 +1539,62 @@ class HeadlessHost {
 	 * this re-hashes them periodically and reports any that actually changed. A silently-dropped
 	 * per-player global is precisely the bug class this epic exists to remove; the same drift contract
 	 * as the BUNDLE_PATCHES site counts in demo-server.js.
+	 *
+	 * KDM-195 fixed two ways that contract was being paid for badly, without weakening it:
+	 *
+	 *  - **Cost.** The pass was unbounded: 22 globals / 5.53 MB / 59-90 ms, synchronously, on the
+	 *    request path of a single-threaded server. It is now a time-budgeted ROUND ROBIN — resume at
+	 *    `_oversizeCursor`, spend at most OVERSIZE_AUDIT_BUDGET_MS, stop; the whole set is still
+	 *    covered, just across several invocations. `force` restores the complete pass for diagnostics.
+	 *  - **Signal.** The reported hash was never updated, so ONE append (ours — see the
+	 *    `KinkyDungeonEnemies` blacklist entry) re-warned on every audit for the life of the process.
+	 *    A reported name is now re-baselined, so each DISTINCT drift warns exactly once. A global that
+	 *    really is per-player oscillates as players swap and therefore keeps warning, which is the case
+	 *    the contract exists for. `_oversizeChanged` accumulates every name ever reported.
 	 */
 	_auditOversize(force = false) {
 		if (!this._oversize) return null;
 		if (!force && ++this._capturesSinceAudit < OVERSIZE_AUDIT_EVERY) return null;
 		this._capturesSinceAudit = 0;
+
+		const all = Object.keys(this._oversize);
+		if (!all.length) { this._lastAuditNames = []; return []; }
+		let start = this._oversizeCursor || 0;
+		if (start >= all.length) start = 0;
+		const order = force ? all : all.slice(start).concat(all.slice(0, start));
+
 		this._context.__KD_OVER_H = this._oversize;
-		const changed = this.eval(`(function(){
+		const res = this.eval(`(function(){
 			${KD_CODEC}
-			var base = globalThis.__KD_OVER_H, out = [];
-			function hash(s){ var x = 5381, i = s.length; while (i) { x = (x*33) ^ s.charCodeAt(--i); } return x>>>0; }
-			for (var n in base) {
+			var names = ${JSON.stringify(order)}, base = globalThis.__KD_OVER_H;
+			var budget = ${force ? 0 : OVERSIZE_AUDIT_BUDGET_MS};
+			${KD_HASH_FN}
+			var t0 = Date.now(), done = [], changed = {};
+			for (var i = 0; i < names.length; i++) {
+				var n = names[i];
+				done.push(n);
 				var v; try { v = eval(n); } catch (e) { continue; }
-				try { var s = kdSer(v); if (s !== undefined && hash(s) !== base[n]) out.push(n); } catch (e) {}
+				try {
+					var s = kdSer(v);
+					if (s !== undefined) { var h = hash(s); if (h !== base[n]) changed[n] = h; }
+				} catch (e) { /* cyclic / PIXI — not player state */ }
+				if (budget > 0 && (Date.now() - t0) >= budget) break;
 			}
-			return out;
+			return { done: done, changed: changed };
 		})()`);
-		if (changed && changed.length) {
-			this._oversizeChanged = changed;
+
+		this._lastAuditNames = res.done;
+		this._oversizeCursor = force ? 0 : (start + res.done.length) % all.length;
+
+		const changed = Object.keys(res.changed);
+		if (changed.length) {
+			// Re-baseline what is about to be reported: the alarm has been raised, and repeating it for
+			// the same unchanged value is noise, not signal. Genuinely per-player state keeps changing,
+			// so it keeps warning.
+			for (const n of changed) this._oversize[n] = res.changed[n];
+			const seen = new Set(this._oversizeChanged || []);
+			changed.forEach((n) => seen.add(n));
+			this._oversizeChanged = [...seen];
 			// eslint-disable-next-line no-console
 			console.warn(`[KDM-161] OVERSIZE GLOBAL CHANGED: ${changed.join(', ')} — excluded from ` +
 				`per-player capture as a static data table (> ${BASELINE_MAX_LEN} bytes) but it MUTATED. ` +
@@ -1539,7 +1623,7 @@ class HeadlessHost {
 			var g = globalThis.__KD_GLOBALS, base = globalThis.__KD_BASE_H, defs = globalThis.__KD_BASE_V;
 			var names = ${JSON.stringify(this._watchNames)};
 			if (!g) return false;
-			function hash(s){ var x = 5381, i = s.length; while (i) { x = (x*33) ^ s.charCodeAt(--i); } return x>>>0; }
+			${KD_HASH_FN}
 			// Bare assignment inside this direct eval targets the bundle's own binding — the same
 			// mechanism the mod system and _neuterRendering rely on.
 			// A __kdT tag can only sit at the TOP level (kdEnc is applied only to top-level Map/Set), so
@@ -1754,5 +1838,5 @@ module.exports = {
 	HeadlessHost, loadSources, REPO_ROOT, BUNDLE_PATH,
 	WORLD_KEYS, KDGAMEDATA_WORLD_KEYS,
 	deriveBundleGlobals, GLOBAL_BLACKLIST, MIN_EXPECTED_GLOBALS, HOST_RESERVED,
-	BASELINE_MAX_LEN, OVERSIZE_AUDIT_EVERY,
+	BASELINE_MAX_LEN, OVERSIZE_AUDIT_EVERY, OVERSIZE_AUDIT_BUDGET_MS,
 };
