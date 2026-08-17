@@ -139,6 +139,15 @@ const GLOBAL_BLACKLIST = Object.freeze([
 	'KDEntityRestraintMetadata', 'KDThoughtBubbles',
 	'KDBuffedStatTypeMemo', 'KDBuffedStatTypeMemoUpdate',
 	// --- render / dirty flags: the server has no screen ----------------------
+	// KDM-186: KDDamageQueue belongs HERE, and its absence was a real bug. It is a CONSUME-ONCE
+	// presentation queue drained by `KinkyDungeonDrawFight` (KinkyDungeonFight.ts:3368) — the draw
+	// emits a floater per entry and splices it out. The server has no draw loop, so it never drained
+	// it; the generic capture then replicated the stale entries as ordinary state and EVERY snapshot
+	// re-delivered them. Measured in UAT: one hit produced a floater per snapshot for as long as
+	// snapshots kept arriving (i.e. while the mouse moved), and stopped the moment they did.
+	// Presentation-only state is not authoritative state and must not be replicated; what the player
+	// needs to be TOLD travels as a sequenced EVENT instead (SwapSession `pendingEvents`).
+	'KDDamageQueue',
 	'KDDrawUpdate', 'KDVisionUpdate', 'KDUpdateChokes', 'KDAlertCD',
 	'lastFloaterRefresh', 'KDParticleid', 'KDCurrentModels', 'KDRefreshCharacter',
 	// --- client audio: neither player nor world ------------------------------
@@ -680,6 +689,21 @@ class HeadlessHost {
 			willMax: (typeof KinkyDungeonStatWillMax !== 'undefined') ? KinkyDungeonStatWillMax : null,
 			distraction: (typeof KinkyDungeonStatDistraction !== 'undefined') ? KinkyDungeonStatDistraction : null,
 			restraints: (typeof KinkyDungeonAllRestraint === 'function') ? KinkyDungeonAllRestraint().length : null,
+			// KDM-199: the peer state a STAND-IN avatar must mirror, so KD own gate can read it.
+			// All three are the GAME computing them for the swapped-in player; none is a rule of ours.
+			disabled: (typeof KDPlayerIsDisabled === "function") ? !!KDPlayerIsDisabled() : null,
+			stunTurns: (typeof KinkyDungeonFlags !== "undefined" && KinkyDungeonFlags && KinkyDungeonFlags.get)
+				? (KinkyDungeonFlags.get("playerStun") || 0) : 0,
+			// Real worn bondage, summed from the GAME per-item power. No scale invented here.
+			bondage: (function(){ try {
+				var all = (typeof KinkyDungeonAllRestraint === "function") ? KinkyDungeonAllRestraint() : [];
+				var t = 0;
+				for (var i = 0; i < all.length; i++) {
+					var r = (typeof KDRestraint === "function") ? KDRestraint(all[i]) : null;
+					t += (r && r.power) || 0;
+				}
+				return t;
+			} catch (e) { return 0; } })(),
 		}; })()`);
 	}
 
@@ -718,6 +742,36 @@ class HeadlessHost {
 	}
 
 	/** KDM-164: take (and clear) the hits recorded against one peer avatar this turn. */
+	/**
+	 * KDM-186 — take the game's own presentation output for the player currently swapped in.
+	 *
+	 * `KDDamageQueue` is how KD tells its DRAW layer "show this damage": `KinkyDungeonDrawFight`
+	 * emits a floater per entry and splices it out. Headless there is no draw loop, so the queue only
+	 * ever grows — which is why it must not be captured as state (it would be re-delivered forever,
+	 * the UAT pile-up) and why the server has to drain it explicitly or leak.
+	 *
+	 * Clearing as it reads is the same take-once contract as `takePeerHits`: an entry can be charged
+	 * exactly once, so no later read can resurrect it. The values are the GAME's own — text, colour
+	 * and position — never numbers this layer invents.
+	 */
+	takeDamageFloaters() {
+		return this.eval(`(function(){
+			if (typeof KDDamageQueue === 'undefined' || !Array.isArray(KDDamageQueue)) return [];
+			var out = [];
+			for (var i = 0; i < KDDamageQueue.length; i++) {
+				var d = KDDamageQueue[i];
+				if (!d || !d.floater) continue;
+				var e = d.Entity || {};
+				out.push({
+					text: String(d.floater), color: d.Color || '#ffffff',
+					x: e.x, y: e.y, time: d.Time || 1,
+				});
+			}
+			KDDamageQueue.length = 0;
+			return out;
+		})()`);
+	}
+
 	takePeerHits(entityId) {
 		return this.eval(`(function(){
 			var w = KinkyDungeonDamageEnemy, k = ${entityId | 0};
@@ -900,6 +954,55 @@ class HeadlessHost {
 
 	/** KD-101: clear an avatar's per-turn bondage gauge (NPC restraints + boundLevel) before the turn,
 	 *  so _reconcilePeers reads only the bondage applied THIS turn (mirrors the hp damage gauge). */
+	/**
+	 * KDM-199: mirror a peer PLAYER real worn bondage onto their stand-in avatar.
+	 *
+	 * Uses specialBoundLevel — the GAME own ITEM-FREE bondage channel (what KDTieUpEnemy writes, e.g.
+	 * specialBoundLevel.Rope). KDResyncBondage sums it back into boundLevel, so the value survives the
+	 * engine recomputing it; a bare boundLevel write does NOT (KDResyncBondage zeroes it when
+	 * specialBoundLevel is unset). Measured: 1 to 1, 5 to 5, 60 to 60, 80 to 80.
+	 *
+	 * Item-free is the point: no KDSetNPCRestraints entries are created, so the KD-101 binding-slot
+	 * overflow that crashes the stock submenu cannot come back.
+	 */
+	/**
+	 * KDM-200: mark a DEFEATED peer avatar as exposed for this turn.
+	 *
+	 * This is the epic ONE declared co-op rule, and it is deliberately the SMALLEST possible one: it
+	 * sets the game own per-turn exposure flag and then lets KD own gate decide. It does NOT override
+	 * KDCanApplyBondage, does not fake a stun, and does not invent a bondage level — the branch that
+	 * fires is the stock one, target.vulnerable && target.hp <= 0.5 * maxhp, and the hp half comes from
+	 * the peer REAL Will (KDM-199 arming).
+	 *
+	 * Why co-op needs it at all: KD subdues an NPC through stun/freeze or accumulated bondage, both of
+	 * which arrive via weapons and spells an NPC fight supplies. Between two PLAYERS the product
+	 * requirement is that beating an opponent down is itself enough to tie them — measured otherwise
+	 * impossible without dictating the loadout. Declared here, in one place, rather than hidden.
+	 *
+	 * No duration is invented: the flag is set for THIS turn and re-armed every turn the peer is still
+	 * defeated, so it expires the moment they are not.
+	 */
+	setAvatarVulnerable(entityId, on) {
+		return this.eval(`(function(){
+			var e = KDMapData.Entities.find(function(en){ return en.id === ${entityId | 0}; });
+			if (!e) return null;
+			e.vulnerable = ${on ? 1 : 0};
+			return { vulnerable: e.vulnerable };
+		})()`);
+	}
+
+	setAvatarBondage(entityId, amount) {
+		const amt = Number(amount) || 0;
+		return this.eval(`(function(){
+			var e = KDMapData.Entities.find(function(en){ return en.id === ${entityId | 0}; });
+			if (!e) return null;
+			if (${amt} > 0) e.specialBoundLevel = { MPPeer: ${amt} };
+			else e.specialBoundLevel = undefined;
+			if (typeof KDResyncBondage === "function") KDResyncBondage(e);
+			return { boundLevel: e.boundLevel || 0 };
+		})()`);
+	}
+
 	clearAvatarBondage(entityId) {
 		return this.eval(`(function(){
 			var e = KDMapData.Entities.find(function(en){ return en.id === ${entityId | 0}; });
@@ -1008,7 +1111,14 @@ class HeadlessHost {
 	serializeRenderState() {
 		return this.eval(`(function(){
 			function clone(o){ try { return (o === undefined) ? undefined : JSON.parse(JSON.stringify(o)); } catch(e){ return null; } }
-			var ENT_FIELDS = ['id','x','y','visual_x','visual_y','offX','offY','scaleX','scaleY','flip','hp','visual_hp','boundLevel','distraction','revealed','player','CustomSprite','CustomName','CustomNameColor','style','outfit','outfitBound'];
+			// KDM-200: these are the fields KD OWN predicates read to decide whether a target is
+			// subdued — KinkyDungeonIsStunned reads stun/freeze, KDCanApplyBondage reads vulnerable and
+			// hp, KDBoundEffects reads boundLevel (and KDResyncBondage rebuilds it from
+			// specialBoundLevel). Omitting them meant the CLIENT — where the tie submenu actually
+			// evaluates the gate — never saw the state the server had computed, so no server-side fix
+			// could ever take effect. The old code hid this by stamping ent.stun onto the snapshot AFTER
+			// serialisation, bypassing this list; with the stamping gone the omission became visible.
+			var ENT_FIELDS = ['id','x','y','visual_x','visual_y','offX','offY','scaleX','scaleY','flip','hp','visual_hp','boundLevel','specialBoundLevel','stun','freeze','vulnerable','distraction','revealed','player','CustomSprite','CustomName','CustomNameColor','style','outfit','outfitBound'];
 			function entSnap(e){
 				var o = {};
 				for (var i=0;i<ENT_FIELDS.length;i++){ var k=ENT_FIELDS[i]; if (e[k] !== undefined) o[k] = e[k]; }

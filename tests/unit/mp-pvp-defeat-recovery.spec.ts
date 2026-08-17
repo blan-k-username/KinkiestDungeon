@@ -57,31 +57,61 @@ describe('defeat recovery (KD-099 "freed")', () => {
 		setWill(s, 'A', 0);
 		moveTurn(s, 'A');                       // the turn that latches it (reconcile runs after apply)
 
-		expect(s.isDefeated('A')).toBe(true);   // flagged (drives bindability + the HUD marker)
-		// KD has no "Will = 0 ⇒ you cannot act" rule: KinkyDungeonMove has no Will check and
+		expect(s.isDefeated('A')).toBe(true);   // flagged (drives the HUD marker)
+		// KD has no "Will = 0 => you cannot act" rule: KinkyDungeonMove has no Will check and
 		// KDPlayerCanMove is terrain-only. What limits a downed player is the bondage the peer
 		// then applies — enforced by the real pipeline, not by us.
-		expect(moveTurn(s, 'A').kdType).toBe('move');
-		expect(s.isDefeated('B')).toBe(false);          // the healthy peer is unaffected
+		expect(moveTurn(s, "A").kdType).toBe("move");
+		expect(s.isDefeated("B")).toBe(false);          // the healthy peer is unaffected
 	}, BOOT_TIMEOUT);
 
-	it('while down: the player can still be tied by a peer (the one co-op-specific addition)', () => {
+	/**
+	 * KDM-199: being down is a HUD MARKER, not a licence to tie.
+	 *
+	 * This used to assert that Will at the floor alone made a peer tie-able — true only because the
+	 * proxy INVENTED it, stamping stun=6 onto the avatar (and onto the wire) whenever Will hit 0. The
+	 * avatar is now armed FROM the peer: hp from their Will, stun from their own engine countdown,
+	 * bondage mirrored through specialBoundLevel. So KD's own KDCanApplyBondage answers, and KD needs
+	 * boundLevel > 0 — KDBoundEffects short-circuits at KinkyDungeonEnemies.ts:4228 otherwise.
+	 *
+	 * Both halves are asserted: down-but-unbound must NOT be tie-able, down-AND-bound must be.
+	 * Without the second half, "nobody is ever tie-able" would pass.
+	 */
+	it('while down: a DEFEATED peer is tie-able, and their real bondage is mirrored', () => {
 		s.setPvP(true);
 		setWill(s, 'A', 0);
 		moveTurn(s, 'A');
 		expect(s.isDefeated('A')).toBe(true);
+		expect(s.snapshotFor('B').defeatedPlayers).toContain('A');   // the marker still travels
 
-		expect(s.snapshotFor('B').defeatedPlayers).toContain('A');
-		// KDM-164: the synthetic `pvpBind` primitive is gone. What makes the tie possible is the
-		// GAME's own gate — being at the floor stuns the avatar, so `KDCanApplyBondage` passes. Assert
-		// that condition directly rather than a deleted primitive's return value.
-		s.world.restorePlayer(s.bundles.get('B'));
-		s._armPeerEnemies('B');
 		const eid = s.avatars.get('A');
-		const disabled = s.world.eval(`(function(){ var e=KDMapData.Entities.find(function(x){return x.id===${eid};});
-			return e ? !!(typeof KinkyDungeonIsDisabled==='function' && KinkyDungeonIsDisabled(e)) : null; })()`);
-		expect(disabled, "a downed peer's avatar is disabled, so the game's own bind gate allows the tie")
+		// KD OWN gate, evaluated on the SNAPSHOT entity — where the tie submenu actually runs.
+		const gate = () => {
+			s.world.restorePlayer(s.bundles.get("B"));
+			s._armPeerEnemies('B');
+			const snap = s.snapshotFor('B');
+			const ent = ((snap.map && snap.map.Entities) || []).find((e: any) => e.id === eid);
+			if (!ent) return { boundLevel: 0, can: null };
+			return s.world.eval("(function(){ var e = " + JSON.stringify(ent) + ";"
+				+ " return { boundLevel: e.boundLevel || 0, vulnerable: e.vulnerable || 0,"
+				+ '   can: (typeof KDCanApplyBondage === "function" && typeof KDPlayer === "function")'
+				+ "     ? !!KDCanApplyBondage(e, KDPlayer()) : null }; })()");
+		};
+
+		expect(gate().can, 'KDM-200: a DEFEATED opponent IS tie-able — the declared co-op rule')
 			.toBe(true);
+
+		// Give A REAL bondage, as a peer who has actually been tied would have.
+		s.world.restorePlayer(s.bundles.get('A'));
+		const added = s.world.addRestraint('HingedCuffs');
+		s.bundles.set('A', s.world.capturePlayer());
+		s.vitalsOf.set('A', s.world.getVitals());
+		expect(added && added.count, 'precondition: A must really be wearing a restraint')
+			.toBeGreaterThan(0);
+
+		const bound = gate();
+		expect(bound.boundLevel, "the peer's real bondage must reach the avatar").toBeGreaterThan(0);
+		expect(bound.can, "a downed AND bound peer is tie-able by KD's own gate").toBe(true);
 	}, BOOT_TIMEOUT);
 
 	it('after recovery: Will back up clears the flag and the player can act again', () => {

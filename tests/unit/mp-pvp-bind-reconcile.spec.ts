@@ -45,15 +45,26 @@ describe('PvP real tie — avatar restraint reconciles to the victim (KD-101)', 
 		const before = s.snapshotFor('B').restraints.length;
 		s.world.restorePlayer(s.bundles.get('A'));
 		s._armPeerEnemies('A');     // clears the avatar bondage gauge
-		s._reconcilePeers();
 		expect(s.snapshotFor('B').restraints.length).toBe(before);
 	}, BOOT_TIMEOUT);
 
-	const avatarDisabled = (sess: any, id: string) => {
-		const eid = sess.avatars.get(id);
-		return sess.world.eval(`(function(){ var e=KDMapData.Entities.find(function(x){return x.id===${eid};});
-			return e ? !!(typeof KinkyDungeonIsDisabled==='function' && KinkyDungeonIsDisabled(e)) : null; })()`);
+	/**
+	 * KD's OWN gate, evaluated on the SNAPSHOT entity — the object the browser holds and where the tie
+	 * submenu actually runs. Asserting against the SERVER world object made three earlier fixes look
+	 * correct while changing nothing in play.
+	 */
+	const bindGateOpen = (sess: any, id: string) => {
+		const actor = (id === "B") ? "A" : "B";
+		sess.world.restorePlayer(sess.bundles.get(actor));
+		sess._armPeerEnemies(actor);
+		const snap = sess.snapshotFor(actor);
+		const ent = ((snap.map && snap.map.Entities) || []).find((e: any) => e.id === sess.avatars.get(id));
+		if (!ent) return null;
+		return sess.world.eval("(function(){ var e = " + JSON.stringify(ent) + ";"
+			+ " return !!((typeof KDCanApplyBondage === 'function' && typeof KDPlayer === 'function')"
+			+ "   && KDCanApplyBondage(e, KDPlayer())); })()");
 	};
+	/** A walks into B avatar — a real bump-attack through KD own pipeline; B waits. */
 	function bumpB(sess: any) {
 		const a = sess.posOf('A'), b = sess.posOf('B');
 		const dir = { x: Math.sign(b.x - a.x), y: Math.sign(b.y - a.y) };
@@ -64,27 +75,31 @@ describe('PvP real tie — avatar restraint reconciles to the victim (KD-101)', 
 	it("a HEALTHY peer's avatar is NOT disabled — can't be tied yet (real 'must be subdued' rule)", () => {
 		s.world.restorePlayer(s.bundles.get('A'));
 		s._armPeerEnemies('A');
-		expect(avatarDisabled(s, 'B')).toBe(false);
+		expect(bindGateOpen(s, 'B')).toBe(false);
 	}, BOOT_TIMEOUT);
 
 	/**
-	 * KDM-164: this used to assert that a peer at HALF Will is already bindable — an MP-only rule we
-	 * invented (`will <= 0.5 * willMax`). The owner's directive is narrower and is the whole feature:
-	 * *default behaviour unchanged, PLUS a 0-WP peer may be tied.* So the line is KD's own floor.
+	/**
+	 * KDM-164 removed a "half Will" rule we invented; KDM-199 removed its successor (0 Will => stun the
+	 * avatar). Neither was KD's. The avatar is now armed FROM the peer — hp from Will, stun from their
+	 * own engine countdown, bondage mirrored via specialBoundLevel — so KD's own KDCanApplyBondage
+	 * decides, and it needs boundLevel > 0 (KDBoundEffects short-circuits at KinkyDungeonEnemies.ts:4228).
 	 *
-	 * Both halves are asserted, because "bindable at zero" is only meaningful if it is NOT bindable
-	 * before that — otherwise the rule has quietly become "always bindable".
+	 * Both halves asserted, or the rule quietly becomes "always" / "never" bindable.
 	 */
-	it('a peer is bindable at KD\'s own floor (0 Will) — and not while still standing', () => {
-		s.world.restorePlayer(s.bundles.get('A'));
-		s._armPeerEnemies('A');
-		expect(avatarDisabled(s, 'B'), 'a peer who is still up must not be bindable').toBe(false);
+	it('a peer is bindable once WORN DOWN — and not while still standing', () => {
+		expect(bindGateOpen(s, 'B'), 'a healthy peer must not be bindable').toBe(false);
 
 		for (let i = 0; i < 40 && s.vitalsFor('B').will > 0; i++) bumpB(s);
-		expect(s.vitalsFor('B').will, 'wear the peer down to the floor').toBeLessThanOrEqual(0);
+		expect(s.vitalsFor('B').will, 'precondition: the peer really was worn down').toBeLessThanOrEqual(0);
+		expect(bindGateOpen(s, 'B'), 'KDM-200: a worn-down (defeated) opponent IS tie-able').toBe(true);
 
-		s.world.restorePlayer(s.bundles.get('A'));
-		s._armPeerEnemies('A');
-		expect(avatarDisabled(s, 'B'), 'at 0 WP the real bind gate must allow the tie').toBe(true);
+		s.world.restorePlayer(s.bundles.get('B'));
+		const added = s.world.addRestraint('HingedCuffs');
+		s.bundles.set('B', s.world.capturePlayer());
+		s.vitalsOf.set('B', s.world.getVitals());
+		expect(added && added.count, 'precondition: B must really be wearing a restraint').toBeGreaterThan(0);
+
+		expect(bindGateOpen(s, 'B'), 'worn down AND bound: KD own gate allows the tie').toBe(true);
 	}, BOOT_TIMEOUT);
 });

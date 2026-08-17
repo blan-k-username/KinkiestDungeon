@@ -91,6 +91,18 @@ class SwapSession {
 		this.startOf = new Map();     // id -> {x,y}
 		this.logs = new Map();        // id -> per-player message log (KD-090)
 		this.actionMsgOf = new Map(); // id -> {text,color} transient floating combat text (KD-098)
+		// KDM-186: monotonic id per client for ONE-SHOT EVENTS on the wire.
+		//
+		// A snapshot is STATE and must be idempotent — re-applying it converges. An EVENT (a combat
+		// floater, a cast animation) is not: re-applying it duplicates it. They shared one wire, so
+		// every snapshot delivered after a hit re-stamped that hit's visuals. Measured in UAT: the
+		// floater queue grew only while the mouse moved (each move = a state change = a snapshot) and
+		// drained to 0 the moment snapshots stopped — 0 created/s with 84 queued.
+		//
+		// The sequence travels WITH the event and the client applies each at most once. Generic by
+		// construction: neither side enumerates which events exist — one counter, one comparison.
+		this._eventSeq = new Map();      // clientId -> last event id issued
+		this.pendingEvents = new Map();  // clientId -> events awaiting delivery
 		this.vitalsOf = new Map();    // id -> {will,willMax,...} last-known vitals (KD-098 HP bar)
 		this.defeated = new Set();    // ids whose Will hit 0 — incapacitated (KD-099)
 		this.tiedOf = new Map();      // id -> Set of restraint NAMES already reconciled onto this peer (KD-101)
@@ -108,6 +120,12 @@ class SwapSession {
 		// KDM-163: input type -> "turn" | "ui", LEARNED from real turns (never from a speculative apply,
 		// which would double-apply world-mutating actions — see HeadlessHost.applyInputObserved).
 		this.inputKind = new Map();
+		// KDM-186: last state FINGERPRINT sent to each client. A reply carrying the full state is only
+		// worth its ~40 KB when the state actually changed; measured, the proxy was answering ~100
+		// inputs/s per client with a full snapshot (809 MB egress, one core pegged, replies stopped,
+		// lockstep never completed). This is a DIFF, not a feature rule: the session never learns which
+		// inputs matter, only whether this player's own captured state moved.
+		this._stateFp = new Map();
 		// KDM-163: pre-seed inputKind by static analysis. OFF by default — the classifier is sound and
 		// unit-tested, but switching the CLIENT to route everything on top of it still destabilises
 		// mp-coop-demo (see KDM-163 § CORRECTION 2). Opt in with { seedInputKinds: true }.
@@ -241,6 +259,32 @@ class SwapSession {
 	 * Cost of this shape: the FIRST use of each UI type in a session goes through lockstep, so it costs
 	 * one turn. It is applied correctly (never lost, never doubled), and every later use is immediate.
 	 */
+	/**
+	 * KDM-186: a cheap content fingerprint of a player's captured state bundle.
+	 *
+	 * Deliberately GENERIC — it hashes whatever the capture produced, so a mod's new field is covered
+	 * with no registration, exactly like the capture itself. djb2 over one JSON pass: no per-field
+	 * knowledge, no allowlist, and no idea what any of the values mean.
+	 */
+	_fingerprint(bundle) {
+		let s;
+		try { s = JSON.stringify(bundle); } catch (e) { return NaN; }   // uncomparable ⇒ always "changed"
+		let h = 5381;
+		for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+		return h;
+	}
+
+	/**
+	 * Did this client's own state move since the last time we told them about it?
+	 * Records the new fingerprint, so the answer is "since the last REPLY", not "since the last turn".
+	 */
+	_stateChanged(clientId, bundle) {
+		const fp = this._fingerprint(bundle);
+		const prev = this._stateFp.get(clientId);
+		this._stateFp.set(clientId, fp);
+		return prev === undefined || prev !== fp || Number.isNaN(fp);
+	}
+
 	apply(clientId, action = {}) {
 		if (!this.started) throw new Error('session not started');
 		if (!this._joined.includes(clientId)) throw new Error(`unknown player ${clientId}`);
@@ -258,14 +302,18 @@ class SwapSession {
 				this.inputKind.set(kdType, 'turn');
 				this._dbg(`RECLASSIFY "${kdType}" ui -> turn (it advanced time outside lockstep)`);
 			}
-			this.bundles.set(clientId, this.world.capturePlayer());
+			const newBundle = this.world.capturePlayer();
+			this.bundles.set(clientId, newBundle);
+			// KDM-186: did this player's own state actually move? The caller uses this to decide between
+			// a full state reply and a bare ack — a diff, never a judgement about which inputs matter.
+			const changed = this._stateChanged(clientId, newBundle);
 			// Leave the world exactly as a resolved turn leaves it. `_advanceTurn` ends with the global
 			// player parked off-field; an immediate apply must restore that same between-turns
 			// invariant, or the world is left with one player swapped in and the next turn (and any
 			// read of avatar/enemy positions) starts from a different state than it used to.
 			this.world.parkGlobalPlayer(PARK.x, PARK.y);
 			this._noteUnknown(kdType, res);
-			return { advanced: false, kind: 'ui', unknownType: !!res.unknownType, error: res.error || null };
+			return { advanced: false, kind: 'ui', changed, unknownType: !!res.unknownType, error: res.error || null };
 		}
 
 		// Everything else — including every type seen for the first time — goes through lockstep. That
@@ -397,6 +445,10 @@ class SwapSession {
 				// would double-apply world-mutating actions (measured, probes/probe11).
 				const obs = this.world.applyInputObserved(kdType, data) || {};
 				result = obs.result;
+				// KDM-186: this player is swapped in, so whatever the game just queued for its draw layer
+				// is theirs. Harvest it as EVENTS now — it is presentation output, not state, and is no
+				// longer captured (it used to be replicated and re-delivered forever).
+				this._harvestFloaters(id);
 				this._noteUnknown(kdType, obs);
 				// Observation beats the static seed, in BOTH directions:
 				//  - a seeded "turn" that demonstrably never advanced is demoted to "ui" (this is what
@@ -476,27 +528,45 @@ class SwapSession {
 	_armPeerEnemies(actorId) {
 		for (const [cid, eid] of this.avatars.entries()) {
 			if (cid === actorId || !this._isPvP(actorId, cid)) continue;
-			// Reset the avatar to FULL hp before the attacker acts — it's a per-turn DAMAGE GAUGE, not
-			// the peer's health. _reconcilePeers reads `ARM_HP - hp` as the real damage dealt and
-			// KDM-164: the avatar is a STAND-IN the attacker's real weapon can reach — nothing about the
-			// victim's health is encoded in it, and `_reconcilePeers` no longer reads its hp. It is
-			// simply kept alive (restored to its own def's maxhp, not to a number we invented) so the
-			// peer stays targetable and combat keeps working.
-			// A peer is bindable at KD's own floor — Will zero — which is the owner's directive
-			// ("0 WP allows another co-op player to use the tie action") and nothing more. The stun is
-			// what the game's real KDCanApplyBondage gate needs to see; a peer who is up cannot be tied.
+			// KDM-199: ARM THE AVATAR FROM THE PEER, do not reset it to a placeholder.
+			//
+			// This used to set hp = FULL, stun = 0, boundLevel = 0 and then patch the consequences with an
+			// invented rule (will <= 0 => stun 6). That rule existed only because the reset deleted the
+			// three things KD own gate reads. Now each is mirrored from the peer real state, so
+			// KDCanApplyBondage answers about the peer instead of about our placeholder.
+			//
+			// hp: the peer Will, on the avatar own scale. Will IS their defeat meter, snapshotFor already
+			// presents it this way to the client, and this docstring said so before KDM-164 changed the
+			// code and left the comment behind. It is a REPRESENTATION only — nothing reads it back as a
+			// measurement any more (that was KDM-156; hits come from the recorder), which is what makes
+			// restoring it safe. Floored just above zero: a hp=0 entity reads as DEAD and untargetable,
+			// so the floor is a liveness detail, not a threshold.
 			const v = this.vitalsOf.get(cid) || {};
 			const cur = this.world.getEntityCombat(eid);
 			const full = (cur && cur.maxhp != null && cur.maxhp > 0) ? cur.maxhp : 10;
-			const down = this.defeated.has(cid) || this._isDown(v);
-			this.world.setAvatarEnemy(eid, full, full, down ? 6 : 0);
-			this._dbg(`arm ${cid} down=${down} -> stun=${down ? 6 : 0} (will=${v.will != null ? v.will.toFixed(1) : '?'})`);
-			// KD-101: clear the avatar's bondage gauge each turn so reconcile reads only THIS turn's new
-			// ties. The avatar must NOT accumulate restraints — its binding slots would fill up and the
-			// stock submenu apply (KDGetNPCBindingSlotForItem(...).sgroup, no null guard) crashes after a
-			// few ties. The victim STAYS bound on their own bundle (reconcile adds, never removes) and
-			// renders it client-side (serializeRenderState→render-client). hp is the per-turn damage gauge.
+			const frac = (v.will != null && v.willMax > 0)
+				? Math.max(0, Math.min(1, v.will / v.willMax))
+				: 1;
+			const hp = Math.max(0.01, frac * full);
+			// stun: the peer OWN engine stun countdown (KinkyDungeonFlags.playerStun). Mirrored, never
+			// invented — the engine sets it and the engine counts it down.
+			this.world.setAvatarEnemy(eid, hp, full, v.stunTurns || 0);
+			this._dbg(`arm ${cid} hp=${hp.toFixed(2)}/${full} (will=${v.will != null ? v.will.toFixed(1) : "?"}) ` +
+				`stun=${v.stunTurns || 0} bondage=${v.bondage || 0} disabled=${v.disabled}`);
+			// KD-101: the avatar must not ACCUMULATE restraint items — its binding slots fill up and the
+			// stock submenu (KDGetNPCBindingSlotForItem(...).sgroup, no null guard) crashes after a few
+			// ties. Clearing the items stays. The victim keeps the real ties on their own bundle.
 			this.world.clearAvatarBondage(eid);
+			// KDM-199: …but their bondage LEVEL is then mirrored back through the item-free channel, so
+			// KDBoundEffects sees it. Without this the avatar reads as unbound and KDBoundEffects returns
+			// 0 at its boundLevel short-circuit, which is why no peer could ever be tied without the
+			// invented stun.
+			this.world.setAvatarBondage(eid, v.bondage || 0);
+			// KDM-200: the DEFEATED-peer exposure is stamped on the SNAPSHOT (see snapshotFor), not on
+			// the world avatar. Marking the world entity `vulnerable` changes real combat — KD grants
+			// crits against a vulnerable target (KinkyDungeonFight.ts:886) — and measured: it killed the
+			// avatar outright, which broke a downed peer keeping agency. The client is where the tie gate
+			// runs, so the flag belongs on the object the client evaluates and nowhere else.
 		}
 	}
 
@@ -533,6 +603,9 @@ class SwapSession {
 					// lines all apply, exactly as when anything else in the game hurts a player.
 					const before = this.world.getVitals().will;
 					this.world.dealDamage(h.damage, h.type);
+					// KDM-186: the victim is swapped in, so the game's own damage presentation for this hit
+					// is queued against THEM — take it as an event so they see the number once.
+					this._harvestFloaters(id);
 					this._dbg(`reconcile ${id} real damage ${h.damage} ${h.type}: will ` +
 						`${before != null ? before.toFixed(2) : '?'} -> ${(this.world.getVitals().will ?? 0).toFixed(2)}`);
 				}
@@ -591,7 +664,7 @@ class SwapSession {
 		const fb = this.world.sendFeedback(txt, '#33ff66', 12);
 		const entries = (fb && fb.entries) || [];
 		for (const pid of this._joined) this._pushLog(pid, entries);
-		this.actionMsgOf.set(id, { text: 'Recovered!', color: '#33ff66' });
+		this._emitEvent(id, { text: 'Recovered!', color: '#33ff66' });
 		this._dbg(`RECOVERED ${id} (${why})`);
 	}
 
@@ -602,7 +675,7 @@ class SwapSession {
 		const fb = this.world.sendFeedback(txt, '#ff3333', 12);
 		const entries = (fb && fb.entries) || [];
 		for (const pid of this._joined) this._pushLog(pid, entries);
-		this.actionMsgOf.set(id, { text: 'Defeated!', color: '#ff3333' });
+		this._emitEvent(id, { text: 'Defeated!', color: '#ff3333' });
 		this._dbg(`DEFEAT ${id} (${why})`);
 	}
 
@@ -753,6 +826,42 @@ class SwapSession {
 	 * world is clean between turns. Snapshot shape === HeadlessHost.serializeRenderState
 	 * (render-state v1) — exactly what KDRenderClient.apply() consumes in the browser.
 	 */
+	/**
+	 * KDM-186 — queue a ONE-SHOT EVENT for a client, stamped with a fresh sequence id.
+	 *
+	 * The id is issued per real occurrence, never per snapshot that carries it, so two identical hits
+	 * in a row are two events (a content hash would wrongly collapse them). The client applies each
+	 * at most once and ignores repeats.
+	 */
+	_emitEvent(clientId, payload) {
+		const seq = (this._eventSeq.get(clientId) || 0) + 1;
+		this._eventSeq.set(clientId, seq);
+		let q = this.pendingEvents.get(clientId);
+		if (!q) { q = []; this.pendingEvents.set(clientId, q); }
+		q.push(Object.assign({ seq }, payload));
+		while (q.length > 64) q.shift();        // bounded: a client that never reads must not grow it
+		return seq;
+	}
+
+	/**
+	 * Harvest whatever the GAME just queued for its draw layer and turn it into events for `clientId`.
+	 * Called with that player swapped in, so the queue holds exactly their occurrences.
+	 */
+	_harvestFloaters(clientId) {
+		let out = [];
+		try { out = this.world.takeDamageFloaters() || []; } catch (e) { return; }
+		for (const f of out) this._emitEvent(clientId, { kind: 'floater', floater: f });
+	}
+
+	/** Events not yet delivered to this client. Take-once: delivered is delivered. */
+	_takePendingEvents(clientId) {
+		const q = this.pendingEvents.get(clientId);
+		if (!q || !q.length) return [];
+		this.pendingEvents.set(clientId, []);
+		return q;
+	}
+
+
 	snapshotFor(clientId) {
 		if (!this.started) throw new Error('session not started');
 		const bundle = this.bundles.get(clientId);
@@ -793,7 +902,18 @@ class SwapSession {
 		if (snap.messages) snap.messages.log = (this.logs.get(clientId) || []).slice(-this.maxLog);
 		// KD-098: this turn's PvP floating combat text, scoped to this client (victim or attacker).
 		const am = this.actionMsgOf.get(clientId);
-		if (am && snap.messages) { snap.messages.action = am.text; snap.messages.actionColor = am.color; snap.messages.actionTime = 2; }
+		// KDM-186: the event travels WITH its sequence id, so a client that has already applied it can
+		// ignore the copy carried by every later snapshot. Without this, each snapshot re-stamped the
+		// last hit's floater — visible as an ever-growing pile while the mouse moved.
+		if (am && snap.messages) {
+			snap.messages.action = am.text;
+			snap.messages.actionColor = am.color;
+			snap.messages.actionTime = 2;
+			snap.messages.actionSeq = am.seq || 0;
+		}
+		// KDM-186: one-shot events ride their OWN channel, each with a sequence the client applies at
+		// most once. Take-once on delivery so an undelivered backlog cannot grow without bound.
+		snap.events = this._takePendingEvents(clientId);
 		// KD-094: peers in a PvP relationship with this client render+target as Enemy faction
 		// (stock attack mechanics then "just work" — the client originates a normal doattack).
 		if (snap.map && Array.isArray(snap.map.Entities)) {
@@ -815,12 +935,23 @@ class SwapSession {
 				}
 				// KD-094: PvP peers render+target as Enemy faction (red bar; stock attack mechanics).
 				if (this._isPvP(clientId, cid)) { ent.faction = 'Enemy'; ent.hostile = 9999; }
-				// KD-101: set the avatar's disabled state DIRECTLY in the snapshot from whether the peer
-				// is down. The world avatar's `stun` is armed per-turn and may decay before snapshot
-				// time; setting it here guarantees the CLIENT sees the peer as disabled so its real
-				// KDCanApplyBondage gate allows the tie.
-				// KDM-164: "down" is KD's own floor (Will zero), not an invented fraction of WillMax.
-				if (this.defeated.has(cid) || this._isDown(v)) ent.stun = Math.max(ent.stun || 0, 6);
+				// KDM-200: a DEFEATED peer is marked EXPOSED on the snapshot the client evaluates.
+				//
+				// It must be stamped here, not only at arm time: `vulnerable` is a per-turn flag the
+				// ENGINE decays (KinkyDungeonEnemies.ts:4650, `vulnerable -= delta`), so a value set
+				// while arming is already consumed by the time the snapshot is composed. The client runs
+				// KDCanApplyBondage against THIS object, so the state has to be true at THIS moment.
+				//
+				// This is the one declared co-op rule and it is deliberately minimal: it sets the game own
+				// exposure flag and lets KD OWN branch decide — `vulnerable && hp <= 0.5 * maxhp` — where
+				// the hp half is the peer real Will (ent.hp above). It does NOT force `disabled`, does not
+				// fake a stun, and invents no duration: it is recomputed per snapshot from whether the
+				// peer is defeated right now, so it lapses the moment they recover.
+				//
+				// (The predecessor stamped `ent.stun = 6` here, which overrode the gate outright.)
+				if (this.defeated.has(cid) || this._isDown(v)) {
+					ent.vulnerable = Math.max(ent.vulnerable || 0, 1);
+				}
 			}
 		}
 		// KD-099: expose the defeated players so the client HUD can mark them (down/incapacitated).
