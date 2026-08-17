@@ -352,9 +352,56 @@
 					} catch (e) { /* best-effort render sync */ }
 				}
 				KinkyDungeonMessageLog = s.messages.log || [];
-			if (typeof KinkyDungeonActionMessage !== 'undefined') KinkyDungeonActionMessage = s.messages.action;
-			if (typeof KinkyDungeonActionMessageTime !== 'undefined') KinkyDungeonActionMessageTime = s.messages.actionTime;
-			if (typeof KinkyDungeonActionMessageColor !== 'undefined') KinkyDungeonActionMessageColor = s.messages.actionColor;
+			/*
+			 * KDM-186 — ONE-SHOT EVENTS ARE APPLIED AT MOST ONCE.
+			 *
+			 * The action message is an EVENT, not state: assigning it makes the game show a floater.
+			 * It rides inside the snapshot, which is STATE and re-applied on every delivery — so every
+			 * snapshot after a hit re-stamped that hit's visuals. Measured in UAT: the floater queue
+			 * grew ONLY while the mouse moved (each move is a state change, hence a snapshot) and
+			 * drained to zero the moment snapshots stopped — 0 created/s with 84 still queued.
+			 *
+			 * The server issues a sequence id per real occurrence; anything already applied is skipped
+			 * and the game's own timer is left to decay it. Generic: this side names no event and no
+			 * game feature — one comparison against one counter, so any future effect the server puts
+			 * on this channel inherits the guarantee.
+			 */
+			var evSeq = (s.messages && s.messages.actionSeq) || 0;
+			if (evSeq > (KDRenderClient._lastEventSeq || 0)) {
+				KDRenderClient._lastEventSeq = evSeq;
+				if (typeof KinkyDungeonActionMessage !== 'undefined') KinkyDungeonActionMessage = s.messages.action;
+				if (typeof KinkyDungeonActionMessageTime !== 'undefined') KinkyDungeonActionMessageTime = s.messages.actionTime;
+				if (typeof KinkyDungeonActionMessageColor !== 'undefined') KinkyDungeonActionMessageColor = s.messages.actionColor;
+			}
+			/*
+			 * KDM-186 — ONE-SHOT EVENTS, APPLIED AT MOST ONCE.
+			 *
+			 * A snapshot is STATE: re-applying it must converge. An EVENT (a damage number, a cast
+			 * animation) is not idempotent — replaying it duplicates it. They used to share one wire:
+			 * `KDDamageQueue` is a consume-once presentation queue that the DRAW loop drains, the
+			 * headless server has no draw loop so it never drained, and the generic capture then
+			 * replicated the stale entries so every snapshot re-stamped the same hit. Measured in UAT:
+			 * the floater queue grew only while snapshots arrived (i.e. while the mouse moved) and
+			 * drained to zero the moment they stopped — 0 created/s with 84 still queued.
+			 *
+			 * Now presentation state is not replicated at all, and what the player must be told
+			 * arrives here with a sequence. This block names no event kind beyond dispatching the
+			 * game's own payload, so any effect the server puts on this channel inherits the
+			 * exactly-once guarantee with no change on either side.
+			 */
+			if (Array.isArray(s.events) && s.events.length) {
+				for (var ei = 0; ei < s.events.length; ei++) {
+					var ev = s.events[ei];
+					if (!ev || !(ev.seq > (KDRenderClient._lastEventSeq || 0))) continue;
+					KDRenderClient._lastEventSeq = ev.seq;
+					try {
+						if (ev.kind === 'floater' && ev.floater && typeof KinkyDungeonSendFloater === 'function') {
+							var f = ev.floater;
+							KinkyDungeonSendFloater({ x: f.x, y: f.y }, f.text, f.color, f.time);
+						}
+					} catch (e) { /* an event must never break the render path */ }
+				}
+			}
 			if (typeof MiniGameKinkyDungeonLevel !== 'undefined') MiniGameKinkyDungeonLevel = s.level;
 			if (s.checkpoint && typeof MiniGameKinkyDungeonCheckpoint !== 'undefined') MiniGameKinkyDungeonCheckpoint = s.checkpoint;
 			return { ok: true, entities: KDMapData.Entities.length };

@@ -27,6 +27,9 @@ const http = require('http');
 const crypto = require('crypto');
 const { SwapSession } = require('./swap-session');
 
+/** Monotonic milliseconds. Never Date.now(): a wall-clock jump would corrupt every latency below. */
+function now() { return Number(process.hrtime.bigint()) / 1e6; }
+
 const WS_MAGIC = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 
 function acceptKey(key) {
@@ -106,6 +109,9 @@ class WSBridge {
 		// never a contested action, so R9 conflict resolution is unaffected.
 		this.idleGraceMs = (opts.idleGraceMs != null) ? opts.idleGraceMs : 0;
 		this._graceTimer = null;
+		// KDM-186: the latency probe must be running before the first input arrives.
+		this._startLoopLag();
+		this._startStatsTicker();
 	}
 
 	listen(port = 0) {
@@ -140,16 +146,47 @@ class WSBridge {
 			buf = Buffer.concat([buf, chunk]);
 			const { messages, rest } = decodeFrames(buf);
 			buf = rest;
-			for (const m of messages) {
-				if (m === null) { socket.end(); return; }
-				let msg; try { msg = JSON.parse(m); } catch (e) { continue; }
+			// KDM-186 queue timing: every message in this batch arrived BEFORE we handled any of them,
+			// so a batch of N is N-1 messages that waited on their predecessors. `_handle` runs
+			// synchronously on the event loop — there is no application queue — so this batch index and
+			// the event-loop lag below are the only places a wait can hide on the server side.
+			const tBatch = now();
+			const parsed = messages.map((m) => {
+				if (m === null) return null;
+				try { return JSON.parse(m); } catch (e) { return undefined; }
+			});
+			const superseded = this._supersededInBatch(parsed);
+			for (let bi = 0; bi < parsed.length; bi++) {
+				if (messages[bi] === null) { socket.end(); return; }
+				const msg = parsed[bi];
+				if (!msg) continue;
+				// KDM-192: a stream input that a NEWER one of the same type already supersedes — with both
+				// already sitting in this same socket read — is stale before we even look at it. Applying
+				// it costs a full transaction and buys nothing but latency for whatever follows.
+				if (superseded.has(bi)) { this._noteCoalesced(clientId, msg); continue; }
+				this._batch = { size: parsed.length, index: bi, waitMs: now() - tBatch };
 				clientId = this._handle(socket, msg, clientId);
 			}
+			this._batch = null;
 		});
 		socket.on('error', () => {});
 	}
 
-	_send(socket, obj) { socket.write(encodeFrame(JSON.stringify(obj))); }
+	/**
+	 * KDM-186: a write that the kernel could not take immediately is queued INSIDE Node, and the
+	 * client sees it whenever the socket drains — latency the server's own clock never sees. With
+	 * ~40 KB snapshots this is a prime suspect for round-trips that are ~60x the measured CPU cost,
+	 * so record the backlog rather than discarding `write`'s return value.
+	 */
+	_send(socket, obj) {
+		const ok = socket.write(encodeFrame(JSON.stringify(obj)));
+		const backlog = socket.writableLength || 0;
+		if (!this._wr) this._wr = { writes: 0, blocked: 0, maxBacklog: 0 };
+		this._wr.writes++;
+		if (!ok) this._wr.blocked++;
+		if (backlog > this._wr.maxBacklog) this._wr.maxBacklog = backlog;
+		return ok;
+	}
 
 	_handle(socket, msg, clientId) {
 		if (msg.type === 'join') {
@@ -177,7 +214,10 @@ class WSBridge {
 			try {
 				// KDM-163 (option A): the client routes EVERY input and classifies nothing. `apply`
 				// asks the GAME whether the input consumes a turn; only then does it enter lockstep.
+				const tApply = now();
 				let res = this.session.apply(clientId, msg.action || {});
+				const applyMs = now() - tApply;
+				this._noteInput(clientId, msg.action, res.kind, applyMs);   // KDM-186 telemetry
 				if (res.kind === 'ui') {
 					// A menu/UI input: applied to this player's own state, no turn consumed. Push their
 					// updated snapshot straight back so the UI responds without waiting for the partner
@@ -187,8 +227,20 @@ class WSBridge {
 					// That matters enormously once the client routes everything: `setMoveDirection` is
 					// sent from KD's draw loop EVERY FRAME, so an untagged push would reset the
 					// per-turn state ~60×/s and no click-to-move route could survive a single frame.
+					// KDM-186 RULE 2 — state on CHANGE, not on input.
+					// Measured: KD's draw loop emits an input every frame, so answering each one with a
+					// full snapshot cost ~40 KB × ~100/s × 2 clients (809 MB egress, one core pegged).
+					// The server then fell so far behind that replies stopped and lockstep never
+					// completed — the turn counter never left 0 and the players could do NOTHING.
+					// An input that moved no state gets a bare ack, which the client counts for its
+					// in-order bookkeeping and otherwise ignores. This is a DIFF of the player's own
+					// captured state — the bridge never learns which inputs are 'important'.
+					if (res.changed === false) {
+						this._send(socket, { type: 'ack', tick: this.session.turn, srv: this._srvStamp(applyMs) });
+						return clientId;
+					}
 					this._send(socket, {
-						type: 'state', kind: 'ui', tick: this.session.turn,
+						type: 'state', kind: 'ui', tick: this.session.turn, srv: this._srvStamp(applyMs),
 						snapshot: this.session.snapshotFor(clientId),
 					});
 					return clientId;
@@ -247,12 +299,222 @@ class WSBridge {
 		}, this.idleGraceMs);
 	}
 
+	/**
+	 * KDM-186 UAT telemetry: how much traffic each client actually generates between turns, how the
+	 * GAME classified it, and — since the 2026-08-17 profile — WHERE THE LATENCY IS.
+	 *
+	 * The profile measured a `ui` transaction at ~16-20 ms of server CPU while the owner measured a
+	 * 1067 ms round-trip: two orders of magnitude apart. So the wait is NOT the work, and only four
+	 * places on this side can hold a message. Each is recorded here, so one UAT round decides it:
+	 *
+	 *   applyMs   the actual transaction (profiled at ~16-20 ms — expected to be small)
+	 *   waitMs    time this message sat behind earlier messages of the SAME socket read batch
+	 *   batch     how many messages arrived together (batch > 1 IS backlog: they queued in the
+	 *             socket buffer while we were busy — `_handle` is synchronous, there is no app queue)
+	 *   loopLag   event-loop drift: time stolen by anything else (e.g. the 90 ms oversize audit)
+	 *   write     `socket.write` returning false + `writableLength` — the kernel could not take the
+	 *             reply, so it is queued INSIDE Node and the client sees it whenever the socket
+	 *             drains. With ~40 KB snapshots this is the prime suspect and the server's own clock
+	 *             is blind to it.
+	 *
+	 * Costs a few counter bumps per input; the line is emitted once per turn into the existing
+	 * serverLog, which the browser console already echoes.
+	 */
+	_noteInput(clientId, action, kind, applyMs) {
+		if (!this._inputStats) this._inputStats = new Map();
+		let per = this._inputStats.get(clientId);
+		if (!per) {
+			per = { ui: 0, turn: 0, types: {}, apply: [], wait: [], batchMax: 0, batched: 0 };
+			this._inputStats.set(clientId, per);
+		}
+		const t = (action && (action.kdType || action.kind)) || 'unknown';
+		per[kind === 'ui' ? 'ui' : 'turn']++;
+		per.types[t] = (per.types[t] || 0) + 1;
+		if (applyMs != null) per.apply.push(applyMs);
+		const b = this._batch;
+		if (b) {
+			per.wait.push(b.waitMs);
+			if (b.size > per.batchMax) per.batchMax = b.size;
+			if (b.index > 0) per.batched++;   // this message waited on a predecessor
+		}
+	}
+
+	/**
+	 * Event-loop lag sampler. A 50 ms interval that reports how late it actually fired: the only way
+	 * to see time stolen by synchronous work elsewhere (the oversize audit is 90 ms every ~3.3 s).
+	 * `unref()` so it never holds the process open — a telemetry probe must not change lifetime.
+	 */
+	_startLoopLag() {
+		if (this._lagTimer) return;
+		const EVERY = 50;
+		let last = now();
+		this._lag = { max: 0, n: 0, sum: 0 };
+		this._lagTimer = setInterval(() => {
+			const t = now();
+			const late = Math.max(0, (t - last) - EVERY);
+			last = t;
+			this._lag.n++; this._lag.sum += late;
+			if (late > this._lag.max) this._lag.max = late;
+		}, EVERY);
+		if (this._lagTimer.unref) this._lagTimer.unref();
+	}
+
+	/**
+	 * KDM-186: emit the latency line at 1 Hz, to BOTH the server stdout and the browser console.
+	 *
+	 * The first version drained per resolved turn. That is the wrong clock: under strict lockstep
+	 * (idleGraceMs=0, the demo default) a turn stalls until BOTH humans act, so the telemetry went
+	 * silent for precisely the stall it was added to explain. A wall-clock tick also makes the counts
+	 * rates rather than per-turn totals, which is what a per-frame input stream needs.
+	 *
+	 * Also reports the lockstep barrier: a stalled turn must SAY who it is waiting on, or "nothing is
+	 * happening" is indistinguishable from "the transport is broken" — a confusion that has already
+	 * cost this task several hypotheses.
+	 */
+	_startStatsTicker() {
+		if (this._statsTimer) return;
+		this._statsLog = [];
+		this._statsTimer = setInterval(() => {
+			const line = this._drainInputStats();
+			const waiting = this._barrierLine();
+			for (const l of [line, waiting]) {
+				if (!l) continue;
+				// eslint-disable-next-line no-console
+				console.log("[mp-stats] " + l);
+				this._statsLog.push(l);
+			}
+			if (this._statsLog.length > 8) this._statsLog = this._statsLog.slice(-8);
+		}, 1000);
+		if (this._statsTimer.unref) this._statsTimer.unref();
+	}
+
+	/** Who is the lockstep barrier still waiting on, and for how long (null when no turn is open). */
+	_barrierLine() {
+		const s = this.session;
+		if (!s || !s.started) return null;
+		let pending = [];
+		// Use the session's own barrier accessor — never re-derive it from `_pending` here, or this line
+		// can disagree with the barrier it is describing.
+		try { pending = (typeof s.waitingOn === "function") ? s.waitingOn() : []; }
+		catch (e) { return null; }
+		if (!pending.length || pending.length === (s.players || []).length) {
+			this._barrierSince = null;
+			return null;
+		}
+		if (!this._barrierSince) this._barrierSince = now();
+		return "turn " + s.turn + " OPEN for " + Math.round((now() - this._barrierSince) / 1000)
+			+ "s — waiting on: " + pending.join(", ") + " (strict lockstep, idleGraceMs=" + this.idleGraceMs + ")";
+	}
+
+	/**
+	 * KDM-192: which messages in this socket read are already superseded by a newer one of the SAME
+	 * type, and therefore need not be applied at all?
+	 *
+	 * WHY. Measured in the owner's live session: ~30 inputs/s at ~60 ms each = ~1.8 s of CPU demanded
+	 * per wall-clock second, so the loop ran ~2 s behind (`loopLag avg 1600-2400ms`) and a real action
+	 * queued behind it landed ~3 s late. The waste was visible in one field: `batched=25/max26` —
+	 * twenty-six `setMoveDirection` in ONE read, each paid in full, when only the last can matter.
+	 *
+	 * SAFETY, and why this is not a per-feature list:
+	 *  - Only types the SESSION has already classified `ui` are eligible. That classification is
+	 *    LEARNED from the game (`inputKind`), never enumerated here — this file names no input type.
+	 *  - A `ui` input is a LEVEL (the current mouse direction), not an event: the newest value is the
+	 *    whole truth, so an older one is not "dropped work", it is a stale reading.
+	 *  - Anything else — turn-consuming, or simply not yet classified — is NEVER skipped. Unknown
+	 *    defaults to "keep", which is the safe direction (KDM-163 forbids silently swallowing an input).
+	 *  - Scope is ONE socket read. These messages are already queued together; nothing is delayed and
+	 *    nothing is held back waiting for a possible successor.
+	 * Skips are COUNTED and reported, never silent.
+	 */
+	_supersededInBatch(parsed) {
+		const skip = new Set();
+		if (!parsed || parsed.length < 2) return skip;
+		const kinds = this.session && this.session.inputKind;
+		if (!kinds) return skip;
+		const lastIndexOfType = new Map();
+		for (let i = 0; i < parsed.length; i++) {
+			const msg = parsed[i];
+			if (!msg || msg.type !== "input" || !msg.action) continue;
+			const t = msg.action.kdType || msg.action.kind;
+			if (!t || kinds.get(t) !== "ui") continue;   // unknown or turn-consuming ⇒ keep every one
+			const prev = lastIndexOfType.get(t);
+			if (prev !== undefined) skip.add(prev);      // an older reading of the same level
+			lastIndexOfType.set(t, i);
+		}
+		return skip;
+	}
+
+	/** Count a coalesced input so the saving is visible and the drop is never silent (KDM-163). */
+	_noteCoalesced(clientId, msg) {
+		if (!this._coalesced) this._coalesced = new Map();
+		const t = (msg && msg.action && (msg.action.kdType || msg.action.kind)) || "unknown";
+		const key = (clientId || "?") + " " + t;
+		this._coalesced.set(key, (this._coalesced.get(key) || 0) + 1);
+	}
+
+	/** Compact per-reply stamp so the client can decompose its OWN round-trip measurement. */
+	_srvStamp(applyMs) {
+		const b = this._batch;
+		return {
+			apply: Math.round(applyMs * 100) / 100,
+			wait: b ? Math.round(b.waitMs * 100) / 100 : 0,
+			batch: b ? b.size : 1,
+			backlog: (this._wr && this._wr.maxBacklog) || 0,
+		};
+	}
+
+	/** Drain the counters into one human-readable line (null when nothing happened). */
+	_drainInputStats() {
+		if (!this._inputStats || !this._inputStats.size) return null;
+		const q = (xs, p) => {
+			if (!xs.length) return 0;
+			const s = [...xs].sort((a, b) => a - b);
+			return Math.round(s[Math.min(s.length - 1, Math.floor(s.length * p))] * 10) / 10;
+		};
+		const parts = [];
+		for (const [cid, per] of this._inputStats) {
+			const top = Object.keys(per.types).sort((a, b) => per.types[b] - per.types[a]).slice(0, 3)
+				.map((k) => k + '×' + per.types[k]).join(' ');
+			parts.push(cid + ': ui=' + per.ui + ' turn=' + per.turn + ' {' + top + '}'
+				+ ' apply p50=' + q(per.apply, 0.5) + 'ms/p95=' + q(per.apply, 0.95) + 'ms'
+				+ ' wait p95=' + q(per.wait, 0.95) + 'ms'
+				+ ' batched=' + per.batched + '/max' + per.batchMax);
+		}
+		this._inputStats.clear();
+		let tail = '';
+		if (this._lag && this._lag.n) {
+			tail += '  || loopLag avg=' + Math.round((this._lag.sum / this._lag.n) * 10) / 10
+				+ 'ms max=' + Math.round(this._lag.max * 10) / 10 + 'ms';
+			this._lag.max = 0; this._lag.n = 0; this._lag.sum = 0;
+		}
+		if (this._wr) {
+			tail += '  || writes=' + this._wr.writes + ' blocked=' + this._wr.blocked
+				+ ' maxSocketBacklog=' + Math.round(this._wr.maxBacklog / 1024) + 'KB';
+			this._wr.writes = 0; this._wr.blocked = 0; this._wr.maxBacklog = 0;
+		}
+		if (this._coalesced && this._coalesced.size) {
+			const top = [...this._coalesced.entries()].sort((x, y) => y[1] - x[1]).slice(0, 3)
+				.map(([k, n]) => k + "x" + n).join(" ");
+			tail += "  || coalesced " + [...this._coalesced.values()].reduce((x, y) => x + y, 0)
+				+ " {" + top + "}";
+			this._coalesced.clear();
+		}
+		return 'inputs/s — ' + parts.join('  |  ') + tail;
+	}
+
 	_broadcastState() {
 		this._clearGrace();
 		const tick = this.session.turn;
 		// KD-098: forward the server's per-turn diagnostics to every client so they show up
 		// in the browser console (no need to read the Docker terminal). Drained once per turn.
-		const serverLog = (typeof this.session.takeDbg === 'function') ? this.session.takeDbg() : null;
+		let serverLog = (typeof this.session.takeDbg === 'function') ? this.session.takeDbg() : null;
+		// KDM-186: forward whatever the 1 Hz stats ticker has emitted since the last turn. The ticker —
+		// NOT this turn boundary — is the drain point: the pathology being measured is turns that STALL,
+		// and a per-turn drain goes silent exactly when the stall it exists to explain is happening.
+		if (this._statsLog && this._statsLog.length) {
+			serverLog = this._statsLog.concat(serverLog || []);
+			this._statsLog = [];
+		}
 		for (const [cid, sock] of this.sockets) {
 			const snapshot = this.session.snapshotFor(cid);
 			this._send(sock, { type: 'state', tick, snapshot, serverLog });
@@ -261,6 +523,8 @@ class WSBridge {
 
 	close() {
 		this._clearGrace();
+		if (this._lagTimer) { clearInterval(this._lagTimer); this._lagTimer = null; }
+		if (this._statsTimer) { clearInterval(this._statsTimer); this._statsTimer = null; }
 		for (const s of this.sockets.values()) { try { s.end(); } catch (e) {} }
 		if (this._server) this._server.close();
 	}
