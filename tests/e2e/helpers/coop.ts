@@ -147,3 +147,87 @@ export async function bootCoopPair(
 
 	await A.waitForTimeout(opts.settleMs ?? SETTLE_MS); // let render frames settle
 }
+
+/** The player's tile, read from the live entity. Shared so every spec reads position the same way. */
+export async function coopPos(P: Page): Promise<{ x: number; y: number }> {
+	// @ts-ignore bare let-global
+	return P.evaluate(() => ({ x: KinkyDungeonPlayerEntity.x, y: KinkyDungeonPlayerEntity.y }));
+}
+
+/**
+ * Move A by one tile, trying directions until one is actually OPEN, with B waiting so the turn can
+ * resolve. Returns whether A ended up somewhere new.
+ *
+ * WHY this exists (KDM-204). A and B spawn ADJACENT, so the peer avatar — an ally under PvP-off —
+ * blocks one neighbouring tile, and walls block others. A move into a blocked tile still RESOLVES a
+ * turn (the input routed fine, lockstep worked, the tick advances) but the position does not change.
+ * So a spec that hardcodes ONE direction and reads "did the position change?" is a map-dependent
+ * oracle: it reports "input was lost" for a perfectly delivered input that simply hit a wall.
+ *
+ * `mp-input-matrix` hardcoded `sendMove(1, 0)` and did exactly that; `mp-coop-demo` had already paid
+ * for the lesson and walks a direction list inline. This is that walk, owned in one place — a second
+ * copy is how the two would drift.
+ *
+ * The direction order deliberately starts away from B. Callers that need the per-turn invariants of
+ * the demo spec (B's view of A staying in sync) keep their own loop; this is the plain "get A to
+ * move" primitive.
+ */
+export async function coopMoveAnyDirection(
+	A: Page,
+	B: Page,
+	opts: { timeout?: number; dirs?: Array<[number, number]> } = {},
+): Promise<{ moved: boolean; advanced: boolean; dir: [number, number] | null; from: { x: number; y: number }; to: { x: number; y: number } }> {
+	const timeout = opts.timeout ?? 30_000;
+	const dirs = opts.dirs ?? ([[-1, 0], [0, -1], [0, 1], [1, 0], [-1, -1], [-1, 1]] as Array<[number, number]>);
+	const from = await coopPos(A);
+	let advanced = false;
+	let last = from;
+
+	for (const [dx, dy] of dirs) {
+		const t0 = await A.evaluate(() => (window as any).__coop.lastTick);
+		await A.evaluate((d) => (window as any).__coop.sendMove(d.dx, d.dy), { dx, dy });
+		await B.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
+		const turned = await A.waitForFunction((t) => (window as any).__coop.lastTick !== t, t0, { timeout })
+			.then(() => true).catch(() => false);
+		advanced = advanced || turned;
+		if (!turned) break;          // routing/lockstep is broken — trying more directions proves nothing
+		last = await coopPos(A);
+		if (last.x !== from.x || last.y !== from.y) return { moved: true, advanced, dir: [dx, dy], from, to: last };
+	}
+	return { moved: false, advanced, dir: null, from, to: last };
+}
+
+/**
+ * The keyboard key the GAME is currently bound to for one movement direction, as a Playwright key.
+ *
+ * WHY read it instead of typing a key literal (KDM-204). KD's movement bindings are `KinkyDungeonKey`
+ * / `KinkyDungeonKeybindings` — a roguelike layout, NOT the arrows (`Game/src/base/KinkyDungeon.ts:162`
+ * defaults to W/A/S/D, and the string "ArrowRight" appears nowhere in the game source). Specs that
+ * pressed `ArrowRight` were pressing a key the game never listens to, then recording "a real keypress
+ * produces no input at all" as a FACT about the transport. It was a fact about the keyboard layout.
+ *
+ * This is the same coupling `mp-uat-repro` proved against the overlay text: the answer is never to
+ * hardcode the right key — that just drifts again on the next rebind — but to ask the live table.
+ */
+export async function coopMovementKey(P: Page, dir: 'Up' | 'Down' | 'Left' | 'Right'): Promise<string> {
+	const key = await P.evaluate((d) => {
+		// @ts-ignore bare let-globals — the game's live binding table and its derived array
+		const kb = (typeof KinkyDungeonKeybindings !== 'undefined' && KinkyDungeonKeybindings) || null;
+		// @ts-ignore
+		const arr = (typeof KinkyDungeonKey !== 'undefined' && KinkyDungeonKey) || null;
+		const byIndex: any = { Up: 0, Left: 1, Down: 2, Right: 3 };
+		return (kb && kb[d]) || (arr && arr[byIndex[d]]) || null;
+	}, dir);
+
+	if (!key) {
+		throw new Error(
+			`the game exposes no movement binding for "${dir}" — KinkyDungeonKeybindings and ` +
+			'KinkyDungeonKey were both unreadable. Refusing to guess a key: guessing is what made the ' +
+			'"real input is lost" reading wrong in the first place (KDM-204).',
+		);
+	}
+	// KD stores either a bare letter ('D') or a KeyboardEvent.code ('KeyD'); Playwright wants the
+	// letter for both. Anything else (e.g. 'Space') is already a Playwright key name.
+	const s = String(key);
+	return /^Key[A-Z]$/.test(s) ? s.slice(3) : s;
+}

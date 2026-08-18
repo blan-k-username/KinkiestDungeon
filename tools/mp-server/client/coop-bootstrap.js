@@ -67,6 +67,9 @@
 	 *   copy(__coopDiag.dump())      → same, straight onto the clipboard (paste it back to me)
 	 *   __coopDiag.quiet(true)          → stop the per-send console.log (itself a suspect: it runs
 	 *                                     JSON.stringify + console.log ~60×/s with debug on)
+	 *   __coopDiag.suppressHover(true)  → stop routing the per-frame `setMoveDirection`; compare the
+	 *                                     frame rate before and after to see whether that round-trip
+	 *                                     is what starves the loop (KDM-204). Diagnostic only.
 	 *   __coopDiag.reset()           → clear counters
 	 * ──────────────────────────────────────────────────────────────────────────────────────────── */
 	var diag = window.__coopDiag = (function () {
@@ -201,7 +204,7 @@
 
 		d.dump = function () {
 			return JSON.stringify({
-				id: id, quiet: d._quiet, inFlight: coop._inFlight, kinds: coop._kindOf, pending: Object.keys(coop._pending),
+				id: id, quiet: d._quiet, noHover: !!d._noHover, inFlight: coop._inFlight, kinds: coop._kindOf, pending: Object.keys(coop._pending),
 				started: coop.started, lastTick: coop.lastTick, submitted: coop.submitted,
 				pendingSends: d._pending.length, sentRouteQueue: coop._sentRoute.length,
 				rollups: d.rollups, recentInputs: d.inputs,
@@ -210,6 +213,23 @@
 		d.reset = function () { d.rollups.length = 0; d.inputs.length = 0; d._win = freshWindow(); };
 		d.quiet = function (v) { d._quiet = v !== false; return d._quiet; };
 		d.verbose = function (v) { d._verbose = v !== false; return d._verbose; };
+		/**
+		 * KDM-204 — stop routing KD's per-frame `setMoveDirection` chatter, so the frame rate can be
+		 * read with the per-frame server round-trip ON and then OFF. Toggle only: it changes nothing
+		 * else, and turning it back off restores the normal path immediately.
+		 *
+		 * The gate itself lives in the KDSendInput wrapper (render-client.js), the one place every
+		 * input passes through; this is the operator-facing switch for it, and the flag is a plain
+		 * window global for the same reason `__KDMP_DEBUG` is — the wrapper must not depend on the
+		 * co-op bootstrap having loaded.
+		 *
+		 * Suppressed frames are counted as skips ('suppressHover' in the rollup), never lost quietly.
+		 */
+		d.suppressHover = function (v) {
+			d._noHover = v !== false;
+			window.__KDMP_SUPPRESS_HOVER = d._noHover;
+			return d._noHover;
+		};
 		// Console budget per type per rollup second — keeps a high-rate type from flooding the log
 		// without the client knowing which type is high-rate. Generic by construction.
 		d._logCount = {};

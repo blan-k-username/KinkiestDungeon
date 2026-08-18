@@ -39,6 +39,14 @@
 	var clientMode = false;   // closure flag — NOT the game-source KDServerRole (reverted, KD-085)
 	var _lastRestraintSig = null;   // KD-101: re-dress the player paper-doll only when worn restraints change
 
+	/**
+	 * KD's draw loop emits this input EVERY FRAME from the live mouse position — it is a per-frame
+	 * STREAM, not a player command. Named once because two places need it: the debug trace excludes
+	 * it to stay readable, and `__coopDiag.suppressHover()` gates it so the chatter-ON/chatter-OFF
+	 * frame-rate comparison can be taken (KDM-204).
+	 */
+	var HOVER_TYPE = 'setMoveDirection';
+
 	/*
 	 * KDM-163 AC1 — the two hardcoded input lists that used to live here are GONE.
 	 *
@@ -495,8 +503,25 @@
 						// KD-098 diagnostics: every input now takes one path, so the trace is just the
 						// type. `setMoveDirection` is per-frame mouse chatter, so it is excluded to keep
 						// the console readable. Toggle window.__KDMP_DEBUG.
-						if (typeof window !== 'undefined' && window.__KDMP_DEBUG && type !== 'setMoveDirection') {
+						if (typeof window !== 'undefined' && window.__KDMP_DEBUG && type !== HOVER_TYPE) {
 							try { console.log('[mp-client] KDSendInput', type, '-> ROUTE', (data && data.id != null) ? ('id=' + data.id) : ''); } catch (e) { /* ignore */ }
+						}
+						/*
+						 * KDM-204 — DIAGNOSTIC GATE. Off by default; nothing sets it in real play.
+						 *
+						 * The whole per-frame round-trip (send → server → state reply → apply → light
+						 * grid recompute) hangs off this ONE input type. Measuring the frame rate with
+						 * it routed and again with it dropped is the only way to tell whether that
+						 * round-trip STARVES the draw loop or is merely a passenger while something
+						 * else does — the question tests/e2e/mp-input-matrix.spec.ts exists to answer.
+						 *
+						 * Dropped, never silently: it is counted through the same `noteSkip` channel as
+						 * every other skipped input (KDM-163 — no invisible losses), so the rollup shows
+						 * exactly what the reading cost.
+						 */
+						if (type === HOVER_TYPE && typeof window !== 'undefined' && window.__KDMP_SUPPRESS_HOVER) {
+							try { window.__coopDiag.noteSkip(type, 'suppressHover'); } catch (e) { /* diag optional */ }
+							return '';
 						}
 						/*
 						 * ⚠️ KNOWN COUPLING — the ONE input still run locally (KD-101, owned by KDM-164).
