@@ -10,8 +10,13 @@
  *
  * Lockstep (R8): the turn advances only when every player has submitted.
  * Conflict (R9): players are applied in RANDOM order on the shared world, so the
- * first-mover wins a contested tile/target (KD's own collision blocks the rest) —
- * random conflict resolution falls out of the model, no special-casing.
+ * first-mover wins a contested tile/target — random conflict resolution falls out
+ * of the model, no special-casing.
+ * KDM-208: the loser is stopped by a VETO on the bump-attack, not by KD's collision
+ * as this comment used to claim. Collision never applied: `_armPeerEnemies` makes
+ * each peer a real hostile enemy, so the loser's move was promoted to a stock
+ * bump-attack instead of blocked. The veto is keyed on the world at TURN START —
+ * a peer who was already there stays fully attackable (deliberate PvP is stock).
  *
  * Other players are shown as avatar entities (KD-082) for rendering; the acting
  * player's avatar is parked while they're swapped in (they ARE the global player).
@@ -137,6 +142,9 @@ class SwapSession {
 		// never be SILENT — the displaced action was a real action that never happened. Recorded here
 		// and surfaced in the snapshot, exactly like an unhandled type.
 		this.replacedInputs = [];
+		// KDM-208: moves cancelled because a peer took the contested tile earlier in the SAME turn.
+		// Third member of the same family: a real action by a real player that produced nothing.
+		this.cancelledMoves = [];
 		// KDM-163: input type -> "turn" | "ui", LEARNED from real turns (never from a speculative apply,
 		// which would double-apply world-mutating actions — see HeadlessHost.applyInputObserved).
 		this.inputKind = new Map();
@@ -396,6 +404,13 @@ class SwapSession {
 	 */
 	replacedInputReport() { return this.replacedInputs.slice(); }
 
+	/**
+	 * Moves cancelled by the contested-tile rule (KDM-208). The peer won the race for the tile, so the
+	 * loser stalled — no attack, no step. Reported for the same reason as the two above: from the
+	 * player's side a cancelled move and an ignored input look identical.
+	 */
+	cancelledMoveReport() { return this.cancelledMoves.slice(); }
+
 	submit(clientId, action = {}) {
 		if (!this.started) throw new Error('session not started');
 		if (!this._joined.includes(clientId)) throw new Error(`unknown player ${clientId}`);
@@ -428,6 +443,23 @@ class SwapSession {
 		const order = this._shuffle(this._joined.slice());
 		const applied = [];
 		this.actionMsgOf.clear();   // floating combat text is per-turn transient (KD-098)
+		// KDM-208: where everyone stood at TURN START — the world each player actually acted against.
+		//
+		// R9's doc comment above claimed collision blocked the loser of a contested tile. It did not:
+		// `_armPeerEnemies` makes each peer a REAL hostile enemy, so once the winner's avatar had been
+		// moved onto the tile, the loser's move hit KD's stock bump-to-attack instead of a wall — real
+		// damage, real bondage, real defeat, purely because of intra-turn application ORDER (measured
+		// in `mp-contested-tile.spec.ts`: Will 10 → 8.5 in BOTH orderings).
+		//
+		// The discriminator is not the input (never classify what the player meant) but the AVATAR: a
+		// peer standing where they stood at turn start is a legitimate target and stays fully
+		// attackable; a peer who ARRIVED this turn is an artefact of the order and cannot be bumped.
+		const startPos = new Map();
+		for (const cid of this._joined) {
+			const p = this.posOf(cid);
+			if (p) startPos.set(cid, { x: p.x, y: p.y });
+		}
+		const arrived = new Set();   // avatar entity ids that changed tile THIS turn
 		for (const id of order) {
 			const action = this._pending.get(id) || { kind: 'wait' };
 			// KD-099 revised (KDM-154): a downed player is NOT incapacitated by us. KD has no
@@ -447,11 +479,16 @@ class SwapSession {
 			// KD-100: arm every PvP peer as a REAL hostile enemy (hp = their Will) so this player's
 			// stock attack pipeline can hit them for real (no synthetic interception).
 			this._armPeerEnemies(id);
+			// KDM-208: …but a peer who only got here because they were applied first is not a target.
+			this.world.setBumpVeto([...this.avatars.entries()]
+				.filter(([cid, eid]) => cid !== id && arrived.has(eid))
+				.map(([, eid]) => eid));
 			// KD-090: capture this player's message-log delta (messages pushed while THEY
 			// are the swapped-in player are theirs — incl. enemy-AI lines aimed at them).
 			const logLen0 = this.world.messageLogLength();
 			const lvl0 = this.world.getLevel();
 			let result = null;
+			let cancelled = false;
 			// KDM-164: the synthetic `pvpAttack` / `pvpBind` primitive is GONE. It computed its own
 			// attack and wrote the result onto the target's bundle, bypassing the game entirely — a
 			// second, parallel combat model kept alive "for tests". There is now exactly one path:
@@ -465,6 +502,16 @@ class SwapSession {
 				// would double-apply world-mutating actions (measured, probes/probe11).
 				const obs = this.world.applyInputObserved(kdType, data) || {};
 				result = obs.result;
+				// KDM-208: did the contested-tile veto fire for this action? Read it before anything else
+				// can, and RECORD it — a cancelled move is a real input that produced nothing, exactly the
+				// class of silent drop KDM-163 made reportable.
+				cancelled = (this.world.takeBumpVetoes() || 0) > 0;
+				if (cancelled) {
+					this.cancelledMoves.push({ clientId: id, turn: this.turn, kdType });
+					while (this.cancelledMoves.length > this.maxLog) this.cancelledMoves.shift();
+					this._dbg(`CANCELLED contested move for ${id} ("${kdType}") in turn ${this.turn} — ` +
+						`a peer arrived on the target tile earlier in this same turn`);
+				}
 				// KDM-186: this player is swapped in, so whatever the game just queued for its draw layer
 				// is theirs. Harvest it as EVENTS now — it is presentation output, not state, and is no
 				// longer captured (it used to be replicated and re-delivered forever).
@@ -475,8 +522,10 @@ class SwapSession {
 				//    repairs the classifier's deliberate conservatism — it over-approximates by design,
 				//    and probe14 measured 12 of 25 known-UI types landing in that bucket);
 				//  - a "ui" that did advance is promoted straight back to "turn".
+				// KDM-208: a VETOED action advanced nothing because we stopped it, not because the type is
+				// a UI type. Learning from it would demote `move` to "ui" and take it out of lockstep.
 				const seen = obs.advanced > 0 ? 'turn' : 'ui';
-				if (this.inputKind.get(kdType) !== seen) {
+				if (!cancelled && this.inputKind.get(kdType) !== seen) {
 					const had = this.inputKind.get(kdType);
 					this.inputKind.set(kdType, seen);
 					this._dbg(`${had ? 'reclassified' : 'learned'} "${kdType}"${had ? ' ' + had + ' ->' : ' ='} ${seen}`);
@@ -514,8 +563,15 @@ class SwapSession {
 			this.vitalsOf.set(id, this.world.getVitals());   // KD-098: refresh for the HP bar
 			const p = this.world.getPlayerPos();
 			if (avId != null) this.world.moveAvatar(avId, p.x, p.y);
-			applied.push({ id, kdType, result, pos: p });
+			// KDM-208: this avatar now stands somewhere it did not stand at turn start, so for everyone
+			// applied AFTER it, it is an arrival — present enough to block, not to be bumped.
+			const s0 = startPos.get(id);
+			if (avId != null && s0 && (p.x !== s0.x || p.y !== s0.y)) arrived.add(avId);
+			applied.push({ id, kdType, result, pos: p, cancelled });
 		}
+		// KDM-208: the veto is per-apply. Leave the world with it off, or the immediate ("ui") apply
+		// path — which runs outside this loop — would inherit a stale set from the last turn.
+		this.world.setBumpVeto([]);
 		// KD-100: reconcile each peer avatar's REAL combat result (hp damage, capture) back into its
 		// owner's bundle (avatar.hp → Will; real capture/helpless → defeated + broadcast).
 		this._reconcilePeers();
@@ -957,6 +1013,8 @@ class SwapSession {
 		// KDM-163 AC3: …and the other silent-drop path — an action displaced out of the lockstep slot
 		// before it could ever be applied.
 		snap.replacedInputs = this.replacedInputReport();
+		// KDM-208: …and a move that really ran but was cancelled because a peer reached the tile first.
+		snap.cancelledMoves = this.cancelledMoveReport();
 		// KD-098: the headless world never runs the draw-ease loop, so entities' visual_x/visual_y
 		// stay stuck near spawn while x/y jump via AI — the client then re-eases from the stale
 		// spot each turn (the "Rat teleports from its initial tile through several tiles"). Snap

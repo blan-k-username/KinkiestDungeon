@@ -32,8 +32,15 @@ KD-069 (orchestrator), KD-070 (reconciler).
   object). `__KDEVAL` is appended to the same script as the bundle so its closure
   can read/write them — the Node analogue of Playwright's `page.evaluate`.
 - **No source edits:** rendering is neutered and `serverMode` is implemented by
-  reassigning KD's globals at runtime (`DrawCharacter`, `KinkyDungeonUpdateEnemies`)
-  — the same reassignable-global mechanism the mod system uses.
+  reassigning KD's globals at runtime (`DrawCharacter`, `KinkyDungeonUpdateEnemies`,
+  `KinkyDungeonMove`) — the same reassignable-global mechanism the mod system uses.
+- **Contested tiles (KDM-208):** a turn applies players in random order, so two players
+  aiming at the same empty tile resolve first-come. The loser does NOT get blocked by
+  KD's collision — under PvP the peer is armed as a real hostile enemy, so the move
+  would be promoted to a stock bump-attack. `HeadlessHost.setBumpVeto` therefore vetoes
+  the move-bump against any avatar that *arrived during this turn*, keyed on where
+  everyone stood at turn start. A peer who was already there stays fully attackable, so
+  deliberate PvP is unchanged. Cancellations are reported via `cancelledMoveReport()`.
 
 ## Run
 

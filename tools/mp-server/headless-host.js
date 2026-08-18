@@ -959,6 +959,60 @@ class HeadlessHost {
 		})()`);
 	}
 
+	/**
+	 * KDM-208: for the NEXT apply, veto KD's stock bump-to-attack against the listed entity ids.
+	 *
+	 * `KinkyDungeonMove` promotes a move into an occupied tile to an attack (KinkyDungeonGame.ts:2977)
+	 * — correct stock behaviour, and what makes deliberate PvP work through the real pipeline. It is
+	 * wrong for exactly one case: the peer was NOT on that tile when the mover acted, and only arrived
+	 * because the turn's random application order put them first. The caller decides which avatars are
+	 * in that state (it is the only layer that knows where everyone stood at turn start); this method
+	 * is the mechanism, and it is deliberately narrow — it fires ONLY on the move-bump, so ranged
+	 * attacks, spells and AOE against the same peer are untouched.
+	 *
+	 * Vetoed = the move does not happen either: no attack, no step, no `KinkyDungeonAdvanceTime`. That
+	 * is what "the move is cancelled" means, and it is the same outcome the R9 doc comment in
+	 * `swap-session.js` always claimed collision already produced.
+	 *
+	 * The wrapper is installed once (sentinel `__kdBumpVeto`) and reads a per-apply Set, so an empty
+	 * list disables it completely.
+	 */
+	setBumpVeto(entityIds) {
+		const ids = (Array.isArray(entityIds) ? entityIds : [])
+			.filter((n) => n != null).map((n) => n | 0);
+		return this.eval(`(function(){
+			globalThis.__KD_BUMP_VETO = new Set(${JSON.stringify(ids)});
+			if (typeof KinkyDungeonMove === 'function' && !KinkyDungeonMove.__kdBumpVeto) {
+				var _move = KinkyDungeonMove;
+				KinkyDungeonMove = function(moveDirection, delta, AllowInteract){
+					var veto = globalThis.__KD_BUMP_VETO;
+					if (veto && veto.size && moveDirection && KinkyDungeonPlayerEntity
+						&& typeof KinkyDungeonEnemyAt === 'function') {
+						var tx = KinkyDungeonPlayerEntity.x + (moveDirection.x | 0);
+						var ty = KinkyDungeonPlayerEntity.y + (moveDirection.y | 0);
+						var e = KinkyDungeonEnemyAt(tx, ty);
+						if (e && veto.has(e.id)) {
+							globalThis.__KD_BUMP_VETO_HITS = (globalThis.__KD_BUMP_VETO_HITS || 0) + 1;
+							return false;   // "nomove": no attack, no step, no time
+						}
+					}
+					return _move.apply(this, arguments);
+				};
+				KinkyDungeonMove.__kdBumpVeto = true;
+			}
+			return globalThis.__KD_BUMP_VETO.size;
+		})()`);
+	}
+
+	/** KDM-208: take-once count of bump-attacks vetoed since the last read (never a silent drop). */
+	takeBumpVetoes() {
+		return this.eval(`(function(){
+			var n = globalThis.__KD_BUMP_VETO_HITS || 0;
+			globalThis.__KD_BUMP_VETO_HITS = 0;
+			return n;
+		})()`);
+	}
+
 	/** List entities in this instance (proves injected avatars are real). */
 	listEntities() {
 		return this.eval(`KDMapData.Entities.map(function(e){
