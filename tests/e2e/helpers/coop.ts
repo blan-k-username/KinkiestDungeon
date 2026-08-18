@@ -231,3 +231,74 @@ export async function coopMovementKey(P: Page, dir: 'Up' | 'Down' | 'Left' | 'Ri
 	const s = String(key);
 	return /^Key[A-Z]$/.test(s) ? s.slice(3) : s;
 }
+
+/**
+ * Move A by one tile using a REAL held keypress — the human input path, end to end, with no test hook
+ * anywhere in the move itself.
+ *
+ * WHY it is shaped like this (KDM-204 / KDM-211). Two independent traps have to be dodged at once, and
+ * dodging only one of them produces a confident, wrong reading about the transport:
+ *
+ *  1. THE KEY. KD binds a roguelike layout (`KinkyDungeonKeybindings` / `KinkyDungeonKey`, defaulting
+ *     to W/A/S/D at `Game/src/base/KinkyDungeon.ts:162`); the arrow keys are bound to NOTHING and the
+ *     string "ArrowRight" does not occur in the game source. Specs that pressed an arrow recorded "a
+ *     real keypress produces no `move` input at all" as a fact about the proxy. It was a fact about
+ *     the keyboard layout. So the key is read from the live table via `coopMovementKey` — never typed
+ *     as a literal, because a literal is the same coupling repainted and drifts on the next rebind.
+ *  2. THE DIRECTION. A and B spawn ADJACENT and the peer avatar is an ALLY under PvP-off, so it blocks
+ *     its tile; walls block others. A blocked move still RESOLVES a turn — the input routed, lockstep
+ *     worked, the tick advanced — while the position does not change. A hardcoded direction therefore
+ *     makes `moved` a coin-flip on spawn geometry.
+ *
+ * The dodge for (2) is to establish an open tile by DOING it first: `coopMoveAnyDirection` walks the
+ * direction list with the synthetic hook until A actually relocates, which means the tile A just LEFT
+ * is provably open. The real keypress then goes back the way A came.
+ *
+ * HELD, not pressed: this harness renders at ~4 fps and KD samples transient key state once per frame,
+ * so a normal keydown+keyup can land entirely between two polls. Holding spans several frames at any
+ * frame rate. A real browser (~85 fps) does not need this.
+ *
+ * Returns the synthetic control leg as well as the real-key leg, so a caller can tell "the whole
+ * session is broken" apart from "only the human path is broken" — the distinction the diagnostic
+ * matrix in `mp-input-matrix` is built on.
+ */
+export async function coopRealKeyMove(
+	A: Page,
+	B: Page,
+	opts: { timeout?: number; holdMs?: number } = {},
+): Promise<{
+	control: Awaited<ReturnType<typeof coopMoveAnyDirection>>;
+	dir: 'Up' | 'Down' | 'Left' | 'Right';
+	key: string;
+	advanced: boolean;
+	moved: boolean;
+	from: { x: number; y: number };
+	to: { x: number; y: number };
+}> {
+	const timeout = opts.timeout ?? 20_000;
+	const control = await coopMoveAnyDirection(A, B, { timeout });
+
+	// Back the way A came — that tile is open because A was standing on it a moment ago. With no
+	// control move to invert (the session never resolved a turn), any direction is a guess; pick one
+	// and let the caller read `control` to see that the guess was never the interesting part.
+	const dir: 'Up' | 'Down' | 'Left' | 'Right' = control.dir
+		? (control.dir[0] > 0 ? 'Left' : control.dir[0] < 0 ? 'Right' : control.dir[1] > 0 ? 'Up' : 'Down')
+		: 'Right';
+	const key = await coopMovementKey(A, dir);
+
+	const from = await coopPos(A);
+	const t0 = await A.evaluate(() => (window as any).__coop.lastTick);
+	// Raw `page.mouse`, never `locator.click()`: KD draws into a canvas that Playwright's actionability
+	// checks can wait on forever, and that hang looks exactly like a product red.
+	await A.mouse.click(200, 200);
+	await A.keyboard.down(key);
+	await A.waitForTimeout(opts.holdMs ?? 2000);
+	await A.keyboard.up(key);
+	// Lockstep: the turn cannot resolve until B acts too.
+	await B.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
+
+	const advanced = await A.waitForFunction((t) => (window as any).__coop.lastTick !== t, t0, { timeout })
+		.then(() => true).catch(() => false);
+	const to = await coopPos(A);
+	return { control, dir, key, advanced, moved: to.x !== from.x || to.y !== from.y, from, to };
+}

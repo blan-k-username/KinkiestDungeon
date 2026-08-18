@@ -26,7 +26,7 @@
  */
 import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
-import { bootCoopPair, coopMoveAnyDirection, coopMovementKey, coopPos, MP_TEST_TIMEOUT } from './helpers/coop';
+import { bootCoopPair, coopRealKeyMove, MP_TEST_TIMEOUT } from './helpers/coop';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
 
@@ -65,43 +65,19 @@ test('WHY real input is lost: control vs hold vs frame rate', async ({ browser }
 		out.fpsNoChatter = await fps(A, 3000);
 		out.sendsNoChatter = await sendsOf(A);
 
-		// ── CONTROL: the synthetic path every other spec uses ───────────────────────────────────
-		// KDM-204: try directions until one is OPEN. This used to hardcode `sendMove(1, 0)`, which made
-		// the column a coin-flip on spawn geometry — A and B spawn adjacent, the peer avatar is an ally
-		// that blocks its tile, and a blocked move still resolves a turn. That reported "control input
-		// lost" for an input the server had delivered perfectly, i.e. the exact false reading this
-		// diagnostic exists to rule out.
-		const control = await coopMoveAnyDirection(A, B, { timeout: 20_000 });
-		out.controlAdvanced = control.advanced;
-		out.controlMoved = control.moved;
-		out.controlDir = control.dir;
-
-		// ── HOLD: keep the key down across several frames ───────────────────────────────────────
-		// KDM-204, two corrections to what this arm used to do:
-		//
-		//  1. It pressed `ArrowRight`. KD does not bind the arrows AT ALL — movement is a roguelike
-		//     layout read from `KinkyDungeonKeybindings` (`Game/src/base/KinkyDungeon.ts:162`), and the
-		//     string "ArrowRight" appears nowhere in the game source. So "a held real key produced no
-		//     input" was never a finding about the transport; it was an unbound key. Ask the live table.
-		//  2. It held toward a FIXED direction that may be a wall. The tile A just LEFT in the control
-		//     arm is provably open — A was standing on it — so hold back the way it came.
-		const holdDir: 'Up' | 'Down' | 'Left' | 'Right' = control.dir
-			? (control.dir[0] > 0 ? 'Left' : control.dir[0] < 0 ? 'Right' : control.dir[1] > 0 ? 'Up' : 'Down')
-			: 'Right';
-		const holdKey = await coopMovementKey(A, holdDir);
-		out.holdDir = holdDir;
-		out.holdKey = holdKey;
-
-		const p1 = await coopPos(A);
-		const t1 = await A.evaluate(() => (window as any).__coop.lastTick);
-		await A.mouse.click(200, 200);
-		await A.keyboard.down(holdKey);
-		await A.waitForTimeout(2000);                 // several frames even at 3 fps
-		await A.keyboard.up(holdKey);
-		await B.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
-		out.holdAdvanced = await A.waitForFunction((t) => (window as any).__coop.lastTick !== t, t1, { timeout: 20_000 })
-			.then(() => true).catch(() => false);
-		out.holdMoved = JSON.stringify(await coopPos(A)) !== JSON.stringify(p1);
+		// ── CONTROL + HOLD ──────────────────────────────────────────────────────────────────────
+		// Both legs come from `coopRealKeyMove` (KDM-211), which owns the two corrections this arm used
+		// to carry inline — read the key from the live binding table rather than pressing an arrow KD
+		// never binds, and aim at a tile the control leg has just proved is open. `mp-real-input`
+		// asserts on the same primitive; keeping a second copy here is how the two would drift.
+		const real = await coopRealKeyMove(A, B, { timeout: 20_000 });
+		out.controlAdvanced = real.control.advanced;
+		out.controlMoved = real.control.moved;
+		out.controlDir = real.control.dir;
+		out.holdDir = real.dir;
+		out.holdKey = real.key;
+		out.holdAdvanced = real.advanced;
+		out.holdMoved = real.moved;
 		out.holdSends = await sendsOf(A);
 
 		// KDM-204: the matrix is the POINT of this spec, and an assertion message is printed only when

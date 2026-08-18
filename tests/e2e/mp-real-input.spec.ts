@@ -1,5 +1,5 @@
 /**
- * E2E — REAL user input through the co-op proxy (KDM-186).
+ * E2E — REAL user input through the co-op proxy (KDM-186, corrected by KDM-204 / KDM-211).
  *
  * ⚠️ THE COVERAGE HOLE THIS FILLS. Every other MP e2e drives the session through the test hooks
  * `__coop.sendMove()` / `__coop.sendAction()`, which BUILD a `{kdType,data}` action and hand it
@@ -9,6 +9,22 @@
  *
  * So the suite can be fully green while a human cannot move at all — which is what the first
  * hands-on UAT reported (2026-08-16: "I cannot move any char or do any action", keyboard AND mouse).
+ *
+ * ⚠️ WHAT THIS FILE ONCE "PROVED", AND DID NOT (KDM-211). The keypress test below used to hold
+ * `ArrowRight` and, when nothing happened, report it as a finding about the proxy: "a real keypress
+ * produces no `move` input at all — the client only ever sends `setMoveDirection`". That reading was
+ * wrong, and it became the founding fact of a chain of follow-up tickets. KD does not bind the arrow
+ * keys AT ALL: movement is a roguelike layout (`Game/src/base/KinkyDungeon.ts:162` defaults to
+ * W/A/S/D) and the string "ArrowRight" does not appear anywhere in the game source. Nothing was
+ * listening, so nothing was produced; the per-frame `setMoveDirection` chatter continued because the
+ * draw loop emits it regardless. Pressed with the key the live binding table actually names, the same
+ * harness on the same boot advances the turn AND moves the character, with real `move` inputs on the
+ * wire. There was never a transport defect here.
+ *
+ * The lesson is encoded, not just narrated: this spec asks the game which key and which direction it
+ * will honour (`coopRealKeyMove` → `coopMovementKey` + `coopMoveAnyDirection`) instead of asserting
+ * against a keyboard layout and a map it assumed. It is the same coupling `mp-uat-repro` already paid
+ * for against the on-screen overlay text.
  *
  * Asserts the PLAYER-VISIBLE outcome (the character moved / the shared turn advanced), never an
  * internal counter — an input that is accepted, routed, classified and then changes nothing is
@@ -23,17 +39,11 @@
  */
 import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
-import { bootCoopPair, MP_TEST_TIMEOUT } from './helpers/coop';
+import { bootCoopPair, coopRealKeyMove, MP_TEST_TIMEOUT } from './helpers/coop';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
 
 const ACT_TIMEOUT = 20_000;
-
-/** Authoritative position of this client's character (not where it happens to be drawn). */
-async function pos(P: Page) {
-	// @ts-ignore bare let-global
-	return P.evaluate(() => ({ x: KinkyDungeonPlayerEntity.x, y: KinkyDungeonPlayerEntity.y }));
-}
 
 /** Both halves of the picture: client rollups + what the client believes about the session. */
 async function diagOf(P: Page) {
@@ -61,31 +71,21 @@ test('a real keypress moves the character (the human input path, not the test ho
 
 	try {
 		await bootCoopPair(A, B, port);
-		const before = await pos(A);
-		const tick0 = await A.evaluate(() => (window as any).__coop.lastTick);
 
-		// Click into the page to focus it (raw mouse — no actionability wait), then press a REAL key.
-		// Lockstep: BOTH must act, so B waits with the real wait key rather than a test hook.
-		await A.mouse.click(200, 200);
-		// HELD, not pressed: this harness renders at ~4 fps and KD samples transient key state per
-		// frame, so a normal keydown+keyup lands entirely between polls. Holding it spans several
-		// frames at any frame rate — the real browser (85 fps) does not need this.
-		await A.keyboard.down('ArrowRight');
-		await A.waitForTimeout(1500);
-		await A.keyboard.up('ArrowRight');
-		await B.mouse.click(200, 200);
-		await B.keyboard.press('Space');
+		// One held press of the key the GAME says means this direction, aimed at a tile the GAME has
+		// just demonstrated is open. Both facts are read from the live session, never assumed — see
+		// `coopRealKeyMove`.
+		const r = await coopRealKeyMove(A, B, { timeout: ACT_TIMEOUT });
 
-		const advanced = await A.waitForFunction(
-			(t) => (window as any).__coop.lastTick !== t, tick0, { timeout: ACT_TIMEOUT },
-		).then(() => true).catch(() => false);
-
-		const after = await pos(A);
-		const moved = after.x !== before.x || after.y !== before.y;
-
-		expect(moved || advanced,
-			'a real ArrowRight keypress changed NOTHING — neither the character nor the shared turn.\n' +
-			`before=${JSON.stringify(before)} after=${JSON.stringify(after)} tick0=${tick0} advanced=${advanced}\n` +
+		// The control leg is diagnostic, not the assertion: if the SYNTHETIC path could not move A
+		// either, the session is broken and this spec is not the one to read. Say so in the message
+		// rather than letting a dead session masquerade as a broken keyboard path.
+		expect(r.moved,
+			'a real held "' + r.key + '" keypress (bound to ' + r.dir + ') did not move the character.\n' +
+			`from=${JSON.stringify(r.from)} to=${JSON.stringify(r.to)} advanced=${r.advanced}\n` +
+			`synthetic control leg: moved=${r.control.moved} advanced=${r.control.advanced} ` +
+			`dir=${JSON.stringify(r.control.dir)} — if this is false too, the session is broken, ` +
+			'not the human input path.\n' +
 			`A=${JSON.stringify(await diagOf(A))}\nB=${JSON.stringify(await diagOf(B))}\n` +
 			`pageerrors=${JSON.stringify(errs.slice(0, 5))}`).toBe(true);
 	} finally {
@@ -93,6 +93,7 @@ test('a real keypress moves the character (the human input path, not the test ho
 		await new Promise<void>((r) => server.close(() => r()));
 	}
 });
+
 
 /**
  * THE REGRESSION GUARD (KDM-186) — per-frame input must not produce per-frame full state.
