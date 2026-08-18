@@ -17,12 +17,20 @@ export default defineConfig({
 		['html', { open: 'never', outputFolder: 'tests/_artifacts/html-report' }],
 	],
 	outputDir: 'tests/_artifacts/playwright',
+	/*
+	 * KD_LIGHT_ARTIFACTS=1 — record nothing. For DIAGNOSTIC runs whose whole output is a number
+	 * printed to the log (the fps/profile probes), where a video and a trace are pure disk cost.
+	 *
+	 * Measured: `tests/_artifacts` reached 259 MB, of which 256 MB was video. A failing spec also
+	 * retries, so it records TWICE. Default is unchanged — a real red still keeps its video, trace and
+	 * screenshot, because that evidence is what makes a red diagnosable.
+	 */
 	use: {
 		baseURL: 'http://localhost:8080',
 		headless: true,
-		trace: 'on-first-retry',
-		screenshot: 'only-on-failure',
-		video: 'retain-on-failure',
+		trace: process.env.KD_LIGHT_ARTIFACTS === '1' ? 'off' : 'on-first-retry',
+		screenshot: process.env.KD_LIGHT_ARTIFACTS === '1' ? 'off' : 'only-on-failure',
+		video: process.env.KD_LIGHT_ARTIFACTS === '1' ? 'off' : 'retain-on-failure',
 	},
 	webServer: {
 		command: 'npm run serve',

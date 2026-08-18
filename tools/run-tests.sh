@@ -147,6 +147,7 @@ docker run --rm $TTY_FLAGS --ipc=host \
 	-w /usr/src/app \
 	-e KD_COOP_BOOT_TIMEOUT="${KD_COOP_BOOT_TIMEOUT:-}" \
 	-e KD_HOST_LOAD="$LOAD_BEFORE" \
+	-e KD_LIGHT_ARTIFACTS="${KD_LIGHT_ARTIFACTS:-}" \
 	"$IMAGE" sh -c "$CMD"
 EXIT=$?
 set -e

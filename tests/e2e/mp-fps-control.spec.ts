@@ -27,14 +27,21 @@
  *     run 3   menuFps 48     gameFps 9     coopFps 5     game/coop 1.80   (integer meter, 8 s)
  *     run 4   menuFps 46.5   gameFps 8.2   coopFps 4.4   game/coop 1.86   (1-dp meter, 8 s)
  *
- * The menu reading swings 29->48 with host load while the RATIO holds. So a dungeon costs ~5x a menu
- * whether or not a proxy exists, and the proxy's real cost is ~1.86x — not the 6-10x the old spec
- * implied. The 1.50/1.60 in the early runs were the integer meter under-reading, not a faster proxy:
- * runs 3 and 4 agree once the reading is precise.
+ * A dungeon costs ~5x a menu whether or not a proxy exists, so the old 6-10x was mostly that.
  *
- * ⚠️ ~1.86x against the 2x line below is only ~7% of headroom, and that cost is NOT yet attributed —
- * it is real, not measurement error. Tracked as its own investigation; do NOT respond to a red here by
- * widening the line.
+ * ⚠️ THE "1.86x" WAS ITSELF A SECOND CONFOUND, FOUND BY KDM-207 AND CORRECTED HERE. Those runs
+ * compared a baseline taken with ONE page open against a co-op reading taken with TWO. Headless
+ * Chromium software-renders with no GPU and the main thread is already (program)-saturated (measured
+ * `taskMs` 3021 of a 3000 ms window), so the SECOND PAGE roughly halves throughput by itself.
+ * Measured symmetrically:
+ *
+ *     plain ALONE 8.7   · coop BOTH-OPEN 4.7   -> 1.85    (what the old comparison reported)
+ *     plain BOTH-OPEN 4.7 · coop BOTH-OPEN 4.7 -> 1.00    like-for-like
+ *     plain ALONE 8.7   · coop ALONE 8.8       -> 0.99    like-for-like
+ *
+ * ⇒ THE PROXY COSTS NOTHING in frame rate. Both readings are now taken with both pages open, so the
+ * ratio isolates the proxy instead of the page count. The 2x line stays: it is now real headroom over
+ * a true ~1.0, not 7% over a measurement artefact.
  *
  * Two consequences, both load-bearing for how this spec is now written:
  *
@@ -124,7 +131,7 @@ test('frame-rate controls: plain game vs co-op client', async ({ browser }) => {
 		});
 		await plain.waitForTimeout(2000);        // let the first dungeon frames settle
 		out.plainScreen = await screen(plain);
-		out.gameFps = await fps(plain, DUNGEON_SAMPLE_MS);   // THE BASELINE: a dungeon, un-proxied
+		out.gameFpsSolo = await fps(plain, DUNGEON_SAMPLE_MS);   // reference only — see below
 
 		// C) a co-op client page (unpaired: no partner, so no session traffic at all)
 		const coop = await ctx.newPage();
@@ -133,6 +140,25 @@ test('frame-rate controls: plain game vs co-op client', async ({ browser }) => {
 		await coop.bringToFront();
 		await coop.waitForTimeout(2000);
 		out.coopScreen = await screen(coop);
+
+		/*
+		 * ⚠️ BOTH ARMS MUST BE MEASURED WITH THE SAME NUMBER OF PAGES ALIVE (KDM-207).
+		 *
+		 * The first version of this fix compared `gameFps` taken with ONE page open against `coopFps`
+		 * taken with TWO, and reported a "1.86x proxy cost". That number was the second page, not the
+		 * proxy. Headless Chromium software-renders with no GPU and this main thread is already
+		 * (program)-saturated — measured `taskMs` 3021 of a 3000 ms window — so a second live WebGL
+		 * page roughly halves throughput on its own. Measured symmetrically:
+		 *
+		 *     plain ALONE 8.7 · coop BOTH-OPEN 4.7   -> "1.85x"   (the confounded comparison)
+		 *     plain BOTH-OPEN 4.7 · coop BOTH-OPEN 4.7 -> 1.00     (like-for-like)
+		 *     plain ALONE 8.7 · coop ALONE 8.8         -> 0.99     (like-for-like)
+		 *
+		 * The proxy costs nothing. So the baseline is re-read HERE, with the co-op page open, and the
+		 * two readings are taken back-to-back under identical conditions. `gameFpsSolo` is kept in the
+		 * payload only as evidence of how large the page-count effect is.
+		 */
+		out.gameFps = await fps(plain, DUNGEON_SAMPLE_MS);   // THE BASELINE: un-proxied, both pages open
 		out.coopFps = await fps(coop, DUNGEON_SAMPLE_MS);
 		out.proxyCost = out.coopFps ? +(out.gameFps / out.coopFps).toFixed(2) : null;
 
@@ -151,11 +177,12 @@ test('frame-rate controls: plain game vs co-op client', async ({ browser }) => {
 		expect(out.gameFps, `the control must produce real frames. ${msg}`).toBeGreaterThan(0);
 
 		// THE ASSERTION — the proxy may not cost more than 2x the un-proxied game rendering the same
-		// dungeon. Measured 1.50 / 1.60 / 1.80 across three runs, so 2x is the regression line rather
-		// than a ceiling fitted to today's number. The headroom over 1.80 is thin, which is exactly why
-		// the readings above use DUNGEON_SAMPLE_MS: the spread is measurement quantisation, not the
-		// proxy moving. If this ever goes red, check `gameFps`/`coopFps` frame COUNTS before assuming a
-		// regression — a red at ~2.0 with single-digit fps is the harness, not the product.
+		// dungeon, both measured with the same pages alive. Measured like-for-like the true ratio is
+		// ~1.0 (KDM-207), so 2x is now genuine headroom rather than the 7% it appeared to be while the
+		// page-count confound was inflating it.
+		//
+		// If this ever goes red: check `gameFpsSolo` against `gameFps` FIRST. A large gap between them
+		// is the page-count effect, and a red driven by that is the harness, not the product.
 		expect(out.coopFps > out.gameFps / 2, msg).toBe(true);
 	} finally {
 		await ctx.close().catch(() => {});
