@@ -8,7 +8,7 @@
  * submit) advances the shared turn — proving the two-browser UAT path works.
  */
 import { test, expect } from '@playwright/test';
-import { bootCoopPair, MP_TEST_TIMEOUT } from './helpers/coop';
+import { bootCoopPair, coopMoveAnyDirection, MP_TEST_TIMEOUT } from './helpers/coop';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
 
@@ -72,24 +72,27 @@ test('two browser windows play one shared co-op dungeon via the demo server', as
 		});
 
 		// --- true lockstep move (R8): turn advances only when BOTH act; B sees A move ---
-		// Try a few directions: A starts adjacent to B's avatar (an ally blocks that
-		// tile), so not every direction is open. Each turn proves lockstep (advances only
-		// when BOTH submit) and that B's view of A stays in sync; net A must move.
-		let moved = false;
-		let prevPeer = await peerOfA();
-		for (const [dx, dy] of [[-1, 0], [0, -1], [0, 1], [-1, -1], [-1, 1]]) {
-			const t0 = await A.evaluate(() => (window as any).__coop.lastTick);
-			await A.evaluate((d) => (window as any).__coop.sendMove(d.dx, d.dy), { dx, dy }); // A moves...
-			await B.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' })); // ...B waits → turn advances
-			await A.waitForFunction((prev) => (window as any).__coop.lastTick === prev + 1, t0, { timeout: 30_000 });
-			await B.waitForFunction((prev) => (window as any).__coop.lastTick === prev + 1, t0, { timeout: 30_000 });
-			const aPos = await A.evaluate(() => ({ /* @ts-ignore */ x: KinkyDungeonPlayerEntity.x, /* @ts-ignore */ y: KinkyDungeonPlayerEntity.y }));
-			const peerAfter = await peerOfA();
-			expect(peerAfter).toEqual({ x: aPos.x, y: aPos.y });        // B's view of A in sync
-			if (peerAfter!.x !== prevPeer!.x || peerAfter!.y !== prevPeer!.y) { moved = true; break; }
-			prevPeer = peerAfter;
-		}
-		expect(moved).toBe(true);
+		// A starts adjacent to B's avatar (an ally blocks that tile) and walls block others, so not
+		// every direction is open — walk until one is. KDM-213: that walk is `coopMoveAnyDirection`,
+		// shared with `mp-input-matrix` / `mp-real-input`. This spec's EXTRA per-turn invariants (which
+		// are why the loop used to be inline) ride along in `onTurn` and are asserted here, on every
+		// iteration including the blocked ones:
+		//   1. strict lockstep — the tick advanced by EXACTLY one, as observed by BOTH pages, not just
+		//      "changed" on A, which is all the shared primitive itself waits for;
+		//   2. B's view of A stays in sync with A's own position.
+		// The direction list is passed explicitly: this spec deliberately omits (+1,0), the tile B's
+		// avatar occupies, so a blocked-by-peer turn is not part of what it walks.
+		const walk = await coopMoveAnyDirection(A, B, {
+			timeout: 30_000,
+			dirs: [[-1, 0], [0, -1], [0, 1], [-1, -1], [-1, 1]] as Array<[number, number]>,
+			onTurn: async ({ tickBefore, tickA, tickB, pos }) => {
+				expect(tickA, 'A did not observe exactly one tick').toBe(tickBefore + 1);
+				expect(tickB, 'B did not observe exactly one tick').toBe(tickBefore + 1);
+				const peerAfter = await peerOfA();
+				expect(peerAfter).toEqual({ x: pos!.x + 999, y: pos!.y }); // KDM-213 PROBE — reverted below
+			},
+		});
+		expect(walk.moved).toBe(true);
 
 		// --- routed bump-attack (KD-085 swap model): A moves into the shared enemy →
 		// the world's REAL dispatcher resolves it → both see the world enemy damaged ---

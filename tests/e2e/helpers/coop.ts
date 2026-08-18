@@ -165,17 +165,53 @@ export async function coopPos(P: Page): Promise<{ x: number; y: number }> {
  * oracle: it reports "input was lost" for a perfectly delivered input that simply hit a wall.
  *
  * `mp-input-matrix` hardcoded `sendMove(1, 0)` and did exactly that; `mp-coop-demo` had already paid
- * for the lesson and walks a direction list inline. This is that walk, owned in one place — a second
- * copy is how the two would drift.
+ * for the lesson and walked a direction list inline. This is that walk, owned in one place.
  *
- * The direction order deliberately starts away from B. Callers that need the per-turn invariants of
- * the demo spec (B's view of A staying in sync) keep their own loop; this is the plain "get A to
- * move" primitive.
+ * The direction order deliberately starts away from B.
+ *
+ * ── THE WAIT IS TOLERANT ON PURPOSE ────────────────────────────────────────────────────────────────
+ * This function never throws on a turn that does not resolve; it reports `advanced: false` and stops.
+ * Its callers are DIAGNOSTIC (`mp-input-matrix` prints a matrix, `mp-real-input` uses it as the
+ * control leg that tells "the session is broken" apart from "the human input path is broken"), and a
+ * primitive that throws cannot serve as a control. Callers that want a hard assertion make it in
+ * `onTurn` — see below.
+ *
+ * ── onTurn: PER-ITERATION INVARIANTS STAY IN THE SPEC (KDM-213) ────────────────────────────────────
+ * `mp-coop-demo` kept its own copy of this walk because it asserts, on EVERY iteration including the
+ * blocked ones, things this primitive deliberately does not: that the turn advanced by EXACTLY one
+ * tick as observed by BOTH pages (strict lockstep), and that B's view of A matches A's own position.
+ *
+ * Folding those into the helper behind flags would make its contract conditional — the thing KDM-204
+ * refused to do. A hook does not: the helper's behaviour is identical whether or not one is passed,
+ * and the assertions live in the spec that cares about them, which is where assertions belong. The
+ * hook is awaited, so throwing from it fails the test at that iteration.
  */
+export interface CoopTurnObservation {
+	/** 0-based index into the direction list. */
+	index: number;
+	/** The direction just attempted. */
+	dir: [number, number];
+	/** A's `__coop.lastTick` sampled BEFORE the move was sent. */
+	tickBefore: number;
+	/** A's and B's `__coop.lastTick` after the turn resolved (both `null` if it never did). */
+	tickA: number | null;
+	tickB: number | null;
+	/** A's authoritative position after the turn (`null` if the turn never resolved). */
+	pos: { x: number; y: number } | null;
+	/** Whether the tick moved at all on A — the tolerant condition this walk itself branches on. */
+	advanced: boolean;
+	/** Whether A actually relocated this iteration (false for a blocked-but-resolved turn). */
+	moved: boolean;
+}
+
 export async function coopMoveAnyDirection(
 	A: Page,
 	B: Page,
-	opts: { timeout?: number; dirs?: Array<[number, number]> } = {},
+	opts: {
+		timeout?: number;
+		dirs?: Array<[number, number]>;
+		onTurn?: (obs: CoopTurnObservation) => void | Promise<void>;
+	} = {},
 ): Promise<{ moved: boolean; advanced: boolean; dir: [number, number] | null; from: { x: number; y: number }; to: { x: number; y: number } }> {
 	const timeout = opts.timeout ?? 30_000;
 	const dirs = opts.dirs ?? ([[-1, 0], [0, -1], [0, 1], [1, 0], [-1, -1], [-1, 1]] as Array<[number, number]>);
@@ -183,16 +219,36 @@ export async function coopMoveAnyDirection(
 	let advanced = false;
 	let last = from;
 
-	for (const [dx, dy] of dirs) {
+	for (let index = 0; index < dirs.length; index++) {
+		const [dx, dy] = dirs[index];
 		const t0 = await A.evaluate(() => (window as any).__coop.lastTick);
 		await A.evaluate((d) => (window as any).__coop.sendMove(d.dx, d.dy), { dx, dy });
 		await B.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
 		const turned = await A.waitForFunction((t) => (window as any).__coop.lastTick !== t, t0, { timeout })
 			.then(() => true).catch(() => false);
 		advanced = advanced || turned;
+
+		// Sampled for `onTurn` before we branch, so a caller asserting strict lockstep sees the same
+		// turn this walk is deciding on. B is read only after A's tick moved — B's own reply may land
+		// a moment later, so give it the same window rather than racing it.
+		let tickA: number | null = null;
+		let tickB: number | null = null;
+		let pos: { x: number; y: number } | null = null;
+		if (turned) {
+			await B.waitForFunction((t) => (window as any).__coop.lastTick !== t, t0, { timeout }).catch(() => {});
+			tickA = await A.evaluate(() => (window as any).__coop.lastTick);
+			tickB = await B.evaluate(() => (window as any).__coop.lastTick);
+			pos = await coopPos(A);
+			last = pos;
+		}
+		const movedThisTurn = !!pos && (pos.x !== from.x || pos.y !== from.y);
+
+		if (opts.onTurn) {
+			await opts.onTurn({ index, dir: [dx, dy], tickBefore: t0, tickA, tickB, pos, advanced: turned, moved: movedThisTurn });
+		}
+
 		if (!turned) break;          // routing/lockstep is broken — trying more directions proves nothing
-		last = await coopPos(A);
-		if (last.x !== from.x || last.y !== from.y) return { moved: true, advanced, dir: [dx, dy], from, to: last };
+		if (movedThisTurn) return { moved: true, advanced, dir: [dx, dy], from, to: last };
 	}
 	return { moved: false, advanced, dir: null, from, to: last };
 }
