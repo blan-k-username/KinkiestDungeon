@@ -8,7 +8,7 @@
  * submit) advances the shared turn — proving the two-browser UAT path works.
  */
 import { test, expect } from '@playwright/test';
-import { bootCoopPair, coopMoveAnyDirection, MP_TEST_TIMEOUT } from './helpers/coop';
+import { bootCoopPair, coopMoveAnyDirection, MP_TEST_TIMEOUT, waitForPeerAvatar } from './helpers/coop';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
 
@@ -65,11 +65,6 @@ test('two browser windows play one shared co-op dungeon via the demo server', as
 		// the KDServerRole game-source flag was reverted; the client is pure monkey-patch).
 		expect(await A.evaluate(() => (window as any).KDRenderClient.isLocalSimDisabled())).toBe(true);
 
-		const peerOfA = () => B.evaluate(() => {
-			// @ts-ignore
-			const a = (KDMapData.Entities || []).find((e: any) => e.Enemy && e.Enemy.name && e.Enemy.name.indexOf('RemotePlayer') === 0);
-			return a ? { x: a.x, y: a.y } : null;
-		});
 
 		// --- true lockstep move (R8): turn advances only when BOTH act; B sees A move ---
 		// A starts adjacent to B's avatar (an ally blocks that tile) and walls block others, so not
@@ -88,8 +83,8 @@ test('two browser windows play one shared co-op dungeon via the demo server', as
 			onTurn: async ({ tickBefore, tickA, tickB, pos }) => {
 				expect(tickA, 'A did not observe exactly one tick').toBe(tickBefore + 1);
 				expect(tickB, 'B did not observe exactly one tick').toBe(tickBefore + 1);
-				const peerAfter = await peerOfA();
-				expect(peerAfter).toEqual({ x: pos!.x + 999, y: pos!.y }); // KDM-213 PROBE — reverted below
+				const peerAfter = await waitForPeerAvatar(B);
+				expect({ x: peerAfter.x, y: peerAfter.y }).toEqual({ x: pos!.x, y: pos!.y }); // B's view of A in sync
 			},
 		});
 		expect(walk.moved).toBe(true);

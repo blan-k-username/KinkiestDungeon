@@ -8,7 +8,7 @@
  * here we only verify the browser-visible faction so the flaky two-browser attack chain is avoided.
  */
 import { test, expect } from '@playwright/test';
-import { bootCoopPair, MP_TEST_TIMEOUT } from './helpers/coop';
+import { bootCoopPair, MP_TEST_TIMEOUT, waitForPeerAvatar } from './helpers/coop';
 
 test('PvP session: each browser sees the peer avatar as Enemy faction', async ({ browser }) => {
 	test.setTimeout(MP_TEST_TIMEOUT);
@@ -27,19 +27,21 @@ test('PvP session: each browser sees the peer avatar as Enemy faction', async ({
 		await bootCoopPair(A, B, port);
 
 		// In A's view, the single RemotePlayer avatar is B; the game must see it as Enemy.
-		const factionForA = await A.evaluate(() => {
-			const ents = (KDMapData as any).Entities || [];
-			const peer = ents.find((e: any) => e.Enemy && e.Enemy.name && e.Enemy.name.indexOf('RemotePlayer') === 0);
+		// KDM-210: wait for the avatar, then look it up BY ID — the 'RemotePlayer' name pattern
+		// lives only in `waitForPeerAvatar`, and the wait removes the null-deref race.
+		const peerA = await waitForPeerAvatar(A, { label: "A's view of the peer" });
+		const factionForA = await A.evaluate((id) => {
+			const peer = ((KDMapData as any).Entities || []).find((e: any) => e.id === id);
 			return peer ? (KDGetFaction as any)(peer) : null;
-		});
+		}, peerA.id);
 		expect(factionForA).toBe('Enemy');
 
 		// Symmetric in B's view.
-		const factionForB = await B.evaluate(() => {
-			const ents = (KDMapData as any).Entities || [];
-			const peer = ents.find((e: any) => e.Enemy && e.Enemy.name && e.Enemy.name.indexOf('RemotePlayer') === 0);
+		const peerB = await waitForPeerAvatar(B, { label: "B's view of the peer" });
+		const factionForB = await B.evaluate((id) => {
+			const peer = ((KDMapData as any).Entities || []).find((e: any) => e.id === id);
 			return peer ? (KDGetFaction as any)(peer) : null;
-		});
+		}, peerB.id);
 		expect(factionForB).toBe('Enemy');
 	} finally {
 		await ctxA.close();

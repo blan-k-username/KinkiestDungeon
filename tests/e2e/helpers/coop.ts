@@ -215,6 +215,13 @@ export async function coopMoveAnyDirection(
 ): Promise<{ moved: boolean; advanced: boolean; dir: [number, number] | null; from: { x: number; y: number }; to: { x: number; y: number } }> {
 	const timeout = opts.timeout ?? 30_000;
 	const dirs = opts.dirs ?? ([[-1, 0], [0, -1], [0, 1], [1, 0], [-1, -1], [-1, 1]] as Array<[number, number]>);
+	// KDM-210: the peer avatar blocks one neighbouring tile, so which directions are open is only
+	// meaningful once it has arrived. Waiting here also means every caller of this walk inherits the
+	// arrival guarantee instead of racing it.
+	// Advisory, and deliberately NON-fatal with a short bound: this walk's contract is that it never
+	// throws (KDM-213 — mp-real-input uses it as a control leg). A session with no peer is already
+	// failing for other reasons; stalling the full 30 s here would only slow that red down.
+	await waitForPeerAvatar(B, { timeout: 15_000 }).catch(() => {});
 	const from = await coopPos(A);
 	let advanced = false;
 	let last = from;
@@ -357,4 +364,56 @@ export async function coopRealKeyMove(
 		.then(() => true).catch(() => false);
 	const to = await coopPos(A);
 	return { control, dir, key, advanced, moved: to.x !== from.x || to.y !== from.y, from, to };
+}
+/**
+ * WAIT for this client's peer avatar to arrive in its entity list, then return it.
+ *
+ * WHY THIS IS A WAIT AND NOT A READ (KDM-210). Seventeen specs each carried their own copy of a
+ * `peerOfB()` closure that FOUND the RemotePlayer entity and returned `{id,x,y}` or `null`, and
+ * called it straight after `bootCoopPair` with no wait at all. The peer avatar is pushed by the
+ * server shortly AFTER the session starts, so on a loaded host the entity is not there yet: the
+ * finder returns `null`, the next `page.evaluate((p) => ... p.x ...)` dereferences it, and the spec
+ * dies with
+ *
+ *     page.evaluate: TypeError: Cannot read properties of null (reading 'x')
+ *
+ * Measured (KDM-204): `mp-pvp-tie-persist` failed BOTH attempts deep in a 28-spec run, yet passed
+ * isolated in 117 s on a pristine tree and 69 s with changes applied — load/ordering sensitive, not
+ * caused by any edit. Retries mask it as `flaky`, which per `TESTING_POLICY.md` rule 3 costs a full
+ * 2-7 min retry and is indistinguishable at a glance from a real regression.
+ *
+ * Copy-paste is what made it unfixable in one place: repairing the race in one spec left sixteen
+ * others racing. Hence one helper, and hence a wait — the read was never correct, only usually lucky.
+ *
+ * Returns `{ id, x, y }` — deliberately the shape the inline copies returned, so call sites were a
+ * drop-in swap. Specs needing the whole entity look it up BY ID inside their own `page.evaluate`
+ * (`mp-pvp-peer-enemy`, `mp-pvp-targeting-repeat`, `mp-pvp-menu-attack`), which keeps the
+ * `RemotePlayer` name pattern in exactly one place — here.
+ *
+ * On timeout it throws naming the avatar and the client, so a red says "the peer never arrived"
+ * instead of a null dereference three lines later in unrelated code.
+ */
+export async function waitForPeerAvatar(
+	P: Page,
+	opts: { timeout?: number; label?: string } = {},
+): Promise<{ id: any; x: number; y: number }> {
+	const timeout = opts.timeout ?? 30_000;
+	let handle;
+	try {
+		handle = await P.waitForFunction(() => {
+			// @ts-ignore bare let-global — KDMapData is a bundle `let`, not on globalThis
+			const e = ((KDMapData as any).Entities || []).find(
+				(x: any) => x.Enemy && typeof x.Enemy.name === 'string' && x.Enemy.name.indexOf('RemotePlayer') === 0,
+			);
+			return e ? { id: e.id, x: e.x, y: e.y } : null;
+		}, undefined, { timeout });
+	} catch (err) {
+		throw new Error(
+			'[KDM-210] the peer avatar (a "RemotePlayer*" entity) never appeared in KDMapData.Entities ' +
+			`within ${timeout} ms${opts.label ? ` — ${opts.label}` : ''}. The session started but the ` +
+			'server had not yet pushed the peer, or never did. This is the race that used to surface as ' +
+			'"Cannot read properties of null (reading \'x\')" in whichever evaluate ran next.',
+		);
+	}
+	return await handle.jsonValue();
 }

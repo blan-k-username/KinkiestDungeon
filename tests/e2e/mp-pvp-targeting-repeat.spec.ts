@@ -14,7 +14,7 @@
  * Will keeps dropping every turn. With the bug, turn 2+ fails the gate → no damage.
  */
 import { test, expect } from '@playwright/test';
-import { bootCoopPair, MP_TEST_TIMEOUT } from './helpers/coop';
+import { bootCoopPair, MP_TEST_TIMEOUT, waitForPeerAvatar } from './helpers/coop';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
 
@@ -29,19 +29,23 @@ test('PvP: A can attack the peer every turn (context-menu visibility holds)', as
 	const ctxB = await browser.newContext();
 	const A = await ctxA.newPage();
 	const B = await ctxB.newPage();
-
 	// What A's context menu sees for the peer avatar: the same gate KDContextMenu applies
 	// before it will offer (and send) an Attack/Aggro on the entity.
-	const peerGateA = () => A.evaluate(() => {
-		// @ts-ignore bare let-globals
-		const e = ((KDMapData as any).Entities || []).find((x: any) => x.Enemy && typeof x.Enemy.name === 'string' && x.Enemy.name.indexOf('RemotePlayer') === 0);
-		if (!e) return null;
-		// @ts-ignore
-		const vis = (typeof KinkyDungeonVisionGet === 'function') ? KinkyDungeonVisionGet(e.x, e.y) : -1;
-		// @ts-ignore
-		const see = (typeof KDCanSeeEnemy === 'function') ? !!KDCanSeeEnemy(e) : true;
-		return { id: e.id, x: e.x, y: e.y, vis, see, targetable: vis > 0 && see };
-	});
+	// KDM-210: the avatar is WAITED for by `waitForPeerAvatar`, which also owns the sole
+	// 'RemotePlayer' name pattern; this only computes the gate, looking the entity up by that id.
+	const peerGateA = async () => {
+		const found = await waitForPeerAvatar(A, { label: "A's context-menu gate" });
+		return A.evaluate((id) => {
+			// @ts-ignore bare let-globals
+			const e = ((KDMapData as any).Entities || []).find((x: any) => x.id === id);
+			if (!e) return null;
+			// @ts-ignore
+			const vis = (typeof KinkyDungeonVisionGet === 'function') ? KinkyDungeonVisionGet(e.x, e.y) : -1;
+			// @ts-ignore
+			const see = (typeof KDCanSeeEnemy === 'function') ? !!KDCanSeeEnemy(e) : true;
+			return { id: e.id, x: e.x, y: e.y, vis, see, targetable: vis > 0 && see };
+		}, found.id);
+	};
 	const willOfB = () => B.evaluate(() => /* @ts-ignore */ KinkyDungeonStatWill as number);
 
 	try {
@@ -52,7 +56,8 @@ test('PvP: A can attack the peer every turn (context-menu visibility holds)', as
 
 		for (let t = 1; t <= TURNS; t++) {
 			const peer = await peerGateA();
-			expect(peer, `turn ${t}: A has no peer avatar entity at all`).not.toBeNull();
+			// KDM-210: waitForPeerAvatar throws a named error if the avatar never arrives, so this
+			// null check is retired. peerGateA still returns null if the id vanished mid-turn.
 
 			// Mimic the UI exactly: only send the attack if the context-menu gate allows it;
 			// otherwise the click is a no-op and the player would "wait".

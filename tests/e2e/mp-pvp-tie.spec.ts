@@ -7,7 +7,7 @@
  * ends up wearing the restraint. If it doesn't, this reproduces the live bug deterministically.
  */
 import { test, expect } from '@playwright/test';
-import { bootCoopPair, MP_TEST_TIMEOUT } from './helpers/coop';
+import { bootCoopPair, MP_TEST_TIMEOUT, waitForPeerAvatar } from './helpers/coop';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
 
@@ -25,11 +25,6 @@ test('PvP tie: binding a defeated peer applies a real restraint to them', async 
 	const A = await ctxA.newPage();
 	const B = await ctxB.newPage();
 
-	const peerOfB = () => B.evaluate(() => {
-		// @ts-ignore
-		const e = ((KDMapData as any).Entities || []).find((x: any) => x.Enemy && x.Enemy.name && x.Enemy.name.indexOf('RemotePlayer') === 0);
-		return e ? { id: e.id, x: e.x, y: e.y } : null;
-	});
 	const advance = async (t0: number) => {
 		await A.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
 		await B.waitForFunction((p) => (window as any).__coop.lastTick === p + 1, t0, { timeout: 30_000 });
@@ -41,8 +36,8 @@ test('PvP tie: binding a defeated peer applies a real restraint to them', async 
 
 		// --- B wears Player A down to defeated (real doattack on A's avatar) ---
 		for (let i = 0; i < 25 && !session.isDefeated('A'); i++) {
-			const peer = await peerOfB();
-			expect(peer, 'B sees no peer avatar').not.toBeNull();
+			const peer = await waitForPeerAvatar(B);
+			// KDM-210: retired — waitForPeerAvatar throws a named error before this could fail.
 			await B.evaluate((p) => (window as any).__coop.sendAction({ kdType: 'doattack', data: { tx: p.x, ty: p.y, id: p.id, attackCost: 1 } }), peer);
 			const t0 = await B.evaluate(() => (window as any).__coop.lastTick);
 			await advance(t0);
@@ -51,7 +46,7 @@ test('PvP tie: binding a defeated peer applies a real restraint to them', async 
 
 		// --- B ties Player A: drive the REAL addNPCRestraint the tie submenu emits ---
 		const restraintsBefore = session.snapshotFor('A').restraints.length;
-		const peer = await peerOfB();
+		const peer = await waitForPeerAvatar(B);
 		const sent = await B.evaluate(({ p, bind, raw }) => {
 			// open the tie submenu the way "Tie Up" does (runs locally on the thin client)
 			// @ts-ignore

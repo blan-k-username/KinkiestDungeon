@@ -8,7 +8,7 @@
  * B submits a wait, THEN B applies the tie — and the tie still lands on A.
  */
 import { test, expect } from '@playwright/test';
-import { bootCoopPair, MP_TEST_TIMEOUT } from './helpers/coop';
+import { bootCoopPair, MP_TEST_TIMEOUT, waitForPeerAvatar } from './helpers/coop';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
 
@@ -25,18 +25,13 @@ test('a tie applied after already acting this turn still lands (manual re-submit
 	const blocked: string[] = [];
 	B.on('console', (m) => { const t = m.text(); if (/submit BLOCKED/.test(t)) blocked.push(t); });
 
-	const peerOfB = () => B.evaluate(() => {
-		// @ts-ignore
-		const e = ((KDMapData as any).Entities || []).find((x: any) => x.Enemy && x.Enemy.name && x.Enemy.name.indexOf('RemotePlayer') === 0);
-		return e ? { id: e.id, x: e.x, y: e.y } : null;
-	});
 
 	try {
 		await bootCoopPair(A, B, port);
 		const session = bridge.session;
 
 		for (let i = 0; i < 25 && !session.isDefeated('A'); i++) {
-			const peer = await peerOfB();
+			const peer = await waitForPeerAvatar(B);
 			await B.evaluate((p) => (window as any).__coop.sendAction({ kdType: 'doattack', data: { tx: p.x, ty: p.y, id: p.id, attackCost: 1 } }), peer);
 			const t0 = await B.evaluate(() => (window as any).__coop.lastTick);
 			await A.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
@@ -45,7 +40,7 @@ test('a tie applied after already acting this turn still lands (manual re-submit
 		expect(session.isDefeated('A')).toBe(true);
 
 		const before = session.snapshotFor('A').restraints.length;
-		const peer = await peerOfB();
+		const peer = await waitForPeerAvatar(B);
 
 		// B acts FIRST (uses up the turn under the old gate), THEN applies the tie — must still work
 		await B.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));

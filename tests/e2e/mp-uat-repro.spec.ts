@@ -6,7 +6,7 @@
  * Both tests below are expected to be RED when written; each says what red means.
  */
 import { test, expect } from '@playwright/test';
-import { bootCoopPair, MP_TEST_TIMEOUT } from './helpers/coop';
+import { bootCoopPair, MP_TEST_TIMEOUT, waitForPeerAvatar } from './helpers/coop';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
 
@@ -179,11 +179,6 @@ test('floating combat text does not accumulate across PvP attacks', async ({ bro
 	const floaters = (P: typeof A) => P.evaluate(() =>
 		// @ts-ignore bare let-global
 		(typeof KinkyDungeonFloaters !== 'undefined' && KinkyDungeonFloaters) ? KinkyDungeonFloaters.length : -1);
-	const peerOfB = () => B.evaluate(() => {
-		const e = ((KDMapData as any).Entities || [])
-			.find((x: any) => x.Enemy && x.Enemy.name && x.Enemy.name.indexOf('RemotePlayer') === 0);
-		return e ? { id: e.id, x: e.x, y: e.y } : null;
-	});
 
 	try {
 		await bootCoopPair(A, B, port);
@@ -192,7 +187,7 @@ test('floating combat text does not accumulate across PvP attacks', async ({ bro
 
 		// B attacks A for real, several times — the exact drive the UAT screenshots came from.
 		for (let i = 0; i < 5; i++) {
-			const peer = await peerOfB();
+			const peer = await waitForPeerAvatar(B);
 			if (!peer) break;
 			await B.evaluate((p) => (window as any).__coop.sendAction(
 				{ kdType: 'doattack', data: { tx: p.x, ty: p.y, id: p.id, attackCost: 1 } }), peer);
@@ -248,12 +243,9 @@ test('re-applying an identical snapshot is idempotent (no effect is replayed)', 
 		await bootCoopPair(A, B, port);
 
 		// Land one real PvP hit so the snapshot in flight carries a combat effect.
-		const peer = await B.evaluate(() => {
-			const e = ((KDMapData as any).Entities || [])
-				.find((x: any) => x.Enemy && x.Enemy.name && x.Enemy.name.indexOf('RemotePlayer') === 0);
-			return e ? { id: e.id, x: e.x, y: e.y } : null;
-		});
-		expect(peer, 'B sees no peer avatar — cannot exercise the combat-effect path').not.toBeNull();
+		// KDM-210: waits for the avatar instead of reading-then-asserting. The null check that used
+		// to follow is retired — it can no longer fail, because the helper throws a named error first.
+		const peer = await waitForPeerAvatar(B, { label: 'B sees no peer avatar — cannot exercise the combat-effect path' });
 		const t0 = await B.evaluate(() => (window as any).__coop.lastTick);
 		await B.evaluate((p) => (window as any).__coop.sendAction(
 			{ kdType: 'doattack', data: { tx: p.x, ty: p.y, id: p.id, attackCost: 1 } }), peer);
@@ -381,12 +373,9 @@ test('snapshots delivered after a hit do not re-create its floaters', async ({ b
 		await bootCoopPair(A, B, port);
 
 		// 1. Land one real PvP hit, so there is a combat event to be replayed.
-		const peer = await B.evaluate(() => {
-			const e = ((KDMapData as any).Entities || [])
-				.find((x: any) => x.Enemy && x.Enemy.name && x.Enemy.name.indexOf('RemotePlayer') === 0);
-			return e ? { id: e.id, x: e.x, y: e.y } : null;
-		});
-		expect(peer, 'B sees no peer avatar — cannot land a PvP hit').not.toBeNull();
+		// KDM-210: waits for the avatar instead of reading-then-asserting. The null check that used
+		// to follow is retired — it can no longer fail, because the helper throws a named error first.
+		const peer = await waitForPeerAvatar(B, { label: 'B sees no peer avatar — cannot land a PvP hit' });
 		const t0 = await B.evaluate(() => (window as any).__coop.lastTick);
 		await B.evaluate((p) => (window as any).__coop.sendAction(
 			{ kdType: 'doattack', data: { tx: p.x, ty: p.y, id: p.id, attackCost: 1 } }), peer);

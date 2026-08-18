@@ -5,7 +5,7 @@
  * KinkyDungeonDressPlayer / UpdateModels / ForceRefreshModels throw.
  */
 import { test } from '@playwright/test';
-import { bootCoopPair, MP_TEST_TIMEOUT } from './helpers/coop';
+import { bootCoopPair, MP_TEST_TIMEOUT, waitForPeerAvatar } from './helpers/coop';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
 
@@ -18,25 +18,20 @@ test('DIAG: victim render-model state after a tie', async ({ browser }) => {
 	const A = await ctxA.newPage();
 	const B = await ctxB.newPage();
 
-	const peerOfB = () => B.evaluate(() => {
-		// @ts-ignore
-		const e = ((KDMapData as any).Entities || []).find((x: any) => x.Enemy && x.Enemy.name && x.Enemy.name.indexOf('RemotePlayer') === 0);
-		return e ? { id: e.id, x: e.x, y: e.y } : null;
-	});
 
 	try {
 		await bootCoopPair(A, B, port);
 		const session = bridge.session;
 
 		for (let i = 0; i < 25 && !session.isDefeated('A'); i++) {
-			const peer = await peerOfB();
+			const peer = await waitForPeerAvatar(B);
 			await B.evaluate((p) => (window as any).__coop.sendAction({ kdType: 'doattack', data: { tx: p.x, ty: p.y, id: p.id, attackCost: 1 } }), peer);
 			const t0 = await B.evaluate(() => (window as any).__coop.lastTick);
 			await A.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
 			await B.waitForFunction((p) => (window as any).__coop.lastTick === p + 1, t0, { timeout: 30_000 });
 		}
 
-		const peer = await peerOfB();
+		const peer = await waitForPeerAvatar(B);
 		await B.evaluate((p) => {
 			// @ts-ignore
 			KDSendInput('tryCastSpell', { tx: p.x, ty: p.y, spell: KDBondageSpell, spellname: 'Bondage', enemy: undefined, player: KDPlayer(), bullet: undefined });

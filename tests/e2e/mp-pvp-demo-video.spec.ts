@@ -5,7 +5,7 @@
  * visual capture. Run it, then open the printed .webm paths.
  */
 import { test } from '@playwright/test';
-import { bootCoopPair, MP_TEST_TIMEOUT } from './helpers/coop';
+import { bootCoopPair, MP_TEST_TIMEOUT, waitForPeerAvatar } from './helpers/coop';
 import * as path from 'path';
 import * as fs from 'fs';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -26,11 +26,6 @@ test('DEMO VIDEO: PvP wear-down → defeat → tie → bound (both views)', asyn
 	const A = await ctxA.newPage();
 	const B = await ctxB.newPage();
 
-	const peerOfB = () => B.evaluate(() => {
-		// @ts-ignore
-		const e = ((KDMapData as any).Entities || []).find((x: any) => x.Enemy && x.Enemy.name && x.Enemy.name.indexOf('RemotePlayer') === 0);
-		return e ? { id: e.id, x: e.x, y: e.y } : null;
-	});
 
 	try {
 		await bootCoopPair(A, B, port);
@@ -39,7 +34,7 @@ test('DEMO VIDEO: PvP wear-down → defeat → tie → bound (both views)', asyn
 
 		// --- wear A down (B attacks A's avatar), slow enough to watch ---
 		for (let i = 0; i < 25 && !session.isDefeated('A'); i++) {
-			const peer = await peerOfB();
+			const peer = await waitForPeerAvatar(B);
 			if (!peer) break;
 			await B.evaluate((p) => (window as any).__coop.sendAction({ kdType: 'doattack', data: { tx: p.x, ty: p.y, id: p.id, attackCost: 1 } }), peer);
 			const t0 = await B.evaluate(() => (window as any).__coop.lastTick);
@@ -50,7 +45,7 @@ test('DEMO VIDEO: PvP wear-down → defeat → tie → bound (both views)', asyn
 		await A.waitForTimeout(1500); // lingers on "Player A defeated"
 
 		// --- B ties A (bootstrap quick-bind pre-selected the rope) ---
-		const peer = await peerOfB();
+		const peer = await waitForPeerAvatar(B);
 		await B.evaluate((p) => {
 			// @ts-ignore
 			KDSendInput('tryCastSpell', { tx: p.x, ty: p.y, spell: KDBondageSpell, spellname: 'Bondage', enemy: undefined, player: KDPlayer(), bullet: undefined });

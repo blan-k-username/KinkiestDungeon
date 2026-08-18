@@ -11,7 +11,7 @@
  *   - owned rope category selected → A IS bound
  */
 import { test, expect } from '@playwright/test';
-import { bootCoopPair, MP_TEST_TIMEOUT } from './helpers/coop';
+import { bootCoopPair, MP_TEST_TIMEOUT, waitForPeerAvatar } from './helpers/coop';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
 
@@ -26,18 +26,13 @@ test('PvP tie via real submenu buttons: wrong material does nothing, owned mater
 	const A = await ctxA.newPage();
 	const B = await ctxB.newPage();
 
-	const peerOfB = () => B.evaluate(() => {
-		// @ts-ignore
-		const e = ((KDMapData as any).Entities || []).find((x: any) => x.Enemy && x.Enemy.name && x.Enemy.name.indexOf('RemotePlayer') === 0);
-		return e ? { id: e.id, x: e.x, y: e.y } : null;
-	});
 
 	try {
 		await bootCoopPair(A, B, port);
 		const session = bridge.session;
 
 		for (let i = 0; i < 25 && !session.isDefeated('A'); i++) {
-			const peer = await peerOfB();
+			const peer = await waitForPeerAvatar(B);
 			await B.evaluate((p) => (window as any).__coop.sendAction({ kdType: 'doattack', data: { tx: p.x, ty: p.y, id: p.id, attackCost: 1 } }), peer);
 			const t0 = await B.evaluate(() => (window as any).__coop.lastTick);
 			await A.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
@@ -45,7 +40,7 @@ test('PvP tie via real submenu buttons: wrong material does nothing, owned mater
 		}
 		expect(session.isDefeated('A')).toBe(true);
 
-		const peer = await peerOfB();
+		const peer = await waitForPeerAvatar(B);
 
 		// open the tie submenu (what clicking "Tie Up" does) and toggle to the generic raw-material view.
 		// Clear any quick-bind selection first so the submenu falls back to the global default category

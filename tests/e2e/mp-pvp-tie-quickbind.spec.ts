@@ -9,7 +9,7 @@
  * applies the restraint to Player A.
  */
 import { test, expect } from '@playwright/test';
-import { bootCoopPair, MP_TEST_TIMEOUT } from './helpers/coop';
+import { bootCoopPair, MP_TEST_TIMEOUT, waitForPeerAvatar } from './helpers/coop';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
 
@@ -24,11 +24,6 @@ test('Tie Up works out-of-the-box: quick-bind pre-selects owned material, bind r
 	const A = await ctxA.newPage();
 	const B = await ctxB.newPage();
 
-	const peerOfB = () => B.evaluate(() => {
-		// @ts-ignore
-		const e = ((KDMapData as any).Entities || []).find((x: any) => x.Enemy && x.Enemy.name && x.Enemy.name.indexOf('RemotePlayer') === 0);
-		return e ? { id: e.id, x: e.x, y: e.y } : null;
-	});
 
 	try {
 		await bootCoopPair(A, B, port);
@@ -44,7 +39,7 @@ test('Tie Up works out-of-the-box: quick-bind pre-selects owned material, bind r
 
 		// wear A down to defeated
 		for (let i = 0; i < 25 && !session.isDefeated('A'); i++) {
-			const peer = await peerOfB();
+			const peer = await waitForPeerAvatar(B);
 			await B.evaluate((p) => (window as any).__coop.sendAction({ kdType: 'doattack', data: { tx: p.x, ty: p.y, id: p.id, attackCost: 1 } }), peer);
 			const t0 = await B.evaluate(() => (window as any).__coop.lastTick);
 			await A.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
@@ -53,7 +48,7 @@ test('Tie Up works out-of-the-box: quick-bind pre-selects owned material, bind r
 		expect(session.isDefeated('A')).toBe(true);
 
 		const before = session.snapshotFor('A').restraints.length;
-		const peer = await peerOfB();
+		const peer = await waitForPeerAvatar(B);
 
 		// "Tie Up" → with the quick-bind pre-selected, the submenu opens straight into the generic
 		// view with the OWNED rope category — no toggle, no category click needed.

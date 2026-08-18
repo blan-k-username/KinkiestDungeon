@@ -10,18 +10,20 @@
  * dropping turn over turn.
  */
 import { test, expect } from '@playwright/test';
-import { bootCoopPair, MP_TEST_TIMEOUT } from './helpers/coop';
+import { bootCoopPair, MP_TEST_TIMEOUT, waitForPeerAvatar } from './helpers/coop';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
 
 const TURNS = 4;
 
 /** Drive KD's real context menu against the peer avatar; invoke the attack option it offers. */
-async function menuAttackPeer(P: any) {
-	return P.evaluate(() => {
+// KDM-210: the caller WAITS for the avatar (waitForPeerAvatar) and passes its id in, so the
+// 'RemotePlayer' name pattern lives in exactly one place and this can never race an absent entity.
+async function menuAttackPeer(P: any, peerId: any) {
+	return P.evaluate((id: any) => {
 		const w = window as any;
 		// @ts-ignore bare let-globals
-		const peer = ((KDMapData as any).Entities || []).find((x: any) => x.Enemy && typeof x.Enemy.name === 'string' && x.Enemy.name.indexOf('RemotePlayer') === 0);
+		const peer = ((KDMapData as any).Entities || []).find((x: any) => x.id === id);
 		if (!peer) return { ok: false, why: 'no-peer-entity' };
 		// Target the peer's TILE directly. The .Game wrapper re-aims from KDContextX/Y as
 		// pixel coords (KinkyDungeonSetTargetLocation), which we can't easily compute headless;
@@ -63,7 +65,7 @@ async function menuAttackPeer(P: any) {
 		// invoke the REAL option callback (runs KDSendInput → routed → submit → WS)
 		try { menu.optionActions[key](0, 0); } catch (e) { return { ok: false, why: 'action-threw:' + (e && (e as any).message), key, options }; }
 		return { ok: true, key, options, vis, see, sent: !!(w.__coop && w.__coop.submitted) };
-	});
+	}, peerId);
 }
 
 test('PvP via the real context menu: sneak then repeated attacks keep landing', async ({ browser }) => {
@@ -91,7 +93,7 @@ test('PvP via the real context menu: sneak then repeated attacks keep landing', 
 		let attackTurns = 0;
 
 		for (let t = 1; t <= TURNS; t++) {
-			const r = await menuAttackPeer(A);
+			const r = await menuAttackPeer(A, (await waitForPeerAvatar(A, { label: "A driving the context menu" })).id);
 			const t0 = await A.evaluate(() => (window as any).__coop.lastTick);
 			if (!r.ok) {
 				// the UI offered/sent nothing → A must still act so we can observe (wait)
