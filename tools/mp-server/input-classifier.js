@@ -1,5 +1,5 @@
 /**
- * tools/mp-server/input-classifier.js  (KDM-163)
+ * tools/mp-server/input-classifier.js  (KDM-163, KDM-197)
  *
  * Decide, WITHOUT running anything, which of KD's input types consume a shared turn.
  *
@@ -22,9 +22,19 @@
  * So an unresolved callee counts as "might advance": a `ui` verdict means the entire resolved call
  * graph is clean AND nothing unresolved was called.
  *
- * The residual conservatism is repaired at runtime, not here: `SwapSession` demotes a seeded `turn` to
- * `ui` the first time a real application is observed not to advance (probe14 measured 12 of 25 known
- * UI inputs landing in that bucket).
+ * KDM-197 — the verdict now ships with the STRENGTH of the evidence behind it, because the runtime
+ * repair below is only legitimate against a guess:
+ *
+ *   proven-turn   a concrete call path to the target exists through RESOLVED functions only. The type
+ *                 demonstrably can advance; an occurrence that did not is the game declining, not a
+ *                 misclassification. Never demotable at runtime.
+ *   assumed-turn  the verdict rests on an unresolved callee — the deliberate over-approximation.
+ *                 probe14 measured 12 of 25 known-UI inputs landing here, so this is the bucket the
+ *                 runtime exists to repair, and the only one it may demote.
+ *   proven-ui     the entire resolved call graph is clean AND nothing unresolved was called.
+ *
+ * `SwapSession` then demotes an `assumed-turn` only after `uiDemotionEvidence` corroborating
+ * non-advancing observations, and pins any type ever seen to advance. One observation decides nothing.
  *
  * ⚠️ TEXT-COUPLED to `out/main.js`, which the plugin rule allows only as a last resort and only with
  * loud drift reporting — hence `report()`: if the handler count or the target name stops matching, the
@@ -60,9 +70,18 @@ const DEF_PATTERNS = [
 	/^(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*async\s*\([^)]*\)\s*=>\s*\{/gm,
 ];
 
+/** Kind + confidence for one analysed body (KDM-197). */
+function verdict(may, proven) {
+	if (proven) return { kind: 'turn', confidence: 'proven-turn' };
+	if (may) return { kind: 'turn', confidence: 'assumed-turn' };
+	return { kind: 'ui', confidence: 'proven-ui' };
+}
+
 /**
  * Classify every KDInputTypes handler in `bundleSource`.
- * @returns {{kinds: Object<string,'turn'|'ui'>, report: object}}
+ * @returns {{kinds: Object<string,'turn'|'ui'>,
+ *            confidence: Object<string,'proven-turn'|'assumed-turn'|'proven-ui'>,
+ *            report: object}}
  */
 function classifyInputs(bundleSource) {
 	const fnBody = new Map();
@@ -89,30 +108,58 @@ function classifyInputs(bundleSource) {
 		return { resolved, unresolved };
 	}
 
-	const memo = new Map();
-	function reaches(name, seen) {
+	/**
+	 * Is TARGET reachable from `name`?
+	 *
+	 * `assumeUnresolved` picks the reading of a callee whose body this analysis cannot see:
+	 *   true  — it MIGHT advance (the sound over-approximation; this produces the verdict)
+	 *   false — only resolved callees count (an under-approximation, so a `true` answer is a PROOF
+	 *           that a concrete call path to the target exists — KDM-197's `proven-turn`)
+	 * One walk, two memo tables: the traversal is identical under both readings, so it must not be
+	 * written twice — the two copies drifting apart is exactly how a "proof" stops being one.
+	 */
+	const memo = [new Map(), new Map()];
+	function reaches(name, assumeUnresolved, seen) {
 		if (name === TARGET) return true;
-		if (memo.has(name)) return memo.get(name);
+		const cache = memo[assumeUnresolved ? 1 : 0];
+		if (cache.has(name)) return cache.get(name);
 		const body = fnBody.get(name);
-		if (body === undefined) return true;            // unresolved ⇒ assume it might advance
+		if (body === undefined) return assumeUnresolved;   // no body: the reading decides
 		seen = seen || new Set();
-		if (seen.has(name)) return false;               // cycle contributes nothing
+		if (seen.has(name)) return false;                  // cycle contributes nothing
 		seen.add(name);
 		const { resolved, unresolved } = calleesIn(body);
 		let r = false;
-		for (const u of unresolved) { if (!INERT.has(u)) { r = true; break; } }
-		if (!r) for (const c of resolved) { if (reaches(c, seen)) { r = true; break; } }
-		memo.set(name, r);
+		if (assumeUnresolved) { for (const u of unresolved) { if (!INERT.has(u)) { r = true; break; } } }
+		if (!r) for (const c of resolved) { if (reaches(c, assumeUnresolved, seen)) { r = true; break; } }
+		cache.set(name, r);
 		return r;
+	}
+
+	/** The same two readings, for a body that is not a named function (an input handler). */
+	function analyse(body) {
+		if (body.indexOf(TARGET) >= 0) return { may: true, proven: true };
+		const { resolved, unresolved } = calleesIn(body);
+		let proven = false;
+		for (const c of resolved) { if (reaches(c, false)) { proven = true; break; } }
+		if (proven) return { may: true, proven: true };
+		let may = false;
+		for (const u of unresolved) { if (!INERT.has(u)) { may = true; break; } }
+		if (!may) for (const c of resolved) { if (reaches(c, true)) { may = true; break; } }
+		return { may, proven: false };
 	}
 
 	const anchor = bundleSource.search(/KDInputTypes\s*=\s*\{/);
 	const kinds = {};
-	const report = { found: anchor >= 0, handlers: 0, ui: 0, turn: 0, functions: fnBody.size, target: TARGET };
-	if (anchor < 0) return { kinds, report };
+	const confidence = {};
+	const report = {
+		found: anchor >= 0, handlers: 0, ui: 0, turn: 0,
+		provenTurn: 0, assumedTurn: 0, functions: fnBody.size, target: TARGET,
+	};
+	if (anchor < 0) return { kinds, confidence, report };
 
 	const lit = blockAt(bundleSource, anchor);
-	if (lit == null) return { kinds, report };
+	if (lit == null) return { kinds, confidence, report };
 
 	const re = /"([A-Za-z0-9_]+)"\s*:\s*\([^)]*\)\s*=>\s*\{/g;
 	let m;
@@ -121,16 +168,16 @@ function classifyInputs(bundleSource) {
 		const body = blockAt(lit, m.index + m[0].length - 1);
 		if (body == null) continue;
 		report.handlers++;
-		let turn = body.indexOf(TARGET) >= 0;
-		if (!turn) {
-			const { resolved, unresolved } = calleesIn(body);
-			for (const u of unresolved) { if (!INERT.has(u)) { turn = true; break; } }
-			if (!turn) for (const c of resolved) { if (reaches(c)) { turn = true; break; } }
-		}
-		kinds[name] = turn ? 'turn' : 'ui';
-		if (turn) report.turn++; else report.ui++;
+		const { may, proven } = analyse(body);
+		const v = verdict(may, proven);
+		kinds[name] = v.kind;
+		confidence[name] = v.confidence;
+		if (v.kind === 'turn') {
+			report.turn++;
+			if (v.confidence === 'proven-turn') report.provenTurn++; else report.assumedTurn++;
+		} else report.ui++;
 	}
-	return { kinds, report };
+	return { kinds, confidence, report };
 }
 
 module.exports = { classifyInputs, TARGET };

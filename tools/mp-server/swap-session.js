@@ -148,6 +148,21 @@ class SwapSession {
 		// KDM-163: input type -> "turn" | "ui", LEARNED from real turns (never from a speculative apply,
 		// which would double-apply world-mutating actions — see HeadlessHost.applyInputObserved).
 		this.inputKind = new Map();
+		// KDM-197: what the STATIC classifier knew when it seeded each type — "proven-turn" /
+		// "assumed-turn" / "proven-ui" (see input-classifier.js). Only a guess may be overturned by
+		// observation; a proven-turn type that declines to advance is the GAME declining, not a
+		// misclassification (measured: a co-op bump into your ally's avatar returns "nomove" and
+		// never calls AdvanceTime, which used to take `move` out of lockstep for the whole session).
+		this.inputConfidence = new Map();
+		// KDM-197: per-type observation tally behind the classification — { advanced, inert, pinned }.
+		// The old rule was `advanced > 0 ? 'turn' : 'ui'` evaluated once per occurrence, so a single
+		// non-advancing observation decided a type forever. Evidence replaces that guess.
+		this._inputEvidence = new Map();
+		// How many corroborating non-advancing observations a demotion to "ui" needs. >1 by
+		// construction: the whole point is that one observation decides nothing. The cost of a larger
+		// number is bounded and one-sided — a genuinely-UI type that the classifier over-approximated
+		// costs this many lockstep turns before it is freed, and never costs anything again.
+		this.uiDemotionEvidence = Math.max(2, (opts.uiDemotionEvidence | 0) || 3);
 		// KDM-186: last state FINGERPRINT sent to each client. A reply carrying the full state is only
 		// worth its ~40 KB when the state actually changed; measured, the proxy was answering ~100
 		// inputs/s per client with a full snapshot (809 MB egress, one core pegged, replies stopped,
@@ -190,7 +205,10 @@ class SwapSession {
 		this.world.boot();
 		this.world.init({ seed: this.seed });
 		this.world.setServerMode('world');
-		if (this.seedInputKinds) this._seedInputKinds();
+		// KDM-197: ALWAYS run the classifier. `seedInputKinds` gates whether its VERDICTS are applied
+		// (that switch is about client routing — KDM-163 § CORRECTION 2); its CONFIDENCE is needed
+		// either way, because "may this observation demote the type?" is a question every session asks.
+		this._seedInputKinds();
 		// KD-074: load server-side mods into the ONE authoritative world (players are state
 		// bundles — no per-instance engine, so "all instances agree" is automatic). Same eval
 		// path as the browser loader (KDMods.ts) — mods push to KD globals / reassign functions.
@@ -324,12 +342,11 @@ class SwapSession {
 			const bundle = this.bundles.get(clientId);
 			this.world.restorePlayer(bundle);
 			const res = this.world.applyInputObserved(kdType, data) || {};
-			if (res.advanced > 0) {
-				// The classification was wrong for this occurrence — an input that did not advance
-				// before just did. Reclassify loudly rather than silently desynchronising lockstep.
-				this.inputKind.set(kdType, 'turn');
-				this._dbg(`RECLASSIFY "${kdType}" ui -> turn (it advanced time outside lockstep)`);
-			}
+			// KDM-197: same learning rule as the lockstep path — one function, so the two can never
+			// disagree about what an observation means. A `ui` type that advanced is promoted (and
+			// pinned) here; it is the direction that desynchronises lockstep, so it is never delayed
+			// for corroboration.
+			this._learnInputKind(kdType, res, false);
 			const newBundle = this.world.capturePlayer();
 			this.bundles.set(clientId, newBundle);
 			// KDM-186: did this player's own state actually move? The caller uses this to decide between
@@ -363,11 +380,21 @@ class SwapSession {
 		try {
 			const { classifyInputs } = require('./input-classifier');
 			const { loadSources } = require('./headless-host');
-			const { kinds, report } = classifyInputs(loadSources().bundle);
+			const { kinds, confidence, report } = classifyInputs(loadSources().bundle);
 			const live = this.world.eval('(typeof KDInputTypes !== "undefined" && KDInputTypes) ? Object.keys(KDInputTypes) : []') || [];
 			let seeded = 0;
-			for (const t of live) { if (kinds[t]) { this.inputKind.set(t, kinds[t]); seeded++; } }
-			this.inputSeedReport = { ...report, live: live.length, seeded, missing: live.length - seeded };
+			for (const t of live) {
+				if (!kinds[t]) continue;
+				// KDM-197: keep HOW WELL the analysis knew this, not just what it concluded. A type with
+				// no entry has no static evidence, which is the demotable default.
+				if (confidence && confidence[t]) this.inputConfidence.set(t, confidence[t]);
+				if (this.seedInputKinds) this.inputKind.set(t, kinds[t]);
+				seeded++;
+			}
+			this.inputSeedReport = {
+				...report, live: live.length, seeded, missing: live.length - seeded,
+				applied: this.seedInputKinds,   // were the verdicts used, or only the confidence?
+			};
 			// Drift: the registry moved and the analysis no longer covers it. Not fatal — the unseeded
 			// types just fall back to the safe default — but it must be visible.
 			if (!report.found || seeded < live.length) {
@@ -377,12 +404,93 @@ class SwapSession {
 				try { console.warn(msg); } catch (e) { /* ignore */ }
 				this._dbg(msg);
 			} else {
-				this._dbg(`input-classifier seeded ${seeded} types (${report.ui} ui / ${report.turn} turn)`);
+				this._dbg(`input-classifier classified ${seeded} types (${report.ui} ui / ${report.turn} turn — ` +
+					`${report.provenTurn} proven, ${report.assumedTurn} assumed); ` +
+					`${this.seedInputKinds ? 'verdicts applied' : 'confidence only, verdicts not applied'}`);
 			}
 		} catch (e) {
 			// Never let classification take the session down — an empty cache is merely the old behaviour.
 			try { console.warn('[mp-server] KDM-163 input-classifier failed, falling back to observe-only: ' + e.message); } catch (e2) { /* ignore */ }
 		}
+	}
+
+	/**
+	 * KDM-197: fold ONE observation of `kdType` into what the session knows about it.
+	 *
+	 * The old rule was `seen = obs.advanced > 0 ? 'turn' : 'ui'`, applied immediately. It made a
+	 * measurement out of a single sample, and the sample is not reliable in the "did not advance"
+	 * direction: an input can decline to advance for reasons that say nothing about its type — we
+	 * vetoed it (KDM-208), it threw, the game refused the action. Measured: in co-op the peer's avatar
+	 * is an ALLY, so bumping it returns `nomove` with `advanced === 0`; that single observation
+	 * demoted `move` to `ui` and took every subsequent move out of lockstep.
+	 *
+	 * The rule is deliberately ASYMMETRIC, because the two errors are not equal. Classifying a
+	 * turn-consuming input as `ui` applies it outside lockstep — a desync, unbounded damage.
+	 * Classifying a UI input as `turn` costs one turn. So:
+	 *
+	 *   advanced > 0        →  "turn" at once, and PINNED: a type that has ever consumed a turn is a
+	 *                          type that sometimes consumes a turn, and lockstep is where those belong.
+	 *                          This is the only rule needed for AC2 — a varying type stays safe.
+	 *   advanced === 0      →  evidence, not a verdict. Demote only when ALL of:
+	 *                            · the observation is admissible (not vetoed, no exception) — a run we
+	 *                              stopped measures us, not the type;
+	 *                            · the type was never observed to advance (not pinned);
+	 *                            · the static verdict was a GUESS. A `proven-turn` type has a concrete
+	 *                              call path to AdvanceTime, so "it did not advance" is the game
+	 *                              declining, and no number of declines makes it a UI input;
+	 *                            · `uiDemotionEvidence` such observations have accumulated.
+	 *
+	 * @param {string} kdType
+	 * @param {{advanced?: number, error?: string|null}} obs  what `applyInputObserved` reported
+	 * @param {boolean} cancelled  we stopped this action ourselves (KDM-208 contested-tile veto)
+	 */
+	_learnInputKind(kdType, obs, cancelled) {
+		if (!kdType) return;
+		const o = obs || {};
+		const advanced = (o.advanced | 0) > 0;
+		// An action that was stopped — by our own veto or by an exception — is not a measurement of the
+		// type. A POSITIVE observation is exempt: whatever else happened, it did advance time.
+		if (!advanced && (cancelled || o.error)) return;
+
+		let ev = this._inputEvidence.get(kdType);
+		if (!ev) { ev = { advanced: 0, inert: 0, pinned: false }; this._inputEvidence.set(kdType, ev); }
+		const had = this.inputKind.get(kdType);
+
+		if (advanced) {
+			ev.advanced += 1;
+			ev.inert = 0;
+			ev.pinned = true;
+			if (had !== 'turn') {
+				this.inputKind.set(kdType, 'turn');
+				this._dbg(had === 'ui'
+					? `RECLASSIFY "${kdType}" ui -> turn (it advanced time outside lockstep)`
+					: `learned "${kdType}" = turn`);
+			}
+			return;
+		}
+
+		ev.inert += 1;
+		// A type nobody has classified is ALREADY treated as turn-consuming (the lockstep default in
+		// `apply`). Record that, so `inputKind` says what the session will actually do rather than
+		// staying silent until the first demotion.
+		if (had === undefined) this.inputKind.set(kdType, 'turn');
+		if (had === 'ui') return;                                        // already where it would go
+		if (ev.pinned) return;                                           // AC2: it has advanced before
+		if (this.inputConfidence.get(kdType) === 'proven-turn') return;  // the game declined, that is all
+		if (ev.inert < this.uiDemotionEvidence) return;                  // AC1: one sample decides nothing
+		this.inputKind.set(kdType, 'ui');
+		this._dbg(`${had ? 'reclassified' : 'learned'} "${kdType}"${had ? ' ' + had + ' ->' : ' ='} ui ` +
+			`(${ev.inert} consecutive non-advancing observations, confidence=` +
+			`${this.inputConfidence.get(kdType) || 'none'})`);
+	}
+
+	/** KDM-197: the evidence behind each learned classification — for tests and diagnostics. */
+	inputKindReport() {
+		return [...this.inputKind.entries()].map(([type, kind]) => ({
+			type, kind,
+			confidence: this.inputConfidence.get(type) || null,
+			...(this._inputEvidence.get(type) || { advanced: 0, inert: 0, pinned: false }),
+		}));
 	}
 
 	/** AC3: an input type the authoritative world has no handler for — never dropped in silence. */
@@ -517,19 +625,10 @@ class SwapSession {
 				// longer captured (it used to be replicated and re-delivered forever).
 				this._harvestFloaters(id);
 				this._noteUnknown(kdType, obs);
-				// Observation beats the static seed, in BOTH directions:
-				//  - a seeded "turn" that demonstrably never advanced is demoted to "ui" (this is what
-				//    repairs the classifier's deliberate conservatism — it over-approximates by design,
-				//    and probe14 measured 12 of 25 known-UI types landing in that bucket);
-				//  - a "ui" that did advance is promoted straight back to "turn".
-				// KDM-208: a VETOED action advanced nothing because we stopped it, not because the type is
-				// a UI type. Learning from it would demote `move` to "ui" and take it out of lockstep.
-				const seen = obs.advanced > 0 ? 'turn' : 'ui';
-				if (!cancelled && this.inputKind.get(kdType) !== seen) {
-					const had = this.inputKind.get(kdType);
-					this.inputKind.set(kdType, seen);
-					this._dbg(`${had ? 'reclassified' : 'learned'} "${kdType}"${had ? ' ' + had + ' ->' : ' ='} ${seen}`);
-				}
+				// KDM-163/KDM-197: fold this occurrence into what we know about the type. Asymmetric on
+				// purpose — see `_learnInputKind`. KDM-208's `!cancelled` guard is now one instance of
+				// the general rule "an action we stopped is not a measurement of the type".
+				this._learnInputKind(kdType, obs, cancelled);
 				// KDM-164: the hand-rolled friendly-fire splash is GONE. KD's own AOE already reaches
 				// peer avatars — measured: an AOE cast produced a real bullet whose blast damaged a peer
 				// avatar via `KinkyDungeonDamageEnemy`, which the peer-damage recorder captures like any

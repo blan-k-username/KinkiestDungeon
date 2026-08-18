@@ -161,9 +161,19 @@ describe('apply/commit split (KDM-163 option A)', () => {
 		expect(pings(), 'a mod-registered input reaches the authoritative world').toBeGreaterThan(before);
 		expect(s.unknownInputReport().map((r: any) => r.type), 'a registered mod type is not "unknown"')
 			.not.toContain('kdm163UnitPing');
+
+		// KDM-197: one non-advancing observation no longer decides the type — a demotion out of
+		// lockstep now needs `uiDemotionEvidence` of them, because a single sample cannot tell a UI
+		// input apart from a turn-consuming one that happened to decline (measured: a co-op bump into
+		// an ally). The mod input still ends up free, it just has to earn it.
+		expect(s.inputKind.get('kdm163UnitPing'), 'one observation is not yet a classification').toBe('turn');
+		for (let i = 1; i < s.uiDemotionEvidence; i++) {
+			s.apply('A', { kdType: 'kdm163UnitPing', data: {} });
+			s.apply('B', { kind: 'wait' });
+		}
 		expect(s.inputKind.get('kdm163UnitPing'), 'it never advances time → learned as UI').toBe('ui');
 
-		// Second use: learned → immediate, no turn consumed.
+		// Next use: learned → immediate, no turn consumed.
 		const mid = pings();
 		const turn0 = s.turn;
 		const res = s.apply('A', { kdType: 'kdm163UnitPing', data: {} });
