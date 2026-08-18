@@ -26,6 +26,7 @@ const fs = require('fs');
 const path = require('path');
 const { WSBridge } = require('./ws-bridge');
 const { KD_CODEC } = require('./kd-codec');
+const { KD_DELTA_BROWSER } = require('./kd-delta');
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 // Default :8090 (not :8080 — that's the stock `npm run serve` / kdrunner port).
@@ -50,12 +51,17 @@ const MIME = {
  * would be a copy that can go stale against the host's.
  */
 const CODEC_ROUTE = '/mp/kd-codec.js';
+// KDM-206: the delta merge half, served from the SAME source the server diffs with — a diff/merge
+// pair that drifts apart corrupts state silently, so there is exactly one definition.
+const DELTA_ROUTE = '/mp/kd-delta.js';
+const DELTA_BODY = KD_DELTA_BROWSER;
 const CODEC_BODY = `${KD_CODEC}\n;(typeof window !== 'undefined' ? window : globalThis).KDCodec = ` +
 	`{ kdEnc: kdEnc, kdDec: kdDec, kdSer: kdSer };\n`;
 
 // Scripts injected just before </body> in index.html (in order).
 const INJECT = [
 	CODEC_ROUTE,                    // must precede render-client.js — it consumes window.KDCodec
+	DELTA_ROUTE,                    // must precede coop-bootstrap.js — it consumes window.KDDelta
 	'/tools/mp-server/client/render-client.js',
 	'/tools/mp-server/client/coop-bootstrap.js',
 ];
@@ -201,6 +207,11 @@ function serveStatic(req, res) {
 	if (urlPath === CODEC_ROUTE) {                       // KDM-162: generated, not on disk
 		res.writeHead(200, { 'Content-Type': MIME['.js'], 'Cache-Control': 'no-cache' });
 		res.end(CODEC_BODY);
+		return;
+	}
+	if (urlPath === DELTA_ROUTE) {                       // KDM-206: same, for the delta merge
+		res.writeHead(200, { 'Content-Type': MIME['.js'], 'Cache-Control': 'no-cache' });
+		res.end(DELTA_BODY);
 		return;
 	}
 	const filePath = safeJoin(REPO_ROOT, urlPath);

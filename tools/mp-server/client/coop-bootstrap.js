@@ -549,6 +549,38 @@
 			ws.send(JSON.stringify({ type: 'join', clientId: id }));
 			setStatus('Co-op ' + id + ': joined, waiting for the other player…');
 		};
+		/**
+		 * KDM-206: resolve a state frame to a FULL snapshot.
+		 *
+		 * The server sends `snapshot` on the first state and after a resync, and a `delta` thereafter
+		 * (measured 38.1 KB -> 115 B). We keep the last full snapshot and merge each delta onto it.
+		 *
+		 * `seq` is what makes that safe: merging a delta onto a base the client never held would
+		 * corrupt state SILENTLY, which is far worse than the bandwidth it saves. On any gap we throw
+		 * our copy away and ask for a full snapshot instead of guessing.
+		 */
+		function resolveState(m) {
+			if (m.snapshot) {                       // full: adopt it and re-baseline
+				coop._snapBase = m.snapshot;
+				coop._snapSeq = m.seq || 0;
+				return m.snapshot;
+			}
+			if (!m.delta) return null;
+			var expected = (coop._snapSeq || 0) + 1;
+			if (!coop._snapBase || (m.seq && m.seq !== expected)) {
+				// Never merge onto an unknown base. Ask for a full one; drop this frame.
+				coop._snapBase = null;
+				try { ws.send(JSON.stringify({ type: 'resync' })); } catch (_) { /* ignore */ }
+				if (window.__KDMP_DEBUG) {
+					try { console.log('[coop ' + id + '] state gap: expected ' + expected + ' got ' + m.seq + ' → resync'); } catch (_) {}
+				}
+				return null;
+			}
+			coop._snapSeq = m.seq || expected;
+			coop._snapBase = window.KDDelta.kdMerge(coop._snapBase, m.delta);
+			return coop._snapBase;
+		}
+
 		ws.onmessage = function (e) {
 			var m; try { m = JSON.parse(e.data); } catch (_) { return; }
 			if (m.type === 'state') diag.noteRecv(m.kind === 'ui' ? 'ui' : 'turn', (e.data && e.data.length) || 0);
@@ -566,7 +598,10 @@
 				coop.started = true;
 				coop._sentRoute.shift();          // this reply consumed one send: it was a UI input
 				ackOne('ui');                     // KDM-186: applied without consuming a turn ⇒ presentation
-				window.KDRenderClient.apply(m.snapshot);
+				// KDM-206: the per-frame path now carries a delta; resolve it against our copy. A null
+				// means we asked for a resync — apply nothing rather than render a half-merged state.
+				var uiSnap = resolveState(m);
+				if (uiSnap) window.KDRenderClient.apply(uiSnap);
 				pinGameScreen();
 			}
 			else if (m.type === 'state') {
@@ -592,12 +627,18 @@
 						try { console.log('[mp-server] ' + m.serverLog[li]); } catch (e) { /* ignore */ }
 					}
 				}
-				coop._lastSnapshot = m.snapshot;   // KDM-186: kept so a test can re-apply it verbatim
-				window.KDRenderClient.apply(m.snapshot);
+				// KDM-206: turn states are delta-encoded too (same composer as the ui path, so the
+				// base stays in step). Resolve first, then everything below sees a full snapshot.
+				var turnSnap = resolveState(m);
+				if (!turnSnap) return;             // resync requested — do not render a partial state
+				coop._lastSnapshot = turnSnap;     // KDM-186: kept so a test can re-apply it verbatim
+				window.KDRenderClient.apply(turnSnap);
 				// KD-101 UAT: seed the server-configured carryable restraint item once (the Items inventory
 				// is client-local, so it must be added here even though the server bundle already has it).
-				if (!coop._startItemAdded && m.snapshot && m.snapshot.startItem) {
-					addStartItem(m.snapshot.startItem);
+				// KDM-206: read from the RESOLVED snapshot — with delta encoding `m.snapshot` is absent
+				// on all but the first frame, so keying off it here would silently stop seeding the item.
+				if (!coop._startItemAdded && turnSnap.startItem) {
+					addStartItem(turnSnap.startItem);
 					coop._startItemAdded = true;
 				}
 				pinGameScreen();   // keep the dungeon on screen (don't let the menu steal it)

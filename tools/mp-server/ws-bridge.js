@@ -26,6 +26,18 @@
 const http = require('http');
 const crypto = require('crypto');
 const { SwapSession } = require('./swap-session');
+const { kdDiff } = require('./kd-delta');
+
+/**
+ * KDM-206: top-level snapshot keys carried IN FULL by every delta, never diffed.
+ *
+ * These are CONSUME-ONCE channels: `snapshotFor` drains pending events (`_takePendingEvents`), and the
+ * floating combat text / unknown-input reports are one-shot too. A one-shot value exists in exactly one
+ * snapshot, so if it were diffed and its delta were lost, it would be gone for good — the anti-deletion
+ * trap KDM-196 documents. Together they are ~0.1 KB, so carrying them whole costs nothing next to the
+ * 26 KB this change removes.
+ */
+const VERBATIM_CHANNELS = ['events', 'messages', 'unknownInputs', 'replacedInputs'];
 
 /** Monotonic milliseconds. Never Date.now(): a wall-clock jump would corrupt every latency below. */
 function now() { return Number(process.hrtime.bigint()) / 1e6; }
@@ -98,6 +110,11 @@ class WSBridge {
 		this.sockets = new Map();          // clientId -> socket
 		this._server = null;
 		this.port = null;
+		// KDM-206: what each client last received, so a reply can carry a DELTA instead of a whole
+		// capture. `_snapSeq` lets the client detect a gap and ask for a full resync rather than
+		// silently merging onto a stale base.
+		this._lastSnap = new Map();        // clientId -> last snapshot SENT
+		this._snapSeq = new Map();         // clientId -> monotonically increasing state sequence
 		// Demo/UAT convenience: when true, one player's move advances the turn
 		// immediately (others auto-"wait"), instead of blocking on every player.
 		// Real lockstep (block until all submit) stays the default for actual co-op.
@@ -199,7 +216,9 @@ class WSBridge {
 				// (e.g. to re-read the diagnostics) without restarting the server.
 				if (this.session.started && this.session.players.includes(clientId)) {
 					this._send(socket, { type: 'joined', clientId, started: true, players: this.session.players });
-					try { this._send(socket, { type: 'state', tick: this.session.turn, snapshot: this.session.snapshotFor(clientId) }); } catch (e) { /* ignore */ }
+					// KDM-206: a rejoining client holds nothing we can diff against — force a full snapshot.
+					this._resetDelta(clientId);
+					try { this._send(socket, Object.assign({ type: 'state', tick: this.session.turn }, this._stateFrame(clientId))); } catch (e) { /* ignore */ }
 					return clientId;
 				}
 				const r = this.session.join(clientId);
@@ -207,6 +226,20 @@ class WSBridge {
 				if (r.started) this._broadcastState();   // both in → push initial render-state
 			} catch (e) {
 				this._send(socket, { type: 'error', error: String(e && e.message || e) });
+			}
+			return clientId;
+		}
+		// KDM-206: the client noticed a gap in the state sequence, so whatever it holds may be stale.
+		// Forget what we think it has and send a full snapshot — merging a delta onto an unknown base
+		// is the one way this optimisation could corrupt state, and this is the escape hatch.
+		if (msg.type === 'resync' && clientId && this.session.started) {
+			this._resetDelta(clientId);
+			const sock = this.sockets.get(clientId);
+			if (sock) {
+				try {
+					this._send(sock, Object.assign({ type: 'state', tick: this.session.turn },
+						this._stateFrame(clientId)));
+				} catch (e) { /* ignore */ }
 			}
 			return clientId;
 		}
@@ -239,10 +272,11 @@ class WSBridge {
 						this._send(socket, { type: 'ack', tick: this.session.turn, srv: this._srvStamp(applyMs) });
 						return clientId;
 					}
-					this._send(socket, {
+					// KDM-206: a DELTA, not a whole capture. This is the per-frame path — KD's draw loop
+					// emits `setMoveDirection` every frame — so it is where the 38.3 KB reply hurt.
+					this._send(socket, Object.assign({
 						type: 'state', kind: 'ui', tick: this.session.turn, srv: this._srvStamp(applyMs),
-						snapshot: this.session.snapshotFor(clientId),
-					});
+					}, this._stateFrame(clientId)));
 					return clientId;
 				}
 				// demo mode: auto-"wait" for any player who hasn't submitted so a single
@@ -502,6 +536,39 @@ class WSBridge {
 		return 'inputs/s — ' + parts.join('  |  ') + tail;
 	}
 
+	/**
+	 * KDM-206: compose the state payload for one client — a DELTA when we know what they last held,
+	 * a full snapshot on the first send and after a resync.
+	 *
+	 * WHY. Every changed `ui` input used to answer with `snapshotFor()`, a whole capture. Measured
+	 * (`tests/unit/mp-ui-reply-size-profile.spec.ts`): a mouse-direction change moves ONE global of
+	 * 13-15 bytes and the reply carrying it was 38.3 KB — ~10,000x amplification, and the reason
+	 * `mp-real-input.spec.ts:112` sat at 195-273 KB against a 100 KB budget. `map` alone (11.7 KB,
+	 * ~31% of every reply) was bit-identical each time and re-sent anyway. Measured after:
+	 * 38.1 KB -> 115 B, 339x smaller (`tests/unit/mp-delta-codec.spec.ts`).
+	 *
+	 * EVERY state send goes through here. That is the point: if one path sent a full snapshot without
+	 * recording it, the next delta would be computed against a base the client never had, and the
+	 * merge would corrupt state silently.
+	 */
+	_stateFrame(clientId) {
+		const full = this.session.snapshotFor(clientId);
+		const prev = this._lastSnap.get(clientId);
+		const seq = (this._snapSeq.get(clientId) || 0) + 1;
+		this._snapSeq.set(clientId, seq);
+		this._lastSnap.set(clientId, full);
+		if (!prev) return { seq, snapshot: full };
+		const delta = kdDiff(prev, full, VERBATIM_CHANNELS);
+		// `undefined` means nothing moved. Still send an (empty) delta rather than a full snapshot:
+		// the client needs the seq to stay in step, and this is the cheapest possible frame.
+		return { seq, delta: delta === undefined ? {} : delta };
+	}
+
+	/** Forget what a client held, so their next state send is a full snapshot (join / resync). */
+	_resetDelta(clientId) {
+		this._lastSnap.delete(clientId);
+	}
+
 	_broadcastState() {
 		this._clearGrace();
 		const tick = this.session.turn;
@@ -516,8 +583,11 @@ class WSBridge {
 			this._statsLog = [];
 		}
 		for (const [cid, sock] of this.sockets) {
-			const snapshot = this.session.snapshotFor(cid);
-			this._send(sock, { type: 'state', tick, snapshot, serverLog });
+			// KDM-206: turn-resolving states go through the SAME frame composer as the ui path, so
+			// `_lastSnap` always matches what the client actually holds. A full snapshot sent here
+			// without recording it would leave the next ui delta diffed against a base the client
+			// never had.
+			this._send(sock, Object.assign({ type: 'state', tick, serverLog }, this._stateFrame(cid)));
 		}
 	}
 

@@ -14,6 +14,8 @@
 import { test, expect } from '../helpers/playwright-fixtures';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { WSBridge } = require('../../tools/mp-server/ws-bridge');
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { KD_DELTA_BROWSER } = require('../../tools/mp-server/kd-delta');
 
 test('a browser thin-client renders server snapshots and rounds input over a WebSocket', async ({ kdPage }) => {
 	const bridge = new WSBridge({ requiredPlayers: 2, seed: 'ws-e2e-seed' });
@@ -22,6 +24,9 @@ test('a browser thin-client renders server snapshots and rounds input over a Web
 	try {
 		// Inject the production thin-client core and bootstrap render structures.
 		await kdPage.addScriptTag({ path: 'tools/mp-server/client/render-client.js' });
+		// KDM-206: this spec builds its own thin client on the STOCK game page, not the demo-server,
+		// so nothing has injected the delta merge for it. Same source text the server diffs with.
+		await kdPage.addScriptTag({ content: KD_DELTA_BROWSER });
 		await kdPage.evaluate(() => {
 			// @ts-ignore — bring up PIXI + KD render globals (KDMapData etc.); the
 			// thin client renders server snapshots, never simulates.
@@ -38,11 +43,18 @@ test('a browser thin-client renders server snapshots and rounds input over a Web
 			w.__states = [];
 			const ws = new WebSocket(url);
 			w.__ws = ws;
+			// KDM-206: the bridge sends a full `snapshot` first and a `delta` thereafter, so this
+			// hand-rolled client merges like the real one — with the served `window.KDDelta.kdMerge`,
+			// the SAME code the server diffs with, never a second implementation.
+			w.__base = null;
 			ws.onmessage = (e: MessageEvent) => {
 				const m = JSON.parse(e.data);
 				if (m.type === 'state') {
-					w.KDRenderClient.apply(m.snapshot);        // render-only adopt
-					w.__states.push({ tick: m.tick, grid: m.snapshot.map.Grid });
+					if (m.snapshot) w.__base = m.snapshot;
+					else if (m.delta && w.__base) w.__base = w.KDDelta.kdMerge(w.__base, m.delta);
+					if (!w.__base) return;
+					w.KDRenderClient.apply(w.__base);          // render-only adopt
+					w.__states.push({ tick: m.tick, grid: w.__base.map.Grid });
 				}
 			};
 			ws.onopen = () => ws.send(JSON.stringify({ type: 'join', clientId: 'A' }));
