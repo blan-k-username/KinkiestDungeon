@@ -424,6 +424,14 @@ test('snapshots delivered after a hit do not re-create its floaters', async ({ b
  * (Reproduced: reticule {1,0} while the last direction sent was {-1,1}.) v3 keeps the newest and
  * sends it when the slot frees, so a stream converges; commands are still never sampled.
  *
+ * ⚠️ THIS TEST DOES NOT GUARD RULE 1 — that is `tests/e2e/mp-input-rule1.spec.ts` (KDM-198).
+ * Measured, not assumed: reverting Rule 1 to v2 (drop the superseded send instead of holding the
+ * newest) leaves this test GREEN, while `mp-input-rule1`'s stream test goes red on both attempts.
+ * The reason is structural — `KinkyDungeonMoveDirection` is recomputed by KD's own draw loop from the
+ * live mouse EVERY FRAME, whether or not anything was ever sent to the server, so a client-side
+ * SAMPLING rule cannot move it. What this test does guard is still worth keeping and is not covered
+ * elsewhere: that the reticule tracks the mouse at all, which is the symptom the player reported.
+ *
  * ⚠️ THE FIRST VERSION OF THIS TEST WAS INVALID. It sent its own burst of directions and asserted the
  * reticule equalled the last one — but the GAME emits the real mouse direction every frame, so the
  * test was racing the very stream it measured. The give-away was the observed value carrying

@@ -417,3 +417,64 @@ export async function waitForPeerAvatar(
 	}
 	return await handle.jsonValue();
 }
+
+/** One input send observed on the client's OUTGOING wire, in order. */
+export interface CoopWireSend {
+	/** The action's `kdType` (or `kind` for the built-in helpers), e.g. `setMoveDirection`. */
+	type: string;
+	/** The action's payload, as sent. */
+	data: any;
+	/** ms since the capture was armed — what separates an immediate send from a late replay. */
+	t: number;
+}
+
+/**
+ * KDM-198 — record what the client actually PUTS ON THE WIRE, in order.
+ *
+ * Rule 1 (KDM-186) is a client-side sampling rule: it decides which inputs are sent, which are held
+ * as the newest-of-a-stream, and which are dropped in favour of a newer one. So the wire IS the
+ * deciding layer, and the only honest oracle for it. Asserting on game state instead cannot
+ * discriminate — `mp-uat-repro` REPRO 7 asserts on the reticule, which KD's own draw loop recomputes
+ * locally every frame whether or not anything was ever sent, and passes with the fix and without it.
+ *
+ * Wraps `__coop.ws.send` (exposed at `coop-bootstrap.js:565`) and calls through unchanged, so the
+ * session behaves exactly as it would untouched. `join`/`resync` frames are ignored — only `input`
+ * is Rule 1's business. Call AFTER `bootCoopPair`, since the socket does not exist before it.
+ */
+export async function captureCoopWire(P: Page): Promise<void> {
+	await P.evaluate(() => {
+		const w = window as any;
+		const coop = w.__coop;
+		if (!coop || !coop.ws) throw new Error('[KDM-198] __coop.ws is not available — capture the wire AFTER bootCoopPair');
+		if (w.__coopWire) return;                      // idempotent: never double-wrap a socket
+		const log: any[] = [];
+		w.__coopWire = log;
+		const t0 = (window.performance || Date).now();
+		const sock = coop.ws;
+		const original = sock.send.bind(sock);
+		w.__coopWireRestore = () => { sock.send = original; delete w.__coopWire; delete w.__coopWireRestore; };
+		sock.send = function (payload: any) {
+			try {
+				const m = JSON.parse(payload);
+				if (m && m.type === 'input') {
+					const a = m.action || {};
+					log.push({ type: a.kdType || a.kind || 'unknown', data: a.data, t: Math.round((window.performance || Date).now() - t0) });
+				}
+			} catch (e) { /* a frame we cannot parse is not an input — ignore, never break the send */ }
+			return original(payload);
+		};
+	});
+}
+
+/** Everything sent since `captureCoopWire`, in order. `type` filters to one input type. */
+export async function readCoopWire(P: Page, type?: string): Promise<CoopWireSend[]> {
+	return await P.evaluate((want) => {
+		const log = ((window as any).__coopWire || []) as any[];
+		return want ? log.filter((s) => s.type === want) : log.slice();
+	}, type);
+}
+
+/** Forget everything recorded so far, keeping the wrap in place (re-arms a window mid-test). */
+export async function clearCoopWire(P: Page): Promise<void> {
+	await P.evaluate(() => { const l = (window as any).__coopWire; if (l) l.length = 0; });
+}
