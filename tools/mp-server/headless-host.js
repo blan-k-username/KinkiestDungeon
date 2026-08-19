@@ -190,6 +190,28 @@ const GLOBAL_BLACKLIST = Object.freeze([
 	// Presentation-only state is not authoritative state and must not be replicated; what the player
 	// needs to be TOLD travels as a sequenced EVENT instead (SwapSession `pendingEvents`).
 	'KDDamageQueue',
+	// KDM-202: the same criterion, applied to the two queues that are consume-once but harmless
+	// only BY ACCIDENT. Neither was a live bug when this was written; both are one upstream change
+	// away from being one, and an exclusion that rests on an accident is not an exclusion. Listed
+	// here so that it is a DECISION.
+	//
+	// `KinkyDungeonInputQueue` is drained by the SIM, not the draw loop: `KDSendInput`
+	// (KinkyDungeonInput.ts:1679) pushes and `KDProcessInputs` (:1690) splices. It stays empty on the
+	// server only because `KDSendInput`'s `process` parameter DEFAULTS to true, so push and drain
+	// happen inside one synchronous call — `applyInputObserved` does route through that queueing
+	// path, contrary to the assumption it never touches it. Any of the 184 call sites passing
+	// `process = false` leaves it non-empty at capture time. Replicating that is GHOST INPUTS: the
+	// client gates its whole per-frame block on an empty queue (KinkyDungeon.ts:3033), then feeds the
+	// entries to its own `KDProcessInput`. MEASURED before this entry: driving
+	// `KDSendInput('Wait', {}, false, false, false)` put the queue on the wire (mp-consume-once-queues).
+	'KinkyDungeonInputQueue',
+	// `KDSaveQueue` is drained by the browser's async save loop (KinkyDungeon.ts:1520), which writes
+	// `localStorage.KinkyDungeonSave`. Replicating it makes a client persist the SERVER's save over
+	// its own. It was excluded before this only by SIZE — a real save exceeds BASELINE_MAX_LEN — and
+	// that protection is both accidental and INVISIBLE: unlike the baseline-time oversize set, a
+	// watched name that grows past the cap later is `continue`d in `_captureGlobals` and never
+	// reaches `_auditOversize` (see KDM-221). MEASURED: a sub-20 KB entry rode the wire.
+	'KDSaveQueue',
 	'KDDrawUpdate', 'KDVisionUpdate', 'KDUpdateChokes', 'KDAlertCD',
 	'lastFloaterRefresh', 'KDParticleid', 'KDCurrentModels', 'KDRefreshCharacter',
 	// --- client audio: neither player nor world ------------------------------
