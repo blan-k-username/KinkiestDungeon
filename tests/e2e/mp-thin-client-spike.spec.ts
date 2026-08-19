@@ -11,16 +11,25 @@
  *
  * Go/no-go gate for the KD-071 client design. Uses the production client core
  * `tools/mp-server/client/render-client.js` (same snapshot shape as the host).
+ *
+ * KDM-216 — uses `isolatedPage`, NOT `kdPage`. This spec injects render-client.js and
+ * calls disableLocalSim(), which installs permanent __kdClientGuard wrappers that make
+ * KinkyDungeonAdvanceTime a no-op. resetKDState() cannot undo a monkey-patch, so on the
+ * worker-scoped shared page every later spec — all four integration specs included —
+ * inherited a game that could not advance a turn. Its own context, its own mess.
  */
 import { test, expect } from '../helpers/playwright-fixtures';
+import { bootKD } from '../helpers/bundle';
 
-test('stock renderer is driven purely from an applied render-state snapshot (no local sim)', async ({ kdPage }) => {
+test('stock renderer is driven purely from an applied render-state snapshot (no local sim)', async ({ isolatedPage }) => {
+	await bootKD(isolatedPage);
+
 	// Inject the production thin-client core (classic script → shares bundle scope).
-	await kdPage.addScriptTag({ path: 'tools/mp-server/client/render-client.js' });
-	expect(await kdPage.evaluate(() => typeof (window as any).KDRenderClient)).toBe('object');
+	await isolatedPage.addScriptTag({ path: 'tools/mp-server/client/render-client.js' });
+	expect(await isolatedPage.evaluate(() => typeof (window as any).KDRenderClient)).toBe('object');
 
 	// --- Game A: start, render, snapshot ---
-	const a = await kdPage.evaluate(() => {
+	const a = await isolatedPage.evaluate(() => {
 		// @ts-ignore KD globals
 		KDsetSeed && KDsetSeed('thin-client-spike-A');
 		// @ts-ignore
@@ -32,11 +41,11 @@ test('stock renderer is driven purely from an applied render-state snapshot (no 
 		// @ts-ignore
 		return { grid: KDMapData.Grid, px: KinkyDungeonPlayerEntity.x, py: KinkyDungeonPlayerEntity.y, tick: KinkyDungeonCurrentTick };
 	});
-	await kdPage.waitForTimeout(300);
-	const shotA = await kdPage.locator('#MainCanvas').screenshot();
+	await isolatedPage.waitForTimeout(300);
+	const shotA = await isolatedPage.locator('#MainCanvas').screenshot();
 
 	// --- Game B: a DIFFERENT dungeon, rendered ---
-	const b = await kdPage.evaluate(() => {
+	const b = await isolatedPage.evaluate(() => {
 		// @ts-ignore
 		KDsetSeed && KDsetSeed('thin-client-spike-B-different');
 		// @ts-ignore
@@ -46,14 +55,14 @@ test('stock renderer is driven purely from an applied render-state snapshot (no 
 		// @ts-ignore
 		return { grid: KDMapData.Grid, px: KinkyDungeonPlayerEntity.x, py: KinkyDungeonPlayerEntity.y };
 	});
-	await kdPage.waitForTimeout(300);
-	const shotB = await kdPage.locator('#MainCanvas').screenshot();
+	await isolatedPage.waitForTimeout(300);
+	const shotB = await isolatedPage.locator('#MainCanvas').screenshot();
 
 	// the two games must actually differ, else the test proves nothing
 	expect(a.grid).not.toBe(b.grid);
 
 	// --- Apply snapshot A onto game B, render-only, NO AdvanceTime ---
-	const c = await kdPage.evaluate(() => {
+	const c = await isolatedPage.evaluate(() => {
 		// @ts-ignore
 		const before = KinkyDungeonCurrentTick;
 		// @ts-ignore
@@ -63,8 +72,8 @@ test('stock renderer is driven purely from an applied render-state snapshot (no 
 		// @ts-ignore
 		return { role, tickBefore: before, tickAfter: KinkyDungeonCurrentTick, grid: KDMapData.Grid, px: KinkyDungeonPlayerEntity.x, py: KinkyDungeonPlayerEntity.y };
 	});
-	await kdPage.waitForTimeout(300);
-	const shotC = await kdPage.locator('#MainCanvas').screenshot();
+	await isolatedPage.waitForTimeout(300);
+	const shotC = await isolatedPage.locator('#MainCanvas').screenshot();
 
 	// render globals now reflect snapshot A, not game B
 	expect(c.grid).toBe(a.grid);

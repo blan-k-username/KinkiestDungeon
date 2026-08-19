@@ -12,31 +12,30 @@
  * fixture and assert a committed PNG baseline. Both were wrong:
  *
  *  1. ORDER DEPENDENCE. `sharedPage` is one Page for the whole worker, and
- *     `mp-thin-client-spike` / `mp-thin-client-ws` sort before this file and
- *     use the same fixture. They call KinkyDungeonStartNewGame() and
+ *     `mp-thin-client-spike` / `mp-thin-client-ws` sort before this file and used
+ *     the same fixture. They call KinkyDungeonStartNewGame() and
  *     KDRenderClient.disableLocalSim(), neither of which resetKDState() undoes,
  *     so this spec screenshotted a live dungeon: 737k px / ratio 0.81 different.
  *     It "passed on retry" only because a retry gets a fresh worker, hence a
- *     fresh page. Reproducible on demand with those two specs and --retries=0.
+ *     fresh page. (KDM-216 has since moved those two specs off the shared page
+ *     as well, but this spec stays isolated on its own merits — it asserts a
+ *     COLD BOOT, which a reset-in-place shared page cannot give it.)
  *  2. A MEANINGLESS BASELINE. The committed title-screen.png was not a title
  *     screen at all — it was the asset preloader mid-load ("Preloading Character
  *     Assets: 34%"). It only ever matched because the changing percentage is a
  *     tiny fraction of the frame, well under the 5% tolerance. The baseline is
  *     deleted rather than regenerated: this test wants "something rendered",
  *     which a pixel baseline answers badly and rots at.
- *
- * So: own browser context (ordering cannot reach it) and a programmatic paint
- * check instead of a snapshot.
  */
-import { test, expect } from '@playwright/test';
-import { waitForBundleReady } from '../helpers/bundle';
+import { test, expect } from '../helpers/playwright-fixtures';
+import { bootKD } from '../helpers/bundle';
 
 /**
  * WebGL discards its drawing buffer after compositing unless asked not to, so
  * drawImage() off the live view returns a blank frame and the renderer exposes
  * no extract plugin to go around it. Forcing preserveDrawingBuffer at the
  * getContext seam — before the bundle runs — is what makes the painted output
- * readable from inside the page. Test-only, and scoped to this context alone.
+ * readable from inside the page. Test-only, and scoped to this spec's own context.
  */
 function preserveDrawingBuffer() {
 	const orig = HTMLCanvasElement.prototype.getContext;
@@ -47,6 +46,8 @@ function preserveDrawingBuffer() {
 		return orig.call(this, type, attrs);
 	};
 }
+
+
 
 /** Distinct colours in a downsampled copy of the render surface. A canvas that never painted returns 1. */
 function countRenderedColors() {
@@ -65,47 +66,40 @@ function countRenderedColors() {
 	return seen.size;
 }
 
-test('title screen boots and paints a live canvas', async ({ browser }) => {
-	const context = await browser.newContext();
-	const page = await context.newPage();
-	try {
-		await page.addInitScript(preserveDrawingBuffer);
-		await page.goto('/');
-		await waitForBundleReady(page);
+test('title screen boots and paints a live canvas', async ({ isolatedPage }) => {
+	await isolatedPage.addInitScript(preserveDrawingBuffer);
+	await bootKD(isolatedPage);
 
-		// The new-game entry point is callable from the title screen.
-		const hasStart = await page.evaluate(() =>
-			// @ts-ignore — KD globals
-			typeof KinkyDungeonStartNewGame === 'function',
-		);
-		expect(hasStart).toBe(true);
+	// The new-game entry point is callable from the title screen.
+	const hasStart = await isolatedPage.evaluate(() =>
+		// @ts-ignore — KD globals
+		typeof KinkyDungeonStartNewGame === 'function',
+	);
+	expect(hasStart).toBe(true);
 
-		// A real boot signal, not a sleep: the game walks Logo → Consent → Intro,
-		// and 'Intro' IS the title screen.
-		await page.waitForFunction(
-			// @ts-ignore — KD globals
-			() => KinkyDungeonState === 'Intro',
-			undefined,
-			{ timeout: 30_000 },
-		);
+	// A real boot signal, not a sleep: the game walks Logo → Consent → Intro,
+	// and 'Intro' IS the title screen.
+	await isolatedPage.waitForFunction(
+		// @ts-ignore — KD globals
+		() => KinkyDungeonState === 'Intro',
+		undefined,
+		{ timeout: 30_000 },
+	);
 
-		// The renderer's own surface — note #MainCanvas is an unused 300x150
-		// placeholder in index.html; PIXI appends the real 2000x1000 view to body,
-		// so the old assertions about #MainCanvas's size were measuring nothing.
-		const view = await page.evaluate(() => ({
-			// @ts-ignore — KD globals
-			w: PIXIapp.view.width as number,
-			// @ts-ignore
-			h: PIXIapp.view.height as number,
-		}));
-		expect(view.w).toBeGreaterThan(100);
-		expect(view.h).toBeGreaterThan(100);
+	// The renderer's own surface — note #MainCanvas is an unused 300x150
+	// placeholder in index.html; PIXI appends the real 2000x1000 view to body,
+	// so the old assertions about #MainCanvas's size were measuring nothing.
+	const view = await isolatedPage.evaluate(() => ({
+		// @ts-ignore — KD globals
+		w: PIXIapp.view.width as number,
+		// @ts-ignore
+		h: PIXIapp.view.height as number,
+	}));
+	expect(view.w).toBeGreaterThan(100);
+	expect(view.h).toBeGreaterThan(100);
 
-		// Visual smoke: the canvas holds real, non-uniform painted content.
-		// Measured on the title screen: ~250 distinct colours; a blank buffer is 1.
-		const colors = await page.evaluate(countRenderedColors);
-		expect(colors, 'render surface should hold non-uniform painted content').toBeGreaterThan(20);
-	} finally {
-		await context.close();
-	}
+	// Visual smoke: the canvas holds real, non-uniform painted content.
+	// Measured on the title screen: ~250 distinct colours; a blank buffer is 1.
+	const colors = await isolatedPage.evaluate(countRenderedColors);
+	expect(colors, 'render surface should hold non-uniform painted content').toBeGreaterThan(20);
 });

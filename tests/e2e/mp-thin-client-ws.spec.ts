@@ -10,24 +10,32 @@
  * Together with the spike (renderer driven from a snapshot) and the node bridge
  * test (server delivers snapshots + lockstep over WS), this closes the MVP loop:
  * a browser plays a shared, server-authoritative dungeon over a WebSocket.
+ *
+ * KDM-216 — uses `isolatedPage`, NOT `kdPage`. This spec injects render-client.js and
+ * calls disableLocalSim(), which installs permanent __kdClientGuard wrappers that make
+ * KinkyDungeonAdvanceTime a no-op. resetKDState() cannot undo a monkey-patch, so on the
+ * worker-scoped shared page every later spec — all four integration specs included —
+ * inherited a game that could not advance a turn. Its own context, its own mess.
  */
 import { test, expect } from '../helpers/playwright-fixtures';
+import { bootKD } from '../helpers/bundle';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { WSBridge } = require('../../tools/mp-server/ws-bridge');
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { KD_DELTA_BROWSER } = require('../../tools/mp-server/kd-delta');
 
-test('a browser thin-client renders server snapshots and rounds input over a WebSocket', async ({ kdPage }) => {
+test('a browser thin-client renders server snapshots and rounds input over a WebSocket', async ({ isolatedPage }) => {
+	await bootKD(isolatedPage);
 	const bridge = new WSBridge({ requiredPlayers: 2, seed: 'ws-e2e-seed' });
 	const port = await bridge.listen(0);
 
 	try {
 		// Inject the production thin-client core and bootstrap render structures.
-		await kdPage.addScriptTag({ path: 'tools/mp-server/client/render-client.js' });
+		await isolatedPage.addScriptTag({ path: 'tools/mp-server/client/render-client.js' });
 		// KDM-206: this spec builds its own thin client on the STOCK game page, not the demo-server,
 		// so nothing has injected the delta merge for it. Same source text the server diffs with.
-		await kdPage.addScriptTag({ content: KD_DELTA_BROWSER });
-		await kdPage.evaluate(() => {
+		await isolatedPage.addScriptTag({ content: KD_DELTA_BROWSER });
+		await isolatedPage.evaluate(() => {
 			// @ts-ignore — bring up PIXI + KD render globals (KDMapData etc.); the
 			// thin client renders server snapshots, never simulates.
 			KinkyDungeonStartNewGame(false);
@@ -38,7 +46,7 @@ test('a browser thin-client renders server snapshots and rounds input over a Web
 		});
 
 		// Browser opens a WebSocket to the bridge as player A; store pushed states.
-		await kdPage.evaluate((url) => {
+		await isolatedPage.evaluate((url) => {
 			const w = window as any;
 			w.__states = [];
 			const ws = new WebSocket(url);
@@ -69,8 +77,8 @@ test('a browser thin-client renders server snapshots and rounds input over a Web
 		B.send(JSON.stringify({ type: 'join', clientId: 'B' }));
 
 		// The browser should receive its first render-state and adopt it.
-		await kdPage.waitForFunction(() => (window as any).__states.length >= 1, undefined, { timeout: 20_000 });
-		const first = await kdPage.evaluate(() => {
+		await isolatedPage.waitForFunction(() => (window as any).__states.length >= 1, undefined, { timeout: 20_000 });
+		const first = await isolatedPage.evaluate(() => {
 			const w = window as any;
 			return {
 				stateTick: w.__states[0].tick,
@@ -87,27 +95,27 @@ test('a browser thin-client renders server snapshots and rounds input over a Web
 		expect(first.clientMode).toBe(true);
 
 		// canvas renders a real frame of the server's world
-		await kdPage.waitForTimeout(300);
-		const shot = await kdPage.locator('#MainCanvas').screenshot();
+		await isolatedPage.waitForTimeout(300);
+		const shot = await isolatedPage.locator('#MainCanvas').screenshot();
 		expect(shot.length).toBeGreaterThan(1000);
 
 		// --- input round-trip: both players submit → shared world advances a turn ---
 		const t0 = first.stateTick;
 		// browser A submits its input (the submitter receives 'waiting' while the
 		// barrier is open); then node B submits → barrier completes → turn advances.
-		await kdPage.evaluate(() => {
+		await isolatedPage.evaluate(() => {
 			const w = window as any;
 			w.__ws.send(JSON.stringify({ type: 'input', action: { dx: 0, dy: 0 } }));
 		});
-		await kdPage.waitForTimeout(200); // let A's input reach the server first
+		await isolatedPage.waitForTimeout(200); // let A's input reach the server first
 		B.send(JSON.stringify({ type: 'input', action: { dx: 0, dy: 0 } }));
 
 		// the browser receives the post-turn render-state with the tick advanced
-		await kdPage.waitForFunction(
+		await isolatedPage.waitForFunction(
 			(prev) => (window as any).__states.some((s: any) => s.tick === prev + 1),
 			t0, { timeout: 20_000 },
 		);
-		const advancedTick = await kdPage.evaluate(() => (window as any).__states[(window as any).__states.length - 1].tick);
+		const advancedTick = await isolatedPage.evaluate(() => (window as any).__states[(window as any).__states.length - 1].tick);
 		expect(advancedTick).toBe(t0 + 1);
 
 		B.close();

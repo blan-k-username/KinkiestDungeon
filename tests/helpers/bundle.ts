@@ -29,3 +29,13 @@ export async function getKDVersion(page: Page): Promise<string> {
 		return TextGet('KDVersionStr') as string;
 	});
 }
+
+/**
+ * Brings a fresh page up to a bundle-ready KD: navigate, then wait for init.
+ * The one place that pairing lives — the `sharedPage` / `isolatedPage` fixtures
+ * and every spec driving its own page all go through here.
+ */
+export async function bootKD(page: Page): Promise<void> {
+	await page.goto('/');
+	await waitForBundleReady(page);
+}
