@@ -19,12 +19,14 @@
  */
 import { test, expect } from '../helpers/playwright-fixtures';
 import { bootKD } from '../helpers/bundle';
+import { installRenderSurfaceReader, readRenderSurface, PAINTED_MIN_COLORS } from './helpers/render-surface';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { WSBridge } = require('../../tools/mp-server/ws-bridge');
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { KD_DELTA_BROWSER } = require('../../tools/mp-server/kd-delta');
 
 test('a browser thin-client renders server snapshots and rounds input over a WebSocket', async ({ isolatedPage }) => {
+	await installRenderSurfaceReader(isolatedPage);   // KDM-217: before the bundle brings PIXI up
 	await bootKD(isolatedPage);
 	const bridge = new WSBridge({ requiredPlayers: 2, seed: 'ws-e2e-seed' });
 	const port = await bridge.listen(0);
@@ -94,10 +96,12 @@ test('a browser thin-client renders server snapshots and rounds input over a Web
 		expect(first.liveGrid).toBe(first.stateGrid);
 		expect(first.clientMode).toBe(true);
 
-		// canvas renders a real frame of the server's world
+		// The renderer paints a real frame of the server's world. Read off PIXIapp.view —
+		// this used to screenshot the dead #MainCanvas placeholder and assert a byte length,
+		// which a blank 300x150 PNG also satisfies (KDM-217; see helpers/render-surface.ts).
 		await isolatedPage.waitForTimeout(300);
-		const shot = await isolatedPage.locator('#MainCanvas').screenshot();
-		expect(shot.length).toBeGreaterThan(1000);
+		const frame = await readRenderSurface(isolatedPage);
+		expect(frame.colors, 'render surface should hold a painted frame').toBeGreaterThan(PAINTED_MIN_COLORS);
 
 		// --- input round-trip: both players submit → shared world advances a turn ---
 		const t0 = first.stateTick;

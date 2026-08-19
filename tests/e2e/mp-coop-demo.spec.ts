@@ -9,6 +9,7 @@
  */
 import { test, expect } from '@playwright/test';
 import { bootCoopPair, coopMoveAnyDirection, MP_TEST_TIMEOUT, waitForPeerAvatar } from './helpers/coop';
+import { installRenderSurfaceReader, readRenderSurface, PAINTED_MIN_COLORS } from './helpers/render-surface';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
 
@@ -20,6 +21,9 @@ test('two browser windows play one shared co-op dungeon via the demo server', as
 
 	const ctxA = await browser.newContext();
 	const ctxB = await browser.newContext();
+	// KDM-217: arm the render-surface reader on both contexts before either navigates.
+	await installRenderSurfaceReader(ctxA);
+	await installRenderSurfaceReader(ctxB);
 	const A = await ctxA.newPage();
 	const B = await ctxB.newPage();
 	const errs: string[] = [];
@@ -195,11 +199,13 @@ test('two browser windows play one shared co-op dungeon via the demo server', as
 			expect(afterT2.x !== afterT1.x || afterT2.y !== afterT1.y).toBe(true);
 		}
 
-		// real rendered frames in both windows
-		const shotA = await A.locator('#MainCanvas').screenshot();
-		const shotB = await B.locator('#MainCanvas').screenshot();
-		expect(shotA.length).toBeGreaterThan(1000);
-		expect(shotB.length).toBeGreaterThan(1000);
+		// Real rendered frames in both windows, read off each page's PIXIapp.view. These used
+		// to screenshot the dead #MainCanvas placeholder and assert a byte length, which a
+		// blank PNG also passes (KDM-217; see helpers/render-surface.ts).
+		for (const P of [A, B]) {
+			const frame = await readRenderSurface(P);
+			expect(frame.colors, 'both windows should paint a real frame').toBeGreaterThan(PAINTED_MIN_COLORS);
+		}
 	} finally {
 		await ctxA.close();
 		await ctxB.close();

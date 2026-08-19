@@ -29,45 +29,10 @@
  */
 import { test, expect } from '../helpers/playwright-fixtures';
 import { bootKD } from '../helpers/bundle';
-
-/**
- * WebGL discards its drawing buffer after compositing unless asked not to, so
- * drawImage() off the live view returns a blank frame and the renderer exposes
- * no extract plugin to go around it. Forcing preserveDrawingBuffer at the
- * getContext seam — before the bundle runs — is what makes the painted output
- * readable from inside the page. Test-only, and scoped to this spec's own context.
- */
-function preserveDrawingBuffer() {
-	const orig = HTMLCanvasElement.prototype.getContext;
-	(HTMLCanvasElement.prototype as any).getContext = function (type: string, attrs?: any) {
-		if (type === 'webgl' || type === 'webgl2' || type === 'experimental-webgl') {
-			attrs = Object.assign({}, attrs, { preserveDrawingBuffer: true });
-		}
-		return orig.call(this, type, attrs);
-	};
-}
-
-
-
-/** Distinct colours in a downsampled copy of the render surface. A canvas that never painted returns 1. */
-function countRenderedColors() {
-	// @ts-ignore — KD globals
-	const view = PIXIapp.view as HTMLCanvasElement;
-	const sample = document.createElement('canvas');
-	sample.width = 500;
-	sample.height = 250;
-	const ctx = sample.getContext('2d')!;
-	ctx.drawImage(view, 0, 0, sample.width, sample.height);
-	const data = ctx.getImageData(0, 0, sample.width, sample.height).data;
-	const seen = new Set<number>();
-	for (let i = 0; i < data.length; i += 4 * 13) {
-		seen.add((data[i] << 16) | (data[i + 1] << 8) | data[i + 2]);
-	}
-	return seen.size;
-}
+import { installRenderSurfaceReader, readRenderSurface, PAINTED_MIN_COLORS } from './helpers/render-surface';
 
 test('title screen boots and paints a live canvas', async ({ isolatedPage }) => {
-	await isolatedPage.addInitScript(preserveDrawingBuffer);
+	await installRenderSurfaceReader(isolatedPage);
 	await bootKD(isolatedPage);
 
 	// The new-game entry point is callable from the title screen.
@@ -86,20 +51,13 @@ test('title screen boots and paints a live canvas', async ({ isolatedPage }) => 
 		{ timeout: 30_000 },
 	);
 
-	// The renderer's own surface — note #MainCanvas is an unused 300x150
-	// placeholder in index.html; PIXI appends the real 2000x1000 view to body,
-	// so the old assertions about #MainCanvas's size were measuring nothing.
-	const view = await isolatedPage.evaluate(() => ({
-		// @ts-ignore — KD globals
-		w: PIXIapp.view.width as number,
-		// @ts-ignore
-		h: PIXIapp.view.height as number,
-	}));
-	expect(view.w).toBeGreaterThan(100);
-	expect(view.h).toBeGreaterThan(100);
+	// The renderer's own surface — PIXIapp.view, NOT the dead #MainCanvas placeholder
+	// (helpers/render-surface.ts explains why locating that element is always a mistake).
+	const frame = await readRenderSurface(isolatedPage);
+	expect(frame.w).toBeGreaterThan(100);
+	expect(frame.h).toBeGreaterThan(100);
 
 	// Visual smoke: the canvas holds real, non-uniform painted content.
-	// Measured on the title screen: ~250 distinct colours; a blank buffer is 1.
-	const colors = await isolatedPage.evaluate(countRenderedColors);
-	expect(colors, 'render surface should hold non-uniform painted content').toBeGreaterThan(20);
+	// Measured on the title screen: hundreds of distinct colours; a blank buffer is 1.
+	expect(frame.colors, 'render surface should hold non-uniform painted content').toBeGreaterThan(PAINTED_MIN_COLORS);
 });
