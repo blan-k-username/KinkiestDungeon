@@ -481,6 +481,28 @@ test('the move reticule follows the mouse', async ({ browser }) => {
  * RATE-INDEPENDENT ON PURPOSE. Five earlier tests in this file failed to discriminate because the
  * harness renders at ~4 fps against a real browser's ~95 — anything whose trigger is input RATE
  * cannot be reproduced here by playing. Latency is not rate-dependent: one input, one measurement.
+ *
+ * ── THE ORACLE IS IN FRAMES, NOT MILLISECONDS (KDM-214) ────────────────────────────────────────
+ * This test asserted `median < 120 ms` and was red at 716–755 ms. That budget was the WRONG UNIT,
+ * and [[KDM-206]] proved it while investigating this exact number: server CPU per transaction is
+ * ~22 ms, which cannot produce a ~750 ms median, and the samples are quantised in ~250 ms steps
+ * (clusters ~245 / ~550 / ~750 / ~950) that match the ~227 ms client frame period [[KDM-205]]
+ * measured (`coopFps 4.4`). The page is single-threaded: a reply cannot be dispatched into a draw
+ * loop that is mid-frame, so the round-trip is CLIENT-FRAME-BOUND, not payload-bound. 120 ms of
+ * wall clock is below one frame of this harness — it asserted the headless frame rate, which is not
+ * this layer's to meet, and which the product's ~95 fps browser does not share.
+ *
+ * So the round-trip is expressed in CLIENT FRAME PERIODS, measured in the SAME run from the same
+ * telemetry. That asserts what this layer actually controls — "the transaction is not the
+ * bottleneck; it costs a small, bounded number of frames" — and it survives a slower or busier host,
+ * because a host that halves the frame rate also halves the budget's unit.
+ *
+ * A frames-only oracle would however be self-cancelling against a payload regression, which slows the
+ * client too and so inflates the very unit the budget is denominated in. The wire cost of the same
+ * window is therefore asserted directly alongside it — in reply KINDS and in bytes, both
+ * frame-rate-independent by construction. See the payload guard below for what that does and does
+ * not cover; the short version is that these inputs move no state, so this window guards KDM-186's
+ * "state on CHANGE, not on input" rule, not KDM-206's delta encoding.
  */
 test('a presentation input round-trips quickly', async ({ browser }) => {
 	test.setTimeout(MP_TEST_TIMEOUT);
@@ -502,15 +524,128 @@ test('a presentation input round-trips quickly', async ({ browser }) => {
 			await A.waitForTimeout(400);
 		}
 
-		const lat = await A.evaluate(() => {
+		/**
+		 * TWO READS, ON PURPOSE — they want different windows, and conflating them was wrong in both
+		 * directions before this was measured (KDM-214):
+		 *
+		 *   LATENCY is read at the end of the send loop, because KD's draw loop keeps emitting chatter
+		 *   while we wait. Every extra second of waiting deepens the queue those samples are drawn
+		 *   from, so a long settle does not measure the round-trip more accurately — it measures a
+		 *   backlog we created by waiting. Reading here moved the median from ~5 frame periods back to
+		 *   ~3, which is the transaction this test is about.
+		 *
+		 *   WIRE COST is read after a full settle, because at a ~250 ms frame period a round-trip
+		 *   outlives the 400 ms slot that launched it: when the loop ends, the replies to the last
+		 *   sends — and their bytes — are still in flight. Reading it at the loop end reported ~0 B
+		 *   while full snapshots were crossing the wire, a measurement bug that made the guard vacuous.
+		 *
+		 * The frame period comes from the LATENCY window, so the unit and the thing it measures are
+		 * the same seconds.
+		 */
+		const readWindow = (page: typeof A) => page.evaluate(() => {
 			const d = JSON.parse((window as any).__coopDiag.dump());
+			const rolls = d.rollups || [];
+			const sum = (f: (r: any) => number) => rolls.reduce((s: number, r: any) => s + (f(r) || 0), 0);
 			const ms = (d.recentInputs || []).map((r: any) => r.ms).filter((n: number) => n >= 0).sort((a: number, b: number) => a - b);
-			return { samples: ms, median: ms.length ? ms[Math.floor(ms.length / 2)] : -1 };
+			return {
+				seconds: rolls.length,
+				frames: sum((r) => r.frames),
+				bytes: sum((r) => r.recvBytes),
+				// Every reply kind counts — 'ui', 'turn' and 'ack' alike. Naming them would make the
+				// measurement go quiet the day a fourth kind is added, which is the failure mode this
+				// whole epic exists to avoid.
+				replies: sum((r) => Object.keys(r.recv || {}).reduce((a, k) => a + r.recv[k], 0)),
+				byKind: rolls.reduce((acc: any, r: any) => {
+					for (const k of Object.keys(r.recv || {})) acc[k] = (acc[k] || 0) + r.recv[k];
+					return acc;
+				}, {}),
+				samples: ms,
+				median: ms.length ? ms[Math.floor(ms.length / 2)] : -1,
+			};
 		});
 
-		expect(lat.median, `a presentation input takes ${lat.median} ms to round-trip ` +
-			`(samples ${JSON.stringify(lat.samples)}). At ~100 updates/s that is what makes the move ` +
-			`reticule lag ~half a second behind the mouse.`).toBeLessThan(120);
+		await A.waitForTimeout(600);      // just enough for the loop's own last reply
+		const lat = await readWindow(A);
+		await A.waitForTimeout(2500);     // now let every reply drain, so the bytes are all counted
+		const win = await readWindow(A);
+
+		// No frames observed would make the unit meaningless — fail loudly rather than divide by zero.
+		expect(lat.frames, `no client frames were observed in ${lat.seconds}s — the frame period, ` +
+			`which is this assertion's unit, could not be measured. ${JSON.stringify({ ...lat, samples: undefined })}`)
+			.toBeGreaterThan(0);
+		const framePeriod = (lat.seconds * 1000) / lat.frames;
+		const inFrames = lat.median / framePeriod;
+
+		// Printed on green too: these are the numbers that justify the unit, and the next person to
+		// question this budget should not have to re-instrument the spec to see them (KDM-214).
+		console.log(`[KDM-214] round-trip median ${lat.median} ms = ${inFrames.toFixed(2)} client ` +
+			`frames (period ${framePeriod.toFixed(0)} ms from ${lat.frames} frames / ${lat.seconds}s); ` +
+			`${win.bytes} B over ${win.replies} replies ${JSON.stringify(win.byKind)}; samples ${JSON.stringify(lat.samples)}`);
+
+		// MEASURED, not guessed. A green run reports the samples sitting on a clean staircase of 1–5
+		// frame periods (296 / 636 / 913 / 1163 / 1425 ms at a 300 ms period) with the median at ~3.2 —
+		// one frame to dispatch the send, the server's turn, one to dispatch the reply, and whatever
+		// chatter KD's own draw loop has queued ahead of it. Six frames is above that staircase and
+		// below anything the staircase no longer explains, so this goes red when the round-trip stops
+		// being a small multiple of the frame period, not when the host has one bad second. The payload
+		// regression this test guards is caught in BYTES below, which is why this budget does not have
+		// to be tight to be meaningful.
+		const BUDGET_FRAMES = 6;
+		expect(inFrames, `a presentation input takes ${lat.median} ms to round-trip = ` +
+			`${inFrames.toFixed(2)} client frame periods (frame period ${framePeriod.toFixed(0)} ms, ` +
+			`measured in this same run). Samples ${JSON.stringify(lat.samples)}. The transaction is ` +
+			`no longer merely frame-bound — it has acquired a cost of its own. See KDM-205/206/214 ` +
+			`for why this is asserted in frames and not in wall-clock ms.`)
+			.toBeLessThan(BUDGET_FRAMES);
+
+		// THE PAYLOAD GUARD — and the assertion that carries this test's regression duty, since the
+		// frames budget above cannot. That is measured, not assumed: forcing `_stateFrame` to answer
+		// with full snapshots (KDM-214) put the round-trip at 6.4 frames on one attempt and 5.9 —
+		// green — on the retry, because a payload blow-up slows the CLIENT too and inflates the very
+		// frame period the budget is denominated in. A frames-only oracle partly cancels the
+		// regression out. Bytes and reply KINDS do not cancel.
+		//
+		// WHAT THIS WINDOW ACTUALLY EXERCISES (KDM-214, measured — this was assumed wrong twice). Almost
+		// every reply here is a bare `ack`: KD's draw loop emits a direction every frame, those move no
+		// captured state, and KDM-186 RULE 2 answers an input that changed nothing with an ack. Measured
+		// `{"ui":2,"turn":0,"ack":19}` and `{"ui":4,"turn":0,"ack":37}` — and `{"ui":0,...,"ack":20}` on
+		// runs where the client's supersede rule swallowed all five deliberate updates. So `_stateFrame`
+		// — and with it KDM-206's delta encoding — is barely reached on this path, and a delta-encoding
+		// regression is NOT reliably visible here. It has a guard of its own in
+		// `tests/unit/mp-delta-codec.spec.ts` (38.1 KB -> 115 B); this is not that guard, and pretending
+		// otherwise would be a vacuous assertion that can only ever pass.
+		//
+		// What this window CAN guard is Rule 2 itself, which is the invariant that made this path cheap
+		// in the first place: KD's draw loop emits an input every frame, and answering each with state
+		// cost ~40 KB × ~100/s × 2 clients — 809 MB of egress, one core pegged, and lockstep never
+		// completing. Both halves are asserted, because either alone has a hole: the KIND (an input
+		// that changed nothing must not be answered with a state frame) catches Rule 2 coming undone
+		// even if the reply is a cheap delta, and the BYTES catch a reply growing regardless of how it
+		// is labelled.
+		expect(win.replies, `no replies were observed in ${win.seconds}s, so the per-reply wire cost ` +
+			`could not be measured. ${JSON.stringify({ ...win, samples: undefined })}`).toBeGreaterThan(0);
+
+		// Stated as a SHARE, not as zero. Zero was tried and is wrong: the five deliberate direction
+		// updates DO move state and legitimately earn a state frame, so a pristine tree scores 0–4 of
+		// ~20–40 replies (0–10%) purely on which of them survive the client's supersede rule. The
+		// regression is categorical, not marginal — with Rule 2 undone EVERY reply carries state, and
+		// the mutation measured 15/15 and 42/42 (100%). Half separates 10% from 100% with room on both
+		// sides, and does not depend on how much chatter the window happened to catch.
+		const stateShare = (win.byKind.ui || 0) / win.replies;
+		expect(stateShare, `${win.byKind.ui || 0} of ${win.replies} presentation inputs were answered ` +
+			`with a STATE frame (${JSON.stringify(win.byKind)}) — ${(stateShare * 100).toFixed(0)}%. ` +
+			`KD's draw loop emits an input every frame and almost none of them move state, so almost ` +
+			`all of these must be bare acks: KDM-186 RULE 2, "state on CHANGE, not on input". ` +
+			`State-per-input is what pegged the server and stalled lockstep entirely.`)
+			.toBeLessThan(0.5);
+
+		const bytesPerReply = win.bytes / win.replies;
+		expect(bytesPerReply, `each reply to a presentation input carries ` +
+			`${Math.round(bytesPerReply)} B (${win.bytes} B over ${win.replies} replies, ` +
+			`${JSON.stringify(win.byKind)}) — this window measures ~110 B/reply green, and ~40 KB was ` +
+			`the pre-KDM-186 cost of answering every input with a full snapshot. A reply this size ` +
+			`means state is riding along with the chatter again.`)
+			.toBeLessThan(2000);
 	} finally {
 		await ctxA.close().catch(() => {}); await ctxB.close().catch(() => {});
 		await new Promise<void>((r) => server.close(() => r()));
