@@ -746,6 +746,19 @@ class HeadlessHost {
 				}
 				return t;
 			} catch (e) { return 0; } })(),
+			// KDM-184: the swapped-in player's own defensive stats, RAW — the buff totals, not the
+			// multiplicative values KinkyDungeonPlayerEvasion/Block derive from them. Raw is what the
+			// stand-in needs: KD applies its own MultiplicativeStat to an entity's buff total
+			// (KinkyDungeonGetEvasion:486, KinkyDungeonEnemies.ts:6681/:6684), so passing the raw stat
+			// lets the game do its own arithmetic. Handing it a derived value, or inverting one back
+			// into a stat, would be a seam of ours.
+			// typeof on BOTH: these are bundle let-globals, not properties of globalThis, so a bare
+			// reference before init is a TDZ throw that would take the whole getVitals read down.
+			// (No backticks in this comment — it lives inside a template literal. See WRAP_CONVENTION.)
+			evasion: (typeof KinkyDungeonGetBuffedStat === "function" && typeof KinkyDungeonPlayerBuffs !== "undefined")
+				? (KinkyDungeonGetBuffedStat(KinkyDungeonPlayerBuffs, "Evasion") || 0) : 0,
+			block: (typeof KinkyDungeonGetBuffedStat === "function" && typeof KinkyDungeonPlayerBuffs !== "undefined")
+				? (KinkyDungeonGetBuffedStat(KinkyDungeonPlayerBuffs, "Block") || 0) : 0,
 		}; })()`);
 	}
 
@@ -898,7 +911,13 @@ class HeadlessHost {
 					bound: 'Apprentice', // sprite name; presence makes KDCanBind true so the Truss/bind option appears (KD-098)
 					AI: 'guard', immobile: true, visionRadius: 0, maxhp: 100, minLevel: 0, weight: -1000,
 					movePoints: 1000, attackPoints: 0, attack: '', attackRange: 0,
-					evasion: -100, armor: 0, followRange: 100, lowpriority: true,
+					// KDM-184: evasion 0 = NEUTRAL, and it must stay neutral. It used to be -100, and
+					// KinkyDungeonMultiplicativeStat(-100) is 101 — a x101 hit chance that made every PvP
+					// attack land unconditionally and swamped anything the peer brought (measured: a peer
+					// with an Evasion buff of 3.0 still came out at 25.25, i.e. still an unconditional
+					// hit). The peer's real evasion now arrives on the entity's buff list instead, via
+					// setAvatarDefenses; a non-zero value here would silently cancel it again.
+					evasion: 0, armor: 0, followRange: 100, lowpriority: true,
 					// style → the client renders the avatar as a full character (NPC path,
 					// KDQuickGenNPC + DrawCharacter) so the other player is VISIBLE, not just
 					// an HP bar. Server never draws (rendering neutered) so this is client-only.
@@ -1059,6 +1078,42 @@ class HeadlessHost {
 			e.stun = Math.max(0, ${Number(stun) || 0});
 			KDUpdateEnemyCache = true;
 			return { id: e.id, hp: e.hp, maxhp: e.Enemy.maxhp, stun: e.stun, faction: (typeof KDGetFaction==='function')?KDGetFaction(e):e.faction };
+		})()`);
+	}
+
+	/**
+	 * KDM-184: mirror a peer's own defensive stats onto their stand-in, so KD evaluates an incoming
+	 * PvP attack against the REAL defender's build.
+	 *
+	 * Hit-or-miss is decided entirely off the ENTITY, never off the player slot:
+	 * `KinkyDungeonAttackEnemy` (`KinkyDungeonFight.ts:1649`) passes the player slot as the ATTACKER and
+	 * asks `KinkyDungeonEvasion` about the entity, which reads `Enemy.buffs` at
+	 * `KinkyDungeonGetEvasion:486`. So no amount of swapping the victim in could have delivered their
+	 * evasion — the channel is the buff list, and the stand-in simply had none.
+	 *
+	 * Evasion + Block is KD's OWN pairing for this question, not a list we chose: the generic
+	 * enemy-attack path branches on `player.player` and, for a non-player target, uses exactly
+	 * `MultiplicativeStat(GetBuffedStat(player.buffs, "Evasion"))` and the same for `"Block"`
+	 * (`KinkyDungeonEnemies.ts:6681`/`:6684`). The values are the game's own raw buff totals; the game
+	 * applies its own formula to them here, so there is no arithmetic of ours in the path.
+	 *
+	 * ⚠️ A FRESH object every call, deliberately. `KinkyDungeonGetBuffedStat` memoises per stat type in
+	 * `KDBuffedStatTypeMemo`, a Map keyed by the buff-list OBJECT (`KinkyDungeonBuffs.ts:300`). Mutating
+	 * the same list in place would serve a stale total, so a peer who dropped a buff would keep evading.
+	 */
+	setAvatarDefenses(entityId, evasion, block) {
+		return this.eval(`(function(){
+			var e = KDMapData.Entities.find(function(en){ return en.id === ${entityId | 0}; });
+			if (!e) return null;
+			var eva = ${Number(evasion) || 0}, blk = ${Number(block) || 0};
+			var buffs = {};
+			// Only carry a stat the peer actually has; an empty list reads as 0, which is the same
+			// neutral answer, and keeps the avatar's buff list honest about what it represents.
+			if (eva) buffs.KDPeerEvasion = { id: 'KDPeerEvasion', type: 'Evasion', power: eva, duration: 9999 };
+			if (blk) buffs.KDPeerBlock  = { id: 'KDPeerBlock',  type: 'Block',   power: blk, duration: 9999 };
+			e.buffs = buffs;
+			KDUpdateEnemyCache = true;
+			return { id: e.id, evasion: eva, block: blk };
 		})()`);
 	}
 

@@ -737,6 +737,13 @@ class SwapSession {
 			// 0 at its boundLevel short-circuit, which is why no peer could ever be tied without the
 			// invented stun.
 			this.world.setAvatarBondage(eid, v.bondage || 0);
+			// KDM-184: …and their own DEFENCES, so the attack that is about to resolve is evaluated
+			// against the real defender's build. KDM-164 gave the victim their resistances, armour and
+			// on-hit events from the moment damage is dealt (KinkyDungeonDealDamage, with them swapped
+			// in); this is the half BEFORE that — hit-or-miss, which KD reads off the ENTITY
+			// (KinkyDungeonGetEvasion:486) and so never saw the peer at all. Same mirror-from-the-peer
+			// rule as the three above: the values are the game's own buff totals for that player.
+			this.world.setAvatarDefenses(eid, v.evasion || 0, v.block || 0);
 			// KDM-200: the DEFEATED-peer exposure is stamped on the SNAPSHOT (see snapshotFor), not on
 			// the world avatar. Marking the world entity `vulnerable` changes real combat — KD grants
 			// crits against a vulnerable target (KinkyDungeonFight.ts:886) — and measured: it killed the
