@@ -19,9 +19,25 @@
  */
 import { describe, it, expect, beforeAll } from 'vitest';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { HeadlessHost, RESET_FULL_EVERY } = require('../../tools/mp-server/headless-host');
+const { HeadlessHost } = require('../../tools/mp-server/headless-host');
 
 const BOOT_TIMEOUT = 300_000;
+
+/**
+ * KDM-223: how many carrier→bare swaps the accumulation leg below drives.
+ *
+ * This used to read `RESET_FULL_EVERY + 5`, destructured from `headless-host` — which never exported
+ * that name and does not define it anywhere. `undefined + 5` is `NaN`, `i < NaN` is false on the
+ * first check, and the whole loop body never ran: the test passed while asserting nothing.
+ *
+ * There is no constant to export in its place. The name presumed a periodic full-reset pass, and the
+ * reset half has none — `_restoreGlobals` (headless-host.js) walks EVERY watched name on EVERY
+ * restore and resets each one that hashes differently from its baseline. So no swap count can be
+ * "the one that happens to hit the full pass", and the bound is honestly just a repetition count:
+ * enough swaps that an under-inclusive reset shows up as accumulation rather than as a single miss,
+ * cheap enough to stay in the unit layer. Raise it if a leak is ever seen to need more rounds.
+ */
+const ACCUMULATION_SWAPS = 12;
 
 describe('KDM-194 · the dirty-set reset cannot lose per-player state', () => {
 	let h: any;
@@ -70,15 +86,22 @@ describe('KDM-194 · the dirty-set reset cannot lose per-player state', () => {
 		const bare = { ...base, globals: { ...base.globals } };
 		delete bare.globals.KinkyDungeonSubmissiveMult;
 
-		// More swaps than the periodic full pass, so this cannot pass merely by hitting RESET_FULL_EVERY
-		// once, and an under-inclusive set has many chances to show.
-		for (let i = 0; i < RESET_FULL_EVERY + 5; i++) {
+		// Repeated swaps, so an under-inclusive reset set has many chances to show — a leak that only
+		// appears once state has built up is exactly what a single swap cannot catch.
+		let swaps = 0;
+		for (let i = 0; i < ACCUMULATION_SWAPS; i++) {
 			h.restorePlayer(carrier);
 			expect(h.eval('KinkyDungeonSubmissiveMult'), `carrier lost its value on swap ${i}`).toBe(7.5);
 			h.restorePlayer(bare);
 			expect(h.eval('KinkyDungeonSubmissiveMult'),
 				`the bare player inherited the carrier's value on swap ${i} — contamination`).not.toBe(7.5);
+			swaps++;
 		}
+		// KDM-223: the anti-vacuity guard. Every assertion above lives inside the loop, so a bound that
+		// silently evaluates to 0 (or NaN) makes this `it` green while testing nothing — which is how
+		// it shipped. Assert the work actually happened, outside the loop, where no bound can skip it.
+		expect(swaps, 'the accumulation loop did not run — this test asserted nothing')
+			.toBe(ACCUMULATION_SWAPS);
 	}, BOOT_TIMEOUT);
 
 	it('a bundle-carried Map still round-trips (the codec path is unchanged)', () => {
