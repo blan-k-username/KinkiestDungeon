@@ -1367,6 +1367,13 @@ class HeadlessHost {
 				buffs: clone(typeof KinkyDungeonPlayerBuffs !== 'undefined' ? KinkyDungeonPlayerBuffs : {}),
 				level: (typeof MiniGameKinkyDungeonLevel !== 'undefined') ? MiniGameKinkyDungeonLevel : 1,
 				checkpoint: (typeof MiniGameKinkyDungeonCheckpoint !== 'undefined') ? MiniGameKinkyDungeonCheckpoint : 'grv',
+				// KDM-222: the other two inputs to the light-params lookup that level/checkpoint feed.
+				// KDGetAltType resolves off KDGameData.RoomType/.MapMod, not off the level number, so a
+				// snapshot carrying only the level recomputes the lightmap with the wrong alt type.
+				// Mirrors client/render-client.js serialize(); keep the two in step.
+				// (No backticks in this comment on purpose — it lives inside an eval template literal.)
+				roomType: (typeof KDGameData !== 'undefined' && KDGameData) ? KDGameData.RoomType : undefined,
+				mapMod: (typeof KDGameData !== 'undefined' && KDGameData) ? KDGameData.MapMod : undefined,
 			};
 		})()`);
 	}
@@ -1409,6 +1416,12 @@ class HeadlessHost {
 			if (typeof KinkyDungeonActionMessageColor !== 'undefined') KinkyDungeonActionMessageColor = s.messages.actionColor;
 			if (typeof MiniGameKinkyDungeonLevel !== 'undefined') MiniGameKinkyDungeonLevel = s.level;
 			if (s.checkpoint && typeof MiniGameKinkyDungeonCheckpoint !== 'undefined') MiniGameKinkyDungeonCheckpoint = s.checkpoint;
+			// KDM-222 — see serializeRenderState. '' is a REAL RoomType (a plain dungeon floor), so
+			// test !== undefined, not truthiness, or the previous room's type survives the adopt.
+			if (typeof KDGameData !== 'undefined' && KDGameData) {
+				if (s.roomType !== undefined) KDGameData.RoomType = s.roomType;
+				if (s.mapMod !== undefined) KDGameData.MapMod = s.mapMod;
+			}
 			return { ok: true, entities: KDMapData.Entities.length, grid: KDMapData.Grid.length };
 		})()`);
 	}

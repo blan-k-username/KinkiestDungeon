@@ -87,6 +87,22 @@ test('stock renderer is driven purely from an applied render-state snapshot (no 
 	await isolatedPage.evaluate(makeHub);
 	await isolatedPage.waitForTimeout(SETTLE);
 
+	/*
+	 * KDM-222: settle the LIGHTMAP too, and discard that render as well.
+	 *
+	 * The warm-up above fixes asset loading; this fixes a second, independent transient. The FIRST
+	 * lightmap recompute after KinkyDungeonStartNewGame does not produce the same picture as every
+	 * later one — measured, flagging the grid again on an untouched world moves the frame 0.0342, 16x
+	 * the noise floor, with no apply() anywhere near it. A THIRD flag then moves it 0.0022, i.e. noise:
+	 * the recompute is idempotent from the second pass on. Taking the ground truth before that second
+	 * pass is what made a self-apply look like it landed 0.033 from its own world.
+	 */
+	await isolatedPage.evaluate(() => {
+		// @ts-ignore
+		KinkyDungeonUpdateLightGrid = true;
+	});
+	await isolatedPage.waitForTimeout(SETTLE);
+
 	// Snapshot it, and take the GROUND TRUTH frame + this run's own noise floor.
 	const a = await isolatedPage.evaluate(() => {
 		// @ts-ignore
@@ -154,10 +170,15 @@ test('stock renderer is driven purely from an applied render-state snapshot (no 
 	expect(movedFromB, `applying a snapshot must repaint (noise floor ${noise.toFixed(4)})`)
 		.toBeGreaterThan(noise * 20);
 
-	// 2. and it moved TOWARDS A: the applied frame is markedly closer to A's own picture than
-	//    B's was. This is the direction assertion the old spec could not make.
-	expect(distanceToA, `applied frame must be closer to A (${distanceToA.toFixed(4)}) than B was (${worldGap.toFixed(4)})`)
-		.toBeLessThan(worldGap * 0.75);
+	// 2. and it REACHES A: the applied frame is at A's own picture, within a small multiple of this
+	//    run's noise floor. KDM-222 tightened this from `worldGap * 0.75` (0.088 — a direction
+	//    assertion) after removing the two things that kept the applied frame away from A.
+	//    Measured after those fixes: distanceToA 0.0052 against a 0.0015 noise floor (3.4x) and a
+	//    0.1179 world gap, i.e. 4% of the gap rather than 54%. The bound takes the larger of 8x noise
+	//    and a 0.012 absolute floor, so an unusually quiet run cannot make it bite spuriously.
+	const reachedA = Math.max(noise * 8, 0.012);
+	expect(distanceToA, `applied frame must REACH A's picture: ${distanceToA.toFixed(4)} vs bound ${reachedA.toFixed(4)} (noise ${noise.toFixed(4)}, world gap ${worldGap.toFixed(4)})`)
+		.toBeLessThan(reachedA);
 
 	/*
 	 * WHY THESE TWO ASSERTIONS, AND NOT "THE FRAME EQUALS A" — KDM-219.
@@ -201,14 +222,35 @@ test('stock renderer is driven purely from an applied render-state snapshot (no 
 	 * assertion 2, the DIRECTION one, that carries the weight. Do not drop it as redundant — on its
 	 * own, assertion 1 is the same shape as the vacuous assertion KDM-217 had to delete.
 	 *
-	 * `expect(distanceToA).toBeLessThan(0)`-style equality is NOT available and asserting it would
-	 * be wrong: the applied frame does not reach A's picture. Measured, that residual is not the
-	 * foreign world leaking through — applying A onto A ITSELF still lands 0.0333 from A, and
-	 * regenerating the hub for real after being in B lands 0.0290 from it, both far above the
-	 * 0.0015 noise floor. So a few percent of this surface is simply not reproducible across a map
-	 * swap (HUD/overlay repaint; the sampled colour count moves 1363 → 1406 on a self-apply).
-	 * disableLocalSim is NOT the cause: it moves the frame 0.0022, i.e. noise.
-	 * Chasing that residual to zero is a separate question from "does adoption reach the screen",
-	 * which is what this spec exists to answer — filed as KDM-222.
+	 * KDM-222 — THE RESIDUAL IS GONE; assertion 2 is now an equality-grade bound, not a direction.
+	 *
+	 * KDM-219 recorded ~3% of this surface as "simply not reproducible across a map swap" and guessed
+	 * HUD/overlay repaint. That guess was wrong, and it was TWO separate causes, neither of them an
+	 * overlay. Both were found by rendering the diff as a MASK and looking at where the pixels are —
+	 * the row/column histogram named the region in one run, after argument had gone nowhere:
+	 *
+	 *  1. AN UNSETTLED LIGHTMAP IN THE GROUND TRUTH (0.034 of it). Not apply()'s doing at all: with no
+	 *     apply anywhere, flagging KinkyDungeonUpdateLightGrid on an untouched world moved the frame
+	 *     0.0342. The first recompute after StartNewGame differs from every later one; from the second
+	 *     pass on it is idempotent (0.0022 = noise). Closed by the light-settle in the warm-up above.
+	 *     The discriminator that proved apply() innocent: the self-applied frame sits 0.0020 — the
+	 *     noise floor — from a frame that had only been light-recomputed.
+	 *  2. A LOST ALT-TYPE (0.054 of it, cross-world only). KinkyDungeonVision looks up `lightParams`
+	 *     via `KDGetAltType(level)`, which resolves off KDGameData.RoomType / .MapMod
+	 *     (KinkyDungeonGame.ts:4300-4304) — NOT off the level number. serialize() carried level and
+	 *     checkpoint but not those two, so adopting the Journey hub with RoomType left at '' fell back
+	 *     to KinkyDungeonBossFloor(0) and the default shadow colour. Measured at the data level:
+	 *     ShadowGrid 384/384 cells different (0x703 → 0x1f) while BrightnessGrid and ColorGrid stayed
+	 *     BIT-IDENTICAL, which is why it read as a whole-room tint along the tile texture edges.
+	 *     Closed in render-client.js (serialize + apply now carry RoomType/MapMod). In production
+	 *     these already rode along in the bundle; this closes the bundle-less snapshot path.
+	 *
+	 * Net: distanceToA 0.0707 → 0.0539 (fix 1) → 0.0052 (fix 2), against a 0.0015 noise floor and an
+	 * unchanged 0.1179 world gap. disableLocalSim was never the cause (it moves the frame 0.0022).
+	 *
+	 *  M3. NEW MUTANT (KDM-222): drop the `KDGameData.RoomType` restore from render-client's apply().
+	 *      Every globals assertion still passes, assertion 1 still passes, and M2's light-invalidation
+	 *      is untouched — only assertion 2 notices, at 0.0539 against a 0.012 bound. That is what the
+	 *      tightened bound buys: at the old `worldGap * 0.75` (0.088) this mutant sailed through.
 	 */
 });

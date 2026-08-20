@@ -288,6 +288,20 @@
 				buffs: clone(typeof KinkyDungeonPlayerBuffs !== 'undefined' ? KinkyDungeonPlayerBuffs : {}),
 				level: (typeof MiniGameKinkyDungeonLevel !== 'undefined') ? MiniGameKinkyDungeonLevel : 1,
 				checkpoint: (typeof MiniGameKinkyDungeonCheckpoint !== 'undefined') ? MiniGameKinkyDungeonCheckpoint : 'grv',
+				// KDM-222: the OTHER two inputs to the same light-params lookup `level`/`checkpoint`
+				// feed. KinkyDungeonVision reads `KDGetAltType(level)` for `lightParams`, and that
+				// function resolves off KDGameData.RoomType / .MapMod (KinkyDungeonGame.ts:4300-4304),
+				// not off the level number. Carrying three of the four inputs meant the lightmap was
+				// recomputed with the WRONG alt type: measured, adopting the Journey hub
+				// (RoomType 'JourneyFloor', shadowColor 0x703) with RoomType left at '' fell back to
+				// KinkyDungeonBossFloor(0) and the default 0x00001f, rewriting all 384 ShadowGrid
+				// cells and tinting the whole room — 0.054 of the frame, 30x the noise floor, while
+				// BrightnessGrid and ColorGrid stayed bit-identical.
+				// In production these ride along in the bundle (KDGameData whole, minus
+				// KDGAMEDATA_WORLD_KEYS), so this closes the BUNDLE-LESS path — a snapshot alone must
+				// still describe which map it is.
+				roomType: (typeof KDGameData !== 'undefined' && KDGameData) ? KDGameData.RoomType : undefined,
+				mapMod: (typeof KDGameData !== 'undefined' && KDGameData) ? KDGameData.MapMod : undefined,
 			};
 		},
 
@@ -469,6 +483,15 @@
 			}
 			if (typeof MiniGameKinkyDungeonLevel !== 'undefined') MiniGameKinkyDungeonLevel = s.level;
 			if (s.checkpoint && typeof MiniGameKinkyDungeonCheckpoint !== 'undefined') MiniGameKinkyDungeonCheckpoint = s.checkpoint;
+			// KDM-222: restore the alt-type inputs alongside the level they are looked up with, so the
+			// lightmap invalidated below recomputes against the map we just adopted rather than the one
+			// we were on. `!== undefined` (not truthiness) on purpose: '' is the REAL value for a plain
+			// dungeon floor, and skipping it would leave the previous room's type in place — exactly
+			// the bug, mirrored. Older snapshots have neither field and are left untouched.
+			if (typeof KDGameData !== 'undefined' && KDGameData) {
+				if (s.roomType !== undefined) KDGameData.RoomType = s.roomType;
+				if (s.mapMod !== undefined) KDGameData.MapMod = s.mapMod;
+			}
 			/*
 			 * KDM-219: invalidate the derived vision/light cache HERE, where the state it derives
 			 * from is replaced — not in the caller.
