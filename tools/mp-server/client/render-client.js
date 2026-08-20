@@ -469,6 +469,26 @@
 			}
 			if (typeof MiniGameKinkyDungeonLevel !== 'undefined') MiniGameKinkyDungeonLevel = s.level;
 			if (s.checkpoint && typeof MiniGameKinkyDungeonCheckpoint !== 'undefined') MiniGameKinkyDungeonCheckpoint = s.checkpoint;
+			/*
+			 * KDM-219: invalidate the derived vision/light cache HERE, where the state it derives
+			 * from is replaced — not in the caller.
+			 *
+			 * `KDMapData` is adopted WHOLESALE above, so the light grid computed for the previous map
+			 * is stale by construction after every apply. It used to be the caller's job:
+			 * `coop-bootstrap.js pinGameScreen()` sets the flag, and every production call site
+			 * already runs it immediately after apply (boot + both `state` branches). So moving it in
+			 * here does NOT change how often a recompute happens in production — it only removes the
+			 * chance of forgetting, which FAILS SILENTLY: the state is correct, the tick is right,
+			 * every assertion on the globals passes, and the screen just keeps showing the old world.
+			 * That is exactly how the thin-client spike came to claim adoption it could not see
+			 * (KDM-219): it never called pinGameScreen, so its "applied" frame stayed the previous
+			 * map's picture. Measured: with this line, applying a snapshot moves the rendered frame
+			 * 0.12 (noise floor 0.0015); without it, the frame does not move.
+			 *
+			 * pinGameScreen keeps its own copy — it also pins KinkyDungeonState/DrawState, and a
+			 * redundant `true` here costs one recompute the adopt already required.
+			 */
+			if (typeof KinkyDungeonUpdateLightGrid !== 'undefined') KinkyDungeonUpdateLightGrid = true;
 			return { ok: true, entities: KDMapData.Entities.length };
 		},
 
