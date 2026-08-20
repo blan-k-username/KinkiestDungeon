@@ -64,6 +64,8 @@ const INJECT = [
 	DELTA_ROUTE,                    // must precede coop-bootstrap.js — it consumes window.KDDelta
 	'/tools/mp-server/client/render-client.js',
 	'/tools/mp-server/client/coop-bootstrap.js',
+	// KDM-225: the peace submenu. AFTER coop-bootstrap — it sends through `window.__coop.sendAction`.
+	'/tools/mp-server/client/coop-peace.js',
 ];
 
 /* ── Serve-time workarounds for UPSTREAM crashes ──────────────────────────────────────────────

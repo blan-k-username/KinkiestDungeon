@@ -24,8 +24,16 @@
 'use strict';
 
 const { HeadlessHost, KDGAMEDATA_WORLD_KEYS } = require('./headless-host');
+const { PeaceRegistry } = require('./peace');
 
 const PARK = { x: 1, y: 1 };
+
+/**
+ * KDM-227: KD's own room type for the mandatory between-floors hub — the "Floor N: Journey Selection"
+ * screen with the buff/debuff picks and the merchants. Named once because it is the ONE room that
+ * ends a war; every other non-empty room type is an optional detour a grudge survives.
+ */
+const HUB_ROOM_TYPE = 'JourneyFloor';
 
 /**
  * KDM-162: KDGameData fields the CLIENT owns, because only the client can compute them.
@@ -92,7 +100,11 @@ class SwapSession {
 		this.enemyType = opts.enemyType || 'Rat';
 		this.maxLog = opts.maxLog || 100;
 		this.pvp = !!opts.pvp;        // global PvP toggle (KD-092) — OFF by default (co-op)
-		this.pvpPairs = new Set();    // per-pair PvP relationships (KD-094) — "A|B" sorted keys
+		// KDM-227: the per-pair relationship, and the offer/answer handshake that changes it.
+		// This REPLACES the old `pvpPairs` Set (KD-094): two containers that both mean "at war" is the
+		// drift this codebase keeps paying for, and that Set had no callers at all — `setPvPPair` was
+		// dead code, so nothing could ever start or end a per-pair war. See tools/mp-server/peace.js.
+		this.rel = new PeaceRegistry();
 		// KDM-164: the `friendlyFire` toggle is gone with the approximation it gated. Under the real
 		// path the GAME decides who its AOE hits — walls, line of sight and the actual bullet — and a
 		// server-side switch could only re-impose our own answer over the game's.
@@ -217,6 +229,13 @@ class SwapSession {
 		// can hand it to the victim's own `KinkyDungeonDealDamage` instead of converting avatar hp into
 		// Will with arithmetic KD does not have.
 		this.world.installPeerDamageRecorder();
+		// KDM-224: and the death gate itself refuses to remove an avatar — the backstop for the ~30
+		// places KD assigns enemy.hp directly, which the damage wrapper above never sees.
+		this.world.installAvatarDeathGuard();
+		// KDM-227: baseline for the hub-arrival check. Seeded HERE rather than left undefined so the
+		// room the session STARTS in is not mistaken for an arrival — the game boots on the journey
+		// hub itself (level 0), so the very first turn of every session would otherwise fire a reset.
+		try { this._lastRoomType = this.world.getRoomType() || ''; } catch (e) { this._lastRoomType = ''; }
 		// KD-101 UAT aid: give the (shared) starting player a CARRYABLE loose-restraint ITEM (Items
 		// inventory) BEFORE capturing each bundle, so the server can apply it; every capturePlayer below
 		// inherits it. The CLIENT shows it via coop-bootstrap (snapshots don't sync the loose inventory).
@@ -331,9 +350,102 @@ class SwapSession {
 		return prev === undefined || prev !== fp || Number.isNaN(fp);
 	}
 
+	/**
+	 * KDM-225 — the peace handshake. An MP-only action: it consumes no turn and never enters the game.
+	 *
+	 * Returned as `kind: 'ui'` with `changed: true` so the bridge answers with a state frame — the
+	 * menu on both clients reads `snap.coop`, so both sides must see the new state at once.
+	 */
+	_applyMPAction(clientId, action) {
+		//  names the OTHER clients whose view this action changed. A ui-kind action normally
+		// only answers its sender (ws-bridge.js), which is right for a menu keypress and wrong for a
+		// handshake: the offer exists to be seen by the peer, and their menu reads .
+		// `notify` names the OTHER clients whose view this action changed. A ui-kind action normally
+		// answers only its sender (ws-bridge), which is right for a menu keypress and wrong for a
+		// handshake: an offer exists precisely to be seen by the peer, whose menu reads `snap.coop`.
+		const ui = (extra) => Object.assign({ advanced: false, kind: 'ui', changed: true }, extra);
+		const peer = this._joined.find((id) => id !== clientId);
+		if (!peer) return ui({ changed: false, error: 'no peer' });
+
+		if (action.mp === 'peace.offer') {
+			// A GLOBAL PvP session has no per-pair war entry — `this.pvp` alone makes `_isPvP` true. The
+			// registry only knows about pairs, so materialise the relationship before negotiating it:
+			// you cannot make peace with someone you are not recorded as fighting.
+			if (this._isPvP(clientId, peer) && !this.rel.atWar(clientId, peer)) {
+				this.rel.declareWar(clientId, peer);
+			}
+			const res = this.rel.offer(clientId, peer, this.turn);
+			if (!res.ok) return ui({ changed: false, error: res.why });
+			if (res.accepted) {                      // R17 — they had already asked; that is agreement
+				this._settlePeace(clientId, peer);
+				return ui({ peace: true, notify: [peer] });
+			}
+			this._emitEvent(peer, { kind: 'peaceOffer', from: clientId });
+			this._pushLog(peer, this.world.sendFeedback(
+				`${clientId} offers peace. Answer from your own menu.`, '#88ccff', 10).entries || []);
+			this._dbg(`PEACE offer ${clientId} -> ${peer}`);
+			return ui({ offered: true, notify: [peer] });
+		}
+
+		if (action.mp === 'peace.answer') {
+			const res = this.rel.answer(clientId, !!action.accept);
+			if (!res.ok) return ui({ changed: false, error: res.why });
+			if (res.peace) this._settlePeace(clientId, res.from);
+			this._dbg(`PEACE ${action.accept ? 'ACCEPTED' : 'DECLINED'} by ${clientId}`);
+			return ui({ peace: !!res.peace, notify: [peer] });
+		}
+
+		return ui({ changed: false, error: `unknown mp action "${action.mp}"` });
+	}
+
+	/**
+	 * R1/R2/R3 at SESSION level — may `a` offer peace to `b` right now?
+	 *
+	 * Not `rel.canOffer`, and the difference is deliberate. The registry answers about the PAIR it
+	 * knows: it requires an entry in its war set. The session also has the global `KD_PVP` flag, under
+	 * which two players are at war with no pair entry at all — `_applyMPAction` materialises one when
+	 * somebody actually negotiates, but the menu has to be offered BEFORE that happens or there is
+	 * nothing to click. So "at war" is `_isPvP` here, and only the offer-slot half comes from the
+	 * registry.
+	 *
+	 * One place, called by the snapshot; the client re-derives none of it.
+	 */
+	_canOffer(a, b) {
+		return this._isPvP(a, b) && !this.rel.pendingFor(a) && !this.rel.pendingFor(b);
+	}
+
+	/**
+	 * Peace is agreed: say so, and make the GAME agree too.
+	 *
+	 * `_isPvP` only decides whether the next turn ARMS the avatars as hostile — it does not undo the
+	 * aggro KD already wrote on the entities, and `hostile` is a 300-turn countdown that would
+	 * otherwise keep them enemies to every predicate that reads it. Clearing it is the whole of the
+	 * effect: D3 — peace touches hostility and nothing else, so ties applied during the fight stay on.
+	 */
+	_settlePeace(a, b) {
+		this.rel.makePeace(a, b);
+		for (const id of [a, b]) {
+			const eid = this.avatars.get(id);
+			if (eid == null) continue;
+			try { this.world.setAvatarHostile(eid, false); } catch (e) { /* avatar gone */ }
+		}
+		const entries = (this.world.sendFeedback('Peace between ' + a + ' and ' + b + '.',
+			'#88ff99', 10) || {}).entries || [];
+		for (const id of this._joined) this._pushLog(id, entries);
+		this._dbg(`PEACE settled ${a} <-> ${b}`);
+	}
+
 	apply(clientId, action = {}) {
 		if (!this.started) throw new Error('session not started');
 		if (!this._joined.includes(clientId)) throw new Error(`unknown player ${clientId}`);
+		// KDM-225: MP-only actions are handled HERE and never reach the game.
+		//
+		// The ordering is load-bearing: `_toInput` ends `return { kdType: 'tick' }`, so anything it
+		// does not recognise silently becomes a WAIT and spends the sender's turn — no error, no
+		// unknown-type report, just a turn quietly gone. An `mp:` action intercepted after it would be
+		// exactly that bug. They also carry no `kdType` on purpose: KD has no handler for a truce, and
+		// inventing one would put the gateway's own feature into `KDInputTypes`.
+		if (action && action.mp) return this._applyMPAction(clientId, action);
 		const { kdType, data } = this._toInput(clientId, action);
 		if (!kdType) return { advanced: false, kind: 'noop' };
 
@@ -522,6 +634,13 @@ class SwapSession {
 	submit(clientId, action = {}) {
 		if (!this.started) throw new Error('session not started');
 		if (!this._joined.includes(clientId)) throw new Error(`unknown player ${clientId}`);
+		// KDM-225 R5: a player who owes an answer to a peace offer cannot take their turn until they
+		// give one. This is the ONE choke point for that — `apply()` routes UI-kind actions around
+		// `submit` entirely, so the answer itself is never blocked by this.
+		if (this.rel.owesAnswer(clientId)) {
+			this._dbg(`BLOCKED ${clientId}: owes an answer to a peace offer`);
+			return { advanced: false, blocked: 'peace-offer', waitingOn: [clientId] };
+		}
 		// KDM-163 AC3: a queued action being displaced is a real input that will never be applied.
 		// Measured in `tests/unit/mp-ui-chatter-repro.spec.ts`: queue a bump-attack, then send any other
 		// turn-consuming input before the peer acts, and the enemy takes no damage — with nothing
@@ -674,6 +793,8 @@ class SwapSession {
 		// KD-100: reconcile each peer avatar's REAL combat result (hp damage, capture) back into its
 		// owner's bundle (avatar.hp → Will; real capture/helpless → defeated + broadcast).
 		this._reconcilePeers();
+		// KDM-227: finishing a level clears the slate between players.
+		this._checkHubReset();
 		// Per-turn state line: who is down and where everyone's Will sits. This is the view you
 		// need to tell "my input is ignored" apart from "my input did nothing".
 		this._dbg(`turn=${this.turn} done defeated=[${[...this.defeated].join(',')}] ` +
@@ -686,6 +807,40 @@ class SwapSession {
 		this._pending.clear();
 		this.lastTurn = { order, applied };
 		return { turn: this.turn, applied };
+	}
+
+	/**
+	 * KDM-227 — reaching the between-floors hub puts everyone back at peace.
+	 *
+	 * The trigger is the room the party is IN, not the floor number: descending goes floor → hub →
+	 * floor, and only the hub — the one with the buff/debuff picks and the merchants — ends a war.
+	 * The other room types (`Tunnel`, `PerkRoom`, `ShopStart`, `ElevatorRoom`, `Summit`, …) are the
+	 * optional detours a grudge is meant to survive, so this matches `JourneyFloor` exactly rather
+	 * than "any non-empty RoomType".
+	 *
+	 * ARRIVAL, NOT PRESENCE. It fires on the TRANSITION into the hub and not on the turns spent there,
+	 * so a fight that breaks out on the hub is not undone by simply standing on it. A compare-and-store
+	 * against the previous room is what buys that: no stairs hook, and therefore none of the
+	 * doubled-signal trouble that hooking `afterHandleStairs` brings (it fires twice on a real
+	 * floor-to-floor walk, precisely because the hub sits between the floors).
+	 *
+	 * There is nothing to coordinate between players: the session has ONE world, one
+	 * `MiniGameKinkyDungeonLevel` and one `KDGameData.RoomType` — a floor change moves the whole party
+	 * (KDM-165) — so no state exists in which one player is on the hub and the other is not.
+	 */
+	_checkHubReset() {
+		let room = '';
+		try { room = this.world.getRoomType() || ''; } catch (e) { return; }
+		const prev = this._lastRoomType;
+		this._lastRoomType = room;
+		if (room !== HUB_ROOM_TYPE || prev === HUB_ROOM_TYPE) return;   // presence ≠ arrival
+		this.rel.resetAll();
+		// …and clear the hostility the GAME holds, not only our verdict: `_isPvP` governs whether the
+		// next turn ARMS the avatars as hostile, it does not undo aggro KD already wrote on them.
+		for (const eid of this.avatars.values()) {
+			try { this.world.setAvatarHostile(eid, false); } catch (e) { /* avatar gone; nothing to clear */ }
+		}
+		this._dbg('HUB RESET — every pair back to co-op on arrival at ' + HUB_ROOM_TYPE);
 	}
 
 	/** Enable/disable GLOBAL player-vs-player damage for this session (KD-092). */
@@ -764,6 +919,22 @@ class SwapSession {
 			if (eid == null) continue;
 			const ec = this.world.getEntityCombat(eid);
 			const v = this.vitalsOf.get(id) || {};
+			// KDM-225 R15/AC6 — an attack starts a war, and the GAME is what says an attack happened.
+			//
+			// The signal is KD's own aggro on the avatar (`hostile`/`rage`), not our reading of the
+			// input: the sneak option (`doaggro`) deals NO damage and would be missed by a
+			// damage-based test, while `KDAggroViaDialogue` sets `hostile` for it just the same. So the
+			// gateway records the relationship the game already decided, and classifies nothing.
+			//
+			// Two players ⇒ the attacker is unambiguous. Attribution for a third player is KDM-226's.
+			if (ec && (ec.hostile > 0 || ec.rage > 0)) {
+				for (const other of this._joined) {
+					if (other !== id && !this.rel.atWar(id, other)) {
+						this.rel.declareWar(id, other);
+						this._dbg(`WAR ${id} <-> ${other} (KD aggro on the avatar: hostile=${ec.hostile})`);
+					}
+				}
+			}
 			// KDM-164: the damage is whatever the GAME produced for each hit on this avatar — taken
 			// verbatim, WITH its type — not `ARM_HP − hp` converted into Will by us. That conversion was
 			// the invented model: it stitched KD's two damage pipelines (entity vs player) together with
@@ -903,15 +1074,22 @@ class SwapSession {
 
 	/** Enable/disable PvP between a specific PAIR of players (KD-094, "PvP starts between A and B"). */
 	setPvPPair(a, b, on) {
-		const key = [a, b].sort().join('|');
-		if (on === false) this.pvpPairs.delete(key); else this.pvpPairs.add(key);
+		if (on === false) this.rel.makePeace(a, b); else this.rel.declareWar(a, b);
 		return this._isPvP(a, b);
 	}
 
-	/** Are players `a` and `b` in a PvP relationship? (global toggle OR a per-pair relationship.) */
+	/**
+	 * Are players `a` and `b` in a PvP relationship?
+	 *
+	 * KDM-227 — PEACE IS CHECKED FIRST, and that ordering is the whole point. This used to open with
+	 * `if (this.pvp) return true`, so under the global `KD_PVP` flag — the mode every PvP session and
+	 * every PvP UAT runs in — ending a war per pair was a NO-OP. An accepted truce has to be
+	 * expressible as something that beats the global switch, not merely as the absence of a per-pair
+	 * entry.
+	 */
 	_isPvP(a, b) {
-		if (this.pvp) return true;
-		return this.pvpPairs.has([a, b].sort().join('|'));
+		if (this.rel.atPeace(a, b)) return false;
+		return this.pvp || this.rel.atWar(a, b);
 	}
 
 
@@ -1181,6 +1359,14 @@ class SwapSession {
 		// KDM-186: one-shot events ride their OWN channel, each with a sequence the client applies at
 		// most once. Take-once on delivery so an undelivered backlog cannot grow without bound.
 		snap.events = this._takePendingEvents(clientId);
+		// KDM-225 A4: the peace menu re-reads this every frame, so it is STANDING STATE, not an event.
+		// Deliberately NOT in `VERBATIM_CHANNELS` (ws-bridge.js:40) — that list is for consume-once
+		// channels, and this one is a value the delta may legitimately elide when it has not changed.
+		snap.coop = {
+			war: this._joined.filter((id) => id !== clientId && this._isPvP(clientId, id)),
+			peaceOffer: this.rel.pendingFor(clientId),
+			canOffer: this._joined.filter((id) => id !== clientId && this._canOffer(clientId, id)),
+		};
 		// KD-094: peers in a PvP relationship with this client render+target as Enemy faction
 		// (stock attack mechanics then "just work" — the client originates a normal doattack).
 		if (snap.map && Array.isArray(snap.map.Entities)) {

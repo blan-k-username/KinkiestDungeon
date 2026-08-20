@@ -526,6 +526,19 @@ class HeadlessHost {
 	}
 
 	/**
+	 * KDM-227: which ROOM the party is in — `''` for a plain dungeon floor, otherwise one of KD's own
+	 * room types (`JourneyFloor`, `Tunnel`, `PerkRoom`, `ShopStart`, `ElevatorRoom`, `Summit`, …).
+	 *
+	 * The floor NUMBER is not enough to tell "we finished a level" from "we ducked into a shop": both
+	 * are transitions, and only the between-floors hub (`JourneyFloor`) is the one that ends a war.
+	 * Sibling of getLevel() for the same reason — a party-wide state the session compares turn to turn.
+	 */
+	getRoomType() {
+		return this.eval('(typeof KDGameData !== "undefined" && KDGameData && KDGameData.RoomType) '
+			+ '? String(KDGameData.RoomType) : ""');
+	}
+
+	/**
 	 * The swapped-in player's movement slow-level, RE-DERIVED from their worn restraints
 	 * (KD-093 self-heal proof): runs the real `KinkyDungeonCalculateSlowLevel` (reads
 	 * `KinkyDungeonAllRestraint()`) then returns `KinkyDungeonSlowLevel`. >0 ⇒ bound/slowed.
@@ -815,7 +828,80 @@ class HeadlessHost {
 	 * entity) because the fatal band is narrow — the peer's Will has to sit a sliver above zero at
 	 * turn start. `tests/unit/mp-pvp-avatar-lifetime.spec.ts` drives that state directly.
 	 */
+	/**
+	 * KDM-224 — "knocked down, never killed", as ONE rule the world enforces in one place.
+	 *
+	 * `KDMPFloorAvatar` lifts a peer avatar off the death threshold. 0.001 is the GAME's own knockdown
+	 * value, not a number we chose: it is what `KinkyDungeonFight.ts:1386` writes for a target its
+	 * bound/in-party/nokill branch spares. We apply the same floor to the one entity class KD has no
+	 * rule for.
+	 *
+	 * Installed as a world global rather than inlined, because it now has TWO callers — the damage
+	 * wrapper and the death gate — and two hand-written copies of a floor is exactly how the two
+	 * drift.
+	 */
+	_installAvatarFloor() {
+		return this.eval(`(function(){
+			if (typeof globalThis.KDMPFloorAvatar === 'function') return { ok: true, already: true };
+			globalThis.KDMPIsAvatar = function (E) {
+				return !!(E && E.id != null && E.Enemy && typeof E.Enemy.name === 'string'
+					&& E.Enemy.name.indexOf('RemotePlayer') === 0);
+			};
+			globalThis.KDMPFloorAvatar = function (E) {
+				if (!globalThis.KDMPIsAvatar(E) || E.hp > 0) return false;
+				E.hp = 0.001;
+				// ...and do not leave the avatar standing as the pending kill, or KD prints its kill
+				// line for it — "[NotFound] KillRemotePlayer_<peer>", since an avatar def has no Kill
+				// text key — and the next enemy KD really does kill loses its own line
+				// (KinkyDungeonEnemies.ts:3354 compares by identity).
+				if (typeof KinkyDungeonKilledEnemy !== 'undefined' && KinkyDungeonKilledEnemy === E)
+					KinkyDungeonKilledEnemy = null;
+				globalThis.KDMPFloorAvatar.count = (globalThis.KDMPFloorAvatar.count || 0) + 1;
+				return true;
+			};
+			globalThis.KDMPFloorAvatar.count = 0;
+			return { ok: true };
+		})()`);
+	}
+
+	/**
+	 * KDM-224 (UAT follow-up) — the floor belongs at the DEATH GATE, not on one writer.
+	 *
+	 * The original fix floored hp inside the `KinkyDungeonDamageEnemy` wrapper. That covers exactly
+	 * one of the ways KD lowers an enemy's hp; the engine assigns `enemy.hp` DIRECTLY in ~30 other
+	 * places — damage-over-time ticks (`KinkyDungeonEvents.ts:11225/11237/11249`), spells
+	 * (`KinkyDungeonMagicCode.ts:95/785/839`), dialogue outcomes, prison code — and none of those
+	 * passes through the wrapper. MEASURED in a live session: `[mp] arm A hp=0.01/10` at turn 54,
+	 * where the `/10` is `_armPeerEnemies` falling back because `getEntityCombat` returned null — the
+	 * avatar was already gone. Player A vanished from B's screen and B's log carried
+	 * `[NotFound] KillRemotePlayer_PlayerA`.
+	 *
+	 * `KinkyDungeonEnemyCheckHP` is the ONE function that turns `hp <= 0` into removal — by
+	 * `KDRemoveEntity`, or by `KinkyDungeonCapture` in its bound branch, which removes the entity just
+	 * as thoroughly. Every writer funnels into it, so flooring here covers the writers we have not
+	 * enumerated as well as the ones we have. Generic over the entity class, not over the cause.
+	 */
+	installAvatarDeathGuard() {
+		this._installAvatarFloor();
+		return this.eval(`(function(){
+			if (KinkyDungeonEnemyCheckHP.__kdAvatarGuard) return { ok: true, already: true };
+			var _chk = KinkyDungeonEnemyCheckHP;
+			KinkyDungeonEnemyCheckHP = function (enemy, E, mapData) {
+				globalThis.KDMPFloorAvatar(enemy);
+				return _chk.apply(this, arguments);
+			};
+			KinkyDungeonEnemyCheckHP.__kdAvatarGuard = 1;
+			return { ok: true };
+		})()`);
+	}
+
+	/** How many times the floor has caught an avatar — the death paths a live session actually hits. */
+	avatarFloorCount() {
+		return this.eval(`(typeof globalThis.KDMPFloorAvatar === 'function' ? (globalThis.KDMPFloorAvatar.count || 0) : -1)`);
+	}
+
 	installPeerDamageRecorder() {
+		this._installAvatarFloor();
 		return this.eval(`(function(){
 			if (KinkyDungeonDamageEnemy.__kdPeerRec) return { ok: true, already: true };
 			var _dmg = KinkyDungeonDamageEnemy;
@@ -829,17 +915,10 @@ class HeadlessHost {
 					w.__hits[E.id].push({ damage: Number(D.damage) || 0, type: D.type || 'pain' });
 				}
 				var res = _dmg.apply(this, arguments);
-				// KDM-224: knocked down, never killed. 0.001 is the GAME's own knockdown value, not a
-				// number we chose - it is what KinkyDungeonFight.ts:1386 writes for a target its
-				// bound/in-party/nokill branch spares. We apply the same floor to the one entity class
-				// KD has no rule for, so KinkyDungeonEnemyCheckHP's hp <= 0 never fires on an avatar.
-				if (isAvatar && !(E.hp > 0)) {
-					E.hp = 0.001;
-					// ...and do not leave the avatar standing as the pending kill, or the next enemy KD
-					// really does kill loses its kill line (KinkyDungeonEnemies.ts:3354, identity compare).
-					if (typeof KinkyDungeonKilledEnemy !== 'undefined' && KinkyDungeonKilledEnemy === E)
-						KinkyDungeonKilledEnemy = null;
-				}
+				// KDM-224: floor it as soon as the damage lands, so everything the rest of the turn
+				// reads (targeting, KDHelpless, the fight path's own follow-ups) sees a live entity.
+				// The DEATH GATE below is the backstop for every other writer.
+				globalThis.KDMPFloorAvatar(E);
 				return res;
 			};
 			KinkyDungeonDamageEnemy.__kdPeerRec = 1;
@@ -1181,6 +1260,10 @@ class HeadlessHost {
 				for (var k in r) { if (r[k] && r[k].name) names.push(r[k].name); }
 			}
 			return { id: e.id, hp: e.hp, maxhp: e.Enemy && e.Enemy.maxhp, boundLevel: e.boundLevel || 0,
+				// KDM-225: KD's OWN aggro on this avatar. The gateway does not classify inputs to decide
+				// "was that an attack" — it reads the flag the game sets (KDMakeHostile / KDAggroViaDialogue),
+				// which covers the damaging attack AND the sneak that deals none.
+				hostile: e.hostile || 0, rage: e.rage || 0,
 				captured: (typeof KDHelpless === 'function') ? !!KDHelpless(e) : (e.hp <= 0.52),
 				npcRestraints: names };
 		})()`);
@@ -1216,6 +1299,32 @@ class HeadlessHost {
 	 * No duration is invented: the flag is set for THIS turn and re-armed every turn the peer is still
 	 * defeated, so it expires the moment they are not.
 	 */
+	/**
+	 * KDM-227: end an avatar's hostility — the inverse of KD's own `KDMakeHostile`
+	 * (`KinkyDungeonEnemies.ts:5207`, which sets `hostile` and deletes `ceasefire`/`allied`).
+	 *
+	 * Both fields, because `KDAllied` and `KinkyDungeonAggressive` each read BOTH: `rage > 0` alone
+	 * keeps an entity hostile no matter what `hostile` says (`KinkyDungeonFactions.ts:33/44`).
+	 *
+	 * Written in the GAME's fields, not in a flag of ours — the MP layer holds the relationship
+	 * (peace.js), the game holds the hostility. `hostile` is a countdown the engine decays on its own
+	 * (`:4525`), which is exactly why it must not be the durable record of a truce.
+	 */
+	setAvatarHostile(entityId, on) {
+		return this.eval(`(function(){
+			var e = KDMapData.Entities.find(function(en){ return en.id === ${entityId | 0}; });
+			if (!e) return null;
+			if (${on ? 1 : 0}) {
+				if (typeof KDMakeHostile === 'function') KDMakeHostile(e);
+				else e.hostile = 300;
+			} else {
+				e.hostile = 0;
+				e.rage = 0;
+			}
+			return { hostile: e.hostile || 0, rage: e.rage || 0 };
+		})()`);
+	}
+
 	setAvatarVulnerable(entityId, on) {
 		return this.eval(`(function(){
 			var e = KDMapData.Entities.find(function(en){ return en.id === ${entityId | 0}; });
@@ -1225,12 +1334,23 @@ class HeadlessHost {
 		})()`);
 	}
 
+	/**
+	 * The key MUST be a type the game registered in `KDSpecialBondage` (Rope, Latex, Metal, ...).
+	 *
+	 * `specialBoundLevel` is a KEYED channel, not a free-form bag: KD indexes `KDSpecialBondage[key]`
+	 * UNGUARDED on the DRAW path — `KinkyDungeonEnemies.ts:2193` (the HP-bar bondage segments) and the
+	 * `KDPredictStruggle` sort comparator at `:8614`. An invented key ("MPPeer", shipped here until a
+	 * UAT session hit it) is therefore not an inert label: the first frame that draws a bound peer's
+	 * HP bar throws `Cannot read properties of undefined (reading 'priority')` and takes the client
+	 * down. `Rope` is what KD's own `KDTieUpEnemy` writes, so we borrow the same channel.
+	 * Locked by `tests/unit/mp-avatar-bondage-type.spec.ts`.
+	 */
 	setAvatarBondage(entityId, amount) {
 		const amt = Number(amount) || 0;
 		return this.eval(`(function(){
 			var e = KDMapData.Entities.find(function(en){ return en.id === ${entityId | 0}; });
 			if (!e) return null;
-			if (${amt} > 0) e.specialBoundLevel = { MPPeer: ${amt} };
+			if (${amt} > 0) e.specialBoundLevel = { Rope: ${amt} };
 			else e.specialBoundLevel = undefined;
 			if (typeof KDResyncBondage === "function") KDResyncBondage(e);
 			return { boundLevel: e.boundLevel || 0 };

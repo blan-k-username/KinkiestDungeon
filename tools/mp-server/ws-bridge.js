@@ -277,6 +277,19 @@ class WSBridge {
 					this._send(socket, Object.assign({
 						type: 'state', kind: 'ui', tick: this.session.turn, srv: this._srvStamp(applyMs),
 					}, this._stateFrame(clientId)));
+					// KDM-225: a ui action that changed SOMEONE ELSE's view (a peace offer is only
+					// interesting to the person being asked) names them in `notify`. Without this the
+					// peer sees nothing until the next resolved turn — and with R5 blocking their turn
+					// on that very answer, that turn would never come. The bridge does not decide who
+					// is affected; the session says so, and this pushes to exactly that list.
+					for (const other of res.notify || []) {
+						const s = this.sockets.get(other);
+						if (!s || other === clientId) continue;
+						try {
+							this._send(s, Object.assign({ type: 'state', kind: 'ui', tick: this.session.turn },
+								this._stateFrame(other)));
+						} catch (e) { /* socket gone */ }
+					}
 					return clientId;
 				}
 				// demo mode: auto-"wait" for any player who hasn't submitted so a single

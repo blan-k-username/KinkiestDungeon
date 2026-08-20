@@ -77,4 +77,93 @@ describe('KDM-224 — a peer avatar survives being worn down (down ≠ deleted)'
 		expect(ents.some((e: any) => e.id === s.avatars.get('B')),
 			"B's avatar is missing from A's snapshot — the bind gate cannot even be evaluated").toBe(true);
 	}, BOOT_TIMEOUT);
+
+	/**
+	 * THE HOLE THE FIRST FIX LEFT (UAT, 2026-08-20).
+	 *
+	 * KDM-224 floored the avatar's hp inside a wrapper around `KinkyDungeonDamageEnemy`. That is ONE
+	 * of the paths that writes enemy hp: the game has ~30 others that assign `enemy.hp` directly —
+	 * damage-over-time ticks (`KinkyDungeonEvents.ts:11225/11237/11249`), spells
+	 * (`KinkyDungeonMagicCode.ts:95/785/839`), dialogue outcomes, prison code. None of them is a
+	 * `KinkyDungeonDamageEnemy` call, so none of them was floored, and the avatar could still reach
+	 * `hp <= 0` and be deleted mid-turn.
+	 *
+	 * MEASURED IN A LIVE SESSION: `[mp] arm A hp=0.01/10` at turn 54. The `/10` is the giveaway —
+	 * `_armPeerEnemies` falls back to `full = 10` only when `getEntityCombat` returns null, i.e. the
+	 * avatar was ALREADY gone from `KDMapData.Entities`. Player A had vanished from B's screen, and
+	 * B's log carried the kill line for it: `[NotFound] KillRemotePlayer_PlayerA`.
+	 *
+	 * So the floor belongs at the DEATH GATE, not on one writer. `KinkyDungeonEnemyCheckHP` is the
+	 * single function that decides `hp <= 0` → `KDRemoveEntity` (or `KinkyDungeonCapture`, which
+	 * removes it just as thoroughly), and every one of those ~30 writers funnels into it. Asserting
+	 * there is asserting at the layer that actually deletes.
+	 */
+	it('survives an hp=0 written OUTSIDE KinkyDungeonDamageEnemy — the death gate must refuse', () => {
+		const eid = s.avatars.get('B');
+		const r = s.world.eval(`(function(){
+			var e = KDMapData.Entities.find(function(x){ return x.id === ${eid}; });
+			if (!e) return { pre: 'the avatar is not on the map to begin with' };
+			var logBefore = (typeof KinkyDungeonMessageLog !== 'undefined' && KinkyDungeonMessageLog)
+				? KinkyDungeonMessageLog.length : 0;
+			// A DoT tick / spell / event write. The KDM-224 damage wrapper never sees this one.
+			e.hp = 0;
+			// …and the fight path leaves the dying entity here, which is what makes the kill line print.
+			if (typeof KinkyDungeonKilledEnemy !== 'undefined') KinkyDungeonKilledEnemy = e;
+			// The REAL index. KDRemoveEntity splices \`forceIndex\` blindly (KinkyDungeonEnemies.ts:10555),
+			// so passing 0 here would delete whatever entity sits first and leave the avatar in place —
+			// a green that proves nothing.
+			var idx = KDMapData.Entities.findIndex(function(x){ return x.id === ${eid}; });
+			var removed = KinkyDungeonEnemyCheckHP(e, idx, KDMapData);
+			var log = (typeof KinkyDungeonMessageLog !== 'undefined' && KinkyDungeonMessageLog)
+				? KinkyDungeonMessageLog.slice(logBefore) : [];
+			return {
+				removed: !!removed, hp: e.hp,
+				onMap: !!KDMapData.Entities.find(function(x){ return x.id === ${eid}; }),
+				unresolved: log.map(function(m){ return (m && (m.text || m.message)) || ''; })
+					.filter(function(t){ return String(t).indexOf('NotFound') >= 0; }),
+				// The kill line is gated on identity with this global (KinkyDungeonEnemies.ts:3354).
+				// An avatar left standing here is what printed "[NotFound] KillRemotePlayer_PlayerA".
+				stillPendingKill: (typeof KinkyDungeonKilledEnemy !== 'undefined')
+					&& KinkyDungeonKilledEnemy === e,
+			};
+		})()`);
+
+		expect(r.pre, 'precondition').toBeUndefined();
+		// eslint-disable-next-line no-console
+		console.log('\ndeath gate on a zeroed avatar: ' + JSON.stringify(r) + '\n');
+
+		expect(r.removed, "KD's death gate DELETED the peer avatar — a peer is knocked down, never killed")
+			.toBe(false);
+		expect(r.onMap, 'the avatar must still be on the map after the gate ran').toBe(true);
+		expect(r.hp, "the avatar must be left alive at KD's own knockdown floor").toBeGreaterThan(0);
+		expect(r.unresolved, 'the kill line has no text key for an avatar def — it prints "[NotFound] Kill…"')
+			.toEqual([]);
+		expect(r.stillPendingKill,
+			'the avatar must not be left as the pending kill — that is what prints "[NotFound] KillRemotePlayer_…"')
+			.toBe(false);
+	}, BOOT_TIMEOUT);
+
+	/**
+	 * …and through the REAL caller. The gate is called from the entity sweeps inside
+	 * `KinkyDungeonAdvanceTime` (KinkyDungeonGame.ts:3584 / :3603), with the loop's own index.
+	 *
+	 * NOT driven through `submit()`: `_armPeerEnemies` re-arms hp from the peer's Will at the START of
+	 * every turn, so an hp written before a turn would be overwritten and the test would assert
+	 * nothing. Advancing the world directly is what puts the zeroed avatar in front of the sweep.
+	 */
+	it('a real turn does not delete an avatar sitting at hp 0', () => {
+		const eid = s.avatars.get('B');
+		const r = s.world.eval(`(function(){
+			var e = KDMapData.Entities.find(function(x){ return x.id === ${eid}; });
+			if (!e) return { pre: 'the avatar is not on the map to begin with' };
+			e.hp = 0;
+			KinkyDungeonAdvanceTime(1);
+			var after = KDMapData.Entities.find(function(x){ return x.id === ${eid}; });
+			return { onMap: !!after, hp: after ? after.hp : null };
+		})()`);
+		expect(r.pre, 'precondition').toBeUndefined();
+		expect(r.onMap, 'a real turn deleted the peer avatar — this is the UAT "player disappears"')
+			.toBe(true);
+		expect(r.hp, 'and it must be left alive').toBeGreaterThan(0);
+	}, BOOT_TIMEOUT);
 });
