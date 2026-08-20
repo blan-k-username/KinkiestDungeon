@@ -1619,6 +1619,9 @@ class HeadlessHost {
 		this._oversizeCursor = 0;
 		this._lastAuditNames = null;
 		this._oversizeChanged = [];
+		// KDM-221: hashes of WATCHED globals that have since grown past the cap — the de-dup store for
+		// _reportGrownOverMax. Cleared with the baseline, because a re-baseline reclassifies everything.
+		this._grownOverMax = {};
 		return this._baseline;
 	}
 
@@ -1641,9 +1644,10 @@ class HeadlessHost {
 	_captureGlobals() {
 		if (!this._baseline) this._captureBaseline();
 		this._context.__KD_BASE_H = this._baseline;
-		const out = this.eval(`(function(){
+		const res = this.eval(`(function(){
 			${KD_CODEC}
 			var names = ${JSON.stringify(this._watchNames)}, base = globalThis.__KD_BASE_H, out = {};
+			var grew = {};
 			${KD_HASH_FN}
 			for (var i = 0; i < names.length; i++) {
 				var n = names[i], v;
@@ -1651,14 +1655,64 @@ class HeadlessHost {
 				if (v === undefined || typeof v === 'function') continue;
 				try {
 					var s = kdSer(v);
-					if (s === undefined || s.length > ${BASELINE_MAX_LEN}) continue;
+					if (s === undefined) continue;
+					// KDM-221: a watched name whose value has GROWN past the cap used to be skipped here
+					// with a bare 'continue' — silently dropped from per-player state, forever, with
+					// nothing watching it. Record the crossing so the host can report it. The hash is the
+					// de-dup key; it is computed on a string kdSer already built, and only for names
+					// actually over the cap, so the normal path pays nothing.
+					if (s.length > ${BASELINE_MAX_LEN}) { grew[n] = hash(s); continue; }
 					if (hash(s) !== base[n]) out[n] = JSON.parse(s);   // diverged ⇒ this player's state
 				} catch (e) { /* cyclic / PIXI — not player state */ }
 			}
-			return out;
+			return { out: out, grew: grew };
 		})()`);
+		this._reportGrownOverMax(res.grew);
 		this._auditOversize();
-		return out;
+		return res.out;
+	}
+
+	/**
+	 * KDM-221: announce a WATCHED global that has crossed BASELINE_MAX_LEN since the baseline.
+	 *
+	 * The threshold has three doors. `_captureBaseline` guards its own (over the cap ⇒ into
+	 * `_oversize`, audited from then on by `_auditOversize`). The other two — the capture pass above
+	 * and the reset half of `_restoreGlobals` — used to take a bare `continue`, so a global that is
+	 * small at post-init and large during real play stopped being replicated AND stopped being reset,
+	 * with no warning at all. `KDSaveQueue` was the worked example ([] at baseline, >20 KB once a real
+	 * save lands); KDM-202 blacklisted that one name, which did nothing about the hole.
+	 *
+	 * De-dup is the KDM-195 contract, not a second mechanism: re-baseline what is reported, so each
+	 * DISTINCT drift warns exactly once, while a global that keeps mutating while over the cap keeps
+	 * warning — that is the case the contract exists for.
+	 *
+	 * ⚠️ These names are deliberately NOT moved into `_oversize`. That was the obvious implementation
+	 * and it is wrong twice over: they are still in `_watchNames`, so they are already re-serialised on
+	 * EVERY capture — the round-robin exists for names nothing else looks at, and would only
+	 * double-detect at a ~210-capture latency — and a name that later shrinks back UNDER the cap would
+	 * then warn as an "oversize global" it is no longer. They stay watched for the same reason: if the
+	 * value comes back under the cap it must resume being captured and reset.
+	 */
+	_reportGrownOverMax(grew) {
+		if (!grew) return [];
+		const names = Object.keys(grew);
+		if (!names.length) return [];
+		if (!this._grownOverMax) this._grownOverMax = {};
+
+		const fresh = names.filter((n) => this._grownOverMax[n] !== grew[n]);
+		if (!fresh.length) return [];
+		for (const n of fresh) this._grownOverMax[n] = grew[n];
+		const seen = new Set(this._oversizeChanged || []);
+		fresh.forEach((n) => seen.add(n));
+		this._oversizeChanged = [...seen];
+		// eslint-disable-next-line no-console
+		console.warn(`[KDM-221] WATCHED GLOBAL GREW PAST THE CAP: ${fresh.join(', ')} — it was under ` +
+			`${BASELINE_MAX_LEN} bytes at baseline (so it is watched as per-player state) and is over it ` +
+			'now. While it stays this large it is NOT replicated to the other player, and it is reset to ' +
+			'its post-init default on every swap rather than carried. Either it is shared world data ' +
+			'(fine — blacklist it explicitly) or it is per-player state the swap is now losing. ' +
+			'Do not ignore this.');
+		return fresh;
 	}
 
 	/**
@@ -1790,7 +1844,15 @@ class HeadlessHost {
 				if (v === undefined || typeof v === 'function') continue;
 				try {
 					var s = kdSer(v);
-					if (s === undefined || s.length > ${BASELINE_MAX_LEN}) continue;
+					if (s === undefined) continue;
+					// KDM-221: this used to skip on size too, which was a LEAK, not merely a loss. A
+					// watched name whose value is over the cap is dirty BY DEFINITION — it was under the
+					// cap at baseline, so it cannot still be holding its default — and skipping it left
+					// the previous player's data in the world for the incoming player to inherit. That is
+					// the contamination class this epic exists to remove. "Absent ⇒ default" must not be
+					// exempted by size, and the hash comparison the old guard skipped is not needed here:
+					// being over the cap already proves divergence.
+					if (s.length > ${BASELINE_MAX_LEN}) { assign(n, defs[n]); continue; }
 					if (hash(s) !== base[n]) assign(n, defs[n]);   // dirty from another player ⇒ reset
 				} catch (e) { /* skip */ }
 			}
