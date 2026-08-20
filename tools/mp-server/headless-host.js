@@ -1683,6 +1683,17 @@ class HeadlessHost {
 	 * at baseline to the globals that could plausibly be player state — serialisable and small. The big
 	 * static tables (enemy/restraint/spell defs) are skipped: they are shared world data by definition,
 	 * and they are exactly what made an unbounded pass slow.
+	 *
+	 * ⚠️ KDM-215 — KEEP THIS EVAL SOURCE BYTE-IDENTICAL FROM CALL TO CALL. The `_watchNames` literal
+	 * below is ~48 KB, and parsing it costs ~4.5 ms — but V8 caches compiled `eval` by source string,
+	 * and `_watchNames` is fixed after the baseline, so it is parsed once per process and every later
+	 * pass is served from that cache. MEASURED (quiet host, interleaved): identical source 0.58 ms/pass
+	 * vs a source made unique per call 5.06 ms/pass — an 8.7x cliff. Interpolating anything that VARIES
+	 * per call into this template (a tick, a player id, a timestamp) silently reinstates the full parse
+	 * on both halves, ~9 ms on a ~13.6 ms transaction. `mp-eval-source-stable.spec.ts` guards it.
+	 *
+	 * This is also why KDM-215 candidate 2 (pass the list over the vm context instead of embedding it)
+	 * is CLOSED as neutral: measured 0.57 vs 0.58 ms/pass. There is no per-pass parse cost to remove.
 	 */
 	_captureGlobals() {
 		if (!this._baseline) this._captureBaseline();
@@ -1839,6 +1850,10 @@ class HeadlessHost {
 	 * default. Assignment alone is not enough: the world keeps whatever the previously swapped-in
 	 * player left there, so a player who never touched a global would inherit their opponent's value.
 	 * That is the whole contamination bug class, and "absent ⇒ default" is what closes it.
+	 *
+	 * ⚠️ KDM-215 — KEEP THIS EVAL SOURCE BYTE-IDENTICAL FROM CALL TO CALL, for the reason spelled out
+	 * over `_captureGlobals`: the ~48 KB name literal is free only because V8 serves it from its eval
+	 * compilation cache, and only an unchanging source string hits that cache.
 	 */
 	_restoreGlobals(globals) {
 		if (!globals) return false;
