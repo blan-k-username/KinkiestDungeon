@@ -6,7 +6,7 @@
  * Both tests below are expected to be RED when written; each says what red means.
  */
 import { test, expect } from '@playwright/test';
-import { bootCoopPair, MP_TEST_TIMEOUT, waitForPeerAvatar } from './helpers/coop';
+import { bootCoopPair, coopFloaters, MP_TEST_TIMEOUT, waitForFloaterCreated, waitForPeerAvatar } from './helpers/coop';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
 
@@ -176,13 +176,9 @@ test('floating combat text does not accumulate across PvP attacks', async ({ bro
 	const A = await ctxA.newPage();
 	const B = await ctxB.newPage();
 
-	const floaters = (P: typeof A) => P.evaluate(() =>
-		// @ts-ignore bare let-global
-		(typeof KinkyDungeonFloaters !== 'undefined' && KinkyDungeonFloaters) ? KinkyDungeonFloaters.length : -1);
-
 	try {
 		await bootCoopPair(A, B, port);
-		const before = await floaters(B);
+		const before = (await coopFloaters(B)).queue;
 		let peak = before;
 
 		// B attacks A for real, several times — the exact drive the UAT screenshots came from.
@@ -195,7 +191,7 @@ test('floating combat text does not accumulate across PvP attacks', async ({ bro
 			await A.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
 			await B.waitForFunction((p) => (window as any).__coop.lastTick !== p, t0, { timeout: 20_000 })
 				.catch(() => { /* count is what matters */ });
-			peak = Math.max(peak, await floaters(B));
+			peak = Math.max(peak, (await coopFloaters(B)).queue);
 		}
 
 		// PRECONDITION — if no floater ever appeared, this test is measuring nothing (v1's mistake).
@@ -204,7 +200,7 @@ test('floating combat text does not accumulate across PvP attacks', async ({ bro
 
 		// Now the real question: do they DRAIN? Transient visuals must expire, not pile up.
 		await B.waitForTimeout(4000);
-		const settled = await floaters(B);
+		const settled = (await coopFloaters(B)).queue;
 		expect(settled, `floating text peaked at ${peak} and settled at ${settled} — transient visuals ` +
 			`are accumulating rather than expiring (started at ${before})`).toBeLessThan(Math.max(10, peak));
 	} finally {
@@ -305,10 +301,6 @@ test('the floater queue drains once nothing is creating floaters', async ({ brow
 	const A = await ctxA.newPage();
 	const B = await ctxB.newPage();
 
-	const q = () => B.evaluate(() =>
-		// @ts-ignore bare let-global
-		(typeof KinkyDungeonFloaters !== 'undefined' && KinkyDungeonFloaters) ? KinkyDungeonFloaters.length : -1);
-
 	try {
 		await bootCoopPair(A, B, port);
 
@@ -321,12 +313,12 @@ test('the floater queue drains once nothing is creating floaters', async ({ brow
 				KinkyDungeonSendFloater(p, 16, '#ff5555');
 			}
 		});
-		const peak = await q();
+		const peak = (await coopFloaters(B)).queue;
 		expect(peak, 'no floaters were created — nothing to measure').toBeGreaterThan(30);
 
 		// Nothing creates floaters from here on. They are transient: they MUST expire.
 		await B.waitForTimeout(6000);
-		const settled = await q();
+		const settled = (await coopFloaters(B)).queue;
 
 		expect(settled, `the floater queue went ${peak} -> ${settled} with NOTHING creating floaters ` +
 			`for 6s. Transient visuals never expire on the thin client, so they pile up forever ` +
@@ -365,10 +357,6 @@ test('snapshots delivered after a hit do not re-create its floaters', async ({ b
 	const A = await ctxA.newPage();
 	const B = await ctxB.newPage();
 
-	const q = () => B.evaluate(() =>
-		// @ts-ignore bare let-global
-		(typeof KinkyDungeonFloaters !== 'undefined' && KinkyDungeonFloaters) ? KinkyDungeonFloaters.length : -1);
-
 	try {
 		await bootCoopPair(A, B, port);
 
@@ -376,13 +364,29 @@ test('snapshots delivered after a hit do not re-create its floaters', async ({ b
 		// KDM-210: waits for the avatar instead of reading-then-asserting. The null check that used
 		// to follow is retired — it can no longer fail, because the helper throws a named error first.
 		const peer = await waitForPeerAvatar(B, { label: 'B sees no peer avatar — cannot land a PvP hit' });
-		const t0 = await B.evaluate(() => (window as any).__coop.lastTick);
+		const before = await coopFloaters(B);
 		await B.evaluate((p) => (window as any).__coop.sendAction(
 			{ kdType: 'doattack', data: { tx: p.x, ty: p.y, id: p.id, attackCost: 1 } }), peer);
 		await A.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
-		await B.waitForFunction((p) => (window as any).__coop.lastTick !== p, t0, { timeout: 20_000 })
-			.catch(() => { /* the count below is the measurement */ });
-		const afterHit = await q();
+		// KDM-220 — WAIT FOR THE FEEDBACK, DO NOT SAMPLE THE QUEUE AFTER A PROXY.
+		//
+		// This used to wait for the TICK to advance and then read `KinkyDungeonFloaters.length`. The
+		// tick is not the event, and the queue is not a record of it: one damage floater is aged out
+		// of that queue in about 0.67 s (lifetime = the server's `time`, typically 1; the draw loop
+		// ages at 1.5x — KinkyDungeonDraw.ts:2603-2674). MEASURED over three separate invocations:
+		// the hit produced `created: 1` EVERY time, while the queue read ONE evaluate later already
+		// showed 0 in two runs of three. The setup guard below was failing on the read, not on the
+		// game — the flake was entirely in the observation seam.
+		const afterHit = await waitForFloaterCreated(B, before.created, {
+			label: 'the hit produced no damage feedback at all. The guard stays because a "fix" ' +
+				'that DELETED the feedback would satisfy the no-growth assertion below while ' +
+				'making the game worse',
+		});
+		// Settle before baselining phase 2, so a straggler from the SAME turn is not counted as a
+		// replay. This cannot mask the bug: the bug creates a floater per DELIVERED SNAPSHOT, and no
+		// snapshot is delivered while nothing changes — which is exactly what REPRO 5 measured.
+		await B.waitForTimeout(500);
+		const settled = await coopFloaters(B);
 
 		// 2. Now just "move the mouse": each distinct direction is a state change, so each one brings
 		//    back a full snapshot. No new combat happens — nothing new may appear on screen.
@@ -395,16 +399,20 @@ test('snapshots delivered after a hit do not re-create its floaters', async ({ b
 			await B.waitForTimeout(150);
 		}
 		await B.waitForTimeout(500);
-		const afterMoving = await q();
+		const afterMoving = await coopFloaters(B);
 
-		// The fix must not pass by DELETING the feedback: a landed hit still has to show its number.
-		expect(afterHit, 'the hit produced no floater at all — a fix that removes the damage feedback ' +
-			'would satisfy the growth assertion below while making the game worse').toBeGreaterThan(0);
-		const who = await B.evaluate(() => (window as any).__coopFloaters ? (window as any).__coopFloaters.report() : 'no tracer');
-		expect(afterMoving, `the floater queue went ${afterHit} -> ${afterMoving} from MOUSE MOVEMENT ` +
-			`\nFLOATER SOURCE: ${who}\n` +
-			`alone, with no new combat: each delivered snapshot replays the last event's visuals. ` +
-			`One-shot events are riding inside idempotent state.`).toBeLessThanOrEqual(afterHit);
+		// KDM-220 — assert on CREATION, not on queue depth. Queue depth was only ever a proxy, and a
+		// leaky one in both directions: it expires (the flake) and it could also hide a live bug that
+		// re-created floaters at roughly the rate they age out. Creation is the defect itself — "each
+		// delivered snapshot replays the last event's visuals" is a statement about how many floaters
+		// get MADE. `created` never decays, so this needs no timing window at all.
+		expect(afterMoving.created, `${afterMoving.created - settled.created} floater(s) were CREATED ` +
+			`(the hit itself created ${afterHit.created - before.created}) ` +
+			`from MOUSE MOVEMENT alone, with no new combat (cumulative ${settled.created} -> ` +
+			`${afterMoving.created}; queue ${settled.queue} -> ${afterMoving.queue}).\n` +
+			`RECENT FLOATER TEXTS: ${JSON.stringify(afterMoving.texts)}\n` +
+			`Each delivered snapshot replays the last event's visuals: one-shot events are riding ` +
+			`inside idempotent state.`).toBe(settled.created);
 	} finally {
 		delete process.env.KD_PVP;
 		await ctxA.close().catch(() => {}); await ctxB.close().catch(() => {});

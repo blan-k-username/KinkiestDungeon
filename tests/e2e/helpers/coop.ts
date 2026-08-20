@@ -478,3 +478,91 @@ export async function readCoopWire(P: Page, type?: string): Promise<CoopWireSend
 export async function clearCoopWire(P: Page): Promise<void> {
 	await P.evaluate(() => { const l = (window as any).__coopWire; if (l) l.length = 0; });
 }
+
+/**
+ * KDM-220 — reading the client's floater state, with the CUMULATIVE count next to the queue depth.
+ *
+ * `KinkyDungeonFloaters` is a DECAYING queue, not a record of what happened. The client makes a
+ * floater from a server event with `KinkyDungeonSendFloater({x,y}, text, color, time)`, so `Amount`
+ * is a string and the lifetime is the server's `time` — typically 1 — while the draw loop ages every
+ * floater at `1.5 * delta/1000` and drops it once `t >= lifetime` (KinkyDungeonDraw.ts:2603-2674).
+ * ONE damage floater is therefore visible for about 0.67 s of wall clock.
+ *
+ * MEASURED (KDM-220, three separate invocations): a hit produced `created: 1` every time, but the
+ * queue read one evaluate later — tens of milliseconds — already showed `queue: 0` in 2 of 3 runs.
+ * So a spec that samples the queue depth to ask "did the hit produce feedback?" is asking a question
+ * whose answer expires while it is being asked. That is the whole of the REPRO 6 flake.
+ *
+ * `created` comes from the coop bootstrap's own wrap of `KinkyDungeonSendFloater`
+ * (`tools/mp-server/client/coop-bootstrap.js`), which is the single creation point. It only ever
+ * increases, so it answers "did this happen" and "did it happen again" without a timing window.
+ *
+ * Use `created` for anything about OCCURRENCE, and `queue` only for the thing it really is — how much
+ * is on screen right now (which is what REPRO 5's drain test is about).
+ */
+export interface CoopFloaterState {
+	/** Depth of `KinkyDungeonFloaters` right now — transient, decays in well under a second. */
+	queue: number;
+	/** Cumulative count of `KinkyDungeonSendFloater` calls since boot. Monotonic; never decays. */
+	created: number;
+	/** The texts of the last few floaters created, newest last — for failure messages. */
+	texts: string[];
+}
+
+export async function coopFloaters(P: Page): Promise<CoopFloaterState> {
+	const seen = await P.evaluate(() => {
+		const w = window as any;
+		return {
+			// @ts-ignore bare let-global — KinkyDungeonFloaters is a bundle `let`, not on globalThis
+			queue: (typeof KinkyDungeonFloaters !== 'undefined' && KinkyDungeonFloaters) ? KinkyDungeonFloaters.length : -1,
+			created: w.__coopFloaters ? w.__coopFloaters.created : null,
+			texts: w.__coopFloaters ? w.__coopFloaters.texts.slice(-6) : [],
+		};
+	});
+	if (seen.created === null) {
+		throw new Error(
+			'[KDM-220] the co-op floater tracer (window.__coopFloaters) is not installed on this page, ' +
+			'so floater OCCURRENCE cannot be observed. It is installed by installFloaterTrace() in ' +
+			'tools/mp-server/client/coop-bootstrap.js, which returns early if KinkyDungeonSendFloater ' +
+			'is not yet a function. Failing here rather than reporting 0 forever, which would make ' +
+			'every occurrence assertion silently vacuous.',
+		);
+	}
+	return seen as CoopFloaterState;
+}
+
+/**
+ * Wait until the page has CREATED a new floater since `since` — the honest completion signal for
+ * "the hit produced damage feedback".
+ *
+ * Replaces the pattern of waiting for a proxy (the tick advancing) and then sampling the queue: the
+ * tick is not the event, and by the time the sample is taken the floater it is looking for may
+ * already have aged out. Waiting on the counter waits for the thing that is about to be asserted.
+ *
+ * Throws naming what did not arrive, so a red says "the hit produced no damage feedback" instead of
+ * an off-by-one-frame `expect(0).toBeGreaterThan(0)`.
+ */
+export async function waitForFloaterCreated(
+	P: Page,
+	since: number,
+	opts: { timeout?: number; label?: string } = {},
+): Promise<CoopFloaterState> {
+	const timeout = opts.timeout ?? 20_000;
+	try {
+		await P.waitForFunction(
+			(n) => { const w = window as any; return !!w.__coopFloaters && w.__coopFloaters.created > n; },
+			since, { timeout },
+		);
+	} catch (err) {
+		const now = await coopFloaters(P).catch(() => null);
+		throw new Error(
+			`[KDM-220] no floater was created within ${timeout} ms of the drive` +
+			`${opts.label ? ` — ${opts.label}` : ''}. Cumulative created went ${since} -> ` +
+			`${now ? now.created : 'unreadable'} (queue now ${now ? now.queue : '?'}). The server ` +
+			'harvests damage feedback from KDDamageQueue and ships it as a sequenced `floater` event ' +
+			'(swap-session.js _harvestFloaters); nothing arrived, so either the hit did not land or ' +
+			'the event channel is broken. This is a SETUP failure, not the claim under test.',
+		);
+	}
+	return await coopFloaters(P);
+}
