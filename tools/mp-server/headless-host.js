@@ -797,6 +797,23 @@ class HeadlessHost {
 	 * ⚠️ The tally lives ON THE WRAPPER FUNCTION, not in a global. `restorePlayer` resets globals to
 	 * their post-init baseline on every swap, which would silently empty a global tally and make a live
 	 * wrap look as if it had never fired.
+	 *
+	 * KDM-224 — the same wrap also KEEPS THE AVATAR ALIVE, because this is the only place a peer
+	 * avatar can take damage and therefore the only place the rule can be enforced.
+	 *
+	 * `_armPeerEnemies` mirrors the peer's Will onto the avatar as hp, floored at 0.01 — so a peer
+	 * worn down to a sliver is armed *at* that floor and the next real hit takes hp through zero. KD
+	 * then does to it what it does to any enemy at zero: `KinkyDungeonEnemyCheckHP`
+	 * (`KinkyDungeonEnemies.ts:3340`) `KDRemoveEntity`s it, mid-turn, permanently — and `posOf` /
+	 * every snapshot map returns nothing for that player from then on. But the avatar is not a
+	 * combatant that can die; it is a stand-in for a PLAYER, and a downed player stays on the map
+	 * (KDM-154: down ≠ frozen — they keep agency, and KDM-200 makes them bindable). KD's own "knocked
+	 * down instead of killed" branch (`KinkyDungeonFight.ts:1370`) covers bound / in-party /
+	 * `Damage.nokill` targets and nothing else, so an avatar falls straight through it.
+	 *
+	 * It surfaced as a rare intermittent red in two PvP specs (a null position, a missing snapshot
+	 * entity) because the fatal band is narrow — the peer's Will has to sit a sliver above zero at
+	 * turn start. `tests/unit/mp-pvp-avatar-lifetime.spec.ts` drives that state directly.
 	 */
 	installPeerDamageRecorder() {
 		return this.eval(`(function(){
@@ -804,13 +821,26 @@ class HeadlessHost {
 			var _dmg = KinkyDungeonDamageEnemy;
 			KinkyDungeonDamageEnemy = function (E, D) {
 				var nm = (E && E.Enemy && E.Enemy.name) || '';
-				if (D && E && E.id != null && nm.indexOf('RemotePlayer') === 0) {
+				var isAvatar = !!(E && E.id != null && nm.indexOf('RemotePlayer') === 0);
+				if (D && isAvatar) {
 					var w = KinkyDungeonDamageEnemy;
 					if (!w.__hits) w.__hits = {};
 					if (!w.__hits[E.id]) w.__hits[E.id] = [];
 					w.__hits[E.id].push({ damage: Number(D.damage) || 0, type: D.type || 'pain' });
 				}
-				return _dmg.apply(this, arguments);
+				var res = _dmg.apply(this, arguments);
+				// KDM-224: knocked down, never killed. 0.001 is the GAME's own knockdown value, not a
+				// number we chose - it is what KinkyDungeonFight.ts:1386 writes for a target its
+				// bound/in-party/nokill branch spares. We apply the same floor to the one entity class
+				// KD has no rule for, so KinkyDungeonEnemyCheckHP's hp <= 0 never fires on an avatar.
+				if (isAvatar && !(E.hp > 0)) {
+					E.hp = 0.001;
+					// ...and do not leave the avatar standing as the pending kill, or the next enemy KD
+					// really does kill loses its kill line (KinkyDungeonEnemies.ts:3354, identity compare).
+					if (typeof KinkyDungeonKilledEnemy !== 'undefined' && KinkyDungeonKilledEnemy === E)
+						KinkyDungeonKilledEnemy = null;
+				}
+				return res;
 			};
 			KinkyDungeonDamageEnemy.__kdPeerRec = 1;
 			KinkyDungeonDamageEnemy.__hits = {};
