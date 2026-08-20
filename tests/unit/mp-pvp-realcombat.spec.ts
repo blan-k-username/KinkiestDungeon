@@ -67,8 +67,23 @@ describe('PvP via the REAL combat pipeline (KD-100)', () => {
 		for (let i = 0; i < 25 && !s.isDefeated('B'); i++) bumpB(s);
 		expect(s.isDefeated('B')).toBe(true);
 		const pos = s.posOf('B');
+		/*
+		 * KDM-224: assert the avatar EXISTS before asserting it moved.
+		 *
+		 * `posOf` returns null when the avatar entity is not in the map (swap-session.js:1021-1024),
+		 * so without this the final assertion compares null against null — a peer avatar that VANISHED
+		 * and one that merely stood still produce the identical failure, and the message
+		 * ("expected null to not deeply equal null") names neither. Worse in the other direction: a
+		 * non-null before-value and a null after-value would PASS, reporting a disappeared avatar as
+		 * proof of agency. Observed as an intermittent red; this is what makes the next one legible.
+		 */
+		expect(pos, 'the defeated peer avatar is GONE from the map before it even tried to move — ' +
+			'down must not mean deleted').not.toBeNull();
 		s.submit('B', { kdType: 'move', data: { dir: { x: 1, y: 0 }, delta: 1 } });
 		s.submit('A', { kind: 'wait' });
-		expect(s.posOf('B')).not.toEqual(pos);         // down, but still moves under their own power
+		const after = s.posOf('B');
+		expect(after, 'the defeated peer avatar VANISHED from the map during its own move')
+			.not.toBeNull();
+		expect(after).not.toEqual(pos);                // down, but still moves under their own power
 	}, BOOT_TIMEOUT);
 });

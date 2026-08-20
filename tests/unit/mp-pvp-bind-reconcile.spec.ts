@@ -59,7 +59,15 @@ describe('PvP real tie — avatar restraint reconciles to the victim (KD-101)', 
 		sess._armPeerEnemies(actor);
 		const snap = sess.snapshotFor(actor);
 		const ent = ((snap.map && snap.map.Entities) || []).find((e: any) => e.id === sess.avatars.get(id));
-		if (!ent) return null;
+		// KDM-224: this used to `return null`, which every caller then compared against true/false —
+		// so an avatar MISSING FROM THE MAP surfaced as "expected null to be true", a message that
+		// says nothing about the actual fault and reads like a gate-logic bug. The absent entity is
+		// never legitimate here (a peer in a PvP session is always on the map), so say so loudly.
+		if (!ent) {
+			throw new Error(`[KDM-224] peer ${id}'s avatar (entity ${sess.avatars.get(id)}) is NOT in ` +
+				`${actor}'s snapshot map — the avatar was removed from the world, so the bind gate ` +
+				'cannot be evaluated at all. This is the vanishing-avatar fault, not a bindability result.');
+		}
 		return sess.world.eval("(function(){ var e = " + JSON.stringify(ent) + ";"
 			+ " return !!((typeof KDCanApplyBondage === 'function' && typeof KDPlayer === 'function')"
 			+ "   && KDCanApplyBondage(e, KDPlayer())); })()");

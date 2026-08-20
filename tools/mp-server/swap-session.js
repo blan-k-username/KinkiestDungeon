@@ -1002,10 +1002,40 @@ class SwapSession {
 		return { kdType: 'tick', data: { delta: 1 } };
 	}
 
-	/** Fisher–Yates (plain Math.random — node side, not the bundle's seeded RNG). */
+	/**
+	 * Fisher-Yates over a SEEDED node-side PRNG (KDM-224).
+	 *
+	 * This used to call `Math.random()`, so turn order was a fresh coin flip on every run even though
+	 * the session takes a `seed` and hands it to the world (`this.world.init({seed})`). Turn order is
+	 * not a detail: KDM-208 established that intra-turn ORDER decides real outcomes (a peer who
+	 * arrived this turn vs one who stood still), so an unseeded shuffle made every PvP session
+	 * irreproducible — a test could pass ten times and fail the eleventh with nothing changed, and no
+	 * way to replay the sequence that broke it.
+	 *
+	 * Seeding it from `this.seed` costs nothing in production (the seed is random there) and makes a
+	 * failing sequence REPLAYABLE, which is the whole point: a flake you cannot summon is a flake you
+	 * cannot prove fixed. Deliberately node-side and independent of the bundle's KDRandom — this
+	 * orders PLAYERS, it is not gameplay randomness (cf. reference-kdrandom-vs-mathrandom-stub).
+	 */
+	_rand() {
+		// mulberry32 — small, fast, good enough for ordering; state advances per draw.
+		if (this._rngState === undefined) {
+			let h = 2166136261 >>> 0;
+			const s = String(this.seed);
+			for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+			this._rngState = h >>> 0;
+		}
+		this._rngState = (this._rngState + 0x6D2B79F5) >>> 0;
+		let t = this._rngState;
+		t = Math.imul(t ^ (t >>> 15), t | 1);
+		t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+		return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+	}
+
+	/** Fisher-Yates over `_rand` — seeded, so a turn-order sequence can be replayed. */
 	_shuffle(a) {
 		for (let i = a.length - 1; i > 0; i--) {
-			const j = Math.floor(Math.random() * (i + 1));
+			const j = Math.floor(this._rand() * (i + 1));
 			const t = a[i]; a[i] = a[j]; a[j] = t;
 		}
 		return a;
