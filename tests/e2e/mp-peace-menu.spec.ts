@@ -11,66 +11,34 @@
  * neither (`KDContextMenu.ts:293`, the `entity == KDPlayer()` branch).
  */
 import { test, expect } from '@playwright/test';
-import { bootCoopPair, MP_TEST_TIMEOUT, waitForPeerAvatar } from './helpers/coop';
+import {
+	bootCoopPair, MP_TEST_TIMEOUT, waitForPeerAvatar, contextMenuAt, pickMenuOption,
+} from './helpers/coop';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
 
 /**
- * Build KD's real context menu on the player's OWN tile and report what it offers.
+ * Build KD's real context menu on the player's OWN tile, plus the one verdict only this spec cares
+ * about: whether the peace wrap is installed on the registry entry.
  *
- * Goes through `KDGetContextActions.Game` — the REGISTRY entry a right-click runs — not through
- * `KDGetGameContextActionsVanilla`. The sibling spec `mp-pvp-menu-attack.spec.ts` calls the vanilla
- * builder deliberately, to isolate entity logic from pixel aiming; here that would be wrong, because
- * the peace entries are added by a cooperative wrap AROUND the registry entry and the vanilla builder
- * never sees them. (Measured: calling vanilla returned `["Wait","Inventory","Special"]` with the wrap
- * installed and working.)
- *
- * `.Game` re-aims from `KDContextX/KDContextY` as PIXELS via `KinkyDungeonSetTargetLocation`, so the
- * tile is converted by inverting that function's own formula (`KinkyDungeonDraw.ts:3001-3002`):
- *   TargetX = round((mx - grid/2 - canvasOffsetX)/grid) + CamX
+ * The aiming and the build live in `contextMenuAt` (helpers/coop.ts) — three specs had grown their
+ * own copy of the same eight lines, and the pixel conversion is the part that is easy to get subtly
+ * wrong. Kept here: `wrapped`, because the peace sentinel is this feature's business and does not
+ * belong on a shared primitive.
  */
 async function ownMenu(P: any) {
-	return P.evaluate(() => {
-		// @ts-ignore bare let-globals
-		const me = KDPlayer();
-		// @ts-ignore
-		const grid = KinkyDungeonGridSizeDisplay;
-		// @ts-ignore
-		const mx = (me.x - KinkyDungeonCamX) * grid + grid / 2 + canvasOffsetX;
-		// @ts-ignore
-		const my = (me.y - KinkyDungeonCamY) * grid + grid / 2 + canvasOffsetY;
-		// @ts-ignore
-		KDContextX = mx; KDContextY = my;
-		// @ts-ignore
-		if (typeof KDGetContextActions === 'undefined' || !KDGetContextActions.Game) {
-			return { ok: false, why: 'no-registry' };
-		}
-		// @ts-ignore
-		const menu = KDGetContextActions.Game(false, mx, my, {});
-		(window as any).__peerMenu = { optionActions: menu.optionActions };
-		return {
-			ok: true, options: menu.options, grey: menu.optionGrey, text: menu.optionText,
-			at: { x: me.x, y: me.y },
-			// @ts-ignore — proves the aiming landed on the player's own tile, so a missing entry is a
-			// real absence and not a mis-aimed menu.
-			aimed: { x: KinkyDungeonTargetX, y: KinkyDungeonTargetY },
-			// @ts-ignore
-			wrapped: !!(KDGetContextActions.Game as any)._kdcoop_peace_wrapped,
-			coop: (window as any).KDRenderClient ? (window as any).KDRenderClient.lastCoop : null,
-		};
+	const me = await P.evaluate(() => {
+		// @ts-ignore bare let-global
+		const p = KDPlayer();
+		return { x: p.x, y: p.y };
 	});
-}
-
-/** Invoke one option the menu offered, exactly as a click would. */
-async function pickOption(P: any, key: string) {
-	return P.evaluate((k: string) => {
-		const w = window as any;
-		const actions = w.__peerMenu && w.__peerMenu.optionActions;
-		if (!actions || !actions[k]) return { ok: false, why: 'no-such-option:' + k };
-		if (w.__coop) w.__coop.submitted = false;
-		try { actions[k](0, 0); } catch (e) { return { ok: false, why: 'threw:' + (e && (e as any).message) }; }
-		return { ok: true };
-	}, key);
+	const menu = await contextMenuAt(P, me);
+	const wrapped = await P.evaluate(() =>
+		// @ts-ignore — the peace entries are added by a cooperative wrap AROUND KDGetContextActions.Game,
+		// so `KDGetGameContextActionsVanilla` never sees them. (Measured: vanilla returned
+		// ["Wait","Inventory","Special"] with the wrap installed and working.)
+		!!(KDGetContextActions.Game as any)._kdcoop_peace_wrapped);
+	return { ...menu, ok: true, wrapped };
 }
 
 /** Does this client believe it is at war with the peer? Read from the standing snapshot state (A4). */
@@ -128,7 +96,7 @@ test('offer peace from your own menu; the peer accepts from theirs', async ({ br
 			.toContain('Peace');
 
 		// ---- 4. A offers; nothing about the war changes yet (R4) --------------------------------
-		expect((await pickOption(A, 'Peace')).ok).toBe(true);
+		await pickMenuOption(A, 'Peace');
 		await B.waitForFunction(() => {
 			const c = (window as any).KDRenderClient && (window as any).KDRenderClient.lastCoop;
 			return !!(c && c.peaceOffer);
@@ -244,39 +212,18 @@ test('offer peace from your own menu; the peer accepts from theirs', async ({ br
 		//
 		// Asserted on the PEER's tile — the vision gate that hides this headless is real in a browser,
 		// which is why this lives in the e2e (see mp-pvp-menu-attack.spec.ts for the same technique).
-		const peerMenuAtPeace = await A.evaluate((id: number) => {
-			// @ts-ignore
-			const p = ((KDMapData as any).Entities || []).find((x: any) => x.id === id);
-			if (!p) return { ok: false, why: 'no-peer-entity' };
-			// @ts-ignore
-			const grid = KinkyDungeonGridSizeDisplay;
-			// @ts-ignore
-			KDContextX = (p.x - KinkyDungeonCamX) * grid + grid / 2 + canvasOffsetX;
-			// @ts-ignore
-			KDContextY = (p.y - KinkyDungeonCamY) * grid + grid / 2 + canvasOffsetY;
-			// @ts-ignore
-			const menu = KDGetContextActions.Game(false, KDContextX, KDContextY, {});
-			return {
-				ok: true, options: menu.options,
-				// @ts-ignore — the verdicts behind the branch, so a failure names its cause
-				aimed: { x: KinkyDungeonTargetX, y: KinkyDungeonTargetY }, at: { x: p.x, y: p.y },
-				// @ts-ignore
-				talkable: KDTalkToEnemy(p), allied: KDAllied(p), hostile: !!KDHostile(p),
-				// @ts-ignore
-				faction: KDGetFaction(p), opinion: KDGetModifiedOpinion(p),
-				vulnerable: p.vulnerable || 0,
-			};
-		}, peer.id);
+		const peerNow = await waitForPeerAvatar(A, { label: 'A checking the peer after the truce' });
+		const peerMenuAtPeace = await contextMenuAt(A, { x: peerNow.x, y: peerNow.y });
 
-		expect(peerMenuAtPeace.ok, JSON.stringify(peerMenuAtPeace)).toBe(true);
 		expect(peerMenuAtPeace.aimed, 'precondition: the menu is aimed at the peer')
 			.toEqual(peerMenuAtPeace.at);
-		expect(peerMenuAtPeace.faction, 'the Enemy stamp must be gone from the world entity')
+		expect(peerMenuAtPeace.entity, 'precondition: the peer is the entity on that tile').not.toBeNull();
+		expect(peerMenuAtPeace.entity!.faction, 'the Enemy stamp must be gone from the world entity')
 			.not.toBe('Enemy');
-		expect(peerMenuAtPeace.hostile, 'and KD must not consider them hostile').toBe(false);
-		expect(peerMenuAtPeace.talkable,
+		expect(peerMenuAtPeace.entity!.hostile, 'and KD must not consider them hostile').toBe(false);
+		expect(peerMenuAtPeace.entity!.talkable,
 			'a peaceful peer must be talkable — that is what makes them a friendly NPC, and what the '
-			+ '"help me get free" interactions need').toBe(true);
+			+ '"help me get free" interactions need (KDM-231 builds on exactly this)').toBe(true);
 		expect(peerMenuAtPeace.options,
 			'attacking must take the deliberate sneak again, exactly as at the start of a co-op session')
 			.toContain('Aggro');

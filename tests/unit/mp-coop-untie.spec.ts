@@ -453,3 +453,140 @@ describe('co-op untie: knock-on effects', () => {
 		expect(trussed.help, 'a trussed partner cannot help').toBe(false);
 	}, BOOT_TIMEOUT);
 });
+
+/**
+ * AC3 — THE UNTIE IS A PEACE AFFORDANCE. At war there is no dialogue to open at all.
+ *
+ * Asserted at the DECIDING LAYER, which is not `KDGetPlayerUntieBindAmt`. Both of KD's player-facing
+ * routes to an ally dialogue — the bump (`KinkyDungeonGame.ts:2699`) and the context menu
+ * (`KDContextMenu.ts:173`) — gate on `KDTalkToEnemy` BEFORE any dialogue exists, and
+ * `KDTalkToEnemy` is false for an aggressive non-ally (`KinkyDungeonGame.ts:4572`). So the honest
+ * question is "does walking into your peer open a dialogue", not "would the option have passed its
+ * prerequisite", and that is what these arms ask.
+ *
+ * Two levels, because the gate and its consequence fail differently:
+ *  - the GATE, read on a freshly armed avatar (the same `_armPeerEnemies` + read the first describe
+ *    uses), where the peace/war arms differ in `KDTalkToEnemy` alone;
+ *  - the CONSEQUENCE, driven by the one real input a player actually sends. The pair spawn adjacent,
+ *    so a single `move` toward the peer IS the interaction.
+ *
+ * What deliberately does NOT change between the arms is the untie budget: bondage is mirrored onto
+ * the avatar at war too (`_armPeerEnemies`), so `KDGetPlayerUntieBindAmt` is > 0 either way. That
+ * makes this a test about HOSTILITY rather than one that would pass because there was nothing to
+ * untie.
+ *
+ * The context-menu half of the same gate is asserted in a browser by `tests/e2e/mp-coop-untie.spec.ts`
+ * and cannot be asserted here: headless, the menu is behind a vision gate that drops every entity
+ * entry, so the peer's tile builds to `["Wait","Special"]` at war AND at peace — an absence that
+ * would read as a pass for the wrong reason.
+ */
+describe('co-op untie is refused at war', () => {
+	/** Arm A's turn against a bound peer and read the gates KD evaluates, at war or at peace. */
+	async function armedGates(pvp: boolean) {
+		const s: any = new SwapSession({
+			requiredPlayers: 2, seed: 'untie-war-gates', pvp, wearRestraint: 'DuctTapeHands',
+		});
+		s.join('A');
+		s.join('B');
+		await s.ready();
+		const avB = s.avatars.get('B');
+		s.world.restorePlayer(s.bundles.get('B'));
+		s.vitalsOf.set('B', s.world.getVitals());
+		s.world.restorePlayer(s.bundles.get('A'));
+		const pos = s.world.eval(`({x: KinkyDungeonPlayerEntity.x, y: KinkyDungeonPlayerEntity.y})`);
+		s.world.moveAvatar(avB, pos.x + 1, pos.y);
+		s.world.moveAvatar(s.avatars.get('A'), 1, 1);
+		s._armPeerEnemies('A');
+		return { s, g: gatesFor(s, avB), aggressive: s.world.eval(`(function(){
+			var e = KDMapData.Entities.find(function(en){ return en.id === ${avB | 0}; });
+			return !!KinkyDungeonAggressive(e);
+		})()`) };
+	}
+
+	it('at war KD\'s talk gate is shut, while the untie budget stays exactly what it was', async () => {
+		const war = await armedGates(true);
+		expect(war.aggressive, 'precondition: this arm really is at war').toBe(true);
+		expect(war.g.allied, 'an enemy is not an ally').toBe(false);
+		expect(war.g.canTalk,
+			'AC3: KDTalkToEnemy is the gate BOTH player routes to the dialogue read').toBe(false);
+		// The refusal is about hostility, not about an empty target — the peer is just as untieable.
+		expect(war.g.untieBindAmt).not.toBe('NaN');
+		expect(war.g.untieOptionShown,
+			'the target is worth untying the whole time; only the way in is shut').toBe(true);
+	}, BOOT_TIMEOUT);
+
+	it('CONTROL: at peace the same arming leaves the gate open', async () => {
+		// Without this arm, the assertions above would pass just as well if peers were never talkable,
+		// or if the arming had failed and left an avatar nobody could interact with at all.
+		const peace = await armedGates(false);
+		expect(peace.aggressive, 'precondition: this arm is at peace').toBe(false);
+		expect(peace.g.allied).toBe(true);
+		expect(peace.g.canTalk, 'the ONLY verdict that differs between the arms').toBe(true);
+		expect(peace.g.untieOptionShown, '…with the same budget as the war arm').toBe(true);
+	}, BOOT_TIMEOUT);
+
+	/**
+	 * …and the consequence, through the real input. Bump A into B and see what the game did with it.
+	 * Everything here is read from DURABLE state (the dialogue on A's own bundle, B's worn restraints,
+	 * B's Will) rather than from the shared world entity, whose arming belongs to whichever turn ran
+	 * last by the time `submit` returns.
+	 */
+	async function bumpPeer(pvp: boolean) {
+		const s: any = new SwapSession({
+			requiredPlayers: 2, seed: 'untie-war-bump', pvp, wearRestraint: 'DuctTapeHands',
+		});
+		s.join('A');
+		s.join('B');
+		await s.ready();
+		const posOf = (id: string) => {
+			s.world.restorePlayer(s.bundles.get(id));
+			return s.world.eval(`({x: KinkyDungeonPlayerEntity.x, y: KinkyDungeonPlayerEntity.y})`);
+		};
+		const a0 = posOf('A');
+		const b0 = posOf('B');
+		expect(Math.max(Math.abs(b0.x - a0.x), Math.abs(b0.y - a0.y)),
+			'precondition: the pair spawn adjacent, so one move bumps A into B').toBe(1);
+
+		const willBefore = (s.vitalsOf.get('B') || {}).will;
+		s.submit('A', { kdType: 'move', data: {
+			dir: { x: Math.sign(b0.x - a0.x), y: Math.sign(b0.y - a0.y) }, delta: 1, AllowInteract: true,
+		} });
+		s.submit('B', { kind: 'wait' });
+
+		s.world.restorePlayer(s.bundles.get('A'));
+		const opened = s.world.eval(`({
+			dialogue: KDGameData.CurrentDialog || null,
+			speaker: KDGameData.CurrentDialogMsgSpeaker || null,
+			bindAmt: String((KDGameData.CurrentDialogMsgValue || {}).BINDAMNT),
+		})`);
+		s.world.restorePlayer(s.bundles.get('B'));
+		const worn = s.world.eval(`KinkyDungeonAllRestraint().map(function(r){ return {
+			name: r.name, struggleProgress: r.struggleProgress || 0 }; })`);
+		return { opened, worn, willBefore, willAfter: (s.vitalsOf.get('B') || {}).will };
+	}
+
+	it('at war, walking into your peer opens no dialogue — the Untie option is unreachable', async () => {
+		const r = await bumpPeer(true);
+		expect(r.opened.dialogue, 'AC3: no dialogue opened, so there is no Untie to pick').toBeNull();
+		// …and NOT because the input vanished. The same bump resolved as KD's stock attack, which is
+		// what makes "no dialogue" a refusal rather than a silently dropped input.
+		expect(r.willAfter, 'the bump WAS delivered — at war it lands as an attack')
+			.toBeLessThan(r.willBefore);
+		expect(r.worn, 'and B keeps every restraint')
+			.toEqual([{ name: 'DuctTapeHands', struggleProgress: 0 }]);
+	}, BOOT_TIMEOUT);
+
+	it('CONTROL: at peace the SAME bump opens the ally dialogue with an untie budget ready', async () => {
+		const r = await bumpPeer(false);
+		expect(r.opened.dialogue, 'at peace the bump opens KD\'s ally dialogue').toBe('GenericAlly');
+		expect(r.opened.speaker, '…on the peer\'s own avatar def').toMatch(/^RemotePlayer/);
+		// `KDAllyDialogue`'s clickFunction has already computed the budget the Untie option is gated on
+		// (KinkyDungeonDialogue.ts:639), so Untie is one click away rather than behind a further gate.
+		expect(Number(r.opened.bindAmt), 'the untie budget is ready on arrival').toBeGreaterThan(0);
+		// A talk is not an attack: speaking to a peer must not hurt them…
+		expect(r.willAfter, 'talking to a peer must not hurt them').toBe(r.willBefore);
+		// …and opening the dialogue is not yet an untie, which is what the Untie click adds.
+		expect(r.worn, 'opening the dialogue alone unties nothing')
+			.toEqual([{ name: 'DuctTapeHands', struggleProgress: 0 }]);
+	}, BOOT_TIMEOUT);
+});

@@ -152,7 +152,24 @@ against a peer avatar:
   `KDBoundEffects > 3` stops granting ally-help while you struggle. That is the game's answer, not ours.
 
 Tests: `tests/unit/mp-coop-untie.spec.ts` (incl. an end-to-end pass driven through the real
-`kdType: 'dialogue'` input, plus a same-shape control for each assertion).
+`kdType: 'dialogue'` input, plus a same-shape control for each assertion) and
+`tests/e2e/mp-coop-untie.spec.ts` (TWO BROWSERS: the real context menu → `Talk` → `Untie`, with the
+restraint's disappearance read off the *victim's own page*).
+
+Two things the e2e pins that are easy to get wrong if you touch this flow:
+
+- **At war there is no dialogue to open.** Both player routes to an ally dialogue — the bump
+  (`KinkyDungeonGame.ts:2699`) and the context menu (`KDContextMenu.ts:173`) — gate on
+  `KDTalkToEnemy` *before* a dialogue exists, so that is the layer to assert on, not
+  `KDGetPlayerUntieBindAmt`. Bondage stays mirrored at war, so the budget is non-zero either way:
+  it is hostility that refuses, not an empty target.
+- **"No unresolved text keys" must be asserted on what is PAINTED, not on what `TextGet` resolves.**
+  `KDGetItemName` (`KinkyDungeonRestraints.ts:7118`) resolves `"KinkyDungeonInventoryItem" + name`
+  and then overwrites it with the correct `"Restraint" + name` key, so every frame showing a worn
+  restraint resolves a key that does not exist and throws the result away. A `TextGet` recorder reds
+  on that stock noise. `recordDrawnText` (`tests/e2e/helpers/coop.ts`) wraps `DrawTextVisKD`
+  (`KinkyDungeonDraw.ts:3405`) — the single choke point all KD text funnels through — so it sees only
+  what a player could actually read.
 
 ## Known limitations (PoC)
 
