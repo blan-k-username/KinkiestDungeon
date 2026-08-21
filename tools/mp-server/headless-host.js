@@ -82,6 +82,30 @@ const KDGAMEDATA_WORLD_KEYS = Object.freeze([
 	// criterion (a). No test currently pins it, so treat it as a reasoned classification rather than
 	// a proven one.
 	'NPCRestraints',
+	// (b) WHICH MAP the party is on — "" for a dungeon floor, JourneyFloor for the between-floors
+	// hub, Tunnel/PerkRoom/ShopStart for the side rooms. The session has one world and one map, and a
+	// floor change moves the whole party (KDM-165).
+	//
+	// Unlike NPCRestraints above, this one is PROVEN rather than reasoned: the game assigns these two
+	// in exactly four places and every one is a map load, a map generation or a floor transition —
+	// KDMapGen.ts:87-88, KDStairActions.ts:201, the new-game boot at KinkyDungeon.ts:6025, and
+	// decisively KinkyDungeonGame.ts:841-842, which is
+	//
+	//     KDGameData.RoomType = KDMapData.RoomType;
+	//     KDGameData.MapMod   = KDMapData.MapMod;
+	//
+	// i.e. the game itself says these are a COPY of a field on KDMapData — state this layer already
+	// treats as authoritative and shared. Being DERIVED makes a per-player copy wrong twice over: a
+	// bundle can hold a value its own source of truth has since moved past.
+	//
+	// They classify together because they are written by the same statements; splitting them would
+	// leave the pair half-classified. No client compensation is needed — render-client.js:617-618
+	// already restores both from the snapshot's own world-sourced fields, after adoptBundle, so the
+	// browser has always preferred the world's answer (KDM-222). This makes the server agree.
+	//
+	// Pinned by tests/unit/mp-room-world-state.spec.ts (the divergence case) and, generically, by
+	// mp-noninterference.spec.ts, which checks declared world keys from both directions.
+	'RoomType', 'MapMod',
 ]);
 
 /**

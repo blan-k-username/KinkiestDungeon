@@ -34,22 +34,20 @@ describe('KDM-227 — arriving at the between-floors hub ends every war', () => 
 	/**
 	 * Put the party in a given room the way a real transition does.
 	 *
-	 * ⚠️ Writing `KDGameData.RoomType` in the world is NOT enough, and a test that only did that was
-	 * measuring the wrong thing. `RoomType` is not in `KDGAMEDATA_WORLD_KEYS`
-	 * (`headless-host.js:67-85`), so `restorePlayer` re-installs it from each player's BUNDLE at the
-	 * top of their slice of the turn — the world write is overwritten before `_checkHubReset` ever
-	 * reads it. (Measured: with the world write alone, every room in this test behaved like the boot
-	 * room, `JourneyFloor`, so the "a side room does not reset" case passed for the wrong reason.)
+	 * This used to have to patch every player's captured bundle as well as the world, because
+	 * `RoomType` was not in `KDGAMEDATA_WORLD_KEYS` and `restorePlayer` re-installed it from the
+	 * acting player's bundle at the top of their slice — overwriting the world write before
+	 * `_checkHubReset` ever read it. (Measured at the time: with the world write alone every room here
+	 * behaved like the boot room, `JourneyFloor`, so the "a side room does not reset" case passed for
+	 * the wrong reason.)
 	 *
-	 * A real transition updates every bundle, because each is captured from the same world after it.
-	 * So do both here. The classification itself — per-player vs world — is filed as tech debt.
+	 * KDM-228 classified `RoomType`/`MapMod` as world state — they are a copy of `KDMapData.RoomType`
+	 * (`KinkyDungeonGame.ts:841`) — so the world write is now the whole story, exactly as it is in
+	 * real play.
 	 */
 	function setRoom(type: string) {
 		s.world.eval('(function(){ if (typeof KDGameData !== "undefined" && KDGameData) '
 			+ `KDGameData.RoomType = ${JSON.stringify(type)}; })()`);
-		for (const b of s.bundles.values()) {
-			if (b && b.gameData) b.gameData.RoomType = type;
-		}
 	}
 	function turn() { s.submit('A', { kind: 'wait' }); s.submit('B', { kind: 'wait' }); }
 	/** What an attack does to the relationship. */
