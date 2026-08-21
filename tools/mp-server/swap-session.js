@@ -554,11 +554,19 @@ class SwapSession {
 			// A forced-immediate action must not teach the classifier anything: we bypassed its verdict,
 			// so an observation from this path is not evidence about `dialogue` in general.
 			if (!ourDialogue) this._learnInputKind(kdType, res, false);
-			// KDM-230: the peace answer IS a `dialogue` input — KD's own option click. Read the verdict
-			// its clickFunction just recorded, while this player is still the one swapped in.
-			const answered = this._settlePeaceAnswerFrom(clientId);
 			const newBundle = this.world.capturePlayer();
 			this.bundles.set(clientId, newBundle);
+			/*
+			 * KDM-230 — the peace answer IS a `dialogue` input, so settle it here. AFTER the capture
+			 * above, and that ordering is the whole point.
+			 *
+			 * UAT bug this fixes: settling swaps OTHER players in and out (it closes the dialogue on
+			 * each side, which is restore → mutate → capture per player). Run before the capture, it
+			 * left the OFFERER swapped in — and the line above then captured the offerer's state and
+			 * stored it as the ANSWERER's bundle. B was handed A's player state: black map, wrong
+			 * stats, wrong everything. Settle only once this player's own state is safely banked.
+			 */
+			const answered = this._settlePeaceAnswerFrom(clientId);
 			// KDM-186: did this player's own state actually move? The caller uses this to decide between
 			// a full state reply and a bare ack — a diff, never a judgement about which inputs matter.
 			const changed = this._stateChanged(clientId, newBundle);

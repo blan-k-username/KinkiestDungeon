@@ -196,4 +196,41 @@ describe('KDM-225 — peace, at the session seams', () => {
 		s.submit('B', { kind: 'wait' });
 		expect(s.turn, 'answered → the turn resolves').toBe(turn0 + 1);
 	});
+
+	/**
+	 * UAT bug (KDM-230): answering handed the ANSWERER the OFFERER's player state.
+	 *
+	 * Settling a truce closes the dialogue on BOTH sides, and each close is a restore → mutate →
+	 * capture on that player. Done before the answerer's own capture, it left the offerer swapped in,
+	 * and `apply()` then captured the offerer's state and stored it under the answerer's id. On screen:
+	 * B's map went black, B's stats became A's, both players read as defeated.
+	 *
+	 * The oracle is IDENTITY, not a symptom: each player's own state must still be their own after the
+	 * handshake. Positions are used because they are per-player, differ between the two, and are
+	 * cheap to read — a swap shows up as B's bundle carrying A's coordinates.
+	 */
+	it('answering does not swap the answerer\'s state for the offerer\'s', () => {
+		const posOf = (id: string) => {
+			const p = s.snapshotFor(id).player;
+			return { x: p.x, y: p.y };
+		};
+		// Give the two players distinguishable positions, or a swap is invisible.
+		s.world.restorePlayer(s.bundles.get('A'));
+		s.world.eval('(function(){ KinkyDungeonPlayerEntity.x = 11; KinkyDungeonPlayerEntity.y = 12; })()');
+		s.bundles.set('A', s.world.capturePlayer());
+		s.world.restorePlayer(s.bundles.get('B'));
+		s.world.eval('(function(){ KinkyDungeonPlayerEntity.x = 21; KinkyDungeonPlayerEntity.y = 22; })()');
+		s.bundles.set('B', s.world.capturePlayer());
+		s.world.parkGlobalPlayer(1, 1);
+
+		expect(posOf('A'), 'precondition').toEqual({ x: 11, y: 12 });
+		expect(posOf('B'), 'precondition').toEqual({ x: 21, y: 22 });
+
+		s.apply('A', { mp: 'peace.offer' });
+		answer(s, 'B', true);
+
+		expect(s.rel.atPeace('A', 'B'), 'precondition: the truce really settled').toBe(true);
+		expect(posOf('B'), "B must still be B — not handed the offerer's state").toEqual({ x: 21, y: 22 });
+		expect(posOf('A'), 'and A must still be A').toEqual({ x: 11, y: 12 });
+	});
 });
