@@ -21,6 +21,21 @@ const { SwapSession } = require('../../tools/mp-server/swap-session');
 
 const BOOT_TIMEOUT = 300_000;
 
+/**
+ * Answer a peace offer the way a player does — by clicking an option in KD's own dialogue.
+ *
+ * NOT a private `mp:` verb. The dialogue option runs `KDSendInput("dialogue", …)`
+ * (`KinkyDungeonDialogue.ts:187`), so the answer is a routed GAME input and the option's
+ * `clickFunction` executes server-side inside `KDDoDialogue`. Driving anything else here would test a
+ * path no player can reach.
+ */
+function answer(s: any, who: string, accept: boolean) {
+	return s.apply(who, {
+		kdType: 'dialogue',
+		data: { dialogue: 'KDCoopPeace', dialogueStage: accept ? 'Accept' : 'Refuse', click: true },
+	});
+}
+
 /** Read the war/peace verdict AND the hostility the game actually holds on each avatar. */
 function worldHostility(s: any, cid: string) {
 	const eid = s.avatars.get(cid);
@@ -46,14 +61,14 @@ describe('KDM-225 — peace, at the session seams', () => {
 			expect(s._isPvP('A', 'B'), 'precondition: the global flag has them at war').toBe(true);
 			s.apply('A', { mp: 'peace.offer' });
 			expect(s._isPvP('A', 'B'), 'an unanswered offer changes nothing (R4)').toBe(true);
-			s.apply('B', { mp: 'peace.answer', accept: true });
+			answer(s, 'B', true);
 			expect(s._isPvP('A', 'B'),
 				'peace must override the global flag, not merely a per-pair entry').toBe(false);
 		});
 
 		it('a declined offer leaves the global war intact (R7/AC4)', () => {
 			s.apply('A', { mp: 'peace.offer' });
-			s.apply('B', { mp: 'peace.answer', accept: false });
+			answer(s, 'B', false);
 			expect(s._isPvP('A', 'B')).toBe(true);
 		});
 	});
@@ -78,7 +93,7 @@ describe('KDM-225 — peace, at the session seams', () => {
 			s.apply('A', { mp: 'peace.offer' });
 			const turn0 = s.turn;
 			const tick0 = s.world.tick();
-			s.apply('B', { mp: 'peace.answer', accept: true });
+			answer(s, 'B', true);
 			expect(s.turn).toBe(turn0);
 			expect(s.world.tick()).toBe(tick0);
 		});
@@ -99,7 +114,7 @@ describe('KDM-225 — peace, at the session seams', () => {
 			expect(blocked.advanced).toBeFalsy();
 			expect(s._pending.has('B'), 'and nothing may sit in B\'s lockstep slot').toBe(false);
 
-			s.apply('B', { mp: 'peace.answer', accept: false });
+			answer(s, 'B', false);
 			const after = s.submit('B', { kind: 'wait' });
 			expect(after.blocked, 'answered — B is free again').toBeFalsy();
 		});
@@ -141,7 +156,7 @@ describe('KDM-225 — peace, at the session seams', () => {
 			expect(beforeA.boundLevel, 'precondition: the avatar really is bound').toBeGreaterThan(0);
 
 			s.apply('A', { mp: 'peace.offer' });
-			s.apply('B', { mp: 'peace.answer', accept: true });
+			answer(s, 'B', true);
 
 			for (const cid of ['A', 'B']) {
 				const after = worldHostility(s, cid);
@@ -176,7 +191,7 @@ describe('KDM-225 — peace, at the session seams', () => {
 			.toBe(turn0);
 
 		// Answer it, and the same two submissions now resolve normally.
-		s.apply('B', { mp: 'peace.answer', accept: false });
+		answer(s, 'B', false);
 		s.submit('A', { kind: 'wait' });
 		s.submit('B', { kind: 'wait' });
 		expect(s.turn, 'answered → the turn resolves').toBe(turn0 + 1);

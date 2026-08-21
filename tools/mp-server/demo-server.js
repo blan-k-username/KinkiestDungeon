@@ -27,6 +27,7 @@ const path = require('path');
 const { WSBridge } = require('./ws-bridge');
 const { KD_CODEC } = require('./kd-codec');
 const { KD_DELTA_BROWSER } = require('./kd-delta');
+const { KD_PEACE_DIALOGUE_BROWSER } = require('./kd-peace-dialogue');
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 // Default :8090 (not :8080 — that's the stock `npm run serve` / kdrunner port).
@@ -54,6 +55,9 @@ const CODEC_ROUTE = '/mp/kd-codec.js';
 // KDM-206: the delta merge half, served from the SAME source the server diffs with — a diff/merge
 // pair that drifts apart corrupts state silently, so there is exactly one definition.
 const DELTA_ROUTE = '/mp/kd-delta.js';
+// KDM-230: the peace-offer DIALOGUE definition. Same two-runtime rule as the codec and the delta —
+// the server evals this exact text into the world, the browser is served it as a script.
+const PEACE_DLG_ROUTE = '/mp/kd-peace-dialogue.js';
 const DELTA_BODY = KD_DELTA_BROWSER;
 const CODEC_BODY = `${KD_CODEC}\n;(typeof window !== 'undefined' ? window : globalThis).KDCodec = ` +
 	`{ kdEnc: kdEnc, kdDec: kdDec, kdSer: kdSer };\n`;
@@ -66,6 +70,7 @@ const INJECT = [
 	'/tools/mp-server/client/coop-bootstrap.js',
 	// KDM-225: the peace submenu. AFTER coop-bootstrap — it sends through `window.__coop.sendAction`.
 	'/tools/mp-server/client/coop-peace.js',
+	PEACE_DLG_ROUTE,                // KDM-230: needs KDDialogue, so after the bundle is in scope
 ];
 
 /* ── Serve-time workarounds for UPSTREAM crashes ──────────────────────────────────────────────
@@ -214,6 +219,11 @@ function serveStatic(req, res) {
 	if (urlPath === DELTA_ROUTE) {                       // KDM-206: same, for the delta merge
 		res.writeHead(200, { 'Content-Type': MIME['.js'], 'Cache-Control': 'no-cache' });
 		res.end(DELTA_BODY);
+		return;
+	}
+	if (urlPath === PEACE_DLG_ROUTE) {                   // KDM-230: same, for the peace dialogue
+		res.writeHead(200, { 'Content-Type': MIME['.js'], 'Cache-Control': 'no-cache' });
+		res.end(KD_PEACE_DIALOGUE_BROWSER);
 		return;
 	}
 	const filePath = safeJoin(REPO_ROOT, urlPath);

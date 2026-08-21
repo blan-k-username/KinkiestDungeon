@@ -158,46 +158,74 @@ test('offer peace from your own menu; the peer accepts from theirs', async ({ br
 			'a refused action must NOT mark the client as having acted — that is the soft-lock')
 			.toBe(false);
 
-		// ---- 6. B's own menu carries the answer, OPENED BY THE OFFER (D8/A6) ---------------------
+		// ---- 6. the offer arrives as KD's own modal DIALOGUE (KDM-230) ---------------------------
 		//
-		// Read through the DRAW path with the aim the auto-open left behind — deliberately NOT
-		// re-aiming as `ownMenu()` does. The first implementation set `KinkyDungeonTargetX/Y`, which
-		// `KDGetContextActions.Game` overwrites from `KDContextX/Y` every frame, so the menu never
-		// pointed at the player and no entry appeared. `ownMenu()` sets the pixels itself and so
-		// could not see that bug; this does.
-		// NOTE: bare identifier, NOT `window.KDContextMenu`. The bundle's top-level `let` globals live
-		// in the global LEXICAL environment and are not properties of `window` — reading it off `window`
-		// yields undefined forever, which is a timeout that looks exactly like a broken feature.
+		// Opened server-side on B's bundle, so it reaches the client as ordinary adopted state. A
+		// client-side dialogue would be erased by the very next snapshot — and the offer triggers one
+		// immediately — which is why this asserts it is still open after a settle, not just present
+		// for an instant.
+		//
+		// NOTE: bare identifiers, NOT `window.X`. The bundle's top-level `let` globals live in the
+		// global LEXICAL environment and are not properties of `window`; reading one off `window`
+		// yields undefined forever, a timeout that looks exactly like a broken feature.
 		// @ts-ignore bare let-global
-		await B.waitForFunction(() => KDContextMenu === true, undefined, { timeout: 30_000 });
-		const opened = await B.evaluate(() => {
-			// @ts-ignore — no aiming here: whatever the auto-open left in KDContextX/Y is the input
-			const menu = KDGetContextActions.Game(false, KDContextX, KDContextY, {});
-			(window as any).__peerMenu = { optionActions: menu.optionActions };
+		await B.waitForFunction(() => KDGameData.CurrentDialog === 'KDCoopPeace',
+			undefined, { timeout: 30_000 });
+		await B.waitForTimeout(1500);   // let a few more snapshots land on top of it
+		const dlg = await B.evaluate(() => {
 			// @ts-ignore
-			const me = KDPlayer();
+			const speaker = KDGetSpeaker ? KDGetSpeaker() : null;
+			// @ts-ignore — the option keys KD will render as buttons
+			const opts = Object.keys((KDDialogue.KDCoopPeace || {}).options || {});
 			return {
-				options: menu.options, text: menu.optionText,
 				// @ts-ignore
-				aimed: { x: KinkyDungeonTargetX, y: KinkyDungeonTargetY }, at: { x: me.x, y: me.y },
+				open: KDGameData.CurrentDialog, stage: KDGameData.CurrentDialogStage,
+				options: opts,
+				// The three text keys the dialogue draws. A missing one prints "[NotFound] …" at the
+				// player — the failure this epic shipped twice.
+				// @ts-ignore
+				body: TextGet('rKDCoopPeaceOffer'),
+				// @ts-ignore
+				accept: TextGet('dKDCoopPeace_Accept'),
+				// @ts-ignore
+				refuse: TextGet('dKDCoopPeace_Refuse'),
+				speaker: speaker ? speaker.Enemy.name : null,
 			};
 		});
-		expect(opened.aimed,
-			'A6: the auto-open must aim the menu at the player, in the coords the builder reads')
-			.toEqual(opened.at);
-		expect(opened.options, 'B answers from the same surface — no second UI').toContain('PeaceAccept');
-		expect(opened.options).toContain('PeaceDecline');
-		expect(opened.text.PeaceAccept, 'and the label must be real text, not a missing key')
-			.toContain('A');
+		expect(dlg.open, 'the dialogue must SURVIVE the snapshots that follow the offer')
+			.toBe('KDCoopPeace');
+		expect(dlg.options, 'both answers are options of the dialogue itself').toEqual(['Accept', 'Refuse']);
+		for (const [k, v] of Object.entries({ body: dlg.body, accept: dlg.accept, refuse: dlg.refuse })) {
+			expect(String(v), `text key for "${k}" must resolve`).not.toContain('NotFound');
+			expect(String(v).length, `text key for "${k}" must not be empty`).toBeGreaterThan(0);
+		}
 
-		// ---- 7. B accepts → both sides are at peace (R6/AC3) -------------------------------------
-		expect((await pickOption(B, 'PeaceAccept')).ok).toBe(true);
+		// …and the answer is NOT on the context menu any more (KDM-230 AC4).
+		const bMenu = await ownMenu(B);
+		expect(bMenu.options, 'the submenu entries are gone — the dialogue owns the answer')
+			.not.toContain('PeaceAccept');
+
+		// ---- 7. B accepts through the dialogue → both sides at peace (R6/AC3) --------------------
+		//
+		// Clicking an option runs `KDSendInput("dialogue", …)` (KinkyDungeonDialogue.ts:187), so this
+		// sends exactly what the button sends — a routed GAME input, not a private verb.
+		await B.evaluate(() => {
+			const w = window as any;
+			if (w.__coop) w.__coop.submitted = false;
+			// @ts-ignore
+			KDSendInput('dialogue', { dialogue: 'KDCoopPeace', dialogueStage: 'Accept', click: true });
+		});
 		await A.waitForFunction(() => {
 			const c = (window as any).KDRenderClient && (window as any).KDRenderClient.lastCoop;
 			return !!c && (!c.war || c.war.length === 0);
 		}, undefined, { timeout: 60_000 });
 		expect(await atWar(A), 'A sees peace').toBe(false);
 		expect(await atWar(B), 'and so does B — no split verdict').toBe(false);
+
+		// …and the dialogue is closed on B, not left hanging over a settled question.
+		// @ts-ignore bare let-global
+		await B.waitForFunction(() => KDGameData.CurrentDialog !== 'KDCoopPeace',
+			undefined, { timeout: 30_000 });
 
 		// ---- 8. and the entry is gone again (R2) -------------------------------------------------
 		const atPeace = await ownMenu(A);

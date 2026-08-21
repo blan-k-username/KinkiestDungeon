@@ -1,7 +1,7 @@
 /**
  * tools/mp-server/client/coop-peace.js  (KDM-225)
  *
- * THE PEACE SUBMENU — on the player's OWN tile.
+* THE "OFFER PEACE" ENTRY — on the player's OWN context menu (the ANSWER is a dialogue, KDM-230).
  *
  * A classic (non-module) script sharing the bundle's global scope, loaded after render-client.js.
  * It adds three entries to KD's own context menu and sends the gateway's `mp:` actions; it decides
@@ -24,8 +24,6 @@
 	'use strict';
 
 	var OFFER = 'Peace';
-	var ACCEPT = 'PeaceAccept';
-	var DECLINE = 'PeaceDecline';
 
 	function coopState() {
 		var rc = (typeof window !== 'undefined') ? window.KDRenderClient : null;
@@ -62,25 +60,11 @@
 		var coop = coopState();
 		if (!coop) return menu;
 
-		if (coop.peaceOffer && coop.peaceOffer.from) {
-			var from = String(coop.peaceOffer.from);
-			menu.options.push(ACCEPT);
-			menu.optionText[ACCEPT] = 'Accept peace with ' + from;
-			menu.optionImages[ACCEPT] = 'Talk';
-			menu.optionActions[ACCEPT] = function () {
-				KDContextMenu = false;
-				send({ mp: 'peace.answer', accept: true });
-			};
-
-			menu.options.push(DECLINE);
-			menu.optionText[DECLINE] = 'Refuse ' + from;
-			menu.optionImages[DECLINE] = 'Aggro';
-			menu.optionActions[DECLINE] = function () {
-				KDContextMenu = false;
-				send({ mp: 'peace.answer', accept: false });
-			};
-			return menu;   // answer first: you cannot counter-offer from a menu you owe an answer on
-		}
+		// KDM-230: ANSWERING is no longer here. An offer arrives as KD's own modal dialogue, opened
+		// server-side on this player's bundle, with Accept / Refuse as its options — a submenu entry
+		// was the wrong place for a question you must answer (owner, UAT). Nothing is offered while
+		// one is open: you answer first.
+		if (coop.peaceOffer && coop.peaceOffer.from) return menu;
 
 		// `canOffer` is the SERVER's answer to R1/R2/R3 (at war, and nobody is mid-question). The
 		// client does not re-derive it from `war` — one source of truth for one rule.
@@ -113,50 +97,12 @@
 	}
 
 	/**
-	 * KDM-225 A6 — when an offer ARRIVES, open the answering menu.
-	 *
-	 * D2 says the prompt blocks the turn; D8 puts the answer on the player's own tile. Together those
-	 * would leave a blocked player with nothing on screen telling them why, because nothing opens a
-	 * context menu for them. Opening it on the transition null → set restores the modal behaviour D2
-	 * intended, using the surface D8 already provides — no second UI. Edge-triggered, so a player who
-	 * closes the menu to look around is not fought with.
+	 * KDM-230: A6's forced context-menu open is GONE. It existed because the answer lived on the
+	 * player's own tile and nothing would show it to them; the offer now arrives as KD's own modal
+	 * dialogue, which is blocking by construction — the game itself refuses world
+	 * interaction while one is open. Nothing here has to force a menu, or watch for an edge.
 	 */
-	/**
-	 * Open the menu the way a right-click does.
-	 *
-	 * ⚠️ Setting `KinkyDungeonTargetX/Y` is NOT how you aim it, and a first attempt that did only that
-	 * shipped broken (UAT: the offer arrived, no menu appeared, and the peer was stuck). The draw path
-	 * is `KDDrawGameContextMenu[KinkyDungeonDrawState](true, MouseX, MouseY)`
-	 * (`KinkyDungeonDraw.ts:1139`) → `KDGetContextActions.Game`, which re-derives the target every
-	 * frame from **`KDContextX/KDContextY` as PIXELS** via `KinkyDungeonSetTargetLocation`. Tile coords
-	 * written here are overwritten before anything reads them, so the menu built for whatever tile the
-	 * mouse last pointed at — not the player's own — and our entries never qualified.
-	 *
-	 * So convert the tile to pixels by inverting that function's own formula
-	 * (`KinkyDungeonDraw.ts:3001-3002`), and set `KDContextStage = ""`, which is what the real
-	 * right-click handler stores (`KinkyDungeon.ts:1262`).
-	 */
-	function openOwnMenu() {
-		var me = KDPlayer();
-		if (!me) return false;
-		var grid = KinkyDungeonGridSizeDisplay;
-		KDContextX = (me.x - KinkyDungeonCamX) * grid + grid / 2 + canvasOffsetX;
-		KDContextY = (me.y - KinkyDungeonCamY) * grid + grid / 2 + canvasOffsetY;
-		KDContextStage = '';
-		KDContextMenu = true;
-		return true;
-	}
-
-	var _hadOffer = false;
-	function pump() {
-		install();
-		var coop = coopState();
-		var has = !!(coop && coop.peaceOffer && coop.peaceOffer.from);
-		if (has && !_hadOffer) {
-			try { openOwnMenu(); } catch (e) { /* pre-boot */ }
-		}
-		_hadOffer = has;
-	}
+	function pump() { install(); }
 
 	// The bundle may not be evaluated yet when this script runs, and `KDGetContextActions` is a
 	// bundle-scope `let` — so poll briefly rather than assuming load order. Cheap and bounded.
@@ -165,9 +111,9 @@
 		tries++;
 		if (install() || tries > 200) clearInterval(timer);
 	}, 100);
-	setInterval(pump, 200);
+	setInterval(pump, 1000);   // KDM-230: only re-checks the wrap now; nothing to sample
 
 	if (typeof window !== 'undefined') {
-		window.KDCoopPeace = { install: install, decorate: decorate, pump: pump, openOwnMenu: openOwnMenu };
+		window.KDCoopPeace = { install: install, decorate: decorate, pump: pump };
 	}
 })();

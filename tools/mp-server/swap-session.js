@@ -25,6 +25,7 @@
 
 const { HeadlessHost, KDGAMEDATA_WORLD_KEYS } = require('./headless-host');
 const { PeaceRegistry } = require('./peace');
+const { KD_PEACE_DIALOGUE } = require('./kd-peace-dialogue');
 
 const PARK = { x: 1, y: 1 };
 
@@ -34,6 +35,9 @@ const PARK = { x: 1, y: 1 };
  * ends a war; every other non-empty room type is an optional detour a grudge survives.
  */
 const HUB_ROOM_TYPE = 'JourneyFloor';
+
+/** KDM-230: the name of OUR dialogue, in `kd-peace-dialogue.js`. Named once; matched by it here. */
+const PEACE_DIALOGUE = 'KDCoopPeace';
 
 /**
  * KDM-162: KDGameData fields the CLIENT owns, because only the client can compute them.
@@ -232,6 +236,14 @@ class SwapSession {
 		// KDM-224: and the death gate itself refuses to remove an avatar — the backstop for the ~30
 		// places KD assigns enemy.hp directly, which the damage wrapper above never sees.
 		this.world.installAvatarDeathGuard();
+		// KDM-230: the peace dialogue, and the hook its options call. Registered in the world because
+		// that is where a routed `dialogue` input is applied and therefore where `clickFunction` runs;
+		// the browser is served the SAME source text (demo-server INJECT) so it can draw the buttons.
+		this.world.loadMod(KD_PEACE_DIALOGUE);
+		this.world.eval(`(function(){
+			globalThis.KDCoopPeaceDecide = function (accept) { globalThis.__kdCoopPeaceAnswer = !!accept; };
+			globalThis.__kdCoopPeaceAnswer = undefined;
+		})()`);
 		// KDM-227: baseline for the hub-arrival check. Seeded HERE rather than left undefined so the
 		// room the session STARTS in is not mistaken for an arrival — the game boots on the journey
 		// hub itself (level 0), so the very first turn of every session would otherwise fire a reset.
@@ -381,21 +393,87 @@ class SwapSession {
 				return ui({ peace: true, notify: [peer] });
 			}
 			this._emitEvent(peer, { kind: 'peaceOffer', from: clientId });
+			this._openPeaceDialogue(peer, clientId);
 			this._pushLog(peer, this.world.sendFeedback(
-				`${clientId} offers peace. Answer from your own menu.`, '#88ccff', 10).entries || []);
+				`${clientId} offers peace.`, '#88ccff', 10).entries || []);
 			this._dbg(`PEACE offer ${clientId} -> ${peer}`);
 			return ui({ offered: true, notify: [peer] });
 		}
 
-		if (action.mp === 'peace.answer') {
-			const res = this.rel.answer(clientId, !!action.accept);
-			if (!res.ok) return ui({ changed: false, error: res.why });
-			if (res.peace) this._settlePeace(clientId, res.from);
-			this._dbg(`PEACE ${action.accept ? 'ACCEPTED' : 'DECLINED'} by ${clientId}`);
-			return ui({ peace: !!res.peace, notify: [peer] });
-		}
-
 		return ui({ changed: false, error: `unknown mp action "${action.mp}"` });
+	}
+
+	/**
+	 * KDM-230 — put the offer in front of `target` as KD's own modal dialogue.
+	 *
+	 * Opened SERVER-SIDE, on that player's bundle, and this is not a style choice: `KDStartDialog`
+	 * stores the open dialogue in `KDGameData.CurrentDialog`, which is per-player state the client
+	 * re-adopts from every snapshot. A dialogue opened on the client would be erased by the very next
+	 * state frame — and the offer triggers one immediately (`notify`). Measured in
+	 * `tests/unit/mp-peace-dialogue-probe.spec.ts`: opened this way it reaches the peer's snapshot,
+	 * stays private to them, and survives a resolved turn.
+	 *
+	 * The speaker is the OFFERER's avatar, so the dialogue reads as that player talking — and the
+	 * game's own `SPEAKER` substitution fills in their name.
+	 */
+	_openPeaceDialogue(target, from) {
+		const avatarId = this.avatars.get(from);
+		const bundle = this.bundles.get(target);
+		if (!bundle) return false;
+		this.world.restorePlayer(bundle);
+		const res = this.world.eval(`(function(){
+			var speaker = KDMapData.Entities.find(function(e){ return e.id === ${avatarId | 0}; });
+			try {
+				KDStartDialog('KDCoopPeace', speaker ? speaker.Enemy.name : 'RemotePlayer', false,
+					'', speaker || undefined);
+			} catch (e) { return { err: String(e && e.message || e) }; }
+			return { open: KDGameData.CurrentDialog };
+		})()`);
+		this.bundles.set(target, this.world.capturePlayer());
+		this.world.parkGlobalPlayer(PARK.x, PARK.y);
+		this._dbg(`PEACE dialogue opened for ${target} (${JSON.stringify(res)})`);
+		return res;
+	}
+
+	/** Close it again — on accept, on decline, and whenever the offer is dropped. */
+	_closePeaceDialogue(target) {
+		const bundle = this.bundles.get(target);
+		if (!bundle) return;
+		this.world.restorePlayer(bundle);
+		this.world.eval(`(function(){
+			if (typeof KDGameData !== 'undefined' && KDGameData
+				&& KDGameData.CurrentDialog === 'KDCoopPeace') {
+				if (typeof KDResetDialogue === 'function') KDResetDialogue();
+				else { KDGameData.CurrentDialog = ''; KDGameData.CurrentDialogStage = ''; }
+			}
+		})()`);
+		this.bundles.set(target, this.world.capturePlayer());
+		this.world.parkGlobalPlayer(PARK.x, PARK.y);
+	}
+
+	/**
+	 * KDM-230 — did the input just applied for `clientId` answer a peace dialogue?
+	 *
+	 * The answer arrives as KD's own routed `dialogue` input, so it is applied by the normal input
+	 * path and the option's `clickFunction` runs inside the game. That function sets a flag in the
+	 * world; this reads and clears it. Take-once, so a stale flag cannot answer a later offer.
+	 */
+	_takePeaceAnswer() {
+		try {
+			const v = this.world.eval('(function(){ var v = globalThis.__kdCoopPeaceAnswer; '
+				+ 'globalThis.__kdCoopPeaceAnswer = undefined; return v; })()');
+			return (v === true || v === false) ? v : null;
+		} catch (e) { return null; }
+	}
+
+	/** Settle whatever a just-applied input decided. Shared by the immediate and lockstep paths. */
+	_settlePeaceAnswerFrom(clientId) {
+		const accept = this._takePeaceAnswer();
+		if (accept === null) return false;
+		const res = this.rel.answer(clientId, accept);
+		if (res.ok && res.peace) this._settlePeace(clientId, res.from);
+		this._dbg(`PEACE ${accept ? 'ACCEPTED' : 'DECLINED'} by ${clientId} (via dialogue)`);
+		return true;
 	}
 
 	/**
@@ -424,6 +502,9 @@ class SwapSession {
 	 */
 	_settlePeace(a, b) {
 		this.rel.makePeace(a, b);
+		// KDM-230: the question is answered — take the dialogue off both screens. Harmless when it was
+		// never open (accept via a counter-offer never opens one on the offerer).
+		for (const id of [a, b]) this._closePeaceDialogue(id);
 		for (const id of [a, b]) {
 			const eid = this.avatars.get(id);
 			if (eid == null) continue;
@@ -449,8 +530,20 @@ class SwapSession {
 		const { kdType, data } = this._toInput(clientId, action);
 		if (!kdType) return { advanced: false, kind: 'noop' };
 
+		/*
+		 * KDM-230: OUR OWN dialogue's answer is applied immediately, whatever the classifier thinks of
+		 * `dialogue` in general.
+		 *
+		 * This is not the gateway overruling the game about a game input. The classifier answers "does
+		 * type X consume a turn?" for all of KD's dialogues at once, and its safe default for an
+		 * unlearned type is lockstep — measured: `dialogue` came back `kind:"turn"`, so the answer sat
+		 * waiting for the OTHER player to move before the truce could settle. But this dialogue is
+		 * ours: we wrote both options, and neither advances time. Scoped to `KDCoopPeace` by name, so
+		 * every other dialogue keeps whatever verdict the game earns for it.
+		 */
+		const ourDialogue = kdType === 'dialogue' && data && data.dialogue === PEACE_DIALOGUE;
 		// Known NOT to consume a turn (learned from a real turn, below) → apply it now, exactly once.
-		if (this.inputKind.get(kdType) === 'ui') {
+		if (ourDialogue || this.inputKind.get(kdType) === 'ui') {
 			const bundle = this.bundles.get(clientId);
 			this.world.restorePlayer(bundle);
 			const res = this.world.applyInputObserved(kdType, data) || {};
@@ -458,7 +551,12 @@ class SwapSession {
 			// disagree about what an observation means. A `ui` type that advanced is promoted (and
 			// pinned) here; it is the direction that desynchronises lockstep, so it is never delayed
 			// for corroboration.
-			this._learnInputKind(kdType, res, false);
+			// A forced-immediate action must not teach the classifier anything: we bypassed its verdict,
+			// so an observation from this path is not evidence about `dialogue` in general.
+			if (!ourDialogue) this._learnInputKind(kdType, res, false);
+			// KDM-230: the peace answer IS a `dialogue` input — KD's own option click. Read the verdict
+			// its clickFunction just recorded, while this player is still the one swapped in.
+			const answered = this._settlePeaceAnswerFrom(clientId);
 			const newBundle = this.world.capturePlayer();
 			this.bundles.set(clientId, newBundle);
 			// KDM-186: did this player's own state actually move? The caller uses this to decide between
@@ -470,7 +568,8 @@ class SwapSession {
 			// read of avatar/enemy positions) starts from a different state than it used to.
 			this.world.parkGlobalPlayer(PARK.x, PARK.y);
 			this._noteUnknown(kdType, res);
-			return { advanced: false, kind: 'ui', changed, unknownType: !!res.unknownType, error: res.error || null };
+			return { advanced: false, kind: 'ui', changed, unknownType: !!res.unknownType,
+				error: res.error || null, notify: answered ? this._joined.filter(function(i){ return i !== clientId; }) : undefined };
 		}
 
 		// Everything else — including every type seen for the first time — goes through lockstep. That
@@ -637,7 +736,11 @@ class SwapSession {
 		// KDM-225 R5: a player who owes an answer to a peace offer cannot take their turn until they
 		// give one. This is the ONE choke point for that — `apply()` routes UI-kind actions around
 		// `submit` entirely, so the answer itself is never blocked by this.
-		if (this.rel.owesAnswer(clientId)) {
+		// KDM-230: …except the answer itself. The dialogue option is a routed `dialogue` input, and if
+		// the classifier ever decides that type consumes a turn it would arrive HERE — refused, with
+		// the only action that could clear the block. Exempt it explicitly rather than depend on the
+		// classifier's verdict staying 'ui'.
+		if (this.rel.owesAnswer(clientId) && this._toInput(clientId, action).kdType !== 'dialogue') {
 			this._dbg(`BLOCKED ${clientId}: owes an answer to a peace offer`);
 			return { advanced: false, blocked: 'peace-offer', waitingOn: [clientId] };
 		}
@@ -835,6 +938,8 @@ class SwapSession {
 		this._lastRoomType = room;
 		if (room !== HUB_ROOM_TYPE || prev === HUB_ROOM_TYPE) return;   // presence ≠ arrival
 		this.rel.resetAll();
+		// KDM-230: and take down any peace dialogue the reset just made moot.
+		for (const id of this._joined) this._closePeaceDialogue(id);
 		// …and clear the hostility the GAME holds, not only our verdict: `_isPvP` governs whether the
 		// next turn ARMS the avatars as hostile, it does not undo aggro KD already wrote on them.
 		for (const eid of this.avatars.values()) {
