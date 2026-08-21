@@ -29,7 +29,7 @@
 	window.__KDMP_DEBUG = !/(?:[#&?])nodebug/.test(location.hash + '&' + location.search);
 
 	var coop = window.__coop = {
-		id: id, connected: false, started: false, submitted: false,
+		id: id, connected: false, started: false, submitted: false, blocked: null,
 		lastTick: null, peers: [], status: 'init', route: null,
 		// KDM-163: route-ness of each in-flight send, in order (see submit()).
 		_sentRoute: [],
@@ -676,6 +676,15 @@
 				// a peer has acted and is waiting on US — act so the turn can resolve.
 				var g = m.graceMs ? ' (auto-pass in ' + (Math.round(m.graceMs / 100) / 10) + 's)' : '';
 				setStatus('Co-op ' + id + ': your move — others ready' + g + controlHint());
+			} else if (m.type === 'blocked') {
+				// KDM-225: the server REFUSED this action — it never entered lockstep. Crucially the
+				// opposite of `waiting`: leave `submitted` false so the client keeps accepting input,
+				// or the player is locked out of the very action that would unblock them.
+				coop.submitted = false;
+				coop.blocked = m.reason || 'blocked';
+				setStatus('Co-op ' + id + ': ' + (m.reason === 'peace-offer'
+					? 'a peace offer is waiting — RIGHT-CLICK YOURSELF to accept or refuse'
+					: 'action refused (' + m.reason + ')'));
 			} else if (m.type === 'error') {
 				setStatus('Co-op ' + id + ': error — ' + m.error);
 			}

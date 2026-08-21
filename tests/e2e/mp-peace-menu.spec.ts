@@ -139,10 +139,56 @@ test('offer peace from your own menu; the peer accepts from theirs', async ({ br
 		const asked = await ownMenu(A);
 		expect(asked.options, 'R3: you already asked').not.toContain('Peace');
 
-		// ---- 6. B's own menu carries the answer (D8/A6) ------------------------------------------
-		const asked_B = await ownMenu(B);
-		expect(asked_B.options, 'B answers from the same surface — no second UI').toContain('PeaceAccept');
-		expect(asked_B.options).toContain('PeaceDecline');
+		// ---- 5b. B is REFUSED, not queued — and knows it ----------------------------------------
+		//
+		// UAT bug: a blocked submit came back as `waiting`, which is the client's signal that its
+		// input entered lockstep. The client then set `submitted = true` and suppressed every further
+		// input — so the player could not reach the one action that would unblock them. Every key and
+		// click did nothing while the overlay read "your move — others ready".
+		const refused = await B.evaluate(async () => {
+			const w = window as any;
+			w.__coop.submitted = false;
+			w.__coop.blocked = null;
+			w.__coop.sendAction({ kind: 'wait' });
+			await new Promise((r) => setTimeout(r, 1500));
+			return { submitted: w.__coop.submitted, blocked: w.__coop.blocked };
+		});
+		expect(refused.blocked, 'the refusal must reach the client as a refusal').toBe('peace-offer');
+		expect(refused.submitted,
+			'a refused action must NOT mark the client as having acted — that is the soft-lock')
+			.toBe(false);
+
+		// ---- 6. B's own menu carries the answer, OPENED BY THE OFFER (D8/A6) ---------------------
+		//
+		// Read through the DRAW path with the aim the auto-open left behind — deliberately NOT
+		// re-aiming as `ownMenu()` does. The first implementation set `KinkyDungeonTargetX/Y`, which
+		// `KDGetContextActions.Game` overwrites from `KDContextX/Y` every frame, so the menu never
+		// pointed at the player and no entry appeared. `ownMenu()` sets the pixels itself and so
+		// could not see that bug; this does.
+		// NOTE: bare identifier, NOT `window.KDContextMenu`. The bundle's top-level `let` globals live
+		// in the global LEXICAL environment and are not properties of `window` — reading it off `window`
+		// yields undefined forever, which is a timeout that looks exactly like a broken feature.
+		// @ts-ignore bare let-global
+		await B.waitForFunction(() => KDContextMenu === true, undefined, { timeout: 30_000 });
+		const opened = await B.evaluate(() => {
+			// @ts-ignore — no aiming here: whatever the auto-open left in KDContextX/Y is the input
+			const menu = KDGetContextActions.Game(false, KDContextX, KDContextY, {});
+			(window as any).__peerMenu = { optionActions: menu.optionActions };
+			// @ts-ignore
+			const me = KDPlayer();
+			return {
+				options: menu.options, text: menu.optionText,
+				// @ts-ignore
+				aimed: { x: KinkyDungeonTargetX, y: KinkyDungeonTargetY }, at: { x: me.x, y: me.y },
+			};
+		});
+		expect(opened.aimed,
+			'A6: the auto-open must aim the menu at the player, in the coords the builder reads')
+			.toEqual(opened.at);
+		expect(opened.options, 'B answers from the same surface — no second UI').toContain('PeaceAccept');
+		expect(opened.options).toContain('PeaceDecline');
+		expect(opened.text.PeaceAccept, 'and the label must be real text, not a missing key')
+			.toContain('A');
 
 		// ---- 7. B accepts → both sides are at peace (R6/AC3) -------------------------------------
 		expect((await pickOption(B, 'PeaceAccept')).ok).toBe(true);

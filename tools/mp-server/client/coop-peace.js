@@ -121,20 +121,39 @@
 	 * intended, using the surface D8 already provides — no second UI. Edge-triggered, so a player who
 	 * closes the menu to look around is not fought with.
 	 */
+	/**
+	 * Open the menu the way a right-click does.
+	 *
+	 * ⚠️ Setting `KinkyDungeonTargetX/Y` is NOT how you aim it, and a first attempt that did only that
+	 * shipped broken (UAT: the offer arrived, no menu appeared, and the peer was stuck). The draw path
+	 * is `KDDrawGameContextMenu[KinkyDungeonDrawState](true, MouseX, MouseY)`
+	 * (`KinkyDungeonDraw.ts:1139`) → `KDGetContextActions.Game`, which re-derives the target every
+	 * frame from **`KDContextX/KDContextY` as PIXELS** via `KinkyDungeonSetTargetLocation`. Tile coords
+	 * written here are overwritten before anything reads them, so the menu built for whatever tile the
+	 * mouse last pointed at — not the player's own — and our entries never qualified.
+	 *
+	 * So convert the tile to pixels by inverting that function's own formula
+	 * (`KinkyDungeonDraw.ts:3001-3002`), and set `KDContextStage = ""`, which is what the real
+	 * right-click handler stores (`KinkyDungeon.ts:1262`).
+	 */
+	function openOwnMenu() {
+		var me = KDPlayer();
+		if (!me) return false;
+		var grid = KinkyDungeonGridSizeDisplay;
+		KDContextX = (me.x - KinkyDungeonCamX) * grid + grid / 2 + canvasOffsetX;
+		KDContextY = (me.y - KinkyDungeonCamY) * grid + grid / 2 + canvasOffsetY;
+		KDContextStage = '';
+		KDContextMenu = true;
+		return true;
+	}
+
 	var _hadOffer = false;
 	function pump() {
 		install();
 		var coop = coopState();
 		var has = !!(coop && coop.peaceOffer && coop.peaceOffer.from);
 		if (has && !_hadOffer) {
-			try {
-				var me = KDPlayer();
-				if (me) {
-					KinkyDungeonTargetX = me.x; KinkyDungeonTargetY = me.y;
-					KDContextStage = 'Game';
-					KDContextMenu = true;
-				}
-			} catch (e) { /* pre-boot */ }
+			try { openOwnMenu(); } catch (e) { /* pre-boot */ }
 		}
 		_hadOffer = has;
 	}
@@ -149,6 +168,6 @@
 	setInterval(pump, 200);
 
 	if (typeof window !== 'undefined') {
-		window.KDCoopPeace = { install: install, decorate: decorate, pump: pump };
+		window.KDCoopPeace = { install: install, decorate: decorate, pump: pump, openOwnMenu: openOwnMenu };
 	}
 })();

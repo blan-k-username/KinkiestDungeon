@@ -292,6 +292,20 @@ class WSBridge {
 					}
 					return clientId;
 				}
+				// KDM-225 UAT: a REFUSED action is not a queued one.
+				//
+				// `submit` can now decline outright (a player owing an answer to a peace offer). That
+				// used to fall through to the `waiting` reply below, and `waiting` is what tells the
+				// client "your input entered lockstep" — so the client set `coop.submitted = true` and
+				// then suppressed every further input as already-acted. Combined with the answer prompt
+				// failing to open, the player was soft-locked: every key and click did nothing, and the
+				// overlay cheerfully read "your move — others ready".
+				//
+				// A refusal gets its own message so the client can say why and keep accepting input.
+				if (res.blocked) {
+					this._send(socket, { type: 'blocked', reason: res.blocked });
+					return clientId;
+				}
 				// demo mode: auto-"wait" for any player who hasn't submitted so a single
 				// player's move advances the turn (easy to validate sync solo).
 				if (!res.advanced && this.autoAdvance) {
