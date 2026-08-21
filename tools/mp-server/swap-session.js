@@ -233,6 +233,9 @@ class SwapSession {
 		// can hand it to the victim's own `KinkyDungeonDealDamage` instead of converting avatar hp into
 		// Will with arithmetic KD does not have.
 		this.world.installPeerDamageRecorder();
+		// …and the same treatment for an ally UNTYING a peer: taken from the call, never from a
+		// standing bind-level delta (see installPeerUntieRecorder for what that cost).
+		this.world.installPeerUntieRecorder();
 		// KDM-224: and the death gate itself refuses to remove an avatar — the backstop for the ~30
 		// places KD assigns enemy.hp directly, which the damage wrapper above never sees.
 		this.world.installAvatarDeathGuard();
@@ -968,9 +971,44 @@ class SwapSession {
 	 * that peer's current Will (maxhp = WillMax). Then the actor's stock move/attack/spell runs the
 	 * game's real combat against it — real damage, real text, real defeat/capture.
 	 */
+	/**
+	 * Put a peer's real bondage onto their avatar, as a LEVEL with no items.
+	 *
+	 * KD-101: the avatar must not ACCUMULATE restraint items — its binding slots fill up and the stock
+	 * submenu (`KDGetNPCBindingSlotForItem(...).sgroup`, no null guard) crashes after a few ties. The
+	 * victim keeps the real ties on their own bundle, so the items are cleared every turn.
+	 *
+	 * KDM-199: …and the LEVEL is then mirrored back through the item-free channel, so `KDBoundEffects`
+	 * sees it. Without this the avatar reads as unbound and `KDBoundEffects` returns 0 at its
+	 * `boundLevel` short-circuit.
+	 *
+	 * The scale is the peer's own bondage power (`headless-host.js:775`, the sum of `KDRestraint().power`
+	 * over what they are wearing) — the same number the tie path and the untie path both read, so no
+	 * third scale is invented between them.
+	 */
+	_mirrorPeerBondage(cid, eid, vitals) {
+		this.world.clearAvatarBondage(eid);
+		this.world.setAvatarBondage(eid, (vitals && vitals.bondage) || 0);
+	}
+
 	_armPeerEnemies(actorId) {
 		for (const [cid, eid] of this.avatars.entries()) {
-			if (cid === actorId || !this._isPvP(actorId, cid)) continue;
+			if (cid === actorId) continue;
+			// BONDAGE IS MIRRORED FOR EVERY PEER, AT WAR OR NOT.
+			//
+			// It is not a combat stance — it is what the peer IS wearing, and the actor can see it.
+			// This used to sit inside the PvP-only block below, so in co-op an avatar always read as
+			// unbound: `KDGetPlayerUntieBindAmt` (KinkyDungeonDialogue.ts:2924) returned NaN off the
+			// undefined `boundLevel`, `NaN > 0` was false, and the ally dialogue's `Untie` option was
+			// never offered. That is the UAT report "players cannot help each other to remove bondage".
+			//
+			// It also switches on two of KD's OWN rules about a bound helper, which is the point: a
+			// peer bound past `KDBoundEffects > 3` stops granting ally-help while you struggle
+			// (KinkyDungeonRestraints.ts:1086) and can read as helpless. A hogtied partner being no
+			// use is the game's answer, not ours.
+			const v = this.vitalsOf.get(cid) || {};
+			this._mirrorPeerBondage(cid, eid, v);
+			if (!this._isPvP(actorId, cid)) continue;
 			// KDM-199: ARM THE AVATAR FROM THE PEER, do not reset it to a placeholder.
 			//
 			// This used to set hp = FULL, stun = 0, boundLevel = 0 and then patch the consequences with an
@@ -984,7 +1022,6 @@ class SwapSession {
 			// measurement any more (that was KDM-156; hits come from the recorder), which is what makes
 			// restoring it safe. Floored just above zero: a hp=0 entity reads as DEAD and untargetable,
 			// so the floor is a liveness detail, not a threshold.
-			const v = this.vitalsOf.get(cid) || {};
 			const cur = this.world.getEntityCombat(eid);
 			const full = (cur && cur.maxhp != null && cur.maxhp > 0) ? cur.maxhp : 10;
 			const frac = (v.will != null && v.willMax > 0)
@@ -996,15 +1033,7 @@ class SwapSession {
 			this.world.setAvatarEnemy(eid, hp, full, v.stunTurns || 0);
 			this._dbg(`arm ${cid} hp=${hp.toFixed(2)}/${full} (will=${v.will != null ? v.will.toFixed(1) : "?"}) ` +
 				`stun=${v.stunTurns || 0} bondage=${v.bondage || 0} disabled=${v.disabled}`);
-			// KD-101: the avatar must not ACCUMULATE restraint items — its binding slots fill up and the
-			// stock submenu (KDGetNPCBindingSlotForItem(...).sgroup, no null guard) crashes after a few
-			// ties. Clearing the items stays. The victim keeps the real ties on their own bundle.
-			this.world.clearAvatarBondage(eid);
-			// KDM-199: …but their bondage LEVEL is then mirrored back through the item-free channel, so
-			// KDBoundEffects sees it. Without this the avatar reads as unbound and KDBoundEffects returns
-			// 0 at its boundLevel short-circuit, which is why no peer could ever be tied without the
-			// invented stun.
-			this.world.setAvatarBondage(eid, v.bondage || 0);
+			// (bondage is mirrored above, for every peer — see `_mirrorPeerBondage`.)
 			// KDM-184: …and their own DEFENCES, so the attack that is about to resolve is evaluated
 			// against the real defender's build. KDM-164 gave the victim their resistances, armour and
 			// on-hit events from the moment damage is dealt (KinkyDungeonDealDamage, with them swapped
@@ -1069,7 +1098,11 @@ class SwapSession {
 			let tied = this.tiedOf.get(id);
 			if (!tied) { tied = new Set(); this.tiedOf.set(id, tied); }
 			const newRestraints = restraints.filter((rn) => !tied.has(rn));
-			if (hits.length || newRestraints.length) {
+			// …and the mirror of that: bind level an ally actually untied off this avatar, TAKEN from
+			// the recorder rather than read as a standing delta — same rule as the hits above, and for
+			// the same measured reason (installPeerUntieRecorder).
+			const untied = this.world.takePeerUnties(eid);
+			if (hits.length || newRestraints.length || untied > 0) {
 				this.world.restorePlayer(this.bundles.get(id));   // swap victim in once for both effects
 				for (const h of hits) {
 					// The victim is in the player slot, so this is KD's REAL player-damage pipeline
@@ -1082,6 +1115,16 @@ class SwapSession {
 					this._harvestFloaters(id);
 					this._dbg(`reconcile ${id} real damage ${h.damage} ${h.type}: will ` +
 						`${before != null ? before.toFixed(2) : '?'} -> ${(this.world.getVitals().will ?? 0).toFixed(2)}`);
+				}
+				if (untied > 0) {
+					// The victim is swapped in, so this is the game's REAL removal path on their own
+					// restraints, with their events and messages — the mirror of the tie below.
+					const u = this.world.untieRestraints(untied, eid);
+					// A freed item must leave `tied`, or the de-dup above would silently swallow a later
+					// re-tie of the same restraint: it would be "already mirrored" forever.
+					for (const rname of u.removed || []) tied.delete(rname);
+					this._dbg(`reconcile ${id} untie -${untied.toFixed(2)} power: removed ` +
+						`${JSON.stringify(u.removed)} progressed ${JSON.stringify(u.progressed)}`);
 				}
 				for (const rname of newRestraints) {
 					// mirror the tie onto the victim's real player via the game's real KinkyDungeonAddRestraint

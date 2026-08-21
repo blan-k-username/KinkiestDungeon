@@ -989,6 +989,56 @@ class HeadlessHost {
 		})()`) || { shockwaves: [], sounddesc: [] };
 	}
 
+	/**
+	 * Record every untie performed on a peer avatar — the sibling of `installPeerDamageRecorder`.
+	 *
+	 * WHY A RECORDER AND NOT A LEVEL DELTA. The obvious reading of "someone untied this peer" is the
+	 * drop in the avatar's `boundLevel` since it was armed. That is wrong for the same reason KDM-164
+	 * gave up on the hp delta: the avatar is a live entity in a running world, and a standing delta
+	 * picks up everything ELSE that moves it. Measured — a bound avatar sheds bind level on its own
+	 * every turn, so every quiet turn read as an untie and quietly stripped the peer's real
+	 * restraints (`mp-slow-per-player`: a hobbled player walked away unslowed).
+	 *
+	 * So the untie is taken from the CALL, not from the state: the amount is what `KDUntieEnemy`
+	 * actually removed, on an entity that is actually an avatar, at the moment it happened. Nothing
+	 * else can forge it, and a quiet turn records nothing at all.
+	 *
+	 * WRAP_CONVENTION: sentinel-gated, `_prev` captured in closure and called first.
+	 */
+	installPeerUntieRecorder() {
+		return this.eval(`(function(){
+			if (typeof KDUntieEnemy !== 'function') return { ok: false, error: 'no KDUntieEnemy' };
+			if (KDUntieEnemy.__kdPeerUntie) return { ok: true, already: true };
+			var _untie = KDUntieEnemy;
+			KDUntieEnemy = function (enemy) {
+				var before = (enemy && enemy.boundLevel) || 0;
+				var res = _untie.apply(this, arguments);
+				var nm = (enemy && enemy.Enemy && enemy.Enemy.name) || '';
+				if (enemy && enemy.id != null && nm.indexOf('RemotePlayer') === 0) {
+					var removed = before - ((enemy.boundLevel) || 0);
+					if (removed > 0) {
+						var w = KDUntieEnemy;
+						if (!w.__unties) w.__unties = {};
+						w.__unties[enemy.id] = (w.__unties[enemy.id] || 0) + removed;
+					}
+				}
+				return res;
+			};
+			KDUntieEnemy.__kdPeerUntie = 1;
+			KDUntieEnemy.__unties = {};
+			return { ok: true };
+		})()`);
+	}
+
+	/** Take (and clear) the bind level untied off one peer avatar this turn. Take-once, like the hits. */
+	takePeerUnties(entityId) {
+		return this.eval(`(function(){
+			var w = KDUntieEnemy, k = ${entityId | 0};
+			if (!w || !w.__unties || !w.__unties[k]) return 0;
+			var out = w.__unties[k]; delete w.__unties[k]; return out;
+		})()`) || 0;
+	}
+
 	takePeerHits(entityId) {
 		return this.eval(`(function(){
 			var w = KinkyDungeonDamageEnemy, k = ${entityId | 0};
@@ -1023,6 +1073,86 @@ class HeadlessHost {
 			if (!def) return { added: 0, count: KinkyDungeonAllRestraint().length, error: 'no restraint def: ' + ${JSON.stringify(name)} };
 			var added = KinkyDungeonAddRestraint(def, 0, true);
 			return { added: added, count: KinkyDungeonAllRestraint().length };
+		})()`);
+	}
+
+	/**
+	 * Spend `amount` of bondage POWER on the swapped-in player's worn restraints — the untie half of
+	 * `addRestraint`, and what an ally's `Untie` on a peer avatar has to mean for a PLAYER victim.
+	 *
+	 * WHY THIS SHAPE. KD has two bondage models: an NPC carries a bind LEVEL (`boundLevel`, what
+	 * `KDUntieEnemy` decrements), a player wears restraint ITEMS with `struggleProgress`. Nothing in
+	 * the game bridges them, because in single player nobody ever unties the player. So the untie is
+	 * denominated in the ONE unit both sides already use — bondage power, `KDRestraint().power`, the
+	 * same sum `getVitals().bondage` reports and `_mirrorPeerBondage` puts on the avatar. Removing X
+	 * power of bondage is X/power of the way through a restraint of that power. No third scale.
+	 *
+	 * Completion goes through the game's own `KinkyDungeonRemoveRestraint`, with the untier passed as
+	 * `Remover` (the stock parameter for "someone else took this off"), so the removal fires KD's own
+	 * events and messages — exactly as the tie path uses the stock `KinkyDungeonAddRestraint`.
+	 *
+	 * Cheapest first: a small budget still frees the easiest binding rather than being spread so thin
+	 * that nothing ever comes off.
+	 *
+	 * KNOWN LIMITATION — protected bondage still COUNTS toward the amount KD offers to untie, so
+	 * choosing Untie on a peer wearing only locked or cursed gear spends the turn and frees nothing.
+	 * KD's own answer is `helpImmune` (`KDGetPlayerUntieBindAmt` subtracts those channels,
+	 * KinkyDungeonDialogue.ts:2931), but NO stock `KDSpecialBondage` type sets it — the one that did
+	 * is commented out — so using it would mean inventing a `specialBoundLevel` key, and that is a
+	 * road already travelled: `setAvatarBondage` below documents an invented key ("MPPeer") crashing
+	 * the client outright, because `KDSpecialBondage[key]` is indexed UNGUARDED on the draw path.
+	 * A wasted click is a far smaller cost than a crash, so the amount stays honest-but-generous and
+	 * this method is the thing that refuses.
+	 */
+	untieRestraints(amount, removerEntityId) {
+		const budget = Number(amount) || 0;
+		if (!(budget > 0)) return { removed: [], progressed: [], protectedItems: [], spent: 0 };
+		return this.eval(`(function(){
+			var budget = ${budget};
+			var rid = ${removerEntityId | 0};
+			var remover = rid ? KDMapData.Entities.find(function(en){ return en.id === rid; }) : undefined;
+			var worn = KinkyDungeonAllRestraint().slice();
+			worn.sort(function(a, b){
+				return ((KDRestraint(a) || {}).power || 0) - ((KDRestraint(b) || {}).power || 0);
+			});
+			var removed = [], progressed = [], protectedItems = [], spent = 0;
+			for (var i = 0; i < worn.length && budget > 0; i++) {
+				var it = worn[i];
+				var def = KDRestraint(it);
+				if (!def || !def.Group) continue;
+				// PROTECTED BONDAGE IS NOT AN ALLY'S TO REMOVE.
+				//
+				// KD's own untie is documented "not including protected bondage"
+				// (KinkyDungeonDialogue.ts:2924): it subtracts the bind level backed by real items and
+				// anything flagged helpImmune, and runs with includeUnlocked = true. A friend loosens
+				// what is merely tied on. A LOCK wants a key or a pick and a CURSE cannot be taken off
+				// at all — neither is something being untied can reach, so the budget skips them
+				// rather than spending itself on something it must not finish.
+				if (it.lock) { protectedItems.push({ name: it.name, why: 'locked', lock: it.lock }); continue; }
+				if (typeof KDGetCurse === 'function' && KDGetCurse(it)) {
+					protectedItems.push({ name: it.name, why: 'cursed' });
+					continue;
+				}
+				var power = def.power || 1;
+				if (!it.struggleProgress) it.struggleProgress = 0;
+				// power still standing between this item and coming off
+				var need = Math.max(0, (1 - it.struggleProgress - (it.cutProgress || 0))) * power;
+				var pay = Math.min(budget, need);
+				if (pay <= 0) continue;
+				it.struggleProgress = Math.min(1, it.struggleProgress + pay / power);
+				budget -= pay; spent += pay;
+				if (it.struggleProgress + (it.cutProgress || 0) >= 1) {
+					KinkyDungeonRemoveRestraint(def.Group, false, false, false, false, false, remover);
+					removed.push(it.name);
+				} else {
+					progressed.push({ name: it.name, struggleProgress: it.struggleProgress });
+				}
+			}
+			// The struggle-group cache describes the worn set, so it has to follow it. (A stale cache
+			// here is what crashed KDDrawStruggleGroups — see UPSTREAM_ISSUES.md #3.)
+			if (typeof KinkyDungeonUpdateStruggleGroups === 'function') KinkyDungeonUpdateStruggleGroups();
+			return { removed: removed, progressed: progressed, protectedItems: protectedItems,
+				spent: spent, count: KinkyDungeonAllRestraint().length };
 		})()`);
 	}
 
