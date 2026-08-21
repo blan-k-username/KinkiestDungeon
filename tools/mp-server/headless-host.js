@@ -997,6 +997,19 @@ class HeadlessHost {
 		})()`) || [];
 	}
 
+	/**
+	 * KDM-230: how many hits are recorded against this avatar, WITHOUT consuming them.
+	 *
+	 * `takePeerHits` is take-once by design (a hit may be charged to the victim exactly once), so it
+	 * cannot also answer "was this avatar attacked this turn?" for a second caller. This peeks.
+	 */
+	peekPeerHits(entityId) {
+		return this.eval(`(function(){
+			var w = KinkyDungeonDamageEnemy, k = ${entityId | 0};
+			return (w && w.__hits && w.__hits[k]) ? w.__hits[k].length : 0;
+		})()`) || 0;
+	}
+
 	/** Deal damage to THIS instance's player (a PvP hit landing on this instance). */
 	dealDamage(amount, type = 'pain') {
 		this.eval(`KinkyDungeonDealDamage({ damage: ${Number(amount) || 0}, type: ${JSON.stringify(type)} })`);
@@ -1320,8 +1333,18 @@ class HeadlessHost {
 			} else {
 				e.hostile = 0;
 				e.rage = 0;
+				// …and give the avatar its FACTION back. setAvatarEnemy stamps faction='Enemy' onto the
+				// world entity when arming a PvP peer, and that stamp is sticky: clearing hostile alone
+				// left KDHostile true through the FACTION relation, so a peer stayed an attackable,
+				// bindable enemy after a truce (measured, UAT round 3). Deleting the override restores
+				// the def own faction ('Player') instead of hard-coding one here.
+				// NOTE: no backticks in this comment — it lives inside a template literal, and one would
+				// terminate the payload (see reference: backtick-in-template-literal, 3rd recurrence).
+				delete e.faction;
+				delete e.ceasefire;
 			}
-			return { hostile: e.hostile || 0, rage: e.rage || 0 };
+			return { hostile: e.hostile || 0, rage: e.rage || 0,
+				faction: (typeof KDGetFaction === 'function') ? KDGetFaction(e) : e.faction };
 		})()`);
 	}
 

@@ -233,4 +233,72 @@ describe('KDM-225 — peace, at the session seams', () => {
 		expect(posOf('B'), "B must still be B — not handed the offerer's state").toEqual({ x: 21, y: 22 });
 		expect(posOf('A'), 'and A must still be A').toEqual({ x: 11, y: 12 });
 	});
+
+	/**
+	 * UAT round 3 (KDM-230): "i have accepted … but still can attack and tie".
+	 *
+	 * Peace was clearing `hostile`/`rage` and nothing else, but `_armPeerEnemies` stamps
+	 * `e.faction = 'Enemy'` onto the WORLD entity (`setAvatarEnemy`), and that stamp is sticky.
+	 * `KDHostile` then stayed true through the FACTION relation, so after a truce the peer was still
+	 * an enemy to every predicate the game asks — attackable, and bindable once worn down.
+	 *
+	 * The oracle is the game's own verdict on the entity the client holds, not our `_isPvP` flag:
+	 * `_isPvP` was already false while all of this was true.
+	 */
+	describe('AC3 — peace makes the peer a non-enemy again, in KD\'s own terms', () => {
+		/** KD's verdicts for B's avatar, evaluated on the object A's client receives. */
+		function verdicts() {
+			const ent = ((s.snapshotFor('A').map || {}).Entities || [])
+				.find((e: any) => e.id === s.avatars.get('B'));
+			if (!ent) return { missing: true } as any;
+			s.world.restorePlayer(s.bundles.get('A'));
+			const v = s.world.eval('(function(){ var e = ' + JSON.stringify(ent) + ';'
+				+ ' return { faction: (typeof KDGetFaction === "function") ? KDGetFaction(e) : e.faction,'
+				+ '   hostile: KDHostile(e), allied: KDAllied(e),'
+				+ '   aggressive: KinkyDungeonAggressive(e) }; })()');
+			s.world.parkGlobalPlayer(1, 1);
+			return v;
+		}
+
+		it('undoes the Enemy faction the arming stamped on, not just the hostile flag', () => {
+			s._armPeerEnemies('A');
+			const war = verdicts();
+			expect(war.faction, 'precondition: arming made the peer an Enemy').toBe('Enemy');
+			expect(war.hostile, 'precondition: and hostile to KD').toBeTruthy();
+
+			s.apply('A', { mp: 'peace.offer' });
+			answer(s, 'B', true);
+
+			const peace = verdicts();
+			expect(peace.faction, 'the Enemy stamp must be lifted').not.toBe('Enemy');
+			// Falsy, not `=== false`: with no second entity KDHostile's last clause is `(enemy2 && …)`,
+			// so a non-hostile answer arrives as `undefined`. What every caller does with it is the same.
+			expect(peace.hostile, 'KDHostile — what every attack path consults — must be falsy').toBeFalsy();
+			expect(peace.allied, 'and the peer reads as an ally again').toBe(true);
+			expect(peace.aggressive, 'so nothing treats them as a target').toBeFalsy();
+		});
+
+		/**
+		 * The other half: a hit that never sets `hostile` (a spell, an AOE) would otherwise drain the
+		 * victim's Will while the pair was still recorded as friends. You cannot hurt someone and stay
+		 * at peace.
+		 */
+		it('a hit landing while at peace re-opens the war instead of passing silently', () => {
+			s._armPeerEnemies('A');
+			s.apply('A', { mp: 'peace.offer' });
+			answer(s, 'B', true);
+			expect(s._isPvP('A', 'B'), 'precondition: at peace').toBe(false);
+
+			const eid = s.avatars.get('B');
+			s.world.eval(`(function(){
+				var e = KDMapData.Entities.find(function(x){ return x.id === ${eid}; });
+				if (e) KinkyDungeonDamageEnemy(e, { damage: 3, type: 'crush' });
+			})()`);
+			s.submit('A', { kind: 'wait' });
+			s.submit('B', { kind: 'wait' });
+
+			expect(s._isPvP('A', 'B'),
+				'damage without aggro must still break the truce, not pass unnoticed').toBe(true);
+		});
+	});
 });

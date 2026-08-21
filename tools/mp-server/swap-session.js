@@ -1040,7 +1040,11 @@ class SwapSession {
 			// gateway records the relationship the game already decided, and classifies nothing.
 			//
 			// Two players ⇒ the attacker is unambiguous. Attribution for a third player is KDM-226's.
-			if (ec && (ec.hostile > 0 || ec.rage > 0)) {
+			// …and damage counts too. KD's aggro flag covers the sneak and the bump, but a spell or an
+			// AOE can wound a peer without ever setting `hostile` — at peace that would drain their
+			// Will silently, with the pair still recorded as friends. You cannot hurt someone and stay
+			// at peace: any hit on their avatar re-opens the war, which is also the door AC6 wants.
+			if (ec && (ec.hostile > 0 || ec.rage > 0 || (this.world.peekPeerHits(eid) || 0) > 0)) {
 				for (const other of this._joined) {
 					if (other !== id && !this.rel.atWar(id, other)) {
 						this.rel.declareWar(id, other);
