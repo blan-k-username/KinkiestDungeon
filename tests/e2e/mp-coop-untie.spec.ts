@@ -193,26 +193,27 @@ test('a co-op player unties their partner: menu → dialogue → the partner\'s 
 				.toBe(true);
 		}
 
-		// ---- 5b. KNOWN DEFECT, pinned so it cannot be forgotten (KDM-232) ------------------------
+		// ---- 5b. AC1 of KDM-232 — the body NAMES the partner -------------------------------------
 		//
-		// The body line comes out as "(You approach )" — the partner's name is BLANK, not missing a
-		// key. Ours, not KD's: `spawnAvatar` gives the avatar a `CustomName` so the client draws a
-		// name plate, and `KDDrawDialogue` reads that as "this speaker is NAMED", which sends it to
-		// `KDGetName(id)` instead of the `Name<def>` key — and `KDGetName`
-		// (`KinkyDungeonEnemies.ts:2446`) returns "" for anything that is neither in
-		// `KDGameData.Collection` nor a persistent NPC. So the one line naming your partner names
-		// nobody.
+		// This used to be pinned as a known defect: the line came out `"(You approach )"`, naming
+		// nobody. `spawnAvatar` gives the avatar a `CustomName` so the client draws a name plate, and
+		// `KDDrawDialogue` (`KinkyDungeonDialogue.ts:142-146`) reads that as "this speaker is NAMED",
+		// which sends it to `KDGetName(id)` instead of the `Name<def>` key — and `KDGetName`
+		// (`KinkyDungeonEnemies.ts:2446`) answers "" for anything neither in `KDGameData.Collection`
+		// nor a persistent NPC. Fixed in `render-client.js` by restoring the `CustomName` fallback KD
+		// itself uses in `KDEnemyName` (`:2437`); the mechanism and its blast-radius controls live in
+		// `tests/e2e/mp-peer-name-dialogue.spec.ts`, which needs no co-op boot.
 		//
-		// Not fixed here: the remedy touches how every avatar is named (plates, combat text), which is
-		// wider than this task. Pinned as the CURRENT behaviour so the fix has a test to flip.
-		//
-		// Asserted as a VALUE, not as the absence of the name: an absence oracle would read green just
-		// as happily if the body had stopped being painted at all.
+		// Asserted as a VALUE, not as the absence of a blank: an absence oracle would read green just
+		// as happily if the body had stopped being painted at all. And the expected name comes from
+		// the REGISTERED text key (`expected.name`, resolved above from `Name<def>` — which the server
+		// derives from the join label), NOT from the entity's `CustomName`. That matters: `CustomName`
+		// is the field the fix reads, so expecting it here would be the fix checking its own homework.
+		// Two independently-sourced spellings of the partner's name must agree.
 		const body = drawn.texts.find((t) => t.indexOf('(You approach') >= 0);
 		expect(body, 'the ally-dialogue body was painted').toBeTruthy();
-		expect(body, 'KDM-232 (known): the partner\'s name comes out blank in the dialogue body — '
-			+ 'flip this assertion to expect the name when that is fixed')
-			.toBe('(You approach )');
+		expect(body, 'KDM-232 AC1: the one line that names your partner must name them')
+			.toBe(`(You approach ${expected.name})`);
 
 		// ---- 6. AC3 — start a war and the way in is shut ----------------------------------------
 		//

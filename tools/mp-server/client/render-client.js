@@ -154,6 +154,57 @@
 	}
 
 	/**
+	 * KDM-232: give KD's own name getter back the fallback it already has everywhere else, so a peer
+	 * avatar names ITSELF.
+	 *
+	 * The symptom was the ally dialogue body painting as "(You approach )" — your partner named as
+	 * nobody. `KDDrawDialogue` (`KinkyDungeonDialogue.ts:142-146`) treats `CustomName` as a PREDICATE
+	 * ("this speaker is named") and then resolves the display name through `KDGetName(id)` **alone**.
+	 * Every other name path in the game has a three-step fallback — `KDEnemyName`
+	 * (`KinkyDungeonEnemies.ts:2437`) is `CustomName || KDGetName(id) || TextGet("Name" + …)` — and
+	 * our avatar satisfies the first and third links of it. `KDGetName` (`:2446`) alone answers `""`
+	 * for anything that is neither in `KDGameData.Collection` nor a persistent NPC, and a live
+	 * player's avatar is neither. Being "named" ALSO strips the redundant article, which is why the
+	 * line lost "the" as well and read "(You approach )" rather than "(You approach the )".
+	 *
+	 * ── WHY HERE, AND ONLY HERE ───────────────────────────────────────────────────────────────────
+	 * The dialogue body is composed at DRAW time, on the client, every frame; the headless server
+	 * never draws. And this file is where the peer-name concern already lives —
+	 * `ensureAvatarDefsFor` above derives `addTextKey('Name' + nm, en.CustomName || nm)` from exactly
+	 * the field this wrap reads, so the same fact stays in one place. It is deliberately NOT in
+	 * `coop-bootstrap.js`: the defect is not co-op-specific — any client adopting a snapshot with a
+	 * `CustomName` entity hits it, the thin-client path included.
+	 *
+	 * ── WHY IT IS SAFE TO WRAP A GETTER KD CALLS FROM MANY PLACES ─────────────────────────────────
+	 * The wrap can only ever turn `""` into a name: the original is called FIRST and any non-empty
+	 * answer is returned untouched, so no Collection or persistent-NPC name changes, and an entity
+	 * with no `CustomName` still answers `""`. Both are asserted as controls in
+	 * `tests/e2e/mp-peer-name-dialogue.spec.ts` — reordering this to consult `CustomName` first would
+	 * silently rename every captured NPC, so it is pinned rather than trusted.
+	 *
+	 * Bare assignment is correct: `KDGetName` is a top-level function declaration, so unlike the
+	 * `let`-globals this file assigns through a direct eval, it is reachable by bare name from a
+	 * classic script sharing the game's scope. `KDLookupID` (`:8382`) is KD's own id→entity resolver
+	 * and is `KDIDCache`-backed — the cheap choice for something a draw path calls every frame.
+	 * `allowPlayer: false` keeps `KDGetName(-1)` answering exactly what it answers today.
+	 */
+	function installPeerNameFallback() {
+		if (typeof KDGetName !== 'function' || KDGetName.__kdClientGuard) return;
+		var _origGetName = KDGetName;
+		KDGetName = function (id) {
+			// eslint-disable-next-line prefer-rest-params
+			var name = _origGetName.apply(this, arguments);
+			if (name) return name;   // Collection / persistent NPC — the game's own answer, untouched
+			try {
+				var e = (typeof KDLookupID === 'function') ? KDLookupID(id, false) : null;
+				if (e && e.CustomName) return e.CustomName;
+			} catch (err) { /* a name lookup must never break a frame */ }
+			return name;
+		};
+		KDGetName.__kdClientGuard = true;
+	}
+
+	/**
 	 * KDM-162: adopt this player's own STATE BUNDLE — the browser analogue of
 	 * HeadlessHost.restorePlayer.
 	 *
@@ -376,6 +427,7 @@
 		apply: function (s) {
 			if (!s) return { ok: false, error: 'no snapshot' };
 			ensureAvatarDef();   // so peer avatars (RemotePlayer) re-link to a real def
+			installPeerNameFallback();   // KDM-232 — so a peer avatar names itself in the ally dialogue
 			// KDM-162: adopt this player's own state FIRST, so the explicit assignments below (which
 			// carry snapshot-time render fixups like snapped visual_x/visual_y) still have the last word.
 			KDRenderClient.lastBundleFields = adoptBundle(s.bundle);
