@@ -28,6 +28,7 @@ const { WSBridge } = require('./ws-bridge');
 const { KD_CODEC } = require('./kd-codec');
 const { KD_DELTA_BROWSER } = require('./kd-delta');
 const { KD_PEACE_DIALOGUE_BROWSER } = require('./kd-peace-dialogue');
+const { KD_ABSENT_RESET_BROWSER } = require('./kd-absent-reset');
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 // Default :8090 (not :8080 — that's the stock `npm run serve` / kdrunner port).
@@ -58,13 +59,28 @@ const DELTA_ROUTE = '/mp/kd-delta.js';
 // KDM-230: the peace-offer DIALOGUE definition. Same two-runtime rule as the codec and the delta —
 // the server evals this exact text into the world, the browser is served it as a script.
 const PEACE_DLG_ROUTE = '/mp/kd-peace-dialogue.js';
-const DELTA_BODY = KD_DELTA_BROWSER;
+// The "absent from the bundle ⇒ back to its default" rule, shared with the host for the same reason.
+const ABSENT_RESET_ROUTE = '/mp/kd-absent-reset.js';
 const CODEC_BODY = `${KD_CODEC}\n;(typeof window !== 'undefined' ? window : globalThis).KDCodec = ` +
 	`{ kdEnc: kdEnc, kdDec: kdDec, kdSer: kdSer };\n`;
+
+/**
+ * The synthetic script routes: generated from the server's own source text, never files on disk (a
+ * real file under `client/` would be a second copy, free to go stale against the host's).
+ *
+ * One table rather than a route-const + body-const + handler-block per entry — that shape was
+ * repeated verbatim three times and every new shared module cloned it again.
+ */
+const SYNTHETIC_ROUTES = {};
+SYNTHETIC_ROUTES[CODEC_ROUTE] = CODEC_BODY;
+SYNTHETIC_ROUTES[DELTA_ROUTE] = KD_DELTA_BROWSER;
+SYNTHETIC_ROUTES[PEACE_DLG_ROUTE] = KD_PEACE_DIALOGUE_BROWSER;
+SYNTHETIC_ROUTES[ABSENT_RESET_ROUTE] = KD_ABSENT_RESET_BROWSER;
 
 // Scripts injected just before </body> in index.html (in order).
 const INJECT = [
 	CODEC_ROUTE,                    // must precede render-client.js — it consumes window.KDCodec
+	ABSENT_RESET_ROUTE,             // must precede render-client.js — it consumes window.KDAbsentReset
 	DELTA_ROUTE,                    // must precede coop-bootstrap.js — it consumes window.KDDelta
 	'/tools/mp-server/client/render-client.js',
 	'/tools/mp-server/client/coop-bootstrap.js',
@@ -211,19 +227,9 @@ function safeJoin(root, urlPath) {
 function serveStatic(req, res) {
 	let urlPath = req.url.split('?')[0].split('#')[0];
 	if (urlPath === '/' || urlPath === '') urlPath = '/index.html';
-	if (urlPath === CODEC_ROUTE) {                       // KDM-162: generated, not on disk
+	if (Object.prototype.hasOwnProperty.call(SYNTHETIC_ROUTES, urlPath)) {   // generated, not on disk
 		res.writeHead(200, { 'Content-Type': MIME['.js'], 'Cache-Control': 'no-cache' });
-		res.end(CODEC_BODY);
-		return;
-	}
-	if (urlPath === DELTA_ROUTE) {                       // KDM-206: same, for the delta merge
-		res.writeHead(200, { 'Content-Type': MIME['.js'], 'Cache-Control': 'no-cache' });
-		res.end(DELTA_BODY);
-		return;
-	}
-	if (urlPath === PEACE_DLG_ROUTE) {                   // KDM-230: same, for the peace dialogue
-		res.writeHead(200, { 'Content-Type': MIME['.js'], 'Cache-Control': 'no-cache' });
-		res.end(KD_PEACE_DIALOGUE_BROWSER);
+		res.end(SYNTHETIC_ROUTES[urlPath]);
 		return;
 	}
 	const filePath = safeJoin(REPO_ROOT, urlPath);

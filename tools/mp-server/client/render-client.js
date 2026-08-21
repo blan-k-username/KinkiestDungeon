@@ -209,12 +209,71 @@
 		KinkyDungeonPlayerEntity: ['visual_stamina', 'visual_mana'],
 	};
 
+	/*
+	 * "ABSENT FROM THE BUNDLE ⇒ BACK TO ITS DEFAULT" — the client half of the swap rule.
+	 *
+	 * The capture records a watched global only while it DIFFERS from the post-init baseline
+	 * (headless-host.js:1862), so a global that returns to its default DROPS OUT of the bundle.
+	 * Absence is not "unchanged", it is "back to the default", and the host already reads it that
+	 * way (_restoreGlobals, headless-host.js:2039-2048). This side used to assign only the keys that
+	 * were PRESENT, so a vanished key kept its old value for the rest of the session.
+	 *
+	 * Measured in UAT as a crash: after struggling free, `KinkyDungeonStruggleGroups` went back to []
+	 * server-side (hence out of the bundle) while the client kept ["ItemHands"];
+	 * `KinkyDungeonGetRestraintItem` then returned null for that stale group and KDDrawStruggleGroups
+	 * dereferenced it unguarded on hover (KinkyDungeonHUD.ts:3511).
+	 *
+	 * `_bundleDefaults` holds the pristine post-init value of every global a bundle has ever
+	 * mentioned, recorded the FIRST time it is mentioned: before that moment this client has never
+	 * written the name, so what it holds is by definition the default. That is why no defaults are
+	 * shipped over the wire — the browser runs the same out/main.js and the same init, so it already
+	 * has them, and sending ~2300 of them at boot would cost megabytes to say the same thing.
+	 * Stored in the CODEC's serialised form, exactly as the host stores `_baselineValues`, so a Map
+	 * or Set global comes back as a Map or Set rather than a bare object.
+	 *
+	 * `_bundleDirty` mirrors the host's other guard: only names believed to hold a non-default value
+	 * are considered, so a steady state costs one empty loop rather than ~2300 assignments.
+	 */
+	var _bundleDefaults = {};
+	var _bundleDirty = {};
+
 	var _adoptVal;                       // transfer slot for the direct eval below
 	function adoptBundle(b) {
 		if (!b) return 0;
 		var codec = (typeof window !== 'undefined' && window.KDCodec) ? window.KDCodec : null;
 		var dec = (codec && codec.kdDec) ? codec.kdDec : function (v) { return v; };
+		var ser = (codec && codec.kdSer) ? codec.kdSer : function (v) { return JSON.stringify(v); };
 		var n = 0;
+
+		/**
+		 * Assign one global from a captured value. Shared by adoption and by the reset pass below so
+		 * the two cannot decode differently — the same reason the host has a single `assign`.
+		 * COPY, never alias: `v` belongs to the bundle (or to `_bundleDefaults`), and both outlive
+		 * this call; handing the game a reference lets it mutate our stored copy in place.
+		 */
+		function assignGlobal(name, v) {
+			// A __kdT tag only ever sits at the TOP level, so this O(1) test is enough.
+			_adoptVal = (v && typeof v === 'object')
+				? (v.__kdT ? dec(v) : JSON.parse(JSON.stringify(v)))
+				: v;
+			// KDM-196: carry over the client-owned animation accumulators the server has no
+			// value for, so the wholesale replace below does not restart the bar every snapshot.
+			var owned = CLIENT_OWNED_ENTITY_FIELDS[name];
+			if (owned && _adoptVal && typeof _adoptVal === 'object') {
+				// eslint-disable-next-line no-eval
+				var prev = eval(name);
+				if (prev && typeof prev === 'object') {
+					for (var oi = 0; oi < owned.length; oi++) {
+						if (_adoptVal[owned[oi]] === undefined && prev[owned[oi]] !== undefined) {
+							_adoptVal[owned[oi]] = prev[owned[oi]];
+						}
+					}
+				}
+			}
+			// eslint-disable-next-line no-eval
+			eval(name + ' = _adoptVal;');
+		}
+
 		if (b.gameData && typeof KDGameData !== 'undefined' && KDGameData) {
 			for (var gk in b.gameData) {
 				if (!Object.prototype.hasOwnProperty.call(b.gameData, gk)) continue;
@@ -229,28 +288,36 @@
 				var v = g[name];
 				if (v === undefined) continue;
 				try {
-					// A __kdT tag only ever sits at the TOP level, so this O(1) test is enough.
-					_adoptVal = (v && typeof v === 'object')
-						? (v.__kdT ? dec(v) : JSON.parse(JSON.stringify(v)))
-						: v;
-					// KDM-196: carry over the client-owned animation accumulators the server has no
-					// value for, so the wholesale replace below does not restart the bar every snapshot.
-					var owned = CLIENT_OWNED_ENTITY_FIELDS[name];
-					if (owned && _adoptVal && typeof _adoptVal === 'object') {
+					// Record this name's pristine value BEFORE the first write to it — that value is
+					// the default a later absence must restore. Unserialisable globals record nothing
+					// and are then skipped by the rule, same guard as the host's `defs` check.
+					if (!Object.prototype.hasOwnProperty.call(_bundleDefaults, name)) {
 						// eslint-disable-next-line no-eval
-						var prev = eval(name);
-						if (prev && typeof prev === 'object') {
-							for (var oi = 0; oi < owned.length; oi++) {
-								if (_adoptVal[owned[oi]] === undefined && prev[owned[oi]] !== undefined) {
-									_adoptVal[owned[oi]] = prev[owned[oi]];
-								}
-							}
-						}
+						var pristine = eval(name);
+						var ps = (pristine === undefined) ? undefined : ser(pristine);
+						if (ps !== undefined) _bundleDefaults[name] = JSON.parse(ps);
 					}
-					// eslint-disable-next-line no-eval
-					eval(name + ' = _adoptVal;');
+					assignGlobal(name, v);
+					_bundleDirty[name] = 1;
 					n++;
 				} catch (e) { /* const / not a bundle binding — skip, same as the host */ }
+			}
+		}
+
+		// …and the other half of the rule: anything this bundle stopped carrying goes back.
+		var rule = (typeof window !== 'undefined' && window.KDAbsentReset) ? window.KDAbsentReset : null;
+		if (rule && rule.kdAbsentResets) {
+			var dirtyNames = [];
+			for (var dn in _bundleDirty) {
+				if (Object.prototype.hasOwnProperty.call(_bundleDirty, dn)) dirtyNames.push(dn);
+			}
+			var resets = rule.kdAbsentResets(_bundleDefaults, dirtyNames, g);
+			for (var ri = 0; ri < resets.length; ri++) {
+				try {
+					assignGlobal(resets[ri].name, resets[ri].value);
+					delete _bundleDirty[resets[ri].name];      // back at its default ⇒ no longer dirty
+					n++;
+				} catch (e) { /* not assignable — same as adoption */ }
 			}
 		}
 		return n;
