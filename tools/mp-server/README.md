@@ -18,6 +18,7 @@ KD-069 (orchestrator), KD-070 (reconciler).
 | `mp-session.js` | `MPSession` — async port of the orchestrator that drives instances over a **pluggable transport** (serialized messages). KD-081. |
 | `lobby.js` | `Lobby` — generalized **N-player (2–4)** session over the transport: join flow, N-player turn clock + reconciler, **PvP**, and **server-side mod loading**. KD-080. |
 | `integration.js` | `IntegratedSession` (extends `Lobby`) — **real in-game integration**: players injected as real KD entities, enemy AI attacks routed to the target's instance, world-adjudicated P2P, independent params. KD-082. |
+| `kd-absent-reset.js` | The "absent from the bundle ⇒ back to its default" rule, exported as source text for both runtimes. The capture only records a global while it DIFFERS from the post-init baseline, so a global returning to its default drops OUT of the bundle; the host already reset those, the browser did not. Served to the client at `/mp/kd-absent-reset.js`. |
 | `transport/` | Transport boundary (KD-081): `protocol.js` (commands + `dispatch`), `in-process.js`, `worker-thread.js` (+`worker-entry.js`), `socket.js` (+`child-entry.js`), `index.js` (registry). |
 | `TRANSPORTS.md` | Measured comparison of the three transports (pros/cons + game-code-change count). |
 | `demo.js` | **Capstone** (KD-075) — one scripted end-to-end run touching every pillar (lobby + shared world + reacting enemy + routed PvP + server mod + independent params), printing a human-readable report. |
@@ -127,6 +128,32 @@ Tests: `tests/unit/mp-integration.spec.ts`. Feasibility was confirmed by a spike
 genuinely targets + damages an injected avatar; routed hit lands on the global player of a separate
 instance).
 
+## Helping a peer out of bondage
+
+KD has two bondage models and nothing that bridges them: an NPC carries a bind LEVEL (`boundLevel`,
+what `KDUntieEnemy` decrements), a player wears restraint ITEMS with `struggleProgress`. In single
+player nobody ever unties the player, so the bridge never had to exist. Both directions now work
+against a peer avatar:
+
+- **Tie** (KD-101) — restraints an attacker puts on an avatar are mirrored onto the victim's own
+  player via the stock `KinkyDungeonAddRestraint`.
+- **Untie** — a peer's bondage is mirrored onto their avatar for **every** peer, at war or not
+  (`_mirrorPeerBondage`), which is what makes the ally dialogue's `Untie` option appear at all: it is
+  gated on `KDGetPlayerUntieBindAmt(enemy) > 0`, and an unmirrored avatar returned `NaN`. The untie
+  is then TAKEN FROM THE CALL by `installPeerUntieRecorder` — never read as a bind-level delta, because
+  a bound avatar sheds level on its own each turn and every quiet turn read as an untie — and spent by
+  `untieRestraints` on the victim's real restraints through the stock `KinkyDungeonRemoveRestraint`,
+  with the untier passed as `Remover`.
+- **Denominated in bondage power** (`KDRestraint().power`), the one unit both models already share, so
+  no third scale is invented between them.
+- **Protected bondage is not an ally's to remove** — locked and cursed items are skipped, mirroring
+  KD's own untie being documented "not including protected bondage".
+- Mirroring bondage in co-op also switches on KD's own rules about a bound *helper*: a peer past
+  `KDBoundEffects > 3` stops granting ally-help while you struggle. That is the game's answer, not ours.
+
+Tests: `tests/unit/mp-coop-untie.spec.ts` (incl. an end-to-end pass driven through the real
+`kdType: 'dialogue'` input, plus a same-shape control for each assertion).
+
 ## Known limitations (PoC)
 
 - Full `KinkyDungeonGenerateSaveData()` is **not** supported headless — the save
@@ -134,6 +161,12 @@ instance).
   save/load round-trip is production host scope (KD-067).
 - The shim layer tracks the bundle's PIXI/DOM surface as of this build; it must be
   updated as the game's rendering surface changes.
+- **Untying a peer wearing only locked or cursed gear spends the turn and frees nothing.** Protected
+  bondage still counts toward the amount KD offers to untie. KD's own answer is `helpImmune`, which
+  `KDGetPlayerUntieBindAmt` subtracts — but no stock `KDSpecialBondage` type sets it, so using it would
+  mean inventing a `specialBoundLevel` key, and an invented key crashes the client outright
+  (`KDSpecialBondage[key]` is indexed unguarded on the draw path — see `setAvatarBondage`). A wasted
+  click is the smaller cost. The safe polish, if wanted, is a message to the untier, not a new channel.
 
 ## Bundle-patch policy (KDM-166)
 

@@ -94,3 +94,53 @@ Open the Inventory screen while a worn item's `Group` has no entry in `KinkyDung
 
 A missing struggle group means the item has nothing to cut, so the falsy path is the correct answer;
 optional chaining only changes behaviour where the code currently throws.
+
+---
+
+## 3. `KinkyDungeonHUD.ts`: unguarded restraint item in `KDDrawStruggleGroups`
+
+**Version:** 5.5.1
+
+**Summary**
+
+`KinkyDungeonStruggleGroups` is a cache, rebuilt by `KinkyDungeonUpdateStruggleGroups` (`:2103`) and
+holding only groups whose `KinkyDungeonGetRestraintItem(Group)` is truthy. The draw path re-reads
+that item per frame (`:3335`) but, in the no-dynamic-link branch, dereferences it with no guard:
+
+```js
+if (dynamicList.length == 0) {
+    let d = item;
+    if ((d.struggleProgress > 0 || d.cutProgress > 0)) {   // :3511 — throws when item is null
+```
+
+So a cached group whose restraint has since been removed takes the whole renderer down as soon as the
+pointer crosses that group's row — `KinkyDungeonRun` → `DrawProcess` → every frame:
+
+```
+Uncaught TypeError: Cannot read properties of null (reading 'struggleProgress')
+    at KDDrawStruggleGroups
+```
+
+This is the mirror of issue 2 above: that one is a worn item with no struggle group, this one is a
+struggle group with no worn item. Both are the same stale-cache window, and both are one-word fixes.
+
+**Reproduction**
+
+Let the struggle-group cache fall behind the worn set — remove the last restraint in a group without
+a rebuild — then hover that group's row in the HUD.
+
+**Suggested fix**
+
+```diff
+-	let d = item;
+-	if ((d.struggleProgress > 0 || d.cutProgress > 0)) {
++	let d = item;
++	if (d && (d.struggleProgress > 0 || d.cutProgress > 0)) {
+```
+
+A group with no item has no progress to draw, so the falsy path is the correct answer; the guard only
+changes behaviour where the code currently throws.
+
+**Note for this repo:** the MP-side cause of the stale cache is fixed in `kd-absent-reset.js` — a
+per-player global whose key vanishes from the capture now goes back to its default on the client, as
+it already did on the host. This entry is defence in depth: a stale cache should not kill the renderer.
