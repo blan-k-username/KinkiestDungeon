@@ -230,6 +230,58 @@ test('offer peace from your own menu; the peer accepts from theirs', async ({ br
 		// ---- 8. and the entry is gone again (R2) -------------------------------------------------
 		const atPeace = await ownMenu(A);
 		expect(atPeace.options, 'nothing left to offer').not.toContain('Peace');
+
+		// ---- 9. the peer is a FRIENDLY NPC again, not a target (UAT round 4) ---------------------
+		//
+		// Owner: "i still can attack. in peace (at the very beginning) i need 'sneak attack' to
+		// activate pvp. also, peace mode should allow players to help each other to free."
+		//
+		// Both are the same requirement: after a truce the peer must read to KD exactly as a friendly
+		// NPC does. KD's context menu says which it thinks: `KDTalkToEnemy` true gives the ally branch
+		// (Talk + Aggro, where Aggro is the deliberate sneak that RE-starts PvP), and false gives the
+		// hostile branch (Attack / Tease / Capture). The screenshot showed "Attack", so the peer was
+		// still an enemy to the game after peace.
+		//
+		// Asserted on the PEER's tile — the vision gate that hides this headless is real in a browser,
+		// which is why this lives in the e2e (see mp-pvp-menu-attack.spec.ts for the same technique).
+		const peerMenuAtPeace = await A.evaluate((id: number) => {
+			// @ts-ignore
+			const p = ((KDMapData as any).Entities || []).find((x: any) => x.id === id);
+			if (!p) return { ok: false, why: 'no-peer-entity' };
+			// @ts-ignore
+			const grid = KinkyDungeonGridSizeDisplay;
+			// @ts-ignore
+			KDContextX = (p.x - KinkyDungeonCamX) * grid + grid / 2 + canvasOffsetX;
+			// @ts-ignore
+			KDContextY = (p.y - KinkyDungeonCamY) * grid + grid / 2 + canvasOffsetY;
+			// @ts-ignore
+			const menu = KDGetContextActions.Game(false, KDContextX, KDContextY, {});
+			return {
+				ok: true, options: menu.options,
+				// @ts-ignore — the verdicts behind the branch, so a failure names its cause
+				aimed: { x: KinkyDungeonTargetX, y: KinkyDungeonTargetY }, at: { x: p.x, y: p.y },
+				// @ts-ignore
+				talkable: KDTalkToEnemy(p), allied: KDAllied(p), hostile: !!KDHostile(p),
+				// @ts-ignore
+				faction: KDGetFaction(p), opinion: KDGetModifiedOpinion(p),
+				vulnerable: p.vulnerable || 0,
+			};
+		}, peer.id);
+
+		expect(peerMenuAtPeace.ok, JSON.stringify(peerMenuAtPeace)).toBe(true);
+		expect(peerMenuAtPeace.aimed, 'precondition: the menu is aimed at the peer')
+			.toEqual(peerMenuAtPeace.at);
+		expect(peerMenuAtPeace.faction, 'the Enemy stamp must be gone from the world entity')
+			.not.toBe('Enemy');
+		expect(peerMenuAtPeace.hostile, 'and KD must not consider them hostile').toBe(false);
+		expect(peerMenuAtPeace.talkable,
+			'a peaceful peer must be talkable — that is what makes them a friendly NPC, and what the '
+			+ '"help me get free" interactions need').toBe(true);
+		expect(peerMenuAtPeace.options,
+			'attacking must take the deliberate sneak again, exactly as at the start of a co-op session')
+			.toContain('Aggro');
+		expect(peerMenuAtPeace.options,
+			'and the direct hostile Attack must NOT be offered at peace').not.toContain('Attack');
 	} finally {
 		await ctxA.close().catch(() => {});
 		await ctxB.close().catch(() => {});
