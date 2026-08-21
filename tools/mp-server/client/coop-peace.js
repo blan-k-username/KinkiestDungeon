@@ -4,7 +4,7 @@
 * THE "OFFER PEACE" ENTRY — on the player's OWN context menu (the ANSWER is a dialogue, KDM-230).
  *
  * A classic (non-module) script sharing the bundle's global scope, loaded after render-client.js.
- * It adds three entries to KD's own context menu and sends the gateway's `mp:` actions; it decides
+ * It adds one entry to KD's own context menu and sends the gateway's `mp:` actions; it decides
  * nothing. The authority for "are we at war" and "do I owe an answer" is the server, read from
  * `KDRenderClient.lastCoop` (`snap.coop`), which is re-read on every menu build.
  *
@@ -96,24 +96,29 @@
 		return true;
 	}
 
-	/**
-	 * KDM-230: A6's forced context-menu open is GONE. It existed because the answer lived on the
-	 * player's own tile and nothing would show it to them; the offer now arrives as KD's own modal
-	 * dialogue, which is blocking by construction — the game itself refuses world
-	 * interaction while one is open. Nothing here has to force a menu, or watch for an edge.
+	/*
+	 * KDM-229: INSTALLED SYNCHRONOUSLY. This used to be two `setInterval`s — a 100 ms poll waiting
+	 * for `KDGetContextActions` to appear, and a 1 s re-check of the wrap. Both were unnecessary,
+	 * and both are gone.
+	 *
+	 * WHY THE POLL WAS NOT NEEDED. `index.html` loads the compiled bundle as a plain synchronous
+	 * `<script src="./out/main.js">`, and `demo-server.js` injects this file immediately before
+	 * `</body>` (its `INJECT` list). A classic script's top-level `let` is initialised during that
+	 * synchronous evaluation and lives in the global LEXICAL environment — so by the time this line
+	 * runs, `KDGetContextActions` (`Game/src/base/game/KDContextMenu.ts`) exists and is out of its
+	 * TDZ. The poll bought nothing but a 100 ms window with no Peace entry.
+	 *
+	 * WHY THE RE-CHECK WAS NOT NEEDED. `KDGetContextActions` is assigned in exactly one place, the
+	 * bundle's own declaration; nothing reassigns `.Game` afterwards, and `install()` short-circuits
+	 * on its sentinel. After the first call the timer could never do anything again.
+	 *
+	 * If this ever DOES return false, the honest failure is a missing menu entry — not a timer
+	 * quietly retrying a load order that is supposed to be guaranteed. Pinned by
+	 * `tests/unit/mp-peace-install.spec.ts`, which fails if a timer comes back.
 	 */
-	function pump() { install(); }
-
-	// The bundle may not be evaluated yet when this script runs, and `KDGetContextActions` is a
-	// bundle-scope `let` — so poll briefly rather than assuming load order. Cheap and bounded.
-	var tries = 0;
-	var timer = setInterval(function () {
-		tries++;
-		if (install() || tries > 200) clearInterval(timer);
-	}, 100);
-	setInterval(pump, 1000);   // KDM-230: only re-checks the wrap now; nothing to sample
+	install();
 
 	if (typeof window !== 'undefined') {
-		window.KDCoopPeace = { install: install, decorate: decorate, pump: pump };
+		window.KDCoopPeace = { install: install, decorate: decorate };
 	}
 })();

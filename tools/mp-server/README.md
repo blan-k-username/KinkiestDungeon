@@ -35,6 +35,15 @@ KD-069 (orchestrator), KD-070 (reconciler).
 - **No source edits:** rendering is neutered and `serverMode` is implemented by
   reassigning KD's globals at runtime (`DrawCharacter`, `KinkyDungeonUpdateEnemies`,
   `KinkyDungeonMove`) — the same reassignable-global mechanism the mod system uses.
+- **Client script load order is GUARANTEED — never poll for a bundle global (KDM-229).**
+  `index.html` loads the compiled bundle as a plain synchronous `<script src="./out/main.js">`, and
+  `demo-server.js` injects everything in its `INJECT` list immediately before `</body>`. A classic
+  script's top-level `let` is initialised during that synchronous evaluation and lives in the global
+  *lexical* environment, so any `client/*.js` may read `KDGameData`, `KDGetContextActions`, … by bare
+  name at its own top level. Ordering *within* `INJECT` is likewise synchronous and guaranteed. The
+  one thing that is genuinely async is asset preloading (`KDLoadingFinished`), which is why
+  `coop-bootstrap.js` `boot()` still retries — that is a wait on an event with no callback, not a
+  load-order poll.
 - **Contested tiles (KDM-208):** a turn applies players in random order, so two players
   aiming at the same empty tile resolve first-come. The loser does NOT get blocked by
   KD's collision — under PvP the peer is armed as a real hostile enemy, so the move
