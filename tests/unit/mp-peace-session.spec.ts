@@ -278,27 +278,54 @@ describe('KDM-225 — peace, at the session seams', () => {
 			expect(peace.aggressive, 'so nothing treats them as a target').toBeFalsy();
 		});
 
-		/**
-		 * The other half: a hit that never sets `hostile` (a spell, an AOE) would otherwise drain the
-		 * victim's Will while the pair was still recorded as friends. You cannot hurt someone and stay
-		 * at peace.
-		 */
-		it('a hit landing while at peace re-opens the war instead of passing silently', () => {
-			s._armPeerEnemies('A');
-			s.apply('A', { mp: 'peace.offer' });
-			answer(s, 'B', true);
-			expect(s._isPvP('A', 'B'), 'precondition: at peace').toBe(false);
+	});
 
-			const eid = s.avatars.get('B');
-			s.world.eval(`(function(){
-				var e = KDMapData.Entities.find(function(x){ return x.id === ${eid}; });
-				if (e) KinkyDungeonDamageEnemy(e, { damage: 3, type: 'crush' });
-			})()`);
+	/**
+	 * UAT round 4 (KDM-230): peace held for an instant and was undone by the NEXT TURN.
+	 *
+	 * `_reconcilePeers` restores every avatar to full hp each turn via `setAvatarEnemy` — which is the
+	 * ARMING call, and also stamps `faction = 'Enemy'` and `hostile = 9999`. It runs for every avatar
+	 * every turn, war or not, so one turn after a truce the peer was an enemy again while `_isPvP`
+	 * stayed false the whole time. Measured: faction `Player` → `Enemy`, talkable true → false,
+	 * opinion +10 → -20 (the "Hates you" the owner's screenshot showed).
+	 *
+	 * The earlier AC3 test could not see it: it asserted immediately after the handshake, and a turn
+	 * is what breaks it. This one runs turns.
+	 */
+	it('AC3b — peace SURVIVES the turns that follow it', () => {
+		const verdict = () => {
+			const ent = ((s.snapshotFor('A').map || {}).Entities || [])
+				.find((e: any) => e.id === s.avatars.get('B'));
+			s.world.restorePlayer(s.bundles.get('A'));
+			const v = s.world.eval('(function(){ var e = ' + JSON.stringify(ent) + ';'
+				+ ' if (!e || !e.Enemy) return { missing: true };'
+				+ ' return { faction: KDGetFaction(e), hostile: !!KDHostile(e), allied: !!KDAllied(e),'
+				+ '   talkable: !!KDTalkToEnemy(e) }; })()');
+			s.world.parkGlobalPlayer(1, 1);
+			return v;
+		};
+
+		// The UAT condition: the peer was beaten down and tied before the truce, not healthy.
+		const v = s.vitalsFor('B');
+		s.vitalsOf.set('B', { ...v, will: 0 });
+		s._armPeerEnemies('A');
+		s.world.setAvatarBondage(s.avatars.get('B'), 30);
+		expect(verdict().faction, 'precondition: at war, the peer is an Enemy').toBe('Enemy');
+
+		s.apply('A', { mp: 'peace.offer' });
+		answer(s, 'B', true);
+		expect(verdict().talkable, 'peace works at the moment it is made').toBe(true);
+
+		for (let turn = 1; turn <= 3; turn++) {
 			s.submit('A', { kind: 'wait' });
 			s.submit('B', { kind: 'wait' });
-
-			expect(s._isPvP('A', 'B'),
-				'damage without aggro must still break the truce, not pass unnoticed').toBe(true);
-		});
+			const after = verdict();
+			expect(after.faction, `turn ${turn}: the per-turn hp restore must not re-arm the peer`)
+				.toBe('Player');
+			expect(after.hostile, `turn ${turn}: still not hostile`).toBe(false);
+			expect(after.talkable, `turn ${turn}: still a friendly NPC you must SNEAK to attack`)
+				.toBe(true);
+			expect(s._isPvP('A', 'B'), `turn ${turn}: and still at peace`).toBe(false);
+		}
 	});
 });

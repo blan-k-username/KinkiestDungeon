@@ -1040,11 +1040,15 @@ class SwapSession {
 			// gateway records the relationship the game already decided, and classifies nothing.
 			//
 			// Two players ⇒ the attacker is unambiguous. Attribution for a third player is KDM-226's.
-			// …and damage counts too. KD's aggro flag covers the sneak and the bump, but a spell or an
-			// AOE can wound a peer without ever setting `hostile` — at peace that would drain their
-			// Will silently, with the pair still recorded as friends. You cannot hurt someone and stay
-			// at peace: any hit on their avatar re-opens the war, which is also the door AC6 wants.
-			if (ec && (ec.hostile > 0 || ec.rage > 0 || (this.world.peekPeerHits(eid) || 0) > 0)) {
+			// KD's aggro flag ONLY — deliberately not "any hit landed".
+			//
+			// A previous version also declared war when `peekPeerHits` was non-zero, to close the case
+			// of a spell wounding a peer without setting `hostile`. That was wrong: the recorder logs
+			// EVERY hit on the avatar, including the shared dungeon's own monsters. A Rat mauling a
+			// downed peer re-declared war between the two PLAYERS one turn after they made peace
+			// (UAT round 4, reproduced in mp-peace-session AC3b). Hits cannot distinguish a peer's
+			// attack from a Rat's; `hostile`/`rage` is set by the aggressor, so it can.
+			if (ec && (ec.hostile > 0 || ec.rage > 0)) {
 				for (const other of this._joined) {
 					if (other !== id && !this.rel.atWar(id, other)) {
 						this.rel.declareWar(id, other);
@@ -1094,7 +1098,31 @@ class SwapSession {
 			// charged once — there is no standing hp delta left to re-read on a later turn. The avatar
 			// is still restored to full so it never dies and the peer stays targetable; that is a
 			// representation detail now, not a measurement.
-			if (eid != null && ec && ec.maxhp != null) this.world.setAvatarEnemy(eid, ec.maxhp, ec.maxhp, 0);
+			if (eid != null && ec && ec.maxhp != null) {
+				this.world.setAvatarEnemy(eid, ec.maxhp, ec.maxhp, 0);
+				/*
+				 * …but that is the ARMING call, and it also stamps `faction = 'Enemy'` and
+				 * `hostile = 9999` (headless-host.js). It runs here for EVERY avatar EVERY turn,
+				 * war or not — purely to restore hp — so it silently re-made a peaceful peer an
+				 * enemy exactly one turn after a truce.
+				 *
+				 * UAT round 4: peace looked right for an instant and the peer was attackable again
+				 * on the next turn, with `_isPvP` still false the whole time. Measured: faction
+				 * `Player` → `Enemy`, talkable true → false, opinion +10 → -20 ("Hates you").
+				 *
+				 * So undo the hostility half whenever this player is at war with nobody. The hp
+				 * restore — the only thing this call is wanted for here — stands.
+				 */
+				// Scoped to pairs that NEGOTIATED a truce, not to "not at war with anyone". Plain co-op
+				// has always left avatars stamped Enemy by this call, and that is load-bearing world
+				// state: making them Player faction changes who the dungeon's own monsters fight, which
+				// showed up immediately as `mp-presentation-once` losing its noise events. Undoing our
+				// own stamp after a truce is the fix that was asked for; quietly re-factioning every
+				// co-op session is a different change, and not this one.
+				if (this._joined.some((other) => other !== id && this.rel.atPeace(id, other))) {
+					this.world.setAvatarHostile(eid, false);
+				}
+			}
 			const cur = this.vitalsOf.get(id) || {};
 			if (!this.defeated.has(id) && this._isDown(cur)) {
 				this._markDefeated(id, `will=${cur.will.toFixed(2)}`);
