@@ -62,7 +62,24 @@ async function sceneShape(P: Page) {
 			width: md ? md.GridWidth : -1,
 			height: md ? md.GridHeight : -1,
 			entities: md && md.Entities ? md.Entities.length : -1,
-			coop: !!w.__coop,
+			/*
+			 * KDM-254: "is the proxy client running on this page?" — and NOT `!!w.__coop`.
+			 *
+			 * `coop-bootstrap.js` assigns `window.__coop` at module top level on EVERY page the demo
+			 * server serves, and has done since KDM-233 removed the `if (!id) return` guard so the
+			 * lobby could reach `window.__coopConnect` from a page with no `#coop=` yet. That change is
+			 * deliberate and the module header says so — what broke is this oracle, which read
+			 * "the API object exists" as a synonym for "the client is active". It stopped being one,
+			 * silently, and the control arm below has been reporting `true` for both pages ever since.
+			 *
+			 * Ask the two questions the arms actually differ by:
+			 *   coopId         `getCoopId()` — null without `#coop=`, so: was this page TOLD to be a
+			 *                  co-op client? Set synchronously at module eval, so never racy.
+			 *   coopConnected  is there a live socket, i.e. is the proxy actually doing the work whose
+			 *                  frame cost this spec exists to measure?
+			 */
+			coopId: (w.__coop && w.__coop.id) || null,
+			coopConnected: !!(w.__coop && w.__coop.connected),
 		};
 	});
 }
@@ -170,6 +187,13 @@ test('KDM-207: attribute the co-op client extra frame cost by script', async ({ 
 		await coop.goto(`http://127.0.0.1:${port}/#coop=SOLO`);
 		await waitLoaded(coop);
 		await coop.bringToFront();
+		// KDM-254: WAIT for the proxy to be live, don't sample and hope. The validity gate below
+		// asserts `coopConnected`, and a fixed sleep would make that a race on a contended host —
+		// turning "the socket was 200 ms late" into a failure that reads like a broken control arm.
+		await coop.waitForFunction(() => {
+			const c = (window as any).__coop;
+			return !!(c && c.id && c.connected);
+		}, undefined, { timeout: 60_000 });
 		await coop.waitForTimeout(2000);
 		out.coopScene = await sceneShape(coop);
 		out.coopFps = await fps(coop, 4000);
@@ -220,8 +244,16 @@ test('KDM-207: attribute the co-op client extra frame cost by script', async ({ 
 		expect(out.startedGame, 'the plain control must actually start a game' + msg).toBe(true);
 		expect(out.plainScene.state, 'plain must be in Game' + msg).toBe('Game');
 		expect(out.coopScene.state, 'coop must be in Game' + msg).toBe('Game');
-		expect(out.coopScene.coop, 'the coop page must actually have the proxy client active' + msg).toBe(true);
-		expect(out.plainScene.coop, 'the plain page must NOT have the proxy client active' + msg).toBe(false);
+		// KDM-254: the coop arm was TOLD to be a co-op client and its proxy is actually connected…
+		expect(out.coopScene.coopId, 'the coop page must actually be a co-op client' + msg).toBe('SOLO');
+		expect(out.coopScene.coopConnected,
+			'the coop page must actually have the proxy client active' + msg).toBe(true);
+		// …and the plain arm is neither. Both halves are asserted: a page with no `#coop=` never runs
+		// `boot()`, so `connected` is deterministically false there — it is not a second racy read.
+		expect(out.plainScene.coopId,
+			'the plain page must NOT be a co-op client' + msg).toBeNull();
+		expect(out.plainScene.coopConnected,
+			'the plain page must NOT have the proxy client active' + msg).toBe(false);
 		expect(out.plainScene.gridLen, 'plain must have a real map' + msg).toBeGreaterThan(0);
 		expect(out.coopScene.gridLen, 'coop must have a real map' + msg).toBeGreaterThan(0);
 		// Same-sized dungeon on both sides, or "1.86x" is map complexity rather than proxy overhead.
