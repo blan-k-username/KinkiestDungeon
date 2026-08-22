@@ -307,21 +307,31 @@ class WSBridge {
 		if (msg.type === 'join') {
 			try {
 				clientId = msg.clientId;
+				/*
+				 * KDM-250 E6 / KDM-253 — `gone` is terminal, and it is checked HERE, before anything
+				 * else, because it must hold on both roads back in.
+				 *
+				 * It used to be enforced inside the re-attach branch, which is gated on
+				 * `session.players.includes(clientId)`. That was true while a dismissed player still
+				 * held a seat — and false the moment KDM-253's teardown actually removed them, so the
+				 * ghost fell through to the ORDINARY join path and got a bare `error` about a session
+				 * that had already started. Presence is what decides this, not seat membership.
+				 *
+				 * Before the socket map, so a connection we are about to close is never registered.
+				 */
+				if (this.presence.state(clientId) === 'gone') {
+					this._reject(socket, { reason: 'seat_gone' });
+					return clientId;
+				}
 				this.sockets.set(clientId, socket);
 				// Reload-friendly (KD-098): a KNOWN player reconnecting to an already-started
 				// session just REATTACHES its new socket and re-syncs — calling join() again
 				// would throw "session already started". This lets you reload a tab mid-session
 				// (e.g. to re-read the diagnostics) without restarting the server.
 				if (this.session.started && this.session.players.includes(clientId)) {
-					// KDM-252 U1/E6: `back` is refused for a seat the survivor has already dismissed,
-					// and `gone` is terminal. Say so in words rather than walking a ghost back into a
-					// session whose character has already been dismantled — and say it BEFORE the
-					// socket map keeps a reference to a connection we are about to close.
-					if (!this.presence.back(clientId, now())) {
-						this.sockets.delete(clientId);
-						this._reject(socket, { reason: 'seat_gone' });
-						return clientId;
-					}
+					// KDM-252 U1: the seat is live again. A `gone` seat cannot reach this line — it is
+					// refused at the top of the join branch, which is the only place that rule lives.
+					this.presence.back(clientId, now());
 					this._send(socket, { type: 'joined', clientId, started: true, players: this.session.players });
 					// KDM-206/KDM-252 N4: a rejoining client holds nothing we can diff against — force a
 					// full snapshot AND restart its sequence, so the client has a base to count gaps from
@@ -384,6 +394,12 @@ class WSBridge {
 				let res = this.session.apply(clientId, msg.action || {});
 				const applyMs = now() - tApply;
 				this._noteInput(clientId, msg.action, res.kind, applyMs);   // KDM-186 telemetry
+				// KDM-253: the session has READ a disconnect answer; acting on it is ours, because it
+				// needs presence and seats — neither of which the session knows about. Done before the
+				// reply below so the state frame that reply carries already shows the world the
+				// decision produced.
+				if (res.solo === true) this._goSolo(clientId);
+				else if (res.quit === true) this._acceptQuit(clientId);
 				if (res.kind === 'ui') {
 					// A menu/UI input: applied to this player's own state, no turn consumed. Push their
 					// updated snapshot straight back so the UI responds without waiting for the partner
@@ -544,6 +560,11 @@ class WSBridge {
 			if (role === 'host' && this.session.started) {
 				try { this.session.openHostLostDialogue(cid); } catch (e) { /* world may be mid-teardown */ }
 			}
+			// KDM-253 S4/D1 — and the mirror: a HOST who has lost a guest is given the choice the
+			// guest is never offered. Two options, no timeout; until they answer, the pause stands.
+			if (role === 'guest' && this.session.started) {
+				try { this.session.openPeerLostDialogue(cid); } catch (e) { /* world may be mid-teardown */ }
+			}
 		}
 	}
 
@@ -593,6 +614,87 @@ class WSBridge {
 					this._stateFrame(cid)));
 			} catch (e) { /* that one is gone too */ }
 		}
+	}
+
+	/**
+	 * KDM-253 E5/E6 — the survivor has chosen to go on alone. Give up the missing seats for good.
+	 *
+	 * The ONE place a seat becomes `gone`, and therefore the one place the join-gate slot is handed
+	 * back: KDM-252 stopped a mid-session close from releasing it, precisely so a returning player
+	 * would find their own seat, and this is where that hold finally ends. Miss the `gate.release`
+	 * and slot 1 leaks for the life of the process.
+	 *
+	 * Every missing seat goes, not just one. With three players and two gone, "continue solo" means
+	 * exactly what it says, and leaving the second one `missing` would re-pause the session the
+	 * instant it resumed.
+	 */
+	_goSolo(deciderId) {
+		const leaving = this.presence.missing().map((m) => m.clientId).filter((id) => id !== deciderId);
+		if (!this._seatGone(leaving, 'dismissed')) return false;
+		this.session._dbg(`SOLO — ${deciderId} continues without ${leaving.join(', ')}`);
+		return true;
+	}
+
+	/**
+	 * KDM-253 — a guest pressed Quit on the host-lost dialogue: they are leaving on purpose.
+	 *
+	 * The same departure as `_goSolo`, aimed at the person who asked rather than the person who
+	 * vanished. It exists because the alternative is a "clean goodbye" that leaves a seat held for
+	 * somebody who has explicitly said they are not coming back — the survivor would then be asked to
+	 * keep waiting for a player who already quit.
+	 */
+	_acceptQuit(clientId) {
+		if (!this._seatGone([clientId], 'quit')) return false;
+		this.session._dbg(`QUIT — ${clientId} left deliberately`);
+		return true;
+	}
+
+	/**
+	 * KDM-253 E5/E6 — a departure that is FINAL. The one place a seat becomes `gone`.
+	 *
+	 * Shared by both ways out (the survivor dismisses a missing peer; a guest quits) because they are
+	 * the same operation seen from two ends, and the two halves that are easy to forget are the same
+	 * either way:
+	 *
+	 *   - the JOIN-GATE slot. KDM-252 stopped a mid-session close from releasing it, precisely so a
+	 *     returning player would find their own seat. This is where that hold finally ends — miss it
+	 *     and slot 1 leaks for the life of the process;
+	 *   - TELLING THE SURVIVORS. `_goSolo` originally did not, and the server state was perfectly
+	 *     correct while the host's browser sat on "your partner has disconnected — the game is
+	 *     paused" forever. Caught by the e2e, invisible to a spec that only reads server state: the
+	 *     decision is not delivered until the page that made it can see the result.
+	 *
+	 * Every missing seat goes, not just one: with three players and two gone, "continue solo" means
+	 * what it says, and leaving the second `missing` would re-pause the session the instant it
+	 * resumed.
+	 */
+	_seatGone(ids, reason) {
+		const gone = [];
+		for (const id of ids) {
+			if (!this.presence.remove(id)) continue;   // already terminal — do not report it twice
+			this.gate.release(id);
+			this.session.removePlayer(id);             // everything the world knew about them
+			const sock = this.sockets.get(id);
+			// If they are still connected (a quit, or a peer whose socket outlived the decision), say
+			// why in words before closing — the same typed refusal a later reconnect would get.
+			if (sock) {
+				try { this._send(sock, { type: 'reject', reason: 'seat_gone' }); sock.end(); } catch (e) { /* already gone */ }
+			}
+			this.sockets.delete(id);
+			gone.push(id);
+		}
+		if (!gone.length) return false;
+		this._resumeIfWhole();
+		for (const [cid, sock] of this.sockets) {
+			try {
+				for (const id of gone) this._send(sock, { type: 'peer_gone', clientId: id, reason });
+				// Their world changed — an avatar left it. `push`, not `ui`: nobody asked for this
+				// frame, so it must not unwind anyone's in-flight bookkeeping (KDM-252).
+				this._send(sock, Object.assign({ type: 'state', kind: 'push', tick: this.session.turn },
+					this._stateFrame(cid)));
+			} catch (e) { /* that one is gone too */ }
+		}
+		return true;
 	}
 
 	/** KDM-251: everybody is back — let the turn loop run again. */

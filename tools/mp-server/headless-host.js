@@ -1265,6 +1265,27 @@ class HeadlessHost {
 		})()`);
 	}
 
+	/**
+	 * KDM-253 E5 — take an injected avatar entity back out of the world.
+	 *
+	 * The counterpart `spawnAvatar` never had. Removes the ENTITY only: its `RemotePlayer_<name>` def
+	 * stays in `KinkyDungeonEnemies`, because that is a template rather than an instance — deleting it
+	 * would break a later spawn of the same name and force a full enemy-cache rebuild for nothing.
+	 *
+	 * `KDUpdateEnemyCache` is set for the same reason `moveAvatar` sets it: KD caches entity lookups
+	 * per tile, and a cache still pointing at a removed entity is how a ghost keeps blocking a
+	 * doorway. Returns whether anything was actually there.
+	 */
+	despawnAvatar(entityId) {
+		return this.eval(`(function(){
+			var i = KDMapData.Entities.findIndex(function(e){ return e.id === ${entityId | 0}; });
+			if (i < 0) return false;
+			KDMapData.Entities.splice(i, 1);
+			KDUpdateEnemyCache = true;
+			return true;
+		})()`);
+	}
+
 	/** Move an injected avatar entity (by entity id) and refresh the entity cache. */
 	moveAvatar(entityId, x, y) {
 		return this.eval(`(function(){

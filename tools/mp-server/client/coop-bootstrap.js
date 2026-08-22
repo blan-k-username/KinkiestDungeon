@@ -823,6 +823,20 @@
 				lobbySay({ error: why, status: '', pending: null });
 				return;
 			}
+			if (m.type === 'peer_gone') {
+				// KDM-253: the other player is not coming back — either we chose to go on without
+				// them, or they quit. Either way the waiting is over, so the page must stop saying it
+				// is waiting: a correct server and a status line still reading "the game is paused" is
+				// indistinguishable, to the player, from the freeze this whole epic exists to remove.
+				coop.peerMissing = null;
+				coop.blocked = null;
+				coop.peers = (coop.peers || []).filter(function (p) { return p !== m.clientId; });
+				setStatus('Co-op ' + id + ': ' + (m.reason === 'quit'
+					? m.clientId + ' has left the game. '
+					: 'carrying on without ' + m.clientId + '. ')
+					+ 'The run is yours alone now.');
+				return;
+			}
 			if (m.type === 'peer_back') {
 				// KDM-252 E4: the mirror of `peer_missing`. The MODAL is closed server-side and reaches
 				// us as the state frame that follows this message; this clears the ambient status the

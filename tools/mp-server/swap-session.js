@@ -26,7 +26,7 @@
 const { HeadlessHost, KDGAMEDATA_WORLD_KEYS } = require('./headless-host');
 const { PeaceRegistry } = require('./peace');
 const { KD_PEACE_DIALOGUE } = require('./kd-peace-dialogue');
-const { KD_DISCONNECT_DIALOGUE, HOST_LOST_DIALOGUE } = require('./kd-disconnect-dialogue');
+const { KD_DISCONNECT_DIALOGUE, HOST_LOST_DIALOGUE, PEER_LOST_DIALOGUE } = require('./kd-disconnect-dialogue');
 
 const PARK = { x: 1, y: 1 };
 
@@ -52,7 +52,7 @@ const PEACE_DIALOGUE = 'KDCoopPeace';
  * holding the only key to their own cell — the trap KDM-230 documents against the peace offer, and
  * the same trap the disconnect dialogues walk into.
  */
-const OWN_DIALOGUES = new Set([PEACE_DIALOGUE, HOST_LOST_DIALOGUE]);
+const OWN_DIALOGUES = new Set([PEACE_DIALOGUE, HOST_LOST_DIALOGUE, PEER_LOST_DIALOGUE]);
 
 /**
  * KDM-162: KDGameData fields the CLIENT owns, because only the client can compute them.
@@ -267,6 +267,9 @@ class SwapSession {
 		this.world.eval(`(function(){
 			globalThis.KDCoopSessionQuit = function () { globalThis.__kdCoopQuit = true; };
 			globalThis.__kdCoopQuit = undefined;
+			// KDM-253 S4: the host's wait/solo answer, on the same take-once terms as the other two.
+			globalThis.KDCoopPeerLostDecide = function (solo) { globalThis.__kdCoopSolo = !!solo; };
+			globalThis.__kdCoopSolo = undefined;
 		})()`);
 		// KDM-227: baseline for the hub-arrival check. Seeded HERE rather than left undefined so the
 		// room the session STARTS in is not mistaken for an arrival — the game boots on the journey
@@ -455,6 +458,19 @@ class SwapSession {
 	}
 
 	/**
+	 * KDM-253 S3/S4 — ask the HOST whether to wait for a missing guest or carry on without them.
+	 *
+	 * No speaker, same as the host-lost dialogue: the entity it would be attributed to is the one who
+	 * has gone, which is the entire message.
+	 *
+	 * Re-openable on purpose. `Wait` closes it, and the host may be asked again — on the next drop, or
+	 * because they want the choice back. The dialogue is a prompt, not a one-shot event.
+	 */
+	openPeerLostDialogue(target) {
+		return this._openOwnDialogue(target, PEER_LOST_DIALOGUE, null);
+	}
+
+	/**
 	 * KDM-251: open one of OUR dialogues on a specific player's bundle.
 	 *
 	 * Generalised from `_openPeaceDialogue` when the disconnect dialogue needed the identical
@@ -538,10 +554,40 @@ class SwapSession {
 	 * path and the option's `clickFunction` runs inside the game. That function sets a flag in the
 	 * world; this reads and clears it. Take-once, so a stale flag cannot answer a later offer.
 	 */
-	_takePeaceAnswer() {
+	_takePeaceAnswer() { return this._takeCoopFlag('__kdCoopPeaceAnswer'); }
+
+	/** KDM-253 S4 — did the host just answer the wait/solo question? `true` = go on alone. */
+	_takeSoloAnswer() { return this._takeCoopFlag('__kdCoopSolo'); }
+
+	/** KDM-253 — did a guest just press Quit on the host-lost dialogue? */
+	_takeQuitAnswer() { return this._takeCoopFlag('__kdCoopQuit'); }
+
+	/**
+	 * Read-and-clear one boolean a dialogue's `clickFunction` set in the world.
+	 *
+	 * KDM-253: there are now THREE of these (peace answer, wait/solo, guest quit) and they were about
+	 * to become three copies of the same eval. Take-once is the load-bearing part — a flag left set
+	 * would answer the NEXT question too, silently — so it gets one implementation rather than three
+	 * chances to forget the clear.
+	 *
+	 * `null` means "nothing was answered", which is different from `false` ("answered: no").
+	 */
+	_takeCoopFlag(name) {
 		try {
-			const v = this.world.eval('(function(){ var v = globalThis.__kdCoopPeaceAnswer; '
-				+ 'globalThis.__kdCoopPeaceAnswer = undefined; return v; })()');
+			/*
+			 * Two shapes here are load-bearing, both taught by KDM-218's payload guard:
+			 *
+			 * ONE template literal, not two concatenated — the guard extracts each eval payload and
+			 * parses it on its own, and it cannot see through a `+`. A payload it cannot parse is a
+			 * payload it cannot protect from the silent truncation it exists to catch.
+			 *
+			 * BRACKET access, not `globalThis.${name}` — the guard substitutes a placeholder for each
+			 * interpolation, so a `${}` in a property-NAME position becomes `globalThis.(…)` and cannot
+			 * parse. Bracket form is also the safer one: the name lands in a string, never in an
+			 * identifier position.
+			 */
+			const key = JSON.stringify(String(name));
+			const v = this.world.eval(`(function(){ var v = globalThis[${key}]; globalThis[${key}] = undefined; return v; })()`);
 			return (v === true || v === false) ? v : null;
 		} catch (e) { return null; }
 	}
@@ -649,6 +695,21 @@ class SwapSession {
 			 * stats, wrong everything. Settle only once this player's own state is safely banked.
 			 */
 			const answered = this._settlePeaceAnswerFrom(clientId);
+			/*
+			 * KDM-253: the disconnect answers are `dialogue` inputs too, and they are READ here but
+			 * ACTED ON by the caller.
+			 *
+			 * The session must not decide these itself, because deciding them needs two things it
+			 * deliberately does not know: who is missing (that is `presence.js`) and which seat that
+			 * maps to (that is `join-gate.js`). Reporting the answer keeps the split KDM-250/251/252
+			 * all kept — the session owns the world, the bridge owns liveness and seats.
+			 *
+			 * Read AFTER the capture above, for the reason spelled out in the peace note: acting on
+			 * these swaps other players in and out, and the ordering bug that produced is one this
+			 * epic has already paid for once.
+			 */
+			const solo = this._takeSoloAnswer();
+			const quit = this._takeQuitAnswer();
 			// KDM-186: did this player's own state actually move? The caller uses this to decide between
 			// a full state reply and a bare ack — a diff, never a judgement about which inputs matter.
 			const changed = this._stateChanged(clientId, newBundle);
@@ -659,7 +720,12 @@ class SwapSession {
 			this.world.parkGlobalPlayer(PARK.x, PARK.y);
 			this._noteUnknown(kdType, res);
 			return { advanced: false, kind: 'ui', changed, unknownType: !!res.unknownType,
-				error: res.error || null, notify: answered ? this._joined.filter(function(i){ return i !== clientId; }) : undefined };
+				error: res.error || null,
+				// KDM-253: `null` = not answered, `false` = Wait, `true` = go on alone. The three
+				// states are distinct on purpose — "Wait" is an ANSWER (the host has seen the
+				// question and chosen), not the absence of one, and the bridge treats them differently.
+				solo, quit: quit === true,
+				notify: answered ? this._joined.filter(function(i){ return i !== clientId; }) : undefined };
 		}
 
 		// Everything else — including every type seen for the first time — goes through lockstep. That
@@ -1084,6 +1150,80 @@ class SwapSession {
 			try { this.world.setAvatarHostile(eid, false); } catch (e) { /* avatar gone; nothing to clear */ }
 		}
 		this._dbg('HUB RESET — every pair back to co-op on arrival at ' + HUB_ROOM_TYPE);
+	}
+
+	/**
+	 * KDM-253 A5 — EVERY container on this session that is keyed by clientId, declared in ONE place.
+	 *
+	 * `join()` only ever pushed; until now nothing was ever removed from any of these, and there are
+	 * thirteen of them. A `removePlayer` that deleted from the seven the ticket happened to name would
+	 * be wrong the day a fourteenth is added — and wrong *silently*, leaving an entry keyed by a
+	 * player who no longer exists.
+	 *
+	 * This list is the intent. The guard is `tests/unit/mp-solo-teardown.spec.ts`, which sweeps the
+	 * live session for the departed id by SHAPE rather than by name, so a container missing from here
+	 * fails a test instead of leaking quietly. Add new per-player state to this list, not to
+	 * `removePlayer`.
+	 *
+	 * `_joined` is deliberately absent: it is an array and its removal is ordered bookkeeping, done
+	 * explicitly below.
+	 */
+	_perClientStores() {
+		return [
+			this.bundles, this.avatars, this.startOf, this.logs, this.actionMsgOf,
+			this._eventSeq, this.pendingEvents, this._sentSoundDesc, this.vitalsOf,
+			this.defeated, this.tiedOf, this._pending, this._stateFp,
+		];
+	}
+
+	/**
+	 * KDM-253 E5/D3 — the survivor has chosen to play on. Take this player out of the world entirely.
+	 *
+	 * ⚠️ THIS IS THE RISKIEST OPERATION IN THE EPIC. `_joined` is load-bearing across turn order,
+	 * per-player logs, PvP pairs, peace, avatar arming and snapshot composition, and it has never had
+	 * a removal path. Each step below is asserted separately rather than under one "it did not crash".
+	 *
+	 * What is deliberately NOT done: the survivor's restraints are left alone. Ties applied by a peer
+	 * are mirrored onto the victim through KD's own `KinkyDungeonAddRestraint`, so they are the
+	 * victim's OWN items on their OWN bundle with no record of who applied them. The ropes do not fall
+	 * off because the person who tied them disconnected, and stripping them would be a state-
+	 * destroying "cleanup" dressed up as tidiness.
+	 *
+	 * Idempotent and safe for an unknown id: this is called from a dialogue answer, and a double click
+	 * must not throw at a player who is already alone.
+	 */
+	removePlayer(clientId) {
+		if (!clientId || !this._joined.includes(clientId)) return false;
+		// 1. the avatar entity leaves the shared world. Its enemy DEF stays: that is a template, and
+		//    removing it would break a later session and disturb KD's enemy cache.
+		const eid = this.avatars.get(clientId);
+		if (eid != null) {
+			try { this.world.despawnAvatar(eid); } catch (e) { this._dbg(`despawn ${eid} failed: ${e}`); }
+		}
+		// 2. any dialogue of OURS still open on a REMAINING player that was about this one. The
+		//    survivor answered the wait/solo question, so KD has already closed it on them — but the
+		//    close is idempotent and this also covers a peace offer left hanging with the departed.
+		for (const id of this._joined) {
+			if (id === clientId) continue;
+			for (const name of OWN_DIALOGUES) {
+				try { this._closeOwnDialogue(id, name); } catch (e) { /* world may be mid-teardown */ }
+			}
+		}
+		// 3. every relationship naming them — war, peace, and any unanswered offer either way.
+		// …and NOT `forget`, which deliberately keeps war/peace for a player who may reconnect. This
+		// player is gone for good (see the note on `PeaceRegistry.remove`).
+		this.rel.remove(clientId);
+		// 4. every per-client container, from the one declaration above.
+		for (const store of this._perClientStores()) {
+			try { store.delete(clientId); } catch (e) { /* not a Map/Set — nothing to delete */ }
+		}
+		// 5. the seat itself, and the lockstep barrier with it. `waitingOn()` filters `_joined`, so
+		//    THIS is what lets the survivor's own submit resolve a turn — not `required`, which is
+		//    only ever read by `join()`. Lowered anyway so the two can never disagree.
+		this._joined = this._joined.filter((id) => id !== clientId);
+		this.required = Math.max(1, this._joined.length);
+		this._dbg(`REMOVED ${clientId} — ${this._joined.length} player(s) remain`);
+		return true;
 	}
 
 	/** Enable/disable GLOBAL player-vs-player damage for this session (KD-092). */

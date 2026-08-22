@@ -153,6 +153,29 @@ class PeaceRegistry {
 	}
 
 	/**
+	 * KDM-253 E5 — a player left FOR GOOD. Drop their offers *and* their relationships.
+	 *
+	 * ⚠️ NOT the same as `forget`, and the difference is the whole reason both exist. `forget` is for
+	 * a player who is merely absent — their war and peace survive, because a reconnecting player
+	 * rejoins the relationships they had (KDM-252, and the note on `forget`). This is for a player the
+	 * survivor has dismissed: they are `gone`, terminal, and a war entry naming them would outlive
+	 * them — which `swap-session.snapshotFor` renders as a standing war with somebody who no longer
+	 * exists.
+	 *
+	 * Wars and peaces are pair-keyed, so this walks both sets rather than guessing at the other half
+	 * of each pair.
+	 */
+	remove(player) {
+		const me = String(player);
+		this.forget(player);
+		for (const set of [this._war, this._peace]) {
+			for (const k of [...set]) {
+				if (k.split('|').includes(me)) set.delete(k);
+			}
+		}
+	}
+
+	/**
 	 * R13/R19 — the between-floors hub. Everyone is at peace and no question is left open.
 	 *
 	 * Wars are cleared rather than converted into `peace` entries: `peace` exists to override the
