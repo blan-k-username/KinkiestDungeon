@@ -42,6 +42,10 @@
 	var coop = window.__coop = {
 		id: id, connected: false, started: false, submitted: false, blocked: null,
 		lastTick: null, peers: [], status: 'init', route: null,
+		// KDM-250: who has dropped, as {clientId, role} — null while everyone is here. Declared up
+		// front rather than sprung into existence on the first drop, so "nobody has left" is a value
+		// a test can assert on instead of an absent property.
+		peerMissing: null,
 		// KDM-163: route-ness of each in-flight send, in order (see submit()).
 		_sentRoute: [],
 		// KDM-186 RULE 1 state: types with an unacknowledged send, the types in flight in ORDER (so a
@@ -667,6 +671,25 @@
 
 		ws.onmessage = function (e) {
 			var m; try { m = JSON.parse(e.data); } catch (_) { return; }
+			// ── KDM-250: the heartbeat ─────────────────────────────────────────────────────────
+			// Answered FIRST and cheaply: this handler runs on the page's own event loop, so a reply
+			// is proof that the loop is still turning — which is the whole point of an
+			// application-level ping rather than an RFC6455 opcode the network stack would answer on
+			// our behalf even with the renderer wedged (KDM-234 A2). It touches no game state and must
+			// never fall through to the input bookkeeping below.
+			if (m.type === 'ping') {
+				try { ws.send(JSON.stringify({ type: 'pong', t: m.t })); } catch (_e) { /* closing */ }
+				return;
+			}
+			if (m.type === 'peer_missing') {
+				// Slice 1 tells the truth and no more: the survivor learns their partner is gone
+				// instead of watching a frozen turn with no explanation. Pausing the session is
+				// KDM-251 and the wait/solo choice is KDM-253 — neither is decided here.
+				coop.peerMissing = { clientId: m.clientId, role: m.role };
+				setStatus('Co-op ' + id + ': ' + (m.role === 'host' ? 'the host' : 'your partner')
+					+ ' (' + m.clientId + ') has disconnected.');
+				return;
+			}
 			if (m.type === 'state') diag.noteRecv(m.kind === 'ui' ? 'ui' : 'turn', (e.data && e.data.length) || 0);
 			else if (m.type === 'ack') diag.noteRecv('ack', (e.data && e.data.length) || 0);
 			// KDM-186: an ACK is a reply that carries no state — the server applied our input and this

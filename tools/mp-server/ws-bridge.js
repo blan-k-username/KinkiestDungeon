@@ -28,6 +28,7 @@ const crypto = require('crypto');
 const { SwapSession } = require('./swap-session');
 const { kdDiff } = require('./kd-delta');
 const { JoinGate } = require('./join-gate');
+const { Presence, DEFAULT_HB_TIMEOUT_MS } = require('./presence');
 
 /**
  * KDM-206: top-level snapshot keys carried IN FULL by every delta, never diffed.
@@ -131,6 +132,17 @@ class WSBridge {
 		// never a contested action, so R9 conflict resolution is unaffected.
 		this.idleGraceMs = (opts.idleGraceMs != null) ? opts.idleGraceMs : 0;
 		this._graceTimer = null;
+		// KDM-250: WHO IS STILL HERE. Kept pure and separate (`presence.js`) so its rules are
+		// unit-tested in milliseconds; the bridge only feeds it the clock and carries its answers to
+		// the sockets. `hbIntervalMs: 0` disables the heartbeat entirely — the escape hatch an
+		// operator (or a spec) needs, and the ONLY way to turn it off. It is on by default on
+		// purpose: a safety mechanism that ships off is the exact mistake `idleGraceMs` made.
+		this.hbIntervalMs = (opts.hbIntervalMs != null) ? opts.hbIntervalMs : 5000;
+		this.presence = new Presence({
+			hbTimeoutMs: (opts.hbTimeoutMs != null) ? opts.hbTimeoutMs : DEFAULT_HB_TIMEOUT_MS,
+		});
+		this._hbTimer = null;
+		this._startHeartbeat();
 		// KDM-186: the latency probe must be running before the first input arrives.
 		this._startLoopLag();
 		this._startStatsTicker();
@@ -191,7 +203,9 @@ class WSBridge {
 			}
 			this._batch = null;
 		});
-		socket.on('error', () => {});
+		// KDM-250: an errored socket is a departed player, not a line to swallow. This used to be a
+		// bare no-op, which is half of why a drop was invisible.
+		socket.on('error', () => { this._dropped(clientId); });
 		// KDM-233: a peer that went away releases whatever it held — a seat, or an unanswered question.
 		// Without this the host is left staring at a dialogue about someone who has already gone, and
 		// slot 1 stays occupied by a ghost. (Making the SESSION survive a drop is KDM-234; this is only
@@ -200,6 +214,9 @@ class WSBridge {
 			if (!clientId) return;
 			this.gate.release(clientId);
 			if (this.sockets.get(clientId) === socket) this.sockets.delete(clientId);
+			// KDM-250: and the SURVIVOR is told. Reported after the socket is dropped from the map so
+			// the report is not addressed to the person who just left.
+			this._dropped(clientId);
 		});
 	}
 
@@ -237,6 +254,14 @@ class WSBridge {
 	}
 
 	_handle(socket, msg, clientId) {
+		// KDM-250: ANY inbound message is evidence the peer's event loop is turning — a `pong` is
+		// merely the one we can count on when the player is doing nothing. Recorded before the
+		// dispatch below so a slow handler cannot make its own sender look dead.
+		if (clientId) this.presence.saw(clientId, now());
+		// A `pong` is liveness and nothing else. It must NOT produce a state frame: KD's draw loop
+		// already emits an input every frame, and KDM-186 measured what answering cheap traffic with
+		// ~40 KB snapshots costs (809 MB egress, one core pegged, lockstep never completing).
+		if (msg.type === 'pong') return clientId;
 		// KDM-233: the host's answer to the one pending question (E2/E3). Only the host may answer —
 		// otherwise a guest could admit itself, which is the whole gate.
 		if (msg.type === 'join_answer' && clientId && clientId === this.gate.host) {
@@ -249,6 +274,7 @@ class WSBridge {
 			}
 			try {
 				const r = this.session.join(res.clientId);
+				this.presence.seat(res.clientId, 'guest', now());   // KDM-250
 				if (guestSock) {
 					this._send(guestSock, {
 						type: 'joined', clientId: res.clientId, started: r.started, players: this.session.players,
@@ -269,6 +295,10 @@ class WSBridge {
 				// would throw "session already started". This lets you reload a tab mid-session
 				// (e.g. to re-read the diagnostics) without restarting the server.
 				if (this.session.started && this.session.players.includes(clientId)) {
+					// KDM-250: a returning player is present again. Un-pausing the session and closing
+					// the survivor's dialogue are KDM-252's job; this is only the bookkeeping, and it is
+					// refused outright for a seat the survivor has already dismissed (E6).
+					this.presence.back(clientId, now());
 					this._send(socket, { type: 'joined', clientId, started: true, players: this.session.players });
 					// KDM-206: a rejoining client holds nothing we can diff against — force a full snapshot.
 					this._resetDelta(clientId);
@@ -294,6 +324,10 @@ class WSBridge {
 					}
 					if (!q.accept) { this._reject(socket, q); return clientId; }
 				}
+				// KDM-250: seated BEFORE `session.join`, so the role is decided while this client is
+				// still the newest arrival — `_roleFor`'s legacy fallback reads arrival order.
+				const role = this._roleFor(clientId, msg.role);
+				this.presence.seat(clientId, role, now());
 				const r = this.session.join(clientId);
 				this._send(socket, { type: 'joined', clientId, started: r.started, players: this.session.players });
 				if (r.started) this._broadcastState();   // both in → push initial render-state
@@ -414,6 +448,74 @@ class WSBridge {
 	 */
 	_clearGrace() {
 		if (this._graceTimer) { clearTimeout(this._graceTimer); this._graceTimer = null; }
+	}
+
+	/**
+	 * KDM-250 — the heartbeat: ping everybody, then sweep whoever stopped answering.
+	 *
+	 * WHY AN APPLICATION-LEVEL PING AND NOT RFC6455 OPCODE 0x9. A browser answers a protocol ping
+	 * from its network stack, so a protocol pong proves the SOCKET is alive and says exactly nothing
+	 * about a frozen JS main loop — and a wedged renderer is one of the two deaths this exists to
+	 * catch (the other, a closed socket, is already covered by `_dropped` below and needs no timer).
+	 * A `{type:'ping'}` message has to be answered by the page's own event loop, so silence means the
+	 * page is gone in the sense the player cares about.
+	 *
+	 * `unref()` so the heartbeat never holds the process open — a liveness probe must not change
+	 * lifetime. Same discipline as `_startLoopLag`.
+	 */
+	_startHeartbeat() {
+		if (this._hbTimer || !(this.hbIntervalMs > 0)) return;
+		this._hbTimer = setInterval(() => {
+			const t = now();
+			for (const [cid, sock] of this.sockets) {
+				try { this._send(sock, { type: 'ping', t: Math.round(t) }); } catch (e) { this._dropped(cid); }
+			}
+			for (const cid of this.presence.sweep(t)) this._reportMissing(cid);
+		}, this.hbIntervalMs);
+		if (this._hbTimer.unref) this._hbTimer.unref();
+	}
+
+	/**
+	 * A seat's socket closed or errored (E2). No need to wait out the heartbeat — this IS the
+	 * evidence. `presence.lost` returns false if the seat was already missing, so an error followed
+	 * by a close reports once, not twice.
+	 */
+	_dropped(clientId) {
+		if (!clientId) return;
+		if (this.presence.lost(clientId)) this._reportMissing(clientId);
+	}
+
+	/**
+	 * Tell everyone still here that somebody is not (E3).
+	 *
+	 * The ROLE travels with the id because host and guest are not symmetric (KDM-234 D5): a guest who
+	 * drops leaves the host a choice, while a host who drops leaves the guest waiting. A survivor who
+	 * only learned "someone left" could not tell which of those it is in.
+	 *
+	 * N2 — nothing is reported until two people have actually been in the session together. Otherwise
+	 * the initial handshake, where one seat is legitimately empty, is indistinguishable from a
+	 * departure, and the survivor gets a disconnect dialogue about somebody who never arrived.
+	 */
+	_reportMissing(clientId) {
+		if (!this.presence.everPaired) return;
+		const msg = { type: 'peer_missing', clientId, role: this.presence.roleOf(clientId) };
+		for (const [cid, sock] of this.sockets) {
+			if (cid === clientId) continue;
+			try { this._send(sock, msg); } catch (e) { /* that one is gone too */ }
+		}
+	}
+
+	/**
+	 * Which seat is this, in the words the survivor needs? An explicit `role` from the join wins;
+	 * otherwise the gate knows (slot 0 is the host); otherwise this is the legacy `#coop=<id>` path,
+	 * where the first to arrive is the host by arrival order.
+	 */
+	_roleFor(clientId, declared) {
+		if (declared === 'host' || declared === 'guest') return declared;
+		const slot = this.gate.slotOf(clientId);
+		if (slot === 0) return 'host';
+		if (slot === 1) return 'guest';
+		return this.presence.seats().length === 0 ? 'host' : 'guest';
 	}
 
 	/** Arm the idle-grace timer: after idleGraceMs, auto-"wait" the non-submitters so a
@@ -693,6 +795,7 @@ class WSBridge {
 
 	close() {
 		this._clearGrace();
+		if (this._hbTimer) { clearInterval(this._hbTimer); this._hbTimer = null; }
 		if (this._lagTimer) { clearInterval(this._lagTimer); this._lagTimer = null; }
 		if (this._statsTimer) { clearInterval(this._statsTimer); this._statsTimer = null; }
 		for (const s of this.sockets.values()) { try { s.end(); } catch (e) {} }

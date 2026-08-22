@@ -299,8 +299,16 @@ function start(port = PORT) {
 	// restraint used to switch this on implicitly — the MP layer choosing a perk for the player. Now
 	// you ask for it, or it stays off.
 	const classicHeels = /^(1|true|on)$/i.test(process.env.KD_CLASSIC_HEELS || '');
+	// KDM-250: the heartbeat. ON by default — a safety mechanism that ships off is the mistake
+	// `idleGraceMs` above made, and "one dead tab freezes the game" is the bug this epic is fixing.
+	// KD_HB_INTERVAL_MS=0 turns it off for a UAT session that wants the old behaviour; the timeout is
+	// deliberately generous because a peer whose JS loop is merely BUSY is indistinguishable from one
+	// that is wedged, and a tight window would declare a live player dead for a slow frame.
+	const hbIntervalMs = parseInt(process.env.KD_HB_INTERVAL_MS || '5000', 10);
+	const hbTimeoutMs = parseInt(process.env.KD_HB_TIMEOUT_MS || '30000', 10);
 	const bridge = new WSBridge({
 		requiredPlayers: 2, seed: 'coop-demo-seed', idleGraceMs: graceMs,
+		hbIntervalMs, hbTimeoutMs,
 		pvp, startRestraint, wearRestraint, classicHeels,
 	});
 	const server = http.createServer(serveStatic);

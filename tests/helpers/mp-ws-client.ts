@@ -23,15 +23,33 @@ export class MPClient {
 	private buf: any[] = [];
 	private waiters: { pred: (m: any) => boolean; res: (m: any) => void; rej: (e: any) => void; timer: any }[] = [];
 	private _base: any = null;
+	private _pong = true;
 
-	static async connect(port: number): Promise<MPClient> {
+	/**
+	 * KDM-250: IT ANSWERS THE HEARTBEAT, like a live browser does.
+	 *
+	 * The server now pings periodically and marks a silent seat `missing`. A test client that did not
+	 * answer would be declared dead partway through every OTHER spec in the suite — so answering is
+	 * the default, and not answering is the thing you opt into. `{pong:false}` (or `stopPong()`
+	 * mid-test) is how a spec plays a WEDGED peer: socket still open, nobody home.
+	 */
+	static async connect(port: number, opts: { pong?: boolean } = {}): Promise<MPClient> {
 		const c = new MPClient();
+		c._pong = opts.pong !== false;
 		// eslint-disable-next-line no-undef
 		c.ws = new WebSocket(`ws://127.0.0.1:${port}`);
-		c.ws.addEventListener('message', (e: any) => { c.buf.push(c._resolve(JSON.parse(e.data))); c._pump(); });
+		c.ws.addEventListener('message', (e: any) => {
+			const m = JSON.parse(e.data);
+			if (m && m.type === 'ping' && c._pong) { try { c.send({ type: 'pong', t: m.t }); } catch (err) { /* closing */ } }
+			c.buf.push(c._resolve(m));
+			c._pump();
+		});
 		await new Promise<void>((res) => c.ws.addEventListener('open', () => res()));
 		return c;
 	}
+
+	/** Play dead without closing the socket — the failure a socket-close handler cannot see. */
+	stopPong() { this._pong = false; }
 
 	send(obj: any) { this.ws.send(JSON.stringify(obj)); }
 
