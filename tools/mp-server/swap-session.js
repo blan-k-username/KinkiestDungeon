@@ -26,6 +26,7 @@
 const { HeadlessHost, KDGAMEDATA_WORLD_KEYS } = require('./headless-host');
 const { PeaceRegistry } = require('./peace');
 const { KD_PEACE_DIALOGUE } = require('./kd-peace-dialogue');
+const { KD_DISCONNECT_DIALOGUE, HOST_LOST_DIALOGUE } = require('./kd-disconnect-dialogue');
 
 const PARK = { x: 1, y: 1 };
 
@@ -38,6 +39,20 @@ const HUB_ROOM_TYPE = 'JourneyFloor';
 
 /** KDM-230: the name of OUR dialogue, in `kd-peace-dialogue.js`. Named once; matched by it here. */
 const PEACE_DIALOGUE = 'KDCoopPeace';
+
+/**
+ * KDM-251: every dialogue the GATEWAY itself owns — as opposed to the hundreds the game ships.
+ *
+ * Two rules need this set, and before this task each hand-rolled its own answer to "is this ours?"
+ * (`apply()` matched `PEACE_DIALOGUE` exactly; `submit()`'s peace check exempted ANY dialogue). A
+ * third copy was about to be written for the pause gate, so they are unified here instead.
+ *
+ * WHY IT MATTERS THAT THE SET IS RIGHT. Our dialogues are the ones whose ANSWER is the only thing
+ * that can clear the state that is blocking the player. Refuse one and the survivor is soft-locked
+ * holding the only key to their own cell — the trap KDM-230 documents against the peace offer, and
+ * the same trap the disconnect dialogues walk into.
+ */
+const OWN_DIALOGUES = new Set([PEACE_DIALOGUE, HOST_LOST_DIALOGUE]);
 
 /**
  * KDM-162: KDGameData fields the CLIENT owns, because only the client can compute them.
@@ -247,6 +262,12 @@ class SwapSession {
 			globalThis.KDCoopPeaceDecide = function (accept) { globalThis.__kdCoopPeaceAnswer = !!accept; };
 			globalThis.__kdCoopPeaceAnswer = undefined;
 		})()`);
+		// KDM-251: the disconnect dialogues, on the same terms and for the same reason.
+		this.world.loadMod(KD_DISCONNECT_DIALOGUE);
+		this.world.eval(`(function(){
+			globalThis.KDCoopSessionQuit = function () { globalThis.__kdCoopQuit = true; };
+			globalThis.__kdCoopQuit = undefined;
+		})()`);
 		// KDM-227: baseline for the hub-arrival check. Seeded HERE rather than left undefined so the
 		// room the session STARTS in is not mistaken for an arrival — the game boots on the journey
 		// hub itself (level 0), so the very first turn of every session would otherwise fire a reset.
@@ -420,21 +441,47 @@ class SwapSession {
 	 * game's own `SPEAKER` substitution fills in their name.
 	 */
 	_openPeaceDialogue(target, from) {
-		const avatarId = this.avatars.get(from);
+		return this._openOwnDialogue(target, PEACE_DIALOGUE, this.avatars.get(from));
+	}
+
+	/**
+	 * KDM-251 S5 — put the host-lost dialogue in front of a guest whose host has gone.
+	 *
+	 * No speaker: there is no avatar to attribute it to (that is the entire message), so it opens as
+	 * a plain narration rather than as somebody talking.
+	 */
+	openHostLostDialogue(target) {
+		return this._openOwnDialogue(target, HOST_LOST_DIALOGUE, null);
+	}
+
+	/**
+	 * KDM-251: open one of OUR dialogues on a specific player's bundle.
+	 *
+	 * Generalised from `_openPeaceDialogue` when the disconnect dialogue needed the identical
+	 * restore → KDStartDialog → capture → re-park sequence. That sequence is the load-bearing part —
+	 * a second hand-written copy would be free to get the capture or the re-park subtly wrong, and
+	 * both failures corrupt player state rather than merely failing to draw.
+	 *
+	 * @param {string} target      whose bundle the dialogue opens on
+	 * @param {string} name        a member of OWN_DIALOGUES
+	 * @param {number|null} speakerEntityId  avatar to attribute it to, or null for plain narration
+	 */
+	_openOwnDialogue(target, name, speakerEntityId) {
 		const bundle = this.bundles.get(target);
 		if (!bundle) return false;
 		this.world.restorePlayer(bundle);
 		const res = this.world.eval(`(function(){
-			var speaker = KDMapData.Entities.find(function(e){ return e.id === ${avatarId | 0}; });
+			var speaker = ${speakerEntityId == null ? 'null'
+		: `KDMapData.Entities.find(function(e){ return e.id === ${speakerEntityId | 0}; })`};
 			try {
-				KDStartDialog('KDCoopPeace', speaker ? speaker.Enemy.name : 'RemotePlayer', false,
+				KDStartDialog('${name}', speaker ? speaker.Enemy.name : 'RemotePlayer', false,
 					'', speaker || undefined);
 			} catch (e) { return { err: String(e && e.message || e) }; }
 			return { open: KDGameData.CurrentDialog };
 		})()`);
 		this.bundles.set(target, this.world.capturePlayer());
 		this.world.parkGlobalPlayer(PARK.x, PARK.y);
-		this._dbg(`PEACE dialogue opened for ${target} (${JSON.stringify(res)})`);
+		this._dbg(`${name} dialogue opened for ${target} (${JSON.stringify(res)})`);
 		return res;
 	}
 
@@ -544,7 +591,9 @@ class SwapSession {
 		 * ours: we wrote both options, and neither advances time. Scoped to `KDCoopPeace` by name, so
 		 * every other dialogue keeps whatever verdict the game earns for it.
 		 */
-		const ourDialogue = kdType === 'dialogue' && data && data.dialogue === PEACE_DIALOGUE;
+		// KDM-251: was `data.dialogue === PEACE_DIALOGUE` inline. One shared answer to "is this ours?"
+		// now, so this rule and the pause gate in `submit` can never disagree about it.
+		const ourDialogue = this._isOwnDialogue(kdType, data);
 		// Known NOT to consume a turn (learned from a real turn, below) → apply it now, exactly once.
 		if (ourDialogue || this.inputKind.get(kdType) === 'ui') {
 			const bundle = this.bundles.get(clientId);
@@ -741,9 +790,57 @@ class SwapSession {
 	 */
 	cancelledMoveReport() { return this.cancelledMoves.slice(); }
 
+	/**
+	 * KDM-251 — stop the turn loop, with a reason the player can be shown.
+	 *
+	 * The reason is an OPAQUE STRING to this class. Presence lives on the bridge (`presence.js`) and
+	 * the session knows nothing about seats, sockets or who is missing — it only knows that somebody
+	 * upstream has said "not now, and here is why". That keeps the bridge the single place where
+	 * presence is mapped onto behaviour, and means a future reason (a host migration, a save) needs no
+	 * change here.
+	 */
+	pause(reason) { this._pausedReason = reason || 'paused'; return this._pausedReason; }
+
+	resume() { this._pausedReason = null; }
+
+	get paused() { return !!this._pausedReason; }
+
+	/**
+	 * Is this input an answer to one of the GATEWAY's own dialogues (`OWN_DIALOGUES`)?
+	 *
+	 * These must never be refused by a gate, because the answer is the only thing that can clear the
+	 * state doing the refusing — see the note on `OWN_DIALOGUES`.
+	 */
+	_isOwnDialogue(kdType, data) {
+		return kdType === 'dialogue' && !!data && OWN_DIALOGUES.has(data.dialogue);
+	}
+
 	submit(clientId, action = {}) {
 		if (!this.started) throw new Error('session not started');
 		if (!this._joined.includes(clientId)) throw new Error(`unknown player ${clientId}`);
+		/*
+		 * KDM-251 S2/N1 — the session is paused, so this turn does not happen.
+		 *
+		 * Refused HERE, at the top of submit, because that is the last point at which nothing has
+		 * happened yet: `_pending` is untouched and `_advanceTurn` (the only thing that moves the
+		 * shared world) runs solely when every player has submitted. A gate any later would have to
+		 * undo work.
+		 *
+		 * `blocked`, never `waiting`. The two are not interchangeable: the client sets
+		 * `coop.submitted = true` on `waiting` and then suppresses further input as already-acted, so
+		 * answering a refusal that way locks the player out of their own controls. That is the exact
+		 * soft-lock KDM-225 shipped and had to fix.
+		 *
+		 * Our own dialogues are exempt — their answer is what ENDS the pause (KDM-253's wait/solo, and
+		 * this task's quit). Refusing them would be the soft-lock one level up.
+		 */
+		if (this._pausedReason) {
+			const input = this._toInput(clientId, action);
+			if (!this._isOwnDialogue(input.kdType, input.data)) {
+				this._dbg(`BLOCKED ${clientId}: session paused (${this._pausedReason})`);
+				return { advanced: false, blocked: this._pausedReason, waitingOn: [clientId] };
+			}
+		}
 		// KDM-225 R5: a player who owes an answer to a peace offer cannot take their turn until they
 		// give one. This is the ONE choke point for that — `apply()` routes UI-kind actions around
 		// `submit` entirely, so the answer itself is never blocked by this.

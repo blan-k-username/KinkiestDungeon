@@ -49,6 +49,13 @@ class Presence {
 	/** @param {{hbTimeoutMs?: number}} opts */
 	constructor(opts) {
 		this.hbTimeoutMs = (opts && opts.hbTimeoutMs != null) ? opts.hbTimeoutMs : DEFAULT_HB_TIMEOUT_MS;
+		/**
+		 * How often the caller INTENDS to sweep. Not used to schedule anything — `sweep` compares it
+		 * against how late a sweep actually was, so the server can tell its own downtime apart from a
+		 * client's silence. See the credit rule in `sweep`.
+		 */
+		this.hbIntervalMs = (opts && opts.hbIntervalMs != null) ? opts.hbIntervalMs : 0;
+		this._lastSweepAt = null;
 		/** clientId -> { role, state, lastSeen } */
 		this._seats = new Map();
 		/**
@@ -130,6 +137,31 @@ class Presence {
 	 * would declare a player dead for the crime of a long garbage collection or a slow frame.
 	 */
 	sweep(t) {
+		/*
+		 * KDM-251 — DO NOT BILL THE CLIENT FOR OUR OWN DOWNTIME.
+		 *
+		 * Both halves of `t - lastSeen` are read on the SERVER, so when the server's own event loop
+		 * stalls — a GC pause, a blocking operation, a loaded host — every seat goes silent at once
+		 * through no fault of any client, and the naive rule declares the whole session dead.
+		 *
+		 * Measured, not theorised: the full unit suite stalled this loop 1.47 s
+		 * (`loopLag max=1469.6ms` in the mp-stats line), which blew a 200 ms window and paused a
+		 * session whose peers were both healthy. Under KDM-250 that cost a wrong overlay line; under
+		 * KDM-251 it stops the game.
+		 *
+		 * So credit everyone with however late this sweep was. Not a skip: a genuinely dead peer is
+		 * still caught, it just takes `hbTimeoutMs + the stall` — which is the honest answer, because
+		 * for the duration of the stall we had no evidence about anyone either way.
+		 */
+		if (this.hbIntervalMs > 0 && this._lastSweepAt != null) {
+			const late = Math.max(0, (t - this._lastSweepAt) - this.hbIntervalMs);
+			if (late > 0) {
+				for (const s of this._seats.values()) {
+					if (s.state === 'connected') s.lastSeen += late;
+				}
+			}
+		}
+		this._lastSweepAt = t;
 		const lost = [];
 		for (const [clientId, s] of this._seats) {
 			if (s.state !== 'connected') continue;

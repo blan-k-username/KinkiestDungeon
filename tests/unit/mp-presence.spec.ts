@@ -82,6 +82,72 @@ describe('KDM-250 — Presence', () => {
 		});
 	});
 
+	/**
+	 * KDM-251 regression — do not bill the client for OUR OWN downtime.
+	 *
+	 * `sweep` measures silence as `now - lastSeen`, and both halves of that are read on the SERVER. So
+	 * when the server's own event loop stalls — a GC pause, a blocking operation, a loaded CI host —
+	 * every seat goes quiet at once through no fault of any client, and the naive rule declares the
+	 * whole session dead simultaneously.
+	 *
+	 * Caught for real: the full unit suite stalled the loop 1.47 s (`loopLag max=1469.6ms`), which
+	 * exceeded a 200 ms heartbeat window and paused a session in which both peers were perfectly
+	 * healthy. Under KDM-250 that cost a wrong overlay line; under KDM-251 it stops the game.
+	 *
+	 * The fix is a CREDIT, not a skip: however late this sweep was, give that time back to everyone.
+	 * A genuinely dead peer is still detected — it just takes `hbTimeout + the stall`, which is the
+	 * honest answer, because during the stall we had no evidence either way.
+	 */
+	describe('a stalled SERVER does not count as a silent client (KDM-251)', () => {
+		const INTERVAL = 100;
+		beforeEach(() => {
+			p = new Presence({ hbTimeoutMs: TIMEOUT, hbIntervalMs: INTERVAL });
+			p.seat('H', 'host', 0);
+			p.seat('G', 'guest', 0);
+			p.sweep(INTERVAL);                              // establish the sweep cadence
+		});
+
+		it('a sweep that arrives late loses nobody', () => {
+			// 5x the timeout of wall-clock, but the sweep itself was that late — so the server was
+			// asleep for it and learned nothing about anyone.
+			expect(p.sweep(INTERVAL + 5 * TIMEOUT)).toEqual([]);
+			expect(p.state('H')).toBe('connected');
+			expect(p.state('G')).toBe('connected');
+		});
+
+		/**
+		 * Run the heartbeat at its INTENDED cadence, with H answering and G silent, and report the
+		 * first sweep that loses anyone. This is what "the clock is running normally again" means —
+		 * a single huge jump is, correctly, indistinguishable from a stall and would be credited away.
+		 */
+		function runOnTime(from: number, forMs: number) {
+			let t = from;
+			const end = from + forMs;
+			while (t < end) {
+				t += INTERVAL;
+				p.saw('H', t);
+				const lost = p.sweep(t);
+				if (lost.length) return lost;
+			}
+			return [];
+		}
+
+		it('and a peer that is REALLY gone is still caught once the clock runs normally again', () => {
+			p.sweep(INTERVAL + 5 * TIMEOUT);                // the stall, credited away
+			expect(runOnTime(INTERVAL + 5 * TIMEOUT, TIMEOUT * 3)).toEqual(['G']);
+		});
+
+		/**
+		 * Control. The credit is bounded by how late the sweep was — if it simply refreshed everyone
+		 * on every call, nothing could ever be detected and the first test above would pass
+		 * vacuously. With no stall at all, an on-time run must still kill the silent seat.
+		 */
+		it('control — with no stall, an on-time run still detects the silent peer', () => {
+			expect(runOnTime(INTERVAL, TIMEOUT * 3)).toEqual(['G']);
+			expect(p.state('H'), 'and only the silent one').toBe('connected');
+		});
+	});
+
 	describe('a closed socket does not wait for the heartbeat (E2)', () => {
 		beforeEach(() => { p.seat('H', 'host', 0); p.seat('G', 'guest', 0); });
 

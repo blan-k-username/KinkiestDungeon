@@ -140,6 +140,9 @@ class WSBridge {
 		this.hbIntervalMs = (opts.hbIntervalMs != null) ? opts.hbIntervalMs : 5000;
 		this.presence = new Presence({
 			hbTimeoutMs: (opts.hbTimeoutMs != null) ? opts.hbTimeoutMs : DEFAULT_HB_TIMEOUT_MS,
+			// KDM-251: presence needs the INTENDED cadence so it can tell a sweep that was late
+			// (our event loop stalled) from a client that went quiet. See the credit rule in `sweep`.
+			hbIntervalMs: this.hbIntervalMs,
 		});
 		this._hbTimer = null;
 		this._startHeartbeat();
@@ -498,11 +501,35 @@ class WSBridge {
 	 */
 	_reportMissing(clientId) {
 		if (!this.presence.everPaired) return;
-		const msg = { type: 'peer_missing', clientId, role: this.presence.roleOf(clientId) };
+		const role = this.presence.roleOf(clientId);
+		/*
+		 * KDM-251 S2 — the turn loop stops here, and this is the ONLY place presence is mapped onto
+		 * session behaviour. `SwapSession` is handed an opaque reason and never learns what a seat is.
+		 *
+		 * Gated on `started`: before the session exists there is no turn loop to pause, and pausing a
+		 * session that has not begun would refuse the joins that would start it.
+		 */
+		if (this.session.started) this.session.pause('peer-missing');
+		const msg = { type: 'peer_missing', clientId, role };
 		for (const [cid, sock] of this.sockets) {
 			if (cid === clientId) continue;
 			try { this._send(sock, msg); } catch (e) { /* that one is gone too */ }
+			// KDM-251 S3/S5 — and the survivor is told IN THE GAME, not only in a corner overlay.
+			// A guest who has lost the HOST gets the quit-only dialogue (D5/D7): they cannot continue,
+			// because it is the host's process that owns the world. The host's own wait/solo choice on
+			// a GUEST drop is KDM-253 — deliberately not opened here.
+			if (role === 'host' && this.session.started) {
+				try { this.session.openHostLostDialogue(cid); } catch (e) { /* world may be mid-teardown */ }
+			}
 		}
+	}
+
+	/** KDM-251: everybody is back — let the turn loop run again. */
+	_resumeIfWhole() {
+		if (this.presence.paused) return false;
+		if (!this.session.started) return false;
+		this.session.resume();
+		return true;
 	}
 
 	/**

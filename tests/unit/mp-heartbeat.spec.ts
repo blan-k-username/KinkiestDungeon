@@ -166,8 +166,14 @@ describe('KDM-250 — heartbeat and the drop report', () => {
 		let A: MPClient; let B: MPClient;
 
 		beforeAll(async () => {
+			// A GENEROUS timeout here, unlike the detection cases above. This describe asserts that a
+			// healthy heartbeat is QUIET, not how fast it notices a death — so a tight window buys it
+			// nothing and costs it robustness. Learned the hard way: with 200 ms it went red in the
+			// full suite, where the server's own event loop stalls (measured `loopLag max=1469.6ms`)
+			// and every seat looks silent at once. Presence now credits that stall back
+			// (`presence.js` `sweep`), and this window no longer sits on the edge of it either.
 			live = new WSBridge({
-				requiredPlayers: 2, seed: 'hb-live', hbIntervalMs: HB_INTERVAL, hbTimeoutMs: HB_TIMEOUT,
+				requiredPlayers: 2, seed: 'hb-live', hbIntervalMs: HB_INTERVAL, hbTimeoutMs: 30_000,
 			});
 			const port = await live.listen(0);
 			A = await MPClient.connect(port);

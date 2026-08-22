@@ -28,6 +28,7 @@ const { WSBridge } = require('./ws-bridge');
 const { KD_CODEC } = require('./kd-codec');
 const { KD_DELTA_BROWSER } = require('./kd-delta');
 const { KD_PEACE_DIALOGUE_BROWSER } = require('./kd-peace-dialogue');
+const { KD_DISCONNECT_DIALOGUE_BROWSER } = require('./kd-disconnect-dialogue');
 const { KD_ABSENT_RESET_BROWSER } = require('./kd-absent-reset');
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
@@ -60,6 +61,8 @@ const DELTA_ROUTE = '/mp/kd-delta.js';
 // the server evals this exact text into the world, the browser is served it as a script.
 const PEACE_DLG_ROUTE = '/mp/kd-peace-dialogue.js';
 // The "absent from the bundle ⇒ back to its default" rule, shared with the host for the same reason.
+// KDM-251: the disconnect dialogues, on the same two-runtime terms as the peace one.
+const DISCONNECT_DLG_ROUTE = '/mp/kd-disconnect-dialogue.js';
 const ABSENT_RESET_ROUTE = '/mp/kd-absent-reset.js';
 const CODEC_BODY = `${KD_CODEC}\n;(typeof window !== 'undefined' ? window : globalThis).KDCodec = ` +
 	`{ kdEnc: kdEnc, kdDec: kdDec, kdSer: kdSer };\n`;
@@ -75,6 +78,7 @@ const SYNTHETIC_ROUTES = {};
 SYNTHETIC_ROUTES[CODEC_ROUTE] = CODEC_BODY;
 SYNTHETIC_ROUTES[DELTA_ROUTE] = KD_DELTA_BROWSER;
 SYNTHETIC_ROUTES[PEACE_DLG_ROUTE] = KD_PEACE_DIALOGUE_BROWSER;
+SYNTHETIC_ROUTES[DISCONNECT_DLG_ROUTE] = KD_DISCONNECT_DIALOGUE_BROWSER;
 SYNTHETIC_ROUTES[ABSENT_RESET_ROUTE] = KD_ABSENT_RESET_BROWSER;
 
 // Scripts injected just before </body> in index.html (in order).
@@ -90,6 +94,7 @@ const INJECT = [
 	// `window.__coopConnect` / `window.__coopAnswerJoin`.
 	'/tools/mp-server/client/coop-lobby.js',
 	PEACE_DLG_ROUTE,                // KDM-230: needs KDDialogue, so after the bundle is in scope
+	DISCONNECT_DLG_ROUTE,           // KDM-251: same — needs KDDialogue in scope
 ];
 
 /* ── Serve-time workarounds for UPSTREAM crashes ──────────────────────────────────────────────

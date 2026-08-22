@@ -682,12 +682,20 @@
 				return;
 			}
 			if (m.type === 'peer_missing') {
-				// Slice 1 tells the truth and no more: the survivor learns their partner is gone
-				// instead of watching a frozen turn with no explanation. Pausing the session is
-				// KDM-251 and the wait/solo choice is KDM-253 — neither is decided here.
+				// KDM-250 reports the drop; KDM-251 makes the session PAUSE on it. The in-game telling
+				// is a server-opened dialogue (S3) — this line is the ambient status, not the message.
+				// The wait/solo choice on a GUEST drop is KDM-253 and is not decided here.
 				coop.peerMissing = { clientId: m.clientId, role: m.role };
-				setStatus('Co-op ' + id + ': ' + (m.role === 'host' ? 'the host' : 'your partner')
-					+ ' (' + m.clientId + ') has disconnected.');
+				// A turn we already had in flight will never resolve now, so stop claiming we acted —
+				// otherwise the client keeps suppressing input as already-submitted (the KDM-225 shape).
+				coop.submitted = false;
+				setStatus('Co-op ' + id + ': ' + (m.role === 'host'
+					// D5/D6 — the guest is NOT offered a choice: it is the host's process that owns the
+					// world, so there is nothing for the guest to continue. Say what is happening and
+					// that waiting is fine, rather than leaving a freeze to be guessed at.
+					? 'the host (' + m.clientId + ') has disconnected — waiting for them to come back. '
+						+ 'Your moves will not be accepted until they do.'
+					: 'your partner (' + m.clientId + ') has disconnected — the game is paused.'));
 				return;
 			}
 			if (m.type === 'state') diag.noteRecv(m.kind === 'ui' ? 'ui' : 'turn', (e.data && e.data.length) || 0);
@@ -798,7 +806,13 @@
 				coop.blocked = m.reason || 'blocked';
 				setStatus('Co-op ' + id + ': ' + (m.reason === 'peace-offer'
 					? 'a peace offer is waiting — RIGHT-CLICK YOURSELF to accept or refuse'
-					: 'action refused (' + m.reason + ')'));
+					// KDM-251 D6: a refused move must not read as a hang. Name the cause every time,
+					// because this is the reason the player will see most often while paused.
+					: m.reason === 'peer-missing'
+						? 'the game is paused — ' + (coop.peerMissing && coop.peerMissing.role === 'host'
+							? 'waiting for the host to reconnect.'
+							: 'waiting for your partner to reconnect.')
+						: 'action refused (' + m.reason + ')'));
 			} else if (m.type === 'error') {
 				setStatus('Co-op ' + id + ': error — ' + m.error);
 			}
