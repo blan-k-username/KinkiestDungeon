@@ -86,6 +86,9 @@ const INJECT = [
 	'/tools/mp-server/client/coop-bootstrap.js',
 	// KDM-225: the peace submenu. AFTER coop-bootstrap — it sends through `window.__coop.sendAction`.
 	'/tools/mp-server/client/coop-peace.js',
+	// KDM-233: the main-menu Multiplayer entry + host/join screens. AFTER coop-bootstrap — it drives
+	// `window.__coopConnect` / `window.__coopAnswerJoin`.
+	'/tools/mp-server/client/coop-lobby.js',
 	PEACE_DLG_ROUTE,                // KDM-230: needs KDDialogue, so after the bundle is in scope
 ];
 

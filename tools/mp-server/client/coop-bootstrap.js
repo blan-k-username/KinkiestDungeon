@@ -21,7 +21,18 @@
 	}
 
 	var id = getCoopId();
-	if (!id) return;   // not a co-op tab — leave the normal game alone
+	// KDM-233: WHERE THE SOCKET GOES, and who we say we are.
+	//
+	// The `#coop=` path is always same-origin and needs none of this. The lobby's Join screen supplies
+	// a host ADDRESS instead — that is the whole point of joining by address — so the endpoint can no
+	// longer be `location.host` unconditionally (it was, at `connect()` below).
+	//
+	// With no `#coop=` this module now defines its API and boots NOTHING: everything between here and
+	// the bottom is declarations, and the only top-level effects are the debug flag and the boot call
+	// at the very end, which is now conditional. A normal single-player page is untouched.
+	var endpoint = null;      // 'host:port' — null means same-origin
+	var role = null;          // 'host' | 'guest' | null (legacy direct join)
+	var playerName = '';      // what the host sees in their accept/decline prompt
 
 	// KD-098 diagnostics: ON by default for the co-op demo (it's a debug harness). Logs to the
 	// browser console: every KDSendInput classification (render-client) + every submit() here.
@@ -413,9 +424,40 @@
 		rc.apply.__kdDiagWrapped = true;
 	}
 
+	/** KDM-233: tell the lobby something, if a lobby is on screen. Fields are merged, not replaced. */
+	function lobbySay(fields) {
+		var L = window.KDMPLobby;
+		if (!L) return;
+		for (var k in fields) if (Object.prototype.hasOwnProperty.call(fields, k)) L[k] = fields[k];
+	}
+
 	function boot() {
 		if (!ready()) { setTimeout(boot, 100); return; }
 		if (!loaded()) { setStatus('Co-op ' + id + ': loading game assets…'); setTimeout(boot, 200); return; }
+		enterGame();
+		connect();
+	}
+
+	/**
+	 * KDM-233: go render-only and hand the controls to the server.
+	 *
+	 * Split out of `boot()` because the approval flow must NOT do this at connect time: a host waiting
+	 * for a friend, or a guest waiting to be let in, is still on the lobby screen. Both enter here only
+	 * once the session actually starts. Idempotent — `joined` can arrive more than once (a reattach
+	 * re-sends it), and forcing the game screen twice would stamp over a live session.
+	 */
+	function enterGame() {
+		if (coop._entered) return;
+		// Assets, not the socket: the bundle preloads character assets and starting a game before that
+		// finishes is clobbered by the loading flow. The HANDSHAKE has no such requirement — a host
+		// sitting in the lobby may well still be preloading — so this wait lives here and NOT in front
+		// of `connect()`, which is where it was first (wrongly) put: the guest's join then never left
+		// the page, and the host was never prompted.
+		if (!loaded()) {
+			if (!coop._enterQueued) { coop._enterQueued = true; setTimeout(function () { coop._enterQueued = false; enterGame(); }, 200); }
+			return;
+		}
+		coop._entered = true;
 		// assets ready → bring up the dungeon and go render-only
 		forceGameScreen();
 		window.KDRenderClient.disableLocalSim();
@@ -428,7 +470,6 @@
 		installRouteDriver();
 		ensureQuickBind();
 		ensureStartItem();
-		connect();
 	}
 
 	/** Read a hash/query param like `&startitem=HingedCuffs`. */
@@ -559,15 +600,38 @@
 		if (typeof KinkyDungeonUpdateLightGrid !== 'undefined') KinkyDungeonUpdateLightGrid = true;
 	}
 
+	/**
+	 * KDM-233: the build this client is running, so the server can refuse a skewed pair (N1).
+	 *
+	 * The guest runs its OWN copy of the bundle and only repoints its socket, so two different builds
+	 * would desync. `KDVersionStr` is the bundle's own version string — the same thing the test
+	 * helpers read to sanity-check which bundle they loaded. The HOST's value defines the session
+	 * (`join-gate.js` adopts it), so nothing has to be configured anywhere.
+	 */
+	function buildId() {
+		try { if (typeof TextGet === 'function') return String(TextGet('KDVersionStr') || ''); } catch (e) { /* noop */ }
+		return '';
+	}
+
 	function connect() {
 		var proto = location.protocol === 'https:' ? 'wss' : 'ws';
-		ws = new WebSocket(proto + '://' + location.host + '/');
+		ws = new WebSocket(proto + '://' + (endpoint || location.host) + '/');
 		coop.ws = ws;
 		setStatus('Co-op ' + id + ': connecting…');
 		ws.onopen = function () {
 			coop.connected = true;
-			ws.send(JSON.stringify({ type: 'join', clientId: id }));
+			var join = { type: 'join', clientId: id };
+			// A role opts into the approval flow; without one this is the legacy direct join and the
+			// server behaves exactly as it always did.
+			if (role) { join.role = role; join.name = playerName; join.build = buildId(); }
+			ws.send(JSON.stringify(join));
 			setStatus('Co-op ' + id + ': joined, waiting for the other player…');
+		};
+		ws.onerror = function () {
+			// E6: a wrong address must arrive in WORDS. A browser gets no reason for a failed connect,
+			// so this is the only place that can say anything at all — and saying nothing is what makes
+			// a mistyped address look like a hang.
+			lobbySay({ error: 'Could not reach ' + (endpoint || location.host) });
 		};
 		/**
 		 * KDM-206: resolve a state frame to a FULL snapshot.
@@ -609,7 +673,34 @@
 			// player's own state did not move. It still consumed exactly one send, so the in-order
 			// bookkeeping must unwind for it exactly like a 'ui' state reply; it just has nothing to apply.
 			if (m.type === 'ack') { coop._sentRoute.shift(); ackOne('ui'); return; }   // applied, no turn ⇒ stream
-			if (m.type === 'joined') { coop.peers = m.players || []; }
+			// ── KDM-233: the approval handshake ────────────────────────────────────────────────
+			// These arrive BEFORE the session exists, so none of them touch game state.
+			if (m.type === 'awaiting_approval') {
+				lobbySay({ status: 'Waiting for the host to let you in…', error: '' });
+				return;
+			}
+			if (m.type === 'join_pending') {
+				// Someone is asking to join OUR game. The host answers this — it is the whole gate.
+				lobbySay({ view: 'host', pending: { clientId: m.clientId, name: m.name || 'Someone' }, error: '' });
+				return;
+			}
+			if (m.type === 'reject') {
+				var why = m.reason === 'declined' ? 'The host declined your request.'
+					: m.reason === 'build_mismatch' ? ('Different game versions — host has ' + (m.hostBuild || '?') + ', you have ' + (m.guestBuild || '?') + '.')
+					: m.reason === 'session_full' ? 'That game is full.'
+					: m.reason === 'busy' ? 'The host is already answering someone else.'
+					: m.reason === 'no_host' ? 'Nobody is hosting at that address.'
+					: ('Refused: ' + m.reason);
+				lobbySay({ error: why, status: '', pending: null });
+				return;
+			}
+			if (m.type === 'joined') {
+				coop.peers = m.players || [];
+				// The session is live once BOTH are in — that is the moment the host's game becomes
+				// multiplayer, and the moment either side stops being a lobby screen.
+				if (m.started) { lobbySay({ pending: null, status: '' }); enterGame(); }
+				else if (role === 'host') lobbySay({ view: 'host', status: '' });
+			}
 			else if (m.type === 'state' && m.kind === 'ui') {
 				// KDM-163: a UI input of OURS was applied — no turn resolved. Adopt the fresh state so
 				// the menu responds (R6), and touch NOTHING that is per-turn. Treating this as a turn
@@ -786,5 +877,37 @@
 		if (p && !coop._inFlight[t]) { delete coop._pending[t]; rawSend(t, p.action, p.route); }
 	}
 
-	boot();
+	/**
+	 * KDM-233 — the lobby's way in. `coop-lobby.js` calls this; nothing else does.
+	 *
+	 *   { role:'host' }                                  claim slot 0 on this machine's server
+	 *   { role:'guest', address:'host:port', name:'Ada' } ask that host to let you in
+	 *
+	 * It does NOT enter the game: that happens on `joined.started`, once the host has said yes.
+	 */
+	window.__coopConnect = function (opts) {
+		opts = opts || {};
+		role = opts.role || 'guest';
+		playerName = String(opts.name || '');
+		endpoint = opts.address ? String(opts.address).replace(/^wss?:\/\//, '').replace(/\/+$/, '') : null;
+		// Identity is ours to pick and must be stable for a reconnect to be recognised (S2). It is not
+		// a credential — there is nothing to authenticate against (KDM-226, LAN-only).
+		id = opts.clientId || (role === 'host' ? 'host' : ('guest-' + Math.random().toString(36).slice(2, 8)));
+		coop.id = id;
+		coop._entered = false;
+		// Only `ready()` — see `enterGame()` for why asset loading must not gate the handshake.
+		if (!ready()) { setTimeout(function () { window.__coopConnect(opts); }, 150); return coop; }
+		connect();
+		return coop;
+	};
+
+	/** Answer the pending join request. Host only — the server enforces that too. */
+	window.__coopAnswerJoin = function (accept) {
+		try { coop.ws.send(JSON.stringify({ type: 'join_answer', accept: !!accept })); } catch (e) { /* no socket */ }
+		lobbySay({ pending: null, status: accept ? 'Starting…' : '' });
+	};
+
+	// The `#coop=<id>` path boots immediately, exactly as before. Without it we have only defined an
+	// API, and a normal single-player page is left alone.
+	if (id) boot();
 })();

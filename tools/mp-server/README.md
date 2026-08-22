@@ -241,3 +241,47 @@ Both `stale` and `delete-me` fail the policy spec and print at bundle-serve time
 `UPSTREAM_ISSUES.md` (repro, why it is upstream's, the one-line fix) and point the entry's `upstream:`
 field at that file. The report stays **local**: publishing it on the upstream tracker is the owner's
 call, not a step of this workflow. If one is ever filed, replace the `unfiled:` marker with the URL.
+
+## Hosting and joining (KDM-233)
+
+Entry is no longer only `#coop=<id>`. The main menu has a **Multiplayer** entry, and a friend joins by
+typing the host's LAN address — there is no join code and no account: **the host approves each join**.
+
+```
+node tools/mp-server/demo-server.js    # game + co-op gateway on one port (PORT=… to move it)
+bash tools/coop-demo.sh                # the same, in docker, for UAT
+```
+
+Co-op is opt-in: run the plain static server (`npm run serve`) and nothing listens for co-op at all.
+
+**The pieces**
+
+| File | What it owns |
+|---|---|
+| `join-gate.js` | Membership: two seats (host = slot 0, guest = slot 1) and the one unanswered question. Pure — no socket, no world. Unit-tested in ms (`tests/unit/mp-join-gate.spec.ts`). |
+| `ws-bridge.js` | Carries answers between the gate and the sockets: `join{role}` → `join_pending` → `join_answer` → `joined`. |
+| `client/coop-lobby.js` | The menu entry and the host/join screens, as a wrap of `KinkyDungeonRun`. |
+| `client/coop-bootstrap.js` | `__coopConnect({role, address, name})` / `__coopAnswerJoin(accept)`. |
+
+**Rules worth not re-deriving**
+
+- **A pending requester holds no seat.** `guest` is only written by `accept()`, so a declined or
+  dropped requester cannot block the next friend.
+- **One question at a time.** A second requester is refused `busy`, never queued — queueing would let
+  the host answer a dialogue about Ada and admit Bob.
+- **Refuse in words, after the upgrade.** A browser cannot read an HTTP upgrade rejection (it surfaces
+  only as close 1006, no status or body), so `_reject()` accepts the upgrade, sends
+  `{type:'reject', reason}`, then closes. Rejecting pre-upgrade leaves the join screen with nothing to
+  show. (Lesson carried from `origin/feature/multiplayer`'s `tools/mp-server.js:286-293`.)
+- **Build skew is refused before the host is prompted.** The guest runs its own bundle copy, so a
+  differing `KDVersionStr` would desync. The **host's** build defines the session — `claimHost` adopts
+  it — so nothing has to be configured. A *missing* build counts as a mismatch, not a wildcard; if
+  nobody knows the build the check stands down, and `buildCheckActive()` makes that visible.
+- **Connecting is not entering the game.** `enterGame()` waits for asset loading; the handshake does
+  not. Putting that wait in front of the socket makes the guest's join never leave the page.
+- **The menu entry needs no game-tree edit** — see `client/coop-lobby.js`'s header for why
+  (`KDButtonsCache` is per-frame data; `_prev` must be called first).
+
+**Not done here:** heartbeat and disconnect handling (KDM-234), joining a run already in progress
+(KDM-235), per-player characters (KDM-237). The legacy `#coop=` path still joins directly, so two
+entry paths exist until KDM-236 converges them.

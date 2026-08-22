@@ -27,6 +27,7 @@ const http = require('http');
 const crypto = require('crypto');
 const { SwapSession } = require('./swap-session');
 const { kdDiff } = require('./kd-delta');
+const { JoinGate } = require('./join-gate');
 
 /**
  * KDM-206: top-level snapshot keys carried IN FULL by every delta, never diffed.
@@ -107,6 +108,10 @@ class WSBridge {
 		// first use of each type takes the lockstep default and costs the player a turn, which breaks
 		// click-to-move (`KDFastMoveTo` dispatches through `KDSendInput`). Callers may still override.
 		this.session = new SwapSession(Object.assign({ seedInputKinds: true }, opts));
+		// KDM-233: WHO MAY BE IN THE SESSION — two seats and the one question the host has not answered
+		// yet. Kept pure and separate (`join-gate.js`) so its rules are unit-tested in milliseconds; the
+		// bridge only carries answers between it and the sockets.
+		this.gate = new JoinGate({ build: opts.build || '' });
 		this.sockets = new Map();          // clientId -> socket
 		this._server = null;
 		this.port = null;
@@ -187,6 +192,15 @@ class WSBridge {
 			this._batch = null;
 		});
 		socket.on('error', () => {});
+		// KDM-233: a peer that went away releases whatever it held — a seat, or an unanswered question.
+		// Without this the host is left staring at a dialogue about someone who has already gone, and
+		// slot 1 stays occupied by a ghost. (Making the SESSION survive a drop is KDM-234; this is only
+		// the membership bookkeeping.)
+		socket.on('close', () => {
+			if (!clientId) return;
+			this.gate.release(clientId);
+			if (this.sockets.get(clientId) === socket) this.sockets.delete(clientId);
+		});
 	}
 
 	/**
@@ -205,7 +219,47 @@ class WSBridge {
 		return ok;
 	}
 
+	/**
+	 * KDM-233: refuse a join IN WORDS (E6).
+	 *
+	 * The reason must travel as an application message, never as a rejected upgrade. A browser cannot
+	 * read an HTTP handshake rejection — it surfaces to `WebSocket` only as close 1006, with no
+	 * status, headers or body — so a pre-upgrade refusal leaves the join screen with literally nothing
+	 * to display. Accept the upgrade, send the typed reason, then close. (Lesson carried over from
+	 * `origin/feature/multiplayer`'s `tools/mp-server.js:286-293`.)
+	 */
+	_reject(socket, r) {
+		const out = { type: 'reject', reason: r.reason || 'refused' };
+		if (r.hostBuild !== undefined) out.hostBuild = r.hostBuild;
+		if (r.guestBuild !== undefined) out.guestBuild = r.guestBuild;
+		try { this._send(socket, out); } catch (e) { /* socket already gone */ }
+		try { socket.end(); } catch (e) { /* noop */ }
+	}
+
 	_handle(socket, msg, clientId) {
+		// KDM-233: the host's answer to the one pending question (E2/E3). Only the host may answer —
+		// otherwise a guest could admit itself, which is the whole gate.
+		if (msg.type === 'join_answer' && clientId && clientId === this.gate.host) {
+			const pendingId = this.gate.pending && this.gate.pending.clientId;
+			const res = msg.accept ? this.gate.accept() : this.gate.decline();
+			const guestSock = pendingId ? this.sockets.get(pendingId) : null;
+			if (!res.admitted) {
+				if (guestSock) this._reject(guestSock, res);
+				return clientId;
+			}
+			try {
+				const r = this.session.join(res.clientId);
+				if (guestSock) {
+					this._send(guestSock, {
+						type: 'joined', clientId: res.clientId, started: r.started, players: this.session.players,
+					});
+				}
+				if (r.started) this._broadcastState();
+			} catch (e) {
+				if (guestSock) this._send(guestSock, { type: 'error', error: String(e && e.message || e) });
+			}
+			return clientId;
+		}
 		if (msg.type === 'join') {
 			try {
 				clientId = msg.clientId;
@@ -220,6 +274,25 @@ class WSBridge {
 					this._resetDelta(clientId);
 					try { this._send(socket, Object.assign({ type: 'state', tick: this.session.turn }, this._stateFrame(clientId))); } catch (e) { /* ignore */ }
 					return clientId;
+				}
+				// KDM-233: an explicit ROLE opts into the approval flow. Without one this is the legacy
+				// `#coop=<id>` path, which still joins directly — the two converge in KDM-236, and until
+				// then the e2e suite and `tools/coop-demo.sh` keep working unchanged.
+				if (msg.role === 'host') {
+					const c = this.gate.claimHost(clientId, { build: msg.build });
+					if (!c.accept) { this._reject(socket, c); return clientId; }
+				} else if (msg.role === 'guest') {
+					const q = this.gate.requestJoin(clientId, { name: msg.name, build: msg.build });
+					if (q.pending) {
+						// Asking is not joining: no seat is taken and the session is untouched until the
+						// host answers. The guest is told it is waiting so the join screen can say so
+						// rather than looking hung.
+						this._send(socket, { type: 'awaiting_approval' });
+						const hostSock = this.sockets.get(this.gate.host);
+						if (hostSock) this._send(hostSock, { type: 'join_pending', clientId, name: this.gate.pending.name });
+						return clientId;
+					}
+					if (!q.accept) { this._reject(socket, q); return clientId; }
 				}
 				const r = this.session.join(clientId);
 				this._send(socket, { type: 'joined', clientId, started: r.started, players: this.session.players });

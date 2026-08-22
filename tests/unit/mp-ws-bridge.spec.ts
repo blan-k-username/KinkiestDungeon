@@ -17,60 +17,8 @@ const { WSBridge } = require('../../tools/mp-server/ws-bridge');
 const { kdMerge } = require('../../tools/mp-server/kd-delta');
 
 const BOOT_TIMEOUT = 240_000;
+import { MPClient as Client } from '../helpers/mp-ws-client';
 
-class Client {
-	ws: any;
-	private buf: any[] = [];
-	private waiters: { pred: (m: any) => boolean; res: (m: any) => void; rej: (e: any) => void; timer: any }[] = [];
-
-	static async connect(port: number): Promise<Client> {
-		const c = new Client();
-		// eslint-disable-next-line no-undef
-		c.ws = new WebSocket(`ws://127.0.0.1:${port}`);
-		c.ws.addEventListener('message', (e: any) => { c.buf.push(c._resolve(JSON.parse(e.data))); c._pump(); });
-		await new Promise<void>((res) => c.ws.addEventListener('open', () => res()));
-		return c;
-	}
-	send(obj: any) { this.ws.send(JSON.stringify(obj)); }
-
-	/**
-	 * KDM-206: the bridge sends a full `snapshot` on the first state and a `delta` thereafter. A test
-	 * client is a client, so it merges exactly like the browser does — with the SAME `kdMerge`, not a
-	 * second implementation that could drift from it.
-	 *
-	 * Re-exposes the merged result as `m.snapshot`, so every assertion in this file keeps reading the
-	 * property it always read. The protocol changed; what the tests assert about it did not.
-	 */
-	private _base: any = null;
-	private _resolve(m: any) {
-		if (m && m.type === 'state') {
-			if (m.snapshot) this._base = m.snapshot;
-			else if (m.delta && this._base) m.snapshot = this._base = kdMerge(this._base, m.delta);
-		}
-		return m;
-	}
-	next(pred: (m: any) => boolean, timeout = 20_000): Promise<any> {
-		return new Promise((res, rej) => {
-			const timer = setTimeout(() => rej(new Error('timeout waiting for message')), timeout);
-			this.waiters.push({ pred, res, rej, timer });
-			this._pump();
-		});
-	}
-	private _pump() {
-		for (let wi = 0; wi < this.waiters.length; wi++) {
-			const w = this.waiters[wi];
-			const idx = this.buf.findIndex(w.pred);
-			if (idx >= 0) {
-				const [m] = this.buf.splice(idx, 1);
-				clearTimeout(w.timer);
-				this.waiters.splice(wi, 1);
-				w.res(m);
-				wi--;
-			}
-		}
-	}
-	close() { try { this.ws.close(); } catch (e) { /* noop */ } }
-}
 
 describe('WSBridge — local WebSocket render+input round-trip (KD-071)', () => {
 	let bridge: any;

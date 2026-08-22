@@ -1,0 +1,170 @@
+/**
+ * tools/mp-server/join-gate.js  (KDM-233)
+ *
+ * WHO IS IN THE SESSION, AND WHO IS STILL ASKING.
+ *
+ * Two seats — host (slot 0) and guest (slot 1) — plus the one question the host has not answered
+ * yet. Everything here is a rule about membership; nothing here touches a socket, a world, or a game
+ * global.
+ *
+ * WHY IT IS ITS OWN MODULE. Same call as `peace.js`: this is the PURE half of "host a game and let a
+ * friend join", so its rules are checked in milliseconds (`tests/unit/mp-join-gate.spec.ts`) instead
+ * of behind a ~30 s session boot — and these are exactly the rules that are easy to get subtly
+ * wrong. `swap-session.js` is already 1600 lines; one concern, one file.
+ *
+ * ⚠️ MP-SPECIFIC BY CONSTRUCTION. A one-player game has no seats, no join request and no host to ask
+ * (KDM-226's test), so the gateway is this feature's only possible home. It re-implements no game
+ * mechanic: it decides membership and hands the answer back to the caller.
+ *
+ * THE PENDING REQUEST DOES NOT HOLD A SEAT. That is the whole point of approval-only joining
+ * (KDM-233 R2 — there is no join code; the host IS the gate). A request that is parked, declined, or
+ * dropped must leave the session exactly as it found it, which is why `guest` is only ever written
+ * by `accept()`. The failure this shape makes unrepresentable: a declined guest that still occupies
+ * slot 1 and blocks the next friend.
+ *
+ * ONE QUESTION AT A TIME. A second requester is refused `busy` rather than queued behind the first
+ * (E7). Queueing would mean the host answers a dialogue about Ada and silently admits Bob.
+ *
+ * BUILD MISMATCH IS REFUSED BEFORE THE HOST IS PROMPTED (N1). The guest runs its OWN copy of the
+ * bundle and only repoints its socket, so two different builds desync — and the host should never be
+ * asked to approve a pairing that cannot work. Note this is the *correctness* check that survived
+ * the LAN-only security posture (KDM-226): it is not authentication, and it is not trying to stop a
+ * liar. A peer that misreports its build gets a broken session, which is its own problem.
+ */
+'use strict';
+
+const HOST_SLOT = 0;
+const GUEST_SLOT = 1;
+
+class JoinGate {
+	/** @param {{build?: string}} opts — `build` is this host's build id; guests must match it. */
+	constructor(opts) {
+		this.build = (opts && opts.build) || '';
+		/** clientId of the host, or null. */
+		this.host = null;
+		/** clientId of the seated guest, or null. A PENDING requester is not seated. */
+		this.guest = null;
+		/** `{ clientId, name, build }` awaiting the host's answer, or null. */
+		this.pending = null;
+	}
+
+	// ----- membership ----------------------------------------------------------------------
+
+	/** Seated players, host first. A pending requester is deliberately absent. */
+	players() {
+		const out = [];
+		if (this.host) out.push(this.host);
+		if (this.guest) out.push(this.guest);
+		return out;
+	}
+
+	has(clientId) { return clientId === this.host || clientId === this.guest; }
+
+	slotOf(clientId) {
+		if (clientId && clientId === this.host) return HOST_SLOT;
+		if (clientId && clientId === this.guest) return GUEST_SLOT;
+		return null;
+	}
+
+	// ----- hosting -------------------------------------------------------------------------
+
+	/**
+	 * Claim slot 0. Idempotent for the SAME id, because a host reloading their tab must not lose the
+	 * session — but a DIFFERENT id is refused rather than silently re-seating, so a stray connection
+	 * can never evict the person whose machine owns the world.
+	 */
+	claimHost(clientId, info) {
+		if (this.host && this.host !== clientId) return { accept: false, reason: 'already_hosting' };
+		this.host = clientId;
+		// "HOST is source of truth" (owner, 2026-08-22): when nobody configured a build, the host's is
+		// the session's, so N1 works without the operator setting anything. An EXPLICIT build wins —
+		// a claim can supply the answer, never overrule one already given.
+		if (!this.build && info && info.build) this.build = String(info.build);
+		return { accept: true, slot: HOST_SLOT };
+	}
+
+	/**
+	 * Is the build check actually doing anything? If no build is known — nobody configured one and the
+	 * host never stated one — then a mismatch is not merely allowed, it is *unknowable*, and refusing
+	 * every guest would be worse than refusing none.
+	 *
+	 * This is exported rather than left implicit precisely because a check that silently does nothing
+	 * is how N1 would rot: the "skip" test is only meaningful because a test can see the skip.
+	 */
+	buildCheckActive() { return !!this.build; }
+
+	// ----- asking to join ------------------------------------------------------------------
+
+	/**
+	 * Park a join request for the host to answer. Returns `{accept:false, pending:true}` on success —
+	 * "not refused, not admitted either". Every refusal carries a `reason` the caller can show
+	 * verbatim (E6: a join failure must arrive in words).
+	 *
+	 * Order matters: the cheap structural refusals come before the build check, and the build check
+	 * comes before parking, so nothing that cannot work ever reaches the host's dialogue (N1).
+	 */
+	requestJoin(clientId, info) {
+		const name = (info && info.name) || '';
+		const build = (info && info.build) || '';
+
+		if (!this.host) return { accept: false, reason: 'no_host' };
+		if (clientId === this.host) return { accept: false, reason: 'already_hosting' };
+		if (clientId === this.guest) return { accept: true, slot: GUEST_SLOT };   // already in
+		if (this.guest) return { accept: false, reason: 'session_full' };
+
+		// Missing is NOT a wildcard — a guest that cannot state its build is as unusable as one that
+		// states the wrong build, and treating absence as "fine" is how a skewed pair slips through.
+		// The one exception is a session that does not know its OWN build (`buildCheckActive`): there
+		// is nothing to compare against, so the check stands down rather than refusing everyone.
+		if (this.buildCheckActive() && (!build || build !== this.build)) {
+			return { accept: false, reason: 'build_mismatch', hostBuild: this.build, guestBuild: build };
+		}
+
+		if (this.pending && this.pending.clientId !== clientId) return { accept: false, reason: 'busy' };
+
+		this.pending = { clientId, name, build };
+		return { accept: false, pending: true };
+	}
+
+	// ----- the host answers ----------------------------------------------------------------
+
+	/** Seat the pending guest. An answer consumes the request, so answering twice is `not_pending`. */
+	accept() {
+		if (!this.pending) return { admitted: false, reason: 'not_pending' };
+		const clientId = this.pending.clientId;
+		this.pending = null;
+		this.guest = clientId;
+		return { admitted: true, clientId, slot: GUEST_SLOT };
+	}
+
+	/**
+	 * Refuse the pending guest. Deliberately NOT a ban: the same person may ask again (they may have
+	 * mistyped a name, or the host may have mis-clicked). With no accounts and no codes there is
+	 * nothing to ban anyway — LAN-only, per KDM-226.
+	 */
+	decline() {
+		if (!this.pending) return { admitted: false, reason: 'not_pending' };
+		const clientId = this.pending.clientId;
+		this.pending = null;
+		return { admitted: false, clientId, reason: 'declined' };
+	}
+
+	// ----- leaving -------------------------------------------------------------------------
+
+	/**
+	 * Free whatever this id held — a seat, or an unanswered question. A requester who dropped is no
+	 * longer asking, so their pending request goes with them; otherwise the host is left staring at a
+	 * dialogue about someone who has gone.
+	 *
+	 * The host leaving does NOT promote the guest. The authoritative world lives in the host's
+	 * process, so there is nothing for a promoted guest to own (KDM-244 C1/C3) — the guest waits, and
+	 * that is all (KDM-234 D5/D7).
+	 */
+	release(clientId) {
+		if (this.pending && this.pending.clientId === clientId) this.pending = null;
+		if (clientId === this.host) this.host = null;
+		if (clientId === this.guest) this.guest = null;
+	}
+}
+
+module.exports = { JoinGate, HOST_SLOT, GUEST_SLOT };

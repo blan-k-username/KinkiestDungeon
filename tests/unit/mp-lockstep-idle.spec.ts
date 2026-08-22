@@ -12,44 +12,8 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 const { WSBridge } = require('../../tools/mp-server/ws-bridge');
 
 const BOOT_TIMEOUT = 240_000;
+import { MPClient as Client } from '../helpers/mp-ws-client';
 
-class Client {
-	ws: any;
-	private buf: any[] = [];
-	private waiters: { pred: (m: any) => boolean; res: (m: any) => void; rej: (e: any) => void; timer: any }[] = [];
-
-	static async connect(port: number): Promise<Client> {
-		const c = new Client();
-		// eslint-disable-next-line no-undef
-		c.ws = new WebSocket(`ws://127.0.0.1:${port}`);
-		c.ws.addEventListener('message', (e: any) => { c.buf.push(JSON.parse(e.data)); c._pump(); });
-		await new Promise<void>((res) => c.ws.addEventListener('open', () => res()));
-		return c;
-	}
-	send(obj: any) { this.ws.send(JSON.stringify(obj)); }
-	seen(pred: (m: any) => boolean) { return this.buf.some(pred); }
-	next(pred: (m: any) => boolean, timeout = 20_000): Promise<any> {
-		return new Promise((res, rej) => {
-			const timer = setTimeout(() => rej(new Error('timeout waiting for message')), timeout);
-			this.waiters.push({ pred, res, rej, timer });
-			this._pump();
-		});
-	}
-	private _pump() {
-		for (let wi = 0; wi < this.waiters.length; wi++) {
-			const w = this.waiters[wi];
-			const idx = this.buf.findIndex(w.pred);
-			if (idx >= 0) {
-				const [m] = this.buf.splice(idx, 1);
-				clearTimeout(w.timer);
-				this.waiters.splice(wi, 1);
-				w.res(m);
-				wi--;
-			}
-		}
-	}
-	close() { try { this.ws.close(); } catch (e) { /* noop */ } }
-}
 
 async function joinBoth(bridge: any): Promise<{ A: Client; B: Client }> {
 	const port = await bridge.listen(0);
