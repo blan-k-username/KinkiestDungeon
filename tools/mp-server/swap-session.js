@@ -487,12 +487,42 @@ class SwapSession {
 
 	/** Close it again — on accept, on decline, and whenever the offer is dropped. */
 	_closePeaceDialogue(target) {
+		return this._closeOwnDialogue(target, PEACE_DIALOGUE);
+	}
+
+	/**
+	 * KDM-252 E4 — the host is back, so take the "you have lost the host" modal off the guest's
+	 * screen. Server-side, for the same reason it was OPENED server-side (see
+	 * `kd-disconnect-dialogue.js`): `CurrentDialog` is per-player state the client re-adopts from
+	 * every snapshot, so a close performed on the client is undone by the very state frame that
+	 * announces the reconnect.
+	 */
+	closeHostLostDialogue(target) {
+		return this._closeOwnDialogue(target, HOST_LOST_DIALOGUE);
+	}
+
+	/**
+	 * Close one of OUR dialogues on a specific player's bundle, and only if it is the one open.
+	 *
+	 * Generalised from `_closePeaceDialogue` when the disconnect dialogue needed the identical
+	 * restore → clear → capture → re-park sequence (KDM-252), exactly as `_openOwnDialogue` was
+	 * generalised from `_openPeaceDialogue` in KDM-251. The pair now moves together; a second
+	 * hand-written copy would be free to get the capture or the re-park subtly wrong, and both
+	 * failures corrupt player state rather than merely failing to draw.
+	 *
+	 * The NAME GUARD is load-bearing: closing "whatever is open" would shut a dialogue the player
+	 * opened themselves — an enemy conversation, a shop — because a peer's socket happened to close.
+	 *
+	 * @param {string} target  whose bundle to close it on
+	 * @param {string} name    a member of OWN_DIALOGUES
+	 */
+	_closeOwnDialogue(target, name) {
 		const bundle = this.bundles.get(target);
 		if (!bundle) return;
 		this.world.restorePlayer(bundle);
 		this.world.eval(`(function(){
 			if (typeof KDGameData !== 'undefined' && KDGameData
-				&& KDGameData.CurrentDialog === 'KDCoopPeace') {
+				&& KDGameData.CurrentDialog === '${name}') {
 				if (typeof KDResetDialogue === 'function') KDResetDialogue();
 				else { KDGameData.CurrentDialog = ''; KDGameData.CurrentDialogStage = ''; }
 			}

@@ -161,9 +161,27 @@ class JoinGate {
 	 * that is all (KDM-234 D5/D7).
 	 */
 	release(clientId) {
-		if (this.pending && this.pending.clientId === clientId) this.pending = null;
+		this.releasePending(clientId);
 		if (clientId === this.host) this.host = null;
 		if (clientId === this.guest) this.guest = null;
+	}
+
+	/**
+	 * KDM-252 — drop an unanswered QUESTION without giving up the SEAT.
+	 *
+	 * Once the session is running, a dropped socket is a player who may still come back, and E4 says
+	 * they come back to *their own* seat. Freeing slot 0 the moment the host's Wi-Fi blinked would
+	 * let a stranger claim the host slot of a game already in progress — and would hand the returning
+	 * host a refusal instead of their character. So the bridge releases the whole seat only before
+	 * the session starts; afterwards the seat is held by `presence`, and it is released when that
+	 * seat goes `gone` (the survivor's decision, never a timer — KDM-234 D7).
+	 *
+	 * A pending REQUEST is different and is dropped either way: someone who disconnected mid-question
+	 * is no longer asking, and leaving it would park the host in front of a dialogue about a person
+	 * who has gone.
+	 */
+	releasePending(clientId) {
+		if (this.pending && this.pending.clientId === clientId) this.pending = null;
 	}
 }
 

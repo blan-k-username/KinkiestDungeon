@@ -16,6 +16,16 @@
  *                      { type:'state', tick, snapshot }      this client's render-state
  *                      { type:'waiting', waitingOn:[...] }    barrier still open
  *
+ * ⚠️ That list is the ORIGINAL core, not the whole protocol — the join gate (KDM-233), presence
+ * (KDM-250/251/252) and the delta encoding (KDM-206) each added messages. `_handle` below is the
+ * authoritative inbound dispatch; the outbound set is whatever `_send` is called with. Two
+ * distinctions worth knowing before adding another:
+ *   - `blocked` ≠ `waiting`. `waiting` means "your input entered lockstep" and the client stops
+ *     accepting input on it; a refusal must therefore never be sent as `waiting` (KDM-225/251).
+ *   - `state{kind:'push'}` ≠ `state{kind:'ui'}`. A `ui` frame is the REPLY to an input the client
+ *     sent, and the client unwinds one in-flight slot for it. A `push` is server-initiated and
+ *     replies to nothing (KDM-252).
+ *
  * The turn advances only when EVERY player has submitted (R8 lockstep). On advance the
  * server composes each client's render-state from the ONE authoritative world + that
  * client's state bundle (SwapSession.snapshotFor) — exactly what KDRenderClient.apply()
@@ -215,7 +225,12 @@ class WSBridge {
 		// the membership bookkeeping.)
 		socket.on('close', () => {
 			if (!clientId) return;
-			this.gate.release(clientId);
+			// KDM-252 E4: a RUNNING session holds the seat. Before it starts, a departure frees
+			// everything (that is the lobby's whole job); after it starts, only the unanswered
+			// question goes — the seat belongs to that clientId until they come back or the survivor
+			// dismisses them. See `join-gate.js` → `releasePending`.
+			if (this.session.started && this.gate.has(clientId)) this.gate.releasePending(clientId);
+			else this.gate.release(clientId);
 			if (this.sockets.get(clientId) === socket) this.sockets.delete(clientId);
 			// KDM-250: and the SURVIVOR is told. Reported after the socket is dropped from the map so
 			// the report is not addressed to the person who just left.
@@ -298,14 +313,22 @@ class WSBridge {
 				// would throw "session already started". This lets you reload a tab mid-session
 				// (e.g. to re-read the diagnostics) without restarting the server.
 				if (this.session.started && this.session.players.includes(clientId)) {
-					// KDM-250: a returning player is present again. Un-pausing the session and closing
-					// the survivor's dialogue are KDM-252's job; this is only the bookkeeping, and it is
-					// refused outright for a seat the survivor has already dismissed (E6).
-					this.presence.back(clientId, now());
+					// KDM-252 U1/E6: `back` is refused for a seat the survivor has already dismissed,
+					// and `gone` is terminal. Say so in words rather than walking a ghost back into a
+					// session whose character has already been dismantled — and say it BEFORE the
+					// socket map keeps a reference to a connection we are about to close.
+					if (!this.presence.back(clientId, now())) {
+						this.sockets.delete(clientId);
+						this._reject(socket, { reason: 'seat_gone' });
+						return clientId;
+					}
 					this._send(socket, { type: 'joined', clientId, started: true, players: this.session.players });
-					// KDM-206: a rejoining client holds nothing we can diff against — force a full snapshot.
+					// KDM-206/KDM-252 N4: a rejoining client holds nothing we can diff against — force a
+					// full snapshot AND restart its sequence, so the client has a base to count gaps from
+					// instead of inheriting a number from a socket that no longer exists.
 					this._resetDelta(clientId);
 					try { this._send(socket, Object.assign({ type: 'state', tick: this.session.turn }, this._stateFrame(clientId))); } catch (e) { /* ignore */ }
+					this._reportBack(clientId);
 					return clientId;
 				}
 				// KDM-233: an explicit ROLE opts into the approval flow. Without one this is the legacy
@@ -521,6 +544,54 @@ class WSBridge {
 			if (role === 'host' && this.session.started) {
 				try { this.session.openHostLostDialogue(cid); } catch (e) { /* world may be mid-teardown */ }
 			}
+		}
+	}
+
+	/**
+	 * KDM-252 E4 — the mirror of `_reportMissing`: somebody who was being waited for is back.
+	 *
+	 * Three things happen to the SURVIVOR, in this order, and the order matters:
+	 *   1. their disconnect modal is closed on their own bundle (server-side — see
+	 *      `swap-session._closeOwnDialogue` for why the client cannot do this itself);
+	 *   2. the session unpauses, but ONLY once every seat is back — a three-seat session missing two
+	 *      people must not resume because one of them returned (`_resumeIfWhole` owns that rule);
+	 *   3. and only then are they told, together with a fresh state frame. The frame is what actually
+	 *      takes the modal off their screen, so sending it before step 1 would announce the return
+	 *      and leave the dialogue standing.
+	 *
+	 * The returning player is not told about themselves, exactly as `_reportMissing` does not report
+	 * a departure to the person who departed.
+	 */
+	_reportBack(clientId) {
+		const role = this.presence.roleOf(clientId);
+		// Closed on every SEAT, not on every open socket. A survivor who is themselves offline right
+		// now still holds that modal in their bundle, and would be handed it back — stale — inside the
+		// full snapshot they get when they in turn reconnect. Harmless where it was never open: the
+		// close is guarded on the dialogue's own name.
+		if (role === 'host' && this.session.started) {
+			for (const cid of this.session.players) {
+				if (cid === clientId) continue;
+				try { this.session.closeHostLostDialogue(cid); } catch (e) { /* world may be mid-teardown */ }
+			}
+		}
+		this._resumeIfWhole();
+		const msg = { type: 'peer_back', clientId, role };
+		for (const [cid, sock] of this.sockets) {
+			if (cid === clientId) continue;
+			try {
+				this._send(sock, msg);
+				// Their own bundle changed (the modal was closed on it), and a bundle change the client
+				// never receives is a modal that never goes away. This is a normal delta — the survivor
+				// has held an unbroken base throughout, so nothing here needs a full snapshot.
+				//
+				// ⚠️ `kind:'push'`, NOT `'ui'`. The client answers a `ui` frame by unwinding one slot of
+				// its in-flight bookkeeping, because a `ui` frame is the REPLY to an input it sent. This
+				// frame replies to nothing — the survivor pressed nothing; their peer's socket came
+				// back — so tagging it `ui` would free a slot that no reply ever filled and leave the
+				// queue permanently out of step with the wire (the KDM-186 Rule-1 failure).
+				this._send(sock, Object.assign({ type: 'state', kind: 'push', tick: this.session.turn },
+					this._stateFrame(cid)));
+			} catch (e) { /* that one is gone too */ }
 		}
 	}
 
@@ -793,9 +864,18 @@ class WSBridge {
 		return { seq, delta: delta === undefined ? {} : delta };
 	}
 
-	/** Forget what a client held, so their next state send is a full snapshot (join / resync). */
+	/**
+	 * Forget what a client held, so their next state send is a full snapshot (join / resync).
+	 *
+	 * KDM-252 N4: the SEQUENCE restarts with it. A reconnecting browser is a fresh page with a fresh
+	 * counter, so leaving the server's number where the dead socket left it would hand the client a
+	 * `seq` far ahead of its own and turn every subsequent frame into a false gap. Safe for the
+	 * `resync` path too: a full snapshot re-baselines the client's counter to whatever it carries,
+	 * and TCP does not reorder, so no in-flight frame can arrive after it with a higher number.
+	 */
 	_resetDelta(clientId) {
 		this._lastSnap.delete(clientId);
+		this._snapSeq.delete(clientId);
 	}
 
 	_broadcastState() {

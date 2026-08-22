@@ -14,7 +14,7 @@
  * share the session, read on the same page before and after.
  */
 import { test, expect } from '@playwright/test';
-import { bootCoopPair, MP_TEST_TIMEOUT } from './helpers/coop';
+import { bootCoopPair, killCoopSocket, MP_TEST_TIMEOUT } from './helpers/coop';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -55,8 +55,12 @@ test('a guest whose host disconnects is told they are waiting, and their moves a
 			expect(before.status, 'and the overlay is not talking about a disconnect')
 				.not.toMatch(/disconnect|paused/i);
 
-			// ---- the HOST's connection dies --------------------------------------------------------
-			await A.evaluate(() => { (window as any).__coop.ws.close(); });
+			// ---- the HOST's connection dies, and STAYS dead ----------------------------------------
+			//
+			// KDM-252 made a bare `ws.close()` self-healing: the client retries after ~1 s, the seat
+			// comes back and the pause ends — the right product behaviour, and the wrong premise for
+			// this spec. What KDM-251 is about is the window in which the host is still away.
+			await killCoopSocket(A, { retry: false });
 
 			await B.waitForFunction(
 				() => !!((window as any).__coop && (window as any).__coop.peerMissing),

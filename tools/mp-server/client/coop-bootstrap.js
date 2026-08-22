@@ -46,6 +46,12 @@
 		// front rather than sprung into existence on the first drop, so "nobody has left" is a value
 		// a test can assert on instead of an absent property.
 		peerMissing: null,
+		// KDM-252: the retry state. `total` is a LATCH — it counts every attempt ever made and is
+		// never reset, because `connected === true` is not evidence of a reconnect (it is also what a
+		// socket that never dropped looks like). `attempts` is the backoff position and DOES reset on
+		// a successful join, so a second, later drop starts its own schedule at 1 s rather than
+		// inheriting a 30 s wait from an outage an hour ago.
+		reconnect: { attempts: 0, total: 0, nextDelayMs: null },
 		// KDM-163: route-ness of each in-flight send, in order (see submit()).
 		_sentRoute: [],
 		// KDM-186 RULE 1 state: types with an unacknowledged send, the types in flight in ORDER (so a
@@ -617,10 +623,91 @@
 		return '';
 	}
 
+	/**
+	 * KDM-252 A6 — the reconnect schedule: 1 / 2 / 4 / 8 / 16 s, capped at 30 s. `attempt` is 0-based.
+	 *
+	 * The POLICY is ported from `origin/feature/multiplayer`'s `MPResume.ts` (`KDMPBackoffDelay`);
+	 * that branch's transport is not (KDM-233 — its netcode is obsolete). Exponential rather than a
+	 * fixed interval because the two outages this must survive want opposite things: a blinked Wi-Fi
+	 * wants the FIRST retry to be almost immediate, and a host that is down for ten minutes must not
+	 * be hammered once a second for ten minutes.
+	 *
+	 * There is no attempt LIMIT, and that is deliberate (KDM-234 D7): the wait is bounded by the
+	 * survivor's patience, never by a clock of ours. Giving up after N tries would be a reconnect
+	 * deadline wearing a different hat.
+	 */
+	function backoffMs(attempt) {
+		var a = (typeof attempt === 'number' && attempt > 0) ? attempt : 0;
+		return Math.min(1000 * Math.pow(2, a), 30000);
+	}
+
+	/**
+	 * KDM-252 — the identity a reconnect is RECOGNISED BY, stable across a page load.
+	 *
+	 * The `#coop=<id>` path gets this for free: the id is in the URL, so a reload asks for the same
+	 * seat by construction. The lobby path generates one, and a value generated fresh on every load
+	 * would make every reload look like a stranger asking to join a full session — which is precisely
+	 * the failure this slice exists to remove.
+	 *
+	 * `sessionStorage`, not `localStorage`: the identity belongs to THIS TAB's session. Two tabs on
+	 * one machine are two players (that is how the demo is driven), and a shared identity would have
+	 * them fighting over one seat.
+	 */
+	function stableId(forRole) {
+		var key = 'kdcoop.clientId';
+		var made = (forRole === 'host' ? 'host' : ('guest-' + Math.random().toString(36).slice(2, 8)));
+		try {
+			var held = window.sessionStorage.getItem(key);
+			if (held) return held;
+			window.sessionStorage.setItem(key, made);
+		} catch (e) { /* storage disabled — fall through with a fresh id, which still works forward */ }
+		return made;
+	}
+	// Exposed so the mechanism is assertable where the storage actually lives (tests/e2e/mp-reconnect).
+	coop._stableId = stableId;
+
+	/**
+	 * KDM-252 — retry the socket after a drop, with backoff. Never a reload: a reload throws away the
+	 * loaded bundle and everything the page had, to reach a state the server can restore anyway.
+	 *
+	 * Only a LIVE session retries. A socket that closes before `started` is a lobby failure — a
+	 * mistyped address, a declined request — and there the player must be told and left to try
+	 * something different, not have a wrong address dialled forever behind their back.
+	 */
+	function scheduleReconnect() {
+		if (!coop.started || coop._closedForGood) return;
+		var wait = backoffMs(coop.reconnect.attempts);
+		coop.reconnect.attempts++;
+		coop.reconnect.total++;
+		coop.reconnect.nextDelayMs = wait;
+		setStatus('Co-op ' + id + ': connection lost — reconnecting in '
+			+ (Math.round(wait / 100) / 10) + 's…');
+		setTimeout(function () {
+			if (coop._closedForGood) return;
+			connect();
+		}, wait);
+	}
+
 	function connect() {
 		var proto = location.protocol === 'https:' ? 'wss' : 'ws';
 		ws = new WebSocket(proto + '://' + (endpoint || location.host) + '/');
 		coop.ws = ws;
+		/*
+		 * KDM-252 N4 — a NEW socket holds nothing.
+		 *
+		 * The server restarts our state sequence and sends a full snapshot (`_resetDelta`), so the
+		 * base we were merging onto is dead; keeping it would risk merging the new stream onto the old
+		 * one. The in-flight bookkeeping goes with it for the same reason: every send waiting on a
+		 * reply is waiting on a socket that no longer exists, and a slot never freed is a type the
+		 * client would suppress for the rest of the session (the KDM-186 Rule-1 shape).
+		 */
+		coop._snapBase = null;
+		coop._snapSeq = 0;
+		coop._sentTypes.length = 0;
+		coop._sentRoute.length = 0;
+		coop._inFlight = {};
+		coop._pending = {};
+		coop.submitted = false;
 		setStatus('Co-op ' + id + ': connecting…');
 		ws.onopen = function () {
 			coop.connected = true;
@@ -632,6 +719,11 @@
 			setStatus('Co-op ' + id + ': joined, waiting for the other player…');
 		};
 		ws.onerror = function () {
+			// KDM-252: only while we are still trying to GET IN. Once a session is live, a failed
+			// retry is not news the player can act on — `scheduleReconnect` already says what is
+			// happening and when the next attempt is — and routing it to the lobby would paint an
+			// error screen over a game that is merely waiting.
+			if (coop.started) return;
 			// E6: a wrong address must arrive in WORDS. A browser gets no reason for a failed connect,
 			// so this is the only place that can say anything at all — and saying nothing is what makes
 			// a mistyped address look like a hang.
@@ -698,7 +790,9 @@
 					: 'your partner (' + m.clientId + ') has disconnected — the game is paused.'));
 				return;
 			}
-			if (m.type === 'state') diag.noteRecv(m.kind === 'ui' ? 'ui' : 'turn', (e.data && e.data.length) || 0);
+			// KDM-252: a `push` is a non-turn frame, like a `ui` one — the bucket separates frames that
+			// resolved a turn from frames that did not, and a server-started push resolved nothing.
+			if (m.type === 'state') diag.noteRecv((m.kind === 'ui' || m.kind === 'push') ? 'ui' : 'turn', (e.data && e.data.length) || 0);
 			else if (m.type === 'ack') diag.noteRecv('ack', (e.data && e.data.length) || 0);
 			// KDM-186: an ACK is a reply that carries no state — the server applied our input and this
 			// player's own state did not move. It still consumed exactly one send, so the in-order
@@ -722,15 +816,43 @@
 					: m.reason === 'busy' ? 'The host is already answering someone else.'
 					: m.reason === 'no_host' ? 'Nobody is hosting at that address.'
 					: ('Refused: ' + m.reason);
+				// KDM-252: a refusal is an ANSWER, not an outage. `seat_gone` is the one that matters
+				// here — the survivor has played on without us (KDM-250 E6) — and retrying any of
+				// these would dial forever at a door that has been shut in words.
+				coop._closedForGood = true;
 				lobbySay({ error: why, status: '', pending: null });
+				return;
+			}
+			if (m.type === 'peer_back') {
+				// KDM-252 E4: the mirror of `peer_missing`. The MODAL is closed server-side and reaches
+				// us as the state frame that follows this message; this clears the ambient status the
+				// drop left behind, so the player is not left reading "the game is paused" while it runs.
+				coop.peerMissing = null;
+				coop.blocked = null;
+				setStatus('Co-op ' + id + ': ' + (m.role === 'host' ? 'the host' : 'your partner')
+					+ ' (' + m.clientId + ') is back — the game has resumed.');
 				return;
 			}
 			if (m.type === 'joined') {
 				coop.peers = m.players || [];
+				// KDM-252: we are in. The backoff position resets so a LATER drop starts its own
+				// schedule at 1 s; `reconnect.total` deliberately does not, so "did this session ever
+				// have to reconnect?" stays answerable.
+				coop.reconnect.attempts = 0;
+				coop.reconnect.nextDelayMs = null;
 				// The session is live once BOTH are in — that is the moment the host's game becomes
 				// multiplayer, and the moment either side stops being a lobby screen.
 				if (m.started) { lobbySay({ pending: null, status: '' }); enterGame(); }
 				else if (role === 'host') lobbySay({ view: 'host', status: '' });
+			}
+			else if (m.type === 'state' && m.kind === 'push') {
+				// KDM-252: a state frame the SERVER started — nothing of ours is being answered. Adopt
+				// it and touch NO bookkeeping: `_sentRoute` / `_inFlight` track replies to inputs WE
+				// sent, and unwinding a slot here would free one that no reply ever filled. Nor is it a
+				// turn: `lastTick`, `submitted` and the route are all left exactly as they were.
+				var pushSnap = resolveState(m);
+				if (pushSnap) window.KDRenderClient.apply(pushSnap);
+				pinGameScreen();
 			}
 			else if (m.type === 'state' && m.kind === 'ui') {
 				// KDM-163: a UI input of OURS was applied — no turn resolved. Adopt the fresh state so
@@ -817,7 +939,13 @@
 				setStatus('Co-op ' + id + ': error — ' + m.error);
 			}
 		};
-		ws.onclose = function () { coop.connected = false; setStatus('Co-op ' + id + ': disconnected'); };
+		ws.onclose = function () {
+			coop.connected = false;
+			setStatus('Co-op ' + id + ': disconnected');
+			// KDM-252 A6: and then it puts itself back together, rather than leaving the player with a
+			// dead tab and a status line. Everything about WHETHER to retry lives in one place.
+			scheduleReconnect();
+		};
 	}
 
 	function submit(action, fromRoute) {
@@ -929,9 +1057,11 @@
 		endpoint = opts.address ? String(opts.address).replace(/^wss?:\/\//, '').replace(/\/+$/, '') : null;
 		// Identity is ours to pick and must be stable for a reconnect to be recognised (S2). It is not
 		// a credential — there is nothing to authenticate against (KDM-226, LAN-only).
-		id = opts.clientId || (role === 'host' ? 'host' : ('guest-' + Math.random().toString(36).slice(2, 8)));
+		// KDM-252: "must be stable" is now ENFORCED rather than merely noted — see `stableId`.
+		id = opts.clientId || stableId(role);
 		coop.id = id;
 		coop._entered = false;
+		coop._closedForGood = false;
 		// Only `ready()` — see `enterGame()` for why asset loading must not gate the handshake.
 		if (!ready()) { setTimeout(function () { window.__coopConnect(opts); }, 150); return coop; }
 		connect();

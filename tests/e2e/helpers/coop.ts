@@ -770,3 +770,27 @@ export async function paintMissingTextKey(P: Page, tag: string): Promise<string>
 		return placeholder;
 	}, tag);
 }
+
+/**
+ * KDM-252 — kill a client's WebSocket from inside its own page, and SAY whether it may come back.
+ *
+ * The socket is closed from inside the page rather than by closing the context: that is the real
+ * shape of a lost connection, and it leaves the page alive so a failure is legible.
+ *
+ * ⚠️ THE `retry` ANSWER IS MANDATORY, and it is why this helper exists. Before KDM-252 a bare
+ * `ws.close()` meant "gone until the test ends", and three specs wrote it inline on that
+ * understanding. It now means "gone for about a second" — the client retries with backoff and heals
+ * itself — so every one of those specs was asserting against a premise that had quietly changed
+ * underneath it (`mp-host-lost` went red; `mp-peer-missing` merely got lucky on timing, which is
+ * worse). Forcing the caller to state which drop they mean is what stops that recurring.
+ *
+ * `retry: false` sets the client's own `_closedForGood` flag — the same one a server refusal sets —
+ * so nothing is simulated that the product does not already do.
+ */
+export async function killCoopSocket(P: Page, opts: { retry: boolean }): Promise<void> {
+	await P.evaluate((allowRetry: boolean) => {
+		const c = (window as any).__coop;
+		if (!allowRetry) c._closedForGood = true;
+		c.ws.close();
+	}, opts.retry);
+}

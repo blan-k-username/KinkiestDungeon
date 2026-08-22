@@ -16,7 +16,7 @@
  * be asserting a behaviour this slice does not claim.
  */
 import { test, expect } from '@playwright/test';
-import { bootCoopPair, MP_TEST_TIMEOUT } from './helpers/coop';
+import { bootCoopPair, killCoopSocket, MP_TEST_TIMEOUT } from './helpers/coop';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
 
@@ -53,9 +53,11 @@ test('a co-op partner who drops is reported to the player who is still here', as
 
 		// ---- B leaves ---------------------------------------------------------------------------
 		//
+		// KDM-252: `retry: false` — B is gone for the whole test. A bare close now heals itself in
+		// ~1 s, which would make the assertions below race the reconnect. See `killCoopSocket`.
 		// The socket is closed from inside B's page rather than by closing the context: that is the
 		// real shape of a lost connection, and it leaves B's page alive so a failure here is legible.
-		await B.evaluate(() => { (window as any).__coop.ws.close(); });
+		await killCoopSocket(B, { retry: false });
 
 		// ---- A is told, and told WHO and in WHICH ROLE (E2, E3) ----------------------------------
 		await A.waitForFunction(
