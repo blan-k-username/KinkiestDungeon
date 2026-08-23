@@ -42,6 +42,15 @@
 		error: '',
 		_drawCount: 0,           // observed by the double-wrap test
 		pending: null,           // { clientId, name } — someone asking to join OUR game
+		/**
+		 * KDM-257 — `{hostOnly, guestOnly, conflict}` from KDM-249's `diffDeclarations`, as it arrives
+		 * on `awaiting_approval` (guest) and `join_pending` (host). Null until one of those lands.
+		 *
+		 * Read-only here: this task RENDERS the diff and changes nothing about how it is computed or
+		 * carried. If anything under `tools/mp-server/*.js` needed editing to make this paint, the
+		 * scope had drifted.
+		 */
+		modDiff: null,
 		/** Whatever is currently typed as the host's address. */
 		address: function () {
 			var el = document.getElementById('KDMPAddress');
@@ -91,6 +100,7 @@
 			lobby.pending = null;
 			lobby.status = '';
 			lobby.error = '';
+			lobby.modDiff = null;
 		},
 	};
 	window.KDMPLobby = lobby;
@@ -190,10 +200,15 @@
 		if (lobby.pending) {
 			DrawTextKD((lobby.pending.name || 'Someone') + text('KDMPWantsToJoin', ' wants to join your game'),
 				W, 410, '#ffffff', '#000000', 30);
+			// KDM-257 R2 — what the host is agreeing to SEND. Between the question and the buttons,
+			// because it is part of the question. The buttons move down by whatever it painted, so a
+			// long list never lands on top of Accept.
+			var below = drawModDiff(455, text('KDMPModsToSend', 'They will be sent COUNT of your mods:'));
+			var btnY = below ? below + 30 : 470;   // R4: nothing painted => the stock layout, unchanged
 			DrawButtonKDEx('KDMPAccept', function () { answer(true); return true; },
-				true, MID - 190, 470, 350, 64, text('KDMPAcceptBtn', 'Accept'), '#ffffff', '');
+				true, MID - 190, btnY, 350, 64, text('KDMPAcceptBtn', 'Accept'), '#ffffff', '');
 			DrawButtonKDEx('KDMPDecline', function () { answer(false); return true; },
-				true, MID + 190, 470, 350, 64, text('KDMPDeclineBtn', 'Decline'), '#ffffff', '');
+				true, MID + 190, btnY, 350, 64, text('KDMPDeclineBtn', 'Decline'), '#ffffff', '');
 			return;
 		}
 
@@ -301,15 +316,113 @@
 		if (lobby.error) DrawTextKD(lobby.error, W, 480, '#ff8080', '#000000', 24);
 		else if (lobby.status) DrawTextKD(lobby.status, W, 480, '#ffffff', '#000000', 24);
 
+		// KDM-257 R1 — what this guest is about to load, named BEFORE it is in. The diff only exists
+		// once the host has been asked, so in practice this paints while the "waiting for the host"
+		// status is up — which is exactly the window in which the guest can still walk away.
+		var below = drawModDiff(510, text('KDMPModsToGet', 'The host is running COUNT mods you don\'t have:'));
+		var joinY = below ? below + 30 : 540;   // R4: nothing painted => the stock layout, unchanged
+
 		DrawButtonKDEx('KDMPConnect', function () {
 			lobby.error = '';
 			lobby.status = text('KDMPConnecting', 'Connecting…');
 			connect({ role: 'guest', address: lobby.address(), name: lobby.playerName(), perks: lobby.playerPerks() });
 			return true;
-		}, true, MID, 540, 350, 64, text('KDMPConnectBtn', 'Join'), '#ffffff', '');
+		}, true, MID, joinY, 350, 64, text('KDMPConnectBtn', 'Join'), '#ffffff', '');
 
 		DrawButtonKDEx('KDMPBack', function () { lobby.leave(); return true; },
-			true, MID, 620, 350, 64, text('KDMPBack', 'Back'), '#ffffff', '');
+			true, MID, joinY + 80, 350, 64, text('KDMPBack', 'Back'), '#ffffff', '');
+	}
+
+	// ---- KDM-257: what the two sides are about to exchange, in words -----------------------
+
+	/** How many mods to name before collapsing the rest into a count. Screen space, not policy. */
+	var MODLIST_SHOWN = 4;
+
+	/**
+	 * KDM-257 R1/R2/R6 — the host-only mod list, painted from ONE function for BOTH sides.
+	 *
+	 * The guest and the host are looking at the same list from opposite ends: these are the mods the
+	 * guest lacks, which is identical to the mods the host will send. Only the sentence above the
+	 * list differs, so only the sentence is a parameter. Two copies of "list the mods" would drift in
+	 * wording, and the two screens disagreeing about what is being transferred is exactly the
+	 * confusion this task exists to remove.
+	 *
+	 * ⚠️ R4 — SILENCE IS THE CORRECT OUTPUT for an empty list, and returning early is how that is
+	 * guaranteed rather than remembered. A banner on every join trains players to ignore banners.
+	 *
+	 * `hostOnly` is already in install order and already deduplicated (`mod-sync.js:61-73`,
+	 * priority-DESC to match `KDMods.ts:311`), so it is painted in the order it arrives — the player
+	 * sees what the game will actually do. `conflict` is a documented STRICT SUBSET of `hostOnly`
+	 * (`mod-sync.js:81-86`), so a row in it is LABELLED rather than listed a second time.
+	 *
+	 * @returns the y below the last line drawn, or 0 if it painted NOTHING — so a caller lays out
+	 * under it when there is something, and keeps its own stock layout byte-for-byte when there is not.
+	 */
+	function drawModDiff(y, lead) {
+		var diff = lobby.modDiff;
+		var rows = (diff && Array.isArray(diff.hostOnly)) ? diff.hostOnly : [];
+		if (!rows.length) return 0;                                   // R4
+		var conflicts = {};
+		if (diff && Array.isArray(diff.conflict)) {
+			for (var c = 0; c < diff.conflict.length; c++) conflicts[diff.conflict[c].hash] = true;
+		}
+		DrawTextKD(lead.replace('COUNT', String(rows.length)), W, y, '#ffd98a', '#000000', 24);
+		var shown = Math.min(rows.length, MODLIST_SHOWN);
+		for (var i = 0; i < shown; i++) {
+			var r = rows[i];
+			// `modname` is what a player recognises; `name` (the file) is the fallback for a mod whose
+			// manifest gave none, so a row is never painted as an empty bullet.
+			var label = String(r.modname || r.name || '?');
+			if (conflicts[r.hash]) label += text('KDMPModConflict', ' (a different version of yours)');
+			DrawTextKD('• ' + label, W, y + 28 + i * 26, '#ffffff', '#000000', 22);
+		}
+		if (rows.length > shown) {
+			DrawTextKD(text('KDMPModMore', '…and MORE more').replace('MORE', String(rows.length - shown)),
+				W, y + 28 + shown * 26, '#cccccc', '#000000', 22);
+			shown += 1;
+		}
+		return y + 28 + shown * 26;
+	}
+
+	/**
+	 * KDM-257 R3 — a degraded mod sync, named while the game runs.
+	 *
+	 * The owner's 2026-08-23 decision is that a degraded sync PROCEEDS rather than refusing the
+	 * session; this notice is what keeps that honest, and it is KDM-249's R9 ("a degraded or refused
+	 * sync SHALL be visible, not mysterious") finally reaching a screen.
+	 *
+	 * ⚠️ IT LIVES ON THIS FILE'S WRAP, NOT A NEW ONE. The notice paints during `KinkyDungeonState ===
+	 * 'Game'`, which is a fourth branch of the SINGLE `KinkyDungeonRun` wrap at the bottom of this
+	 * file — a second wrap of the same global from another client script is the bug [[KDM-229]] was
+	 * raised for. One global, one wrap.
+	 *
+	 * Persistent BY CONSTRUCTION: it re-reads live state every frame, so it lasts exactly as long as
+	 * the condition does and needs no dismissal, no timer and no latch. And it is silent for every
+	 * other status (`executed` / `nothing-to-do` / `off` / `pending`) — R4 again.
+	 *
+	 * ⚠️ EXPOSED AS `KDMPLobby.drawModWarning` — a deliberate test seam, and the reason is worth
+	 * knowing before anyone "cleans it up". KD's in-game draw THROWS in the headless harness
+	 * (`Cannot set properties of null (setting 'fillStyle')`, from a canvas context that does not
+	 * exist there) and that kills the PIXI ticker: MEASURED on both the host and the guest page of a
+	 * real started co-op session, `KinkyDungeonRun` runs 388 times and then zero, from the frame
+	 * `KinkyDungeonState` becomes `'Game'`. So the FRAME PATH into this function cannot be exercised
+	 * by any e2e in this repo today, and the spec calls it directly instead. See KDM-257's task notes
+	 * and the follow-up filed there.
+	 */
+	function drawModWarning() {
+		if (!window.__coopMods || typeof window.__coopMods.state !== 'function') return;
+		var st;
+		try { st = window.__coopMods.state(); } catch (e) { return; }
+		if (!st || st.status !== 'degraded') return;                  // R4
+		var missing = Array.isArray(st.missing) ? st.missing : [];
+		var names = [];
+		for (var i = 0; i < missing.length && i < MODLIST_SHOWN; i++) {
+			var m = missing[i];
+			names.push(String((m && (m.modname || m.name)) || m || '?'));
+		}
+		if (missing.length > names.length) names.push('+' + (missing.length - names.length));
+		DrawTextKD(text('KDMPModDegraded', 'Co-op: some of the host\'s mods could not be loaded — ') + names.join(', '),
+			W, 60, '#ffb060', '#000000', 22);
 	}
 
 	// ---- the wrap ---------------------------------------------------------------------------
@@ -326,6 +439,10 @@
 			// an `else if` on 'Stats' alone: the override only applies to a co-op pick, and that
 			// condition lives in one place, inside the function.
 			else if (KinkyDungeonState === 'Stats') drawPerkPickOverrides();
+			// KDM-257 R3 — the degraded-sync notice, on THIS wrap. A second wrap of KinkyDungeonRun
+			// from another client script is the duplication [[KDM-229]] was raised for; one global,
+			// one wrap, and the branch that needs it lives here with the others.
+			else if (KinkyDungeonState === 'Game') drawModWarning();
 		} catch (e) {
 			if (window.__KDMP_DEBUG) { try { console.error('[coop lobby]', e); } catch (_) { /* noop */ } }
 		}
@@ -333,4 +450,6 @@
 	};
 	KinkyDungeonRun._kdmp_lobby_wrapped = true;
 	KinkyDungeonRun._kdmp_lobby_original = _prev;
+	// KDM-257 — the test seam for the notice; see drawModWarning's own note for why it exists.
+	lobby.drawModWarning = drawModWarning;
 })();

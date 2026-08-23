@@ -124,3 +124,85 @@ export async function waitAssetsPreloaded(page: any, timeout = 120_000) {
 		undefined, { timeout },
 	);
 }
+
+/**
+ * Build a REAL mod zip in the page and hand it to KD's stock installer (`KDMods.ts:238`).
+ *
+ * Here rather than in a spec because two specs now need it (KDM-249's acceptance test and KDM-257's
+ * notice test), and a second copy would drift from the first — the same reason `press()` lives here.
+ * It is deliberately a real zip built with the game's own zip library, so unzip -> `mod.json` ->
+ * priority -> `eval` is genuinely exercised; a stub payload would make every caller's green weaker.
+ *
+ * Call it AFTER the page has loaded, which is what a real player does (Mods menu, then host) and is
+ * the case a declaration computed once at load would miss.
+ */
+export async function installModZip(page: any, modname: string, markerName: string) {
+	await page.evaluate(async (a: any) => {
+		// @ts-ignore — `zip` comes from Scripts/lib/zip-full.min.js, loaded before out/main.js.
+		const w = new zip.ZipWriter(new zip.BlobWriter('application/zip'));
+		// @ts-ignore
+		await w.add('mod.json', new zip.TextReader(JSON.stringify({
+			modname: a.modname, moddesc: '', author: 'kdtest', modbuild: 'test',
+			gamemajor: -1, gameminor: -1, gamepatch_min: -1, gamepatch_max: -1, priority: 0,
+		})));
+		// @ts-ignore
+		await w.add('init.js', new zip.TextReader(
+			`globalThis.${a.markerName} = (globalThis.${a.markerName} || 0) + 1;`));
+		const blob = await w.close();
+		const file = new File([blob], a.modname + '.zip', { type: 'application/zip' });
+		// @ts-ignore — the stock install path (KDMods.ts:238).
+		await KDLoadMod([file]);
+	}, { modname, markerName });
+}
+
+/**
+ * Record every string KD paints for one settled frame.
+ *
+ * The lobby draws to a CANVAS, so there is no DOM node to assert on and `lobbyState` only exposes
+ * view/pending/error/status. Asserting on a getter that says what *would* be painted is a weaker
+ * claim than asserting on the paint call itself — the same lesson as the text-key oracle. So wrap
+ * `DrawTextKD`, run a frame, put it back, and answer with what actually reached the screen.
+ */
+export async function paintedText(page: any): Promise<string[]> {
+	return page.evaluate(() => new Promise<string[]>((resolve) => {
+		const seen: string[] = [];
+		// @ts-ignore — bundle `let` global; bare assignment is how a mod replaces a KD function.
+		const prev = DrawTextKD;
+		// @ts-ignore
+		DrawTextKD = function (...args: any[]) { seen.push(String(args[0])); return prev.apply(this, args); };
+		requestAnimationFrame(() => requestAnimationFrame(() => {
+			// @ts-ignore — restored before resolving, so a failed assertion cannot leave the page wrapped.
+			DrawTextKD = prev;
+			resolve(seen);
+		}));
+	}));
+}
+
+/**
+ * Record every string a single draw call paints, without waiting for a frame.
+ *
+ * The frame-driven sibling (`paintedText`) is the right oracle wherever KD's loop is alive. It is
+ * NOT alive in-game: KD's Game draw throws in the headless harness (`Cannot set properties of null
+ * (setting 'fillStyle')`) and that kills the PIXI ticker — measured on both pages of a real started
+ * co-op session, `KinkyDungeonRun` runs and then stops dead from the frame `KinkyDungeonState`
+ * becomes `'Game'`. So an in-game paint has to be invoked directly, and this records it.
+ *
+ * `fn` names a function on `window.KDMPLobby`. Restores `DrawTextKD` in a `finally`, so a throwing
+ * renderer cannot leave the page wrapped for the next assertion.
+ */
+export async function paintedBy(page: any, fn: string): Promise<string[]> {
+	return page.evaluate((name: string) => {
+		const seen: string[] = [];
+		// @ts-ignore — bundle `let` global; bare assignment is how a mod replaces a KD function.
+		const prev = DrawTextKD;
+		// @ts-ignore
+		DrawTextKD = function (...args: any[]) { seen.push(String(args[0])); return prev.apply(this, args); };
+		try {
+			(window as any).KDMPLobby[name]();
+		} finally {
+			// @ts-ignore
+			DrawTextKD = prev;
+		}
+		return seen;
+	}, fn);
+}

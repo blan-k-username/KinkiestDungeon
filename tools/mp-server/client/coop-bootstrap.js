@@ -971,12 +971,16 @@
 			// ── KDM-233: the approval handshake ────────────────────────────────────────────────
 			// These arrive BEFORE the session exists, so none of them touch game state.
 			if (m.type === 'awaiting_approval') {
-				lobbySay({ status: 'Waiting for the host to let you in…', error: '' });
+				// KDM-257 R1 — the diff rides this message and used to be dropped here. The guest must be
+				// able to SEE what it is about to load before the host answers, and this is the only
+				// moment it can: the session does not exist yet.
+				lobbySay({ status: 'Waiting for the host to let you in…', error: '', modDiff: m.modDiff || null });
 				return;
 			}
 			if (m.type === 'join_pending') {
 				// Someone is asking to join OUR game. The host answers this — it is the whole gate.
-				lobbySay({ view: 'host', pending: { clientId: m.clientId, name: m.name || 'Someone' }, error: '' });
+				// KDM-257 R2 — same diff, other side: the host is agreeing to SEND these, so say so.
+				lobbySay({ view: 'host', pending: { clientId: m.clientId, name: m.name || 'Someone' }, error: '', modDiff: m.modDiff || null });
 				return;
 			}
 			if (m.type === 'reject') {

@@ -22,32 +22,13 @@
  *     mod-sync failure and is not one.
  */
 import { test, expect } from '@playwright/test';
-import { press, openLobby, lobbyState, guestAsks } from '../helpers/mp-lobby';
+import { press, openLobby, lobbyState, guestAsks, installModZip } from '../helpers/mp-lobby';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
 
 const MP_TEST_TIMEOUT = Number(process.env.KD_MP_TEST_TIMEOUT || 600_000);
 const MARKER = '__kdm249HostModRan';
 
-/** Build a REAL mod zip in the page and hand it to the stock installer. */
-async function installModZip(page: any, modname: string, markerName: string) {
-	await page.evaluate(async (a: any) => {
-		// @ts-ignore — `zip` comes from Scripts/lib/zip-full.min.js, loaded before out/main.js.
-		const w = new zip.ZipWriter(new zip.BlobWriter('application/zip'));
-		// @ts-ignore
-		await w.add('mod.json', new zip.TextReader(JSON.stringify({
-			modname: a.modname, moddesc: '', author: 'kdm249', modbuild: 'test',
-			gamemajor: -1, gameminor: -1, gamepatch_min: -1, gamepatch_max: -1, priority: 0,
-		})));
-		// @ts-ignore
-		await w.add('init.js', new zip.TextReader(
-			`globalThis.${a.markerName} = (globalThis.${a.markerName} || 0) + 1;`));
-		const blob = await w.close();
-		const file = new File([blob], a.modname + '.zip', { type: 'application/zip' });
-		// @ts-ignore — the stock install path (KDMods.ts:238).
-		await KDLoadMod([file]);
-	}, { modname, markerName });
-}
 
 const marker = (page: any) => page.evaluate((n: string) => (globalThis as any)[n], MARKER);
 const modsState = (page: any) => page.evaluate(() => (window as any).__coopMods.state());
