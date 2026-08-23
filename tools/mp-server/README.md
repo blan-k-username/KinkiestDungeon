@@ -20,6 +20,8 @@ KD-069 (orchestrator), KD-070 (reconciler).
 | `integration.js` | `IntegratedSession` (extends `Lobby`) — **real in-game integration**: players injected as real KD entities, enemy AI attacks routed to the target's instance, world-adjudicated P2P, independent params. KD-082. |
 | `kd-absent-reset.js` | The "absent from the bundle ⇒ back to its default" rule, exported as source text for both runtimes. The capture only records a global while it DIFFERS from the post-init baseline, so a global returning to its default drops OUT of the bundle; the host already reset those, the browser did not. Served to the client at `/mp/kd-absent-reset.js`. |
 | `transport/` | Transport boundary (KD-081): `protocol.js` (commands + `dispatch`), `in-process.js`, `worker-thread.js` (+`worker-entry.js`), `socket.js` (+`child-entry.js`), `index.js` (registry). |
+| `mod-sync.js` | KDM-249 — reconciling two mod sets: `diffDeclarations` (pure) + an in-memory, content-addressed `ModStore` for the payloads. No socket, no world, no game globals. |
+| `client/coop-mods.js` | KDM-249 — the browser half of mod sync: latches `KDGetMods` before the first frame, declares/publishes/fetches, then drives `KDExecuteMods`. See "Mod sync" below. |
 | `TRANSPORTS.md` | Measured comparison of the three transports (pros/cons + game-code-change count). |
 | `demo.js` | **Capstone** (KD-075) — one scripted end-to-end run touching every pillar (lobby + shared world + reacting enemy + routed PvP + server mod + independent params), printing a human-readable report. |
 | `smoke-boot.js` / `bench-transports.js` | Manual smoke driver / transport benchmark. |
@@ -323,3 +325,76 @@ Co-op is opt-in: run the plain static server (`npm run serve`) and nothing liste
 names themselves landed in KDM-237. The legacy `#coop=` path still joins directly, bypassing the
 gate, so two entry paths exist until **KDM-255** converges them — that path is also what keeps the MP
 e2e suite green, which is why retiring it is its own task.
+
+## Mod sync (KDM-249)
+
+**The host is the source of truth for mods.** Gameplay-only mods already worked by construction — the
+host's headless world runs the simulation and the guest never simulates. Presentation mods (art, text
+keys, draw wraps, names) did not: the guest renders locally from snapshots, so a modded entity arriving
+in a snapshot is drawn by the *guest's* bundle, and a guest without the mod sees missing sprites.
+
+### The thing to know before touching this
+
+KD executes mods from exactly **one** place — `KDExecuteModsAndStart()` on the main-menu buttons
+(`KinkyDungeon.ts:1891`) — plus a per-frame auto-load gated on `KDToggles.AutoLoadMods`, which
+**defaults to `false`** (`KinkyDungeonVibe.ts:145`). The co-op client reaches neither: it calls
+`KinkyDungeonStartNewGame(false)` directly. Before KDM-249, a co-op player on default settings got
+**none of their own mods**.
+
+`KDExecuted` is also a **one-shot latch** (`KDMods.ts:350-351`), so mods can be executed at most once
+per page load. The fix does not fight that; it borrows KD's *other* flag:
+
+1. `client/coop-mods.js` is injected before `out/main.js` has had a frame, and sets **`KDGetMods = true`**
+   (`KDMods.ts:9`) — KD's own "the auto-loader has been handled" flag. KD stands down, `KDExecuted`
+   stays `false`, and the timing is ours.
+2. At session start (`enterGame()`, the co-op Play button) it loads, optionally fetches, and executes —
+   guest mods and host mods together in **one priority-ordered pass**.
+
+`KDGetMods = true` is a **bare assignment**: bundle `let`-globals are not on `globalThis`, so
+`globalThis.KDGetMods = true` would latch nothing. That makes the `INJECT` order load-bearing (the tag
+must come after `out/main.js`, or it is a TDZ throw); pinned by `tests/unit/mp-mod-inject-order.spec.ts`.
+
+### The wire
+
+| Where | Carries |
+|---|---|
+| `join` | `mods` — this client's declaration: `{name, modname, modbuild, priority, hash}` per zip |
+| `mods_declare` | a host re-stating its set after publishing (mods picked *just before* hosting) |
+| `awaiting_approval` / `join_pending` | `modDiff` — `{hostOnly, guestOnly, conflict}`, to both sides |
+| `POST /mp/mods/<hash>` | host uploads a zip |
+| `GET /mp/mods/<hash>` | guest fetches one |
+| `GET /mp/mods/manifest` | the session (= host's) declaration |
+
+**Identity is the content hash, never the filename.** Two players may hold one mod under two names, or
+two builds under one name. `conflict` is a strict *subset* of `hostOnly` — the host's copy wins, and a
+caller iterating `hostOnly` to decide what to download needs no second loop.
+
+**A mod difference never refuses a join.** A build mismatch cannot work and is refused (KDM-233 N1); a
+mod difference only degrades presentation, and the remedy is to *ship the files* — unreachable if the
+join was refused. Mutation-tested, because breaking this makes the whole feature unreachable.
+
+### Rules that are easy to break
+
+- **Absent is not satisfied.** A peer declaring no mods needs *everything*. Reading absence as "nothing
+  to do" is how a guest ends up silently mod-less.
+- **The mod routes must be matched before the static handler.** `serveStatic` maps leftovers onto the
+  repo via `safeJoin`, and `/mp/mods/../../package.json` normalises back *inside* the root — so a mod
+  fetch would be answered with a repo file.
+- **Nothing on this path may call `batchSaveMods`** (`KDModsUtils.ts:13`). It is the file picker's alone,
+  and it is what keeps session mods out of the guest's own library.
+- **Payloads are in memory only.** A restarted gateway holds nothing and re-asks the host, which is the
+  right answer to "whose mods are these".
+- **The host's declaration is not memoised.** A player picks mods from the Mods menu and *then* hosts;
+  a set computed once at page load would silently mean "this session has no mods".
+- **Every path must reach a terminal status.** `KDExecuteMods` swallows per-file errors into
+  `console.log`, so a watchdog settles the status without awaiting the game's async — otherwise a hung
+  mod loader wedges the session.
+
+### Testing
+
+`tests/unit/mp-mod-{sync,gate,routes,inject-order}.spec.ts` (fast, no browser) and
+`tests/e2e/mp-mod-{local-exec,sync-guest}.spec.ts`.
+
+⚠️ **Any e2e that needs the session to actually START must pass `{preload: true}`** to
+`openLobby`/`guestAsks`. Two boot-sequence traps make the alternative look like a product bug — see the
+comments in `tests/helpers/mp-lobby.ts`.

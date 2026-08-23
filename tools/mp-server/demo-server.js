@@ -83,6 +83,10 @@ SYNTHETIC_ROUTES[ABSENT_RESET_ROUTE] = KD_ABSENT_RESET_BROWSER;
 
 // Scripts injected just before </body> in index.html (in order).
 const INJECT = [
+	// KDM-249 Phase A: the mod pre-seed. FIRST of the client scripts and, critically, after
+	// `out/main.js` — it sets the bundle `let`-global `KDGetMods` by BARE assignment, which is a TDZ
+	// throw if the bundle is not yet in scope. Before coop-bootstrap.js, which sends the join.
+	'/tools/mp-server/client/coop-mods.js',
 	CODEC_ROUTE,                    // must precede render-client.js — it consumes window.KDCodec
 	ABSENT_RESET_ROUTE,             // must precede render-client.js — it consumes window.KDAbsentReset
 	DELTA_ROUTE,                    // must precede coop-bootstrap.js — it consumes window.KDDelta
@@ -225,6 +229,65 @@ function serveBundle(filePath, stat) {
 	return bundleCache.body;
 }
 
+/**
+ * KDM-249 R6 — the mod payload relay: `/mp/mods/manifest` and `/mp/mods/<hash>`.
+ *
+ * WHY HTTP RATHER THAN THE SESSION SOCKET. The guest needs the bytes at PAGE-LOAD time, before its
+ * WebSocket exists — `client/coop-mods.js` runs as an injected script ahead of the first frame. A
+ * plain GET fits that window exactly; a relay over the socket would arrive too late and would have to
+ * be buffered anyway. It also sidesteps frame-size limits, which matters because there is
+ * deliberately no size cap (N5 — LAN-only, owner 2026-08-23).
+ *
+ * ⚠️ MATCHED BEFORE THE STATIC HANDLER, and that ordering is load-bearing rather than stylistic.
+ * `serveStatic` maps any remaining path onto the repo through `safeJoin`, so a hash containing `..`
+ * normalises back INSIDE the root (`/mp/mods/../../package.json` → `REPO_ROOT/package.json`) and the
+ * traversal guard correctly allows it — a mod fetch would be answered with a repo file. Pinned by
+ * `tests/unit/mp-mod-routes.spec.ts`.
+ *
+ * Answers `false` when the path is not ours, so the caller falls through to the static server.
+ */
+const MODS_PREFIX = '/mp/mods/';
+
+function handleModRoute(req, res, bridge) {
+	const urlPath = req.url.split('?')[0].split('#')[0];
+	if (urlPath.indexOf(MODS_PREFIX) !== 0) return false;
+
+	// The session's declared set — the HOST's (join-gate.js adopts it on `claimHost`). An absent
+	// bridge or an absent host is an EMPTY set, never an error: the guest fetches this before it
+	// knows whether anyone is hosting, and a 500 would read as "mod sync is broken" rather than
+	// "nobody is hosting yet".
+	if (urlPath === MODS_PREFIX + 'manifest') {
+		const mods = (bridge && bridge.gate) ? bridge.gate.hostMods() : [];
+		res.writeHead(200, { 'Content-Type': MIME['.json'], 'Cache-Control': 'no-cache' });
+		res.end(JSON.stringify({ mods: mods }));
+		return true;
+	}
+
+	// Decoded, so a hash is compared as the host stated it rather than as the URL spelled it.
+	let hash = urlPath.slice(MODS_PREFIX.length);
+	try { hash = decodeURIComponent(hash); } catch (e) { /* keep the raw form */ }
+	const store = bridge && bridge.mods;
+
+	if (req.method === 'POST' || req.method === 'PUT') {
+		const chunks = [];
+		req.on('data', (c) => chunks.push(c));
+		req.on('end', () => {
+			// Content-addressed, so a re-upload is idempotent and costs nothing — which is what makes
+			// a host retry free.
+			if (store) store.put(hash, Buffer.concat(chunks));
+			res.writeHead(200, { 'Content-Type': MIME['.json'] });
+			res.end(JSON.stringify({ ok: true, hash: hash }));
+		});
+		return true;
+	}
+
+	const bytes = store && store.get(hash);
+	if (!bytes) { res.writeHead(404); res.end('no such mod'); return true; }
+	res.writeHead(200, { 'Content-Type': 'application/zip', 'Cache-Control': 'no-cache' });
+	res.end(bytes);
+	return true;
+}
+
 function safeJoin(root, urlPath) {
 	const clean = decodeURIComponent(urlPath.split('?')[0].split('#')[0]);
 	const p = path.normalize(path.join(root, clean));
@@ -232,7 +295,10 @@ function safeJoin(root, urlPath) {
 	return p;
 }
 
-function serveStatic(req, res) {
+function serveStatic(req, res, bridge) {
+	// KDM-249 R6 — BEFORE anything that touches the filesystem. See `handleModRoute`'s header: a
+	// `/mp/mods/<hash>` that fell through to `safeJoin` would be answered with a repo file.
+	if (handleModRoute(req, res, bridge)) return;
 	let urlPath = req.url.split('?')[0].split('#')[0];
 	if (urlPath === '/' || urlPath === '') urlPath = '/index.html';
 	if (Object.prototype.hasOwnProperty.call(SYNTHETIC_ROUTES, urlPath)) {   // generated, not on disk
@@ -319,7 +385,8 @@ function start(port = PORT, overrides = null) {
 		hbIntervalMs, hbTimeoutMs,
 		pvp, startRestraint, wearRestraint, classicHeels,
 	}, overrides || {}));
-	const server = http.createServer(serveStatic);
+	// KDM-249: the mod routes read the session's declaration and payload store off the bridge.
+	const server = http.createServer((req, res) => serveStatic(req, res, bridge));
 	bridge.attach(server);
 	return new Promise((resolve) => {
 		server.listen(port, () => {
@@ -330,7 +397,7 @@ function start(port = PORT, overrides = null) {
 }
 
 module.exports = {
-	start, patchServedBundle,
+	start, patchServedBundle, INJECT,
 	BUNDLE_PATCHES, PATCH_POLICY_FIELDS, validateBundlePatchPolicy, auditBundlePatches,
 };
 

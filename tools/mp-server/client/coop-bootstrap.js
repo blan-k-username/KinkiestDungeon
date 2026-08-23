@@ -467,8 +467,23 @@
 			if (!coop._enterQueued) { coop._enterQueued = true; setTimeout(function () { coop._enterQueued = false; enterGame(); }, 200); }
 			return;
 		}
-		coop._entered = true;
+		// KDM-249 Phase A: the stock game executes mods when a GAME STARTS
+		// (`KDExecuteModsAndStart`, KinkyDungeon.ts:1891) and this is the co-op Play button — the one
+		// place the co-op path bypasses. Same shape as the `loaded()` gate above: kick it off, come
+		// back in 200 ms. This cannot spin forever because `coop-mods.js` runs a watchdog that always
+		// settles a status, so `done()` is guaranteed to go true whatever the game's loader does.
+		if (window.__coopMods && !window.__coopMods.done()) {
+			// KDM-249 — a GUEST pulls the host's mods first; a host (and the legacy `#coop=` path) has
+			// no host mod set to reconcile against and only executes its own.
+			window.__coopMods.ensureExecuted(role === 'guest' ? { fetchFrom: httpBase() } : {});
+			if (!coop._modsQueued) {
+				coop._modsQueued = true;
+				setTimeout(function () { coop._modsQueued = false; enterGame(); }, 200);
+			}
+			return;
+		}
 		// assets ready → bring up the dungeon and go render-only
+		coop._entered = true;
 		forceGameScreen();
 		window.KDRenderClient.disableLocalSim();
 		// KD's default controls drive: the routed KDSendInput wrapper hands each
@@ -777,6 +792,18 @@
 		}, wait);
 	}
 
+	/**
+	 * KDM-249 — the HOST's http origin, which is where the mod payloads live.
+	 *
+	 * The same `endpoint || location.host` pair `connect()` uses for the socket: a guest that typed an
+	 * address must fetch the mods from THAT machine, not from whichever server happened to serve its
+	 * own page. Same-origin is the common case (both players load the host's gateway) and falls out of
+	 * this without a special case.
+	 */
+	function httpBase() {
+		return location.protocol + '//' + (endpoint || location.host);
+	}
+
 	function connect() {
 		var proto = location.protocol === 'https:' ? 'wss' : 'ws';
 		var where = endpoint || location.host;
@@ -818,8 +845,34 @@
 			var join = { type: 'join', clientId: id };
 			// A role opts into the approval flow; without one this is the legacy direct join and the
 			// server behaves exactly as it always did.
-			if (role) { join.role = role; join.name = playerName; join.build = buildId(); }
+			if (role) {
+				join.role = role;
+				join.name = playerName;
+				join.build = buildId();
+				// KDM-249 R1 — this client's mod set rides on the handshake beside `build`.
+				//
+				// If `prepare()` has not finished hashing yet, this is `[]` — and that is SAFE by
+				// design rather than a race worth guarding: an absent declaration means "needs
+				// everything" at the gate (`mod-sync.js`), so the worst case is the guest being
+				// offered mods it already has. The dangerous reading — absent as "nothing to do" —
+				// is the one that would leave it silently mod-less, and the gate refuses it.
+				try { join.mods = window.__coopMods ? window.__coopMods.declaration() : []; } catch (e) { join.mods = []; }
+			}
 			ws.send(JSON.stringify(join));
+			// KDM-249 R6 — a HOST publishes its zips so a guest can fetch them, then re-states the
+			// declaration: `join` above carried whatever had been hashed by the time the socket
+			// opened, which misses mods picked from the Mods menu just before hosting.
+			//
+			// Fire-and-forget: the host's own session needs nothing from the gateway's store, so a
+			// failed upload degrades the GUEST's presentation (named by R9) rather than blocking
+			// anyone's game.
+			if (role === 'host' && window.__coopMods) {
+				try {
+					window.__coopMods.publish(httpBase()).then(function (rows) {
+						if (ws === myWs && ws.readyState === 1) ws.send(JSON.stringify({ type: 'mods_declare', mods: rows }));
+					}).catch(function () { /* best-effort */ });
+				} catch (e) { /* best-effort */ }
+			}
 			setStatus('Co-op ' + id + ': joined, waiting for the other player…');
 		};
 		ws.onerror = function () {

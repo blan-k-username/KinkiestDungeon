@@ -33,6 +33,9 @@
  */
 'use strict';
 
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { diffDeclarations, normalizeDeclaration } = require('./mod-sync');
+
 const HOST_SLOT = 0;
 const GUEST_SLOT = 1;
 
@@ -93,6 +96,14 @@ class JoinGate {
 		 * `releasePending` below — the same asymmetry that holds the seat holds the name.
 		 */
 		this.names = new Map();
+		/**
+		 * KDM-249 R2 — the SESSION's mod set, which is the host's, adopted on `claimHost`.
+		 *
+		 * "HOST is source of truth" (owner, 2026-08-22) implemented the same way it already is for
+		 * `build` just above. Always an array, never undefined: callers iterate it, and an undefined
+		 * here would surface as a crash at the far end of the handshake rather than as "no mods".
+		 */
+		this.mods = [];
 	}
 
 	// ----- membership ----------------------------------------------------------------------
@@ -141,6 +152,12 @@ class JoinGate {
 		// KDM-237 N1/N3 — the host names themselves too. An absent name is left absent rather than
 		// defaulted here: `SwapSession.displayNameOf` owns the one fallback (NF2).
 		if (info && info.name !== undefined) this.names.set(clientId, sanitizeName(info.name));
+		// KDM-249 R2 — the host's declaration IS the session's. Unlike `build` above (where an
+		// explicit value wins and a claim may only supply a missing one), a later claim REPLACES:
+		// the host is the source of truth including when what they are running changes. Guarded on
+		// `!== undefined` so a claim that says nothing about mods leaves the set alone, while an
+		// explicit `[]` correctly means "I have none".
+		if (info && info.mods !== undefined) this.mods = normalizeDeclaration(info.mods);
 		return { accept: true, slot: HOST_SLOT };
 	}
 
@@ -153,6 +170,12 @@ class JoinGate {
 	 * is how N1 would rot: the "skip" test is only meaningful because a test can see the skip.
 	 */
 	buildCheckActive() { return !!this.build; }
+
+	/**
+	 * KDM-249 R2 — the session's mod set. A COPY, so a caller cannot quietly edit what the session
+	 * believes the host is running.
+	 */
+	hostMods() { return this.mods.slice(); }
 
 	// ----- asking to join ------------------------------------------------------------------
 
@@ -185,8 +208,17 @@ class JoinGate {
 
 		if (this.pending && this.pending.clientId !== clientId) return { accept: false, reason: 'busy' };
 
-		this.pending = { clientId, name, build };
-		return { accept: false, pending: true };
+		// KDM-249 R3/R4 — the diff is computed only once the join is otherwise GOING to be parked, so
+		// no work is done for a join that was never going to happen, and it comes AFTER the build
+		// check so a doomed pairing never reaches it.
+		//
+		// It is deliberately NOT a refusal input. A build mismatch cannot work and is refused
+		// (KDM-233 N1); a mod difference only degrades presentation, and the remedy for it is to ship
+		// the files — which is unreachable if the join was refused first.
+		const modDiff = diffDeclarations(this.mods, info && info.mods);
+
+		this.pending = { clientId, name, build, mods: normalizeDeclaration(info && info.mods), modDiff };
+		return { accept: false, pending: true, modDiff };
 	}
 
 	// ----- the host answers ----------------------------------------------------------------
@@ -198,10 +230,14 @@ class JoinGate {
 		// KDM-237 N2 — the name is promoted from the QUESTION to the SEAT, in the same statement that
 		// seats them. Read before `pending` is cleared, for the obvious reason.
 		const name = this.pending.name || '';
+		// KDM-249 — read alongside the name, and for the same reason: the answer CONSUMES the
+		// question, so anything the caller will need afterwards must be taken before `pending` is
+		// cleared. Handing it back means no caller has to have kept its own copy.
+		const modDiff = this.pending.modDiff;
 		this.pending = null;
 		this.guest = clientId;
 		if (name) this.names.set(clientId, name);
-		return { admitted: true, clientId, slot: GUEST_SLOT };
+		return { admitted: true, clientId, slot: GUEST_SLOT, modDiff };
 	}
 
 	/**
@@ -229,7 +265,13 @@ class JoinGate {
 	 */
 	release(clientId) {
 		this.releasePending(clientId);
-		if (clientId === this.host) this.host = null;
+		if (clientId === this.host) {
+			this.host = null;
+			// KDM-249 R2 — the session mod set goes with the HOST. Keeping it would offer the next
+			// host's guests the previous host's mods, which is the wrong answer to "whose mods are
+			// these".
+			this.mods = [];
+		}
 		if (clientId === this.guest) this.guest = null;
 		// KDM-237 P2 — the name goes with the SEAT, and only with the seat. `releasePending` above
 		// deliberately does not touch it: a player who merely dropped still owns their seat (KDM-252

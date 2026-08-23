@@ -38,6 +38,7 @@ const crypto = require('crypto');
 const { SwapSession } = require('./swap-session');
 const { kdDiff } = require('./kd-delta');
 const { JoinGate } = require('./join-gate');
+const { ModStore } = require('./mod-sync');
 const { Presence, DEFAULT_HB_TIMEOUT_MS } = require('./presence');
 
 /**
@@ -123,6 +124,15 @@ class WSBridge {
 		// yet. Kept pure and separate (`join-gate.js`) so its rules are unit-tested in milliseconds; the
 		// bridge only carries answers between it and the sockets.
 		this.gate = new JoinGate({ build: opts.build || '' });
+		/**
+		 * KDM-249 R6 — the session's mod PAYLOADS, keyed by content hash.
+		 *
+		 * On the bridge because the bridge owns the session lifecycle the payloads belong to; the HTTP
+		 * routes in `demo-server.js` read it through here. In memory only, and cleared with the
+		 * session — a restarted gateway holds nothing and re-asks the host, which is the correct
+		 * answer to "whose mods are these".
+		 */
+		this.mods = new ModStore();
 		this.sockets = new Map();          // clientId -> socket
 		this._server = null;
 		this.port = null;
@@ -296,6 +306,22 @@ class WSBridge {
 		// already emits an input every frame, and KDM-186 measured what answering cheap traffic with
 		// ~40 KB snapshots costs (809 MB egress, one core pegged, lockstep never completing).
 		if (msg.type === 'pong') return clientId;
+		/**
+		 * KDM-249 — a HOST re-states its mod set after publishing the payloads.
+		 *
+		 * The declaration on `join` is whatever had been hashed by the time the socket opened. A
+		 * player who picks mods from the Mods menu and then hosts would otherwise declare a stale
+		 * (often empty) set — and because the session's mod set IS the host's declaration, that
+		 * silently means "this session has no mods" rather than merely being out of date.
+		 *
+		 * Host-only by construction: `claimHost` is what adopts a declaration, and a guest saying this
+		 * is ignored rather than refused — it cannot change the session, so there is nothing to
+		 * report.
+		 */
+		if (msg.type === 'mods_declare' && clientId && clientId === this.gate.host) {
+			this.gate.claimHost(clientId, { mods: msg.mods });
+			return clientId;
+		}
 		// KDM-233: the host's answer to the one pending question (E2/E3). Only the host may answer —
 		// otherwise a guest could admit itself, which is the whole gate.
 		if (msg.type === 'join_answer' && clientId && clientId === this.gate.host) {
@@ -362,17 +388,20 @@ class WSBridge {
 				// `#coop=<id>` path, which still joins directly — the two converge in KDM-236, and until
 				// then the e2e suite and `tools/coop-demo.sh` keep working unchanged.
 				if (msg.role === 'host') {
-					const c = this.gate.claimHost(clientId, { name: msg.name, build: msg.build });
+					const c = this.gate.claimHost(clientId, { name: msg.name, build: msg.build, mods: msg.mods });
 					if (!c.accept) { this._reject(socket, c); return clientId; }
 				} else if (msg.role === 'guest') {
-					const q = this.gate.requestJoin(clientId, { name: msg.name, build: msg.build });
+					const q = this.gate.requestJoin(clientId, { name: msg.name, build: msg.build, mods: msg.mods });
 					if (q.pending) {
 						// Asking is not joining: no seat is taken and the session is untouched until the
 						// host answers. The guest is told it is waiting so the join screen can say so
 						// rather than looking hung.
-						this._send(socket, { type: 'awaiting_approval' });
+						// KDM-249 R5 — the diff rides on BOTH replies, so each side learns it before the
+						// session exists. The guest needs to know what it will be missing before it
+						// commits; the host needs to know what it is about to be asked to supply.
+						this._send(socket, { type: 'awaiting_approval', modDiff: q.modDiff });
 						const hostSock = this.sockets.get(this.gate.host);
-						if (hostSock) this._send(hostSock, { type: 'join_pending', clientId, name: this.gate.pending.name });
+						if (hostSock) this._send(hostSock, { type: 'join_pending', clientId, name: this.gate.pending.name, modDiff: q.modDiff });
 						return clientId;
 					}
 					if (!q.accept) { this._reject(socket, q); return clientId; }
