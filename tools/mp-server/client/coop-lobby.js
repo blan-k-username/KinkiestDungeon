@@ -53,7 +53,26 @@
 			return el ? String(el.value || '') : '';
 		},
 		open: function () { KinkyDungeonState = 'Multiplayer'; lobby.view = 'menu'; lobby.error = ''; lobby.status = ''; },
-		close: function () { KinkyDungeonState = 'Menu'; lobby.view = 'menu'; },
+		close: function () { lobby.leave(); KinkyDungeonState = 'Menu'; },
+		/**
+		 * KDM-236 T — the ONE way back to the lobby root.
+		 *
+		 * The Host view's Cancel, the Join view's Back and the root's own Back all come here. Three
+		 * copies of "drop the socket, clear the screen" is exactly the duplication to avoid, and the
+		 * root Back genuinely needs it too: it is reachable with a host socket open, by way of
+		 * Host → Cancel → Back.
+		 *
+		 * `__coopDisconnect` is the bootstrap's — the lobby asks, it does not own the socket.
+		 */
+		leave: function () {
+			if (typeof window.__coopDisconnect === 'function') {
+				try { window.__coopDisconnect(); } catch (e) { /* nothing to drop */ }
+			}
+			lobby.view = 'menu';
+			lobby.pending = null;
+			lobby.status = '';
+			lobby.error = '';
+		},
 	};
 	window.KDMPLobby = lobby;
 
@@ -131,7 +150,7 @@
 		DrawTextKD(lobby.status || text('KDMPWaitingGuest', 'Waiting for someone to join…'),
 			W, 400, '#ffffff', '#000000', 24);
 		if (lobby.error) DrawTextKD(lobby.error, W, 440, '#ff8080', '#000000', 24);
-		DrawButtonKDEx('KDMPBack', function () { lobby.view = 'menu'; return true; },
+		DrawButtonKDEx('KDMPBack', function () { lobby.leave(); return true; },
 			true, MID, 480, 350, 64, text('KDMPCancel', 'Cancel'), '#ffffff', '');
 	}
 
@@ -140,9 +159,29 @@
 		if (typeof window.__coopAnswerJoin === 'function') window.__coopAnswerJoin(accept);
 	}
 
+	/**
+	 * KDM-236 A1/A3 — what the address field is pre-filled with.
+	 *
+	 * The address you last actually reached a host at, else this page's own origin. The memory lives
+	 * in the bootstrap (`__coopLastAddress`), which is the only place that knows an address WORKED;
+	 * the lobby just asks, and falls back cleanly on a page where the transport was never injected.
+	 *
+	 * This is read on every frame, but `KDTextField` honours `Value` only when it CREATES the element
+	 * (`KinkyDungeonDraw.ts:5679`) and `KDCullTempElements` destroys any field not drawn this frame —
+	 * so what the player types survives while the view is open, and leaving and returning genuinely
+	 * re-offers the remembered value. No extra plumbing needed for either half.
+	 */
+	function addressDefault() {
+		var remembered = '';
+		if (typeof window.__coopLastAddress === 'function') {
+			try { remembered = String(window.__coopLastAddress() || ''); } catch (e) { /* no storage */ }
+		}
+		return remembered || String(location.host || 'localhost:8090');
+	}
+
 	function drawJoin() {
 		DrawTextKD(text('KDMPHostAddress', 'Host address'), W, 250, '#ffffff', '#000000', 28);
-		KDTextField('KDMPAddress', MID, 280, 350, 56, 'text', String(location.host || 'localhost:8090'), '64');
+		KDTextField('KDMPAddress', MID, 280, 350, 56, 'text', addressDefault(), '64');
 		DrawTextKD(text('KDMPYourName', 'Your name'), W, 370, '#ffffff', '#000000', 28);
 		KDTextField('KDMPName', MID, 400, 350, 56, 'text', '', '24');
 
@@ -156,7 +195,7 @@
 			return true;
 		}, true, MID, 540, 350, 64, text('KDMPConnectBtn', 'Join'), '#ffffff', '');
 
-		DrawButtonKDEx('KDMPBack', function () { lobby.view = 'menu'; return true; },
+		DrawButtonKDEx('KDMPBack', function () { lobby.leave(); return true; },
 			true, MID, 620, 350, 64, text('KDMPBack', 'Back'), '#ffffff', '');
 	}
 

@@ -667,6 +667,95 @@
 	coop._stableId = stableId;
 
 	/**
+	 * KDM-236 A — the address you last reached a host at.
+	 *
+	 * `localStorage`, deliberately UNLIKE `stableId`'s `sessionStorage` two functions up. That
+	 * identity is per-TAB on purpose (two tabs on one machine are two players — KDM-252); an address
+	 * is a property of the MACHINE and has to outlive the tab, or "remembered" means "remembered
+	 * until you close the game", which is not what A1 asks for.
+	 *
+	 * Read by `coop-lobby.js` for the join field's default. The key string lives here only — the
+	 * lobby draws screens and never touches storage.
+	 */
+	var ADDR_KEY = 'kdcoop.lastAddress';
+
+	/** The remembered address, or '' — never throws, so a storage-disabled browser just gets A3. */
+	function lastAddress() {
+		try { return String(window.localStorage.getItem(ADDR_KEY) || ''); } catch (e) { return ''; }
+	}
+	window.__coopLastAddress = lastAddress;
+
+	/**
+	 * A2 — remember an address only once it has REACHED a host. Called from `ws.onopen`, which is the
+	 * only place that fact exists: a browser gives no other signal that the far end was listening.
+	 *
+	 * Remembering at send time instead would helpfully offer the player their own typo back, every
+	 * time, forever. Only a guest with an explicit endpoint has anything to store — a host is
+	 * same-origin and its address is `location.host` already.
+	 */
+	function rememberAddress() {
+		if (role !== 'guest' || !endpoint) return;
+		try { window.localStorage.setItem(ADDR_KEY, endpoint); } catch (e) { /* storage disabled */ }
+	}
+
+	/**
+	 * KDM-236 F1 — the deadline on a JOIN attempt.
+	 *
+	 * A browser asked for a socket to a peer that accepts the TCP connection and then says nothing
+	 * fires neither `open` nor `error`: the socket sits in CONNECTING and the join screen sits on
+	 * "Connecting…" for as long as the player is willing to look at it. That is the hang requirement 3
+	 * forbids, and no layer below can see it — the server we are talking about is, by construction,
+	 * one that never answers.
+	 *
+	 * Armed ONLY for a lobby attempt. A live session that drops is `scheduleReconnect`'s business:
+	 * it already retries with backoff and already says when the next attempt is, and putting a
+	 * deadline there would turn a recoverable outage into an error screen.
+	 */
+	var connectTimer = null;
+	function clearConnectDeadline() {
+		if (connectTimer) { clearTimeout(connectTimer); connectTimer = null; }
+	}
+	function armConnectDeadline(sock, where) {
+		clearConnectDeadline();
+		if (coop.started) return;                      // a reconnect — not ours to time out
+		var ms = Number(window.__coopConnectTimeoutMs);
+		if (!(ms > 0)) ms = 10000;
+		connectTimer = setTimeout(function () {
+			connectTimer = null;
+			if (ws !== sock || sock.readyState !== 0) return;   // opened, failed, or superseded
+			coop._closedForGood = true;                // do not dial a silent door forever
+			try { sock.close(); } catch (e) { /* already going */ }
+			// F4: the progress line is REPLACED, never left standing as the terminal state.
+			lobbySay({ error: 'No answer from ' + where + ' — is the game hosting there?', status: '' });
+		}, ms);
+	}
+
+	/**
+	 * KDM-236 T — leave, and leave nothing behind.
+	 *
+	 * Every way out of the lobby routes here (`coop-lobby.js` → `leave()`). `_closedForGood` is
+	 * latched FIRST: it is what stops `onclose` reaching `scheduleReconnect`, so T3 needs no new flag
+	 * of its own. Dropping `ws` to null is the other half — `connect()`'s handlers each check
+	 * `ws !== myWs`, so a reply that arrives after we walked away finds no lobby to paint into.
+	 */
+	window.__coopDisconnect = function () {
+		clearConnectDeadline();
+		coop._closedForGood = true;
+		var sock = ws;
+		ws = null;
+		coop.ws = null;
+		coop.connected = false;
+		coop.started = false;
+		coop.submitted = false;
+		coop.peerMissing = null;
+		coop._entered = false;
+		coop._snapBase = null;
+		coop._snapSeq = 0;
+		if (sock) { try { sock.close(); } catch (e) { /* already going */ } }
+		return coop;
+	};
+
+	/**
 	 * KDM-252 — retry the socket after a drop, with backoff. Never a reload: a reload throws away the
 	 * loaded bundle and everything the page had, to reach a state the server can restore anyway.
 	 *
@@ -690,8 +779,20 @@
 
 	function connect() {
 		var proto = location.protocol === 'https:' ? 'wss' : 'ws';
-		ws = new WebSocket(proto + '://' + (endpoint || location.host) + '/');
+		var where = endpoint || location.host;
+		ws = new WebSocket(proto + '://' + where + '/');
 		coop.ws = ws;
+		/*
+		 * KDM-236 T3 — THIS socket, and no other.
+		 *
+		 * Every handler below is gated on `ws === myWs`. Two things make that necessary: a player who
+		 * left the lobby (`__coopDisconnect` nulls `ws`) can still be sent the answer to the question
+		 * they withdrew, and a reconnect replaces `ws` while the dead socket's events are still
+		 * queued. In both cases a late `join_pending` / `joined` / `reject` would paint into — or
+		 * worse, enter the game from — a lobby that has moved on. One comparison covers both.
+		 */
+		var myWs = ws;
+		armConnectDeadline(myWs, where);
 		/*
 		 * KDM-252 N4 — a NEW socket holds nothing.
 		 *
@@ -710,6 +811,9 @@
 		coop.submitted = false;
 		setStatus('Co-op ' + id + ': connecting…');
 		ws.onopen = function () {
+			if (ws !== myWs) return;                    // T3 — a socket we walked away from
+			clearConnectDeadline();                     // F1 — it answered; the deadline is spent
+			rememberAddress();                          // A2 — and it answered HERE, so this address is good
 			coop.connected = true;
 			var join = { type: 'join', clientId: id };
 			// A role opts into the approval flow; without one this is the legacy direct join and the
@@ -719,6 +823,8 @@
 			setStatus('Co-op ' + id + ': joined, waiting for the other player…');
 		};
 		ws.onerror = function () {
+			if (ws !== myWs) return;                    // T3
+			clearConnectDeadline();                     // F1 — it failed out loud; nothing left to time out
 			// KDM-252: only while we are still trying to GET IN. Once a session is live, a failed
 			// retry is not news the player can act on — `scheduleReconnect` already says what is
 			// happening and when the next attempt is — and routing it to the lobby would paint an
@@ -727,7 +833,8 @@
 			// E6: a wrong address must arrive in WORDS. A browser gets no reason for a failed connect,
 			// so this is the only place that can say anything at all — and saying nothing is what makes
 			// a mistyped address look like a hang.
-			lobbySay({ error: 'Could not reach ' + (endpoint || location.host) });
+			// F4: `status` goes with it — a stale "Connecting…" under an error is its own small lie.
+			lobbySay({ error: 'Could not reach ' + where, status: '' });
 		};
 		/**
 		 * KDM-206: resolve a state frame to a FULL snapshot.
@@ -762,6 +869,7 @@
 		}
 
 		ws.onmessage = function (e) {
+			if (ws !== myWs) return;                    // T3 — see `myWs` above
 			var m; try { m = JSON.parse(e.data); } catch (_) { return; }
 			// ── KDM-250: the heartbeat ─────────────────────────────────────────────────────────
 			// Answered FIRST and cheaply: this handler runs on the page's own event loop, so a reply
@@ -954,6 +1062,8 @@
 			}
 		};
 		ws.onclose = function () {
+			if (ws !== myWs) return;                    // T3 — a socket we already let go of
+			clearConnectDeadline();
 			coop.connected = false;
 			setStatus('Co-op ' + id + ': disconnected');
 			// KDM-252 A6: and then it puts itself back together, rather than leaving the player with a

@@ -20,50 +20,11 @@
  * of this spec used `baseURL` and failed with exactly that — the stock menu, no `MultiplayerButton`.
  */
 import { test, expect } from '@playwright/test';
-import { waitForBundleReady } from '../helpers/bundle';
+import { press, openLobby, lobbyState, guestAsks } from '../helpers/mp-lobby';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
 
 const MP_TEST_TIMEOUT = Number(process.env.KD_MP_TEST_TIMEOUT || 600_000);
-
-/** Two settled frames — KD's own loop is live on the page, so we wait for it rather than calling in. */
-const settle = (page: any) => page.evaluate(
-	() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))),
-);
-
-/** Drive the lobby exactly as KD's click dispatch does: invoke the registered handler. */
-async function press(page: any, button: string) {
-	await page.evaluate((name: string) => {
-		// @ts-ignore — bundle `let` global, readable by bare name.
-		const b = KDButtonsCache[name];
-		if (!b) throw new Error('no such button on screen: ' + name + ' (have: ' + Object.keys(KDButtonsCache).join() + ')');
-		b.func({});
-	}, button);
-	await settle(page);
-}
-
-async function openLobby(page: any, port: number) {
-	await page.goto(`http://127.0.0.1:${port}/`);
-	await waitForBundleReady(page);
-	await page.evaluate(() => { KinkyDungeonState = 'Menu'; });
-	await settle(page);
-	await press(page, 'MultiplayerButton');
-}
-
-const lobbyState = (page: any) => page.evaluate(() => ({
-	view: window.KDMPLobby.view,
-	pending: window.KDMPLobby.pending,
-	error: window.KDMPLobby.error,
-	status: window.KDMPLobby.status,
-}));
-
-async function guestAsks(page: any, port: number, name: string) {
-	await openLobby(page, port);
-	await press(page, 'KDMPJoin');
-	await page.locator('#KDMPAddress').fill(`127.0.0.1:${port}`);
-	await page.locator('#KDMPName').fill(name);
-	await press(page, 'KDMPConnect');
-}
 
 test.describe('KDM-233 — hosting and joining, end to end', () => {
 	test('the host is ASKED, and only their Accept starts the session (E1, E2)', async ({ browser }) => {

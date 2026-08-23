@@ -261,7 +261,7 @@ Co-op is opt-in: run the plain static server (`npm run serve`) and nothing liste
 | `join-gate.js` | Membership: two seats (host = slot 0, guest = slot 1) and the one unanswered question. Pure — no socket, no world. Unit-tested in ms (`tests/unit/mp-join-gate.spec.ts`). |
 | `ws-bridge.js` | Carries answers between the gate and the sockets: `join{role}` → `join_pending` → `join_answer` → `joined`. |
 | `client/coop-lobby.js` | The menu entry and the host/join screens, as a wrap of `KinkyDungeonRun`. |
-| `client/coop-bootstrap.js` | `__coopConnect({role, address, name})` / `__coopAnswerJoin(accept)`. |
+| `client/coop-bootstrap.js` | The socket and the storage: `__coopConnect({role, address, name})`, `__coopAnswerJoin(accept)`, `__coopDisconnect()`, `__coopLastAddress()`. |
 
 **Rules worth not re-deriving**
 
@@ -281,7 +281,28 @@ Co-op is opt-in: run the plain static server (`npm run serve`) and nothing liste
   not. Putting that wait in front of the socket makes the guest's join never leave the page.
 - **The menu entry needs no game-tree edit** — see `client/coop-lobby.js`'s header for why
   (`KDButtonsCache` is per-frame data; `_prev` must be called first).
+- **The bootstrap owns the socket and the storage; the lobby only asks.** `coop-lobby.js` draws
+  screens and calls `__coopConnect` / `__coopAnswerJoin` / `__coopDisconnect` / `__coopLastAddress`;
+  `lobbySay()` is the single channel back. A key string or a socket decision placed in the lobby
+  immediately exists in two files.
+- **A join can hang with neither `open` nor `error`.** A peer that accepts the TCP connection and
+  never finishes the WebSocket handshake leaves the socket in `readyState 0` indefinitely — a browser
+  reports nothing, and no layer below can see it. Hence `armConnectDeadline`
+  (`window.__coopConnectTimeoutMs`, default 10 s), armed **only while `!coop.started`**: a live
+  session that drops belongs to `scheduleReconnect`, and a deadline there would turn a recoverable
+  outage into an error screen.
+- **`ws !== myWs` is the whole stale-reply guard.** `connect()` captures its own socket and every
+  handler returns early if it is no longer the current one. That covers both a socket the player
+  walked away from (`__coopDisconnect` nulls `ws`) and one a reconnect superseded. Without it, a
+  host's late Accept drags a guest who already left the lobby into the game.
+- **An address is remembered on `onopen`, never on submit.** That is the only moment proving the far
+  end was listening; remembering at send time offers the player their own typo back forever.
+  `localStorage` (per machine) — deliberately unlike the per-tab `sessionStorage` holding
+  `kdcoop.clientId`, which must differ between two tabs because two tabs are two players.
+- **Every way out of the lobby goes through `lobby.leave()`**, including the root Back — which is
+  reachable with a host socket still open, via Host → Cancel → Back.
 
-**Not done here:** heartbeat and disconnect handling (KDM-234), joining a run already in progress
-(KDM-235), per-player characters (KDM-237). The legacy `#coop=` path still joins directly, so two
-entry paths exist until KDM-236 converges them.
+**Not done here:** per-player characters (KDM-237). Heartbeat and disconnect handling (KDM-234) and
+joining a run already in progress (KDM-235) have since landed. The legacy `#coop=` path still joins
+directly, bypassing the gate, so two entry paths exist until **KDM-255** converges them — that path
+is also what keeps the MP e2e suite green, which is why retiring it is its own task.
