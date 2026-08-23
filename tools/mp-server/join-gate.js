@@ -36,6 +36,44 @@
 const HOST_SLOT = 0;
 const GUEST_SLOT = 1;
 
+/**
+ * KDM-237 N4 — the one place a player-supplied name is made safe to seat and to draw.
+ *
+ * Server-side, because a client may send anything: the lobby field's own `maxlength` is a courtesy
+ * to the person typing, not a constraint on the wire. Three rules, and no more —
+ *
+ *   - **control characters are removed**, not escaped. They carry no meaning in a KD label, and a
+ *     stray ESC reaches a draw call and a log line alike.
+ *   - **trimmed**, so `'  '` reads as "no name given" rather than as a name made of spaces.
+ *   - **capped at `NAME_MAX`**, matching the lobby field, so what a player typed is what they get.
+ *
+ * A name is NOT an identity, and this deliberately does not make it one: it does not uniquify,
+ * reject duplicates or reserve anything. `clientId` is the identity (KDM-252), and two players are
+ * perfectly entitled to both be called Ada.
+ *
+ * Answers `''` for anything that survives none of the above — the single value every caller reads as
+ * "unnamed", which is what keeps the legacy `Player <id>` label reachable (NF2).
+ *
+ * Written as a char-code scan rather than a regex on purpose: the alternative needs a class of
+ * escaped control codepoints, and an escape lost to an edit is invisible in review and silently
+ * stops filtering. Order matters — strip THEN trim, or a name of one bell character survives as
+ * whitespace that looks real.
+ */
+const NAME_MAX = 24;
+
+function sanitizeName(raw) {
+	if (raw === undefined || raw === null) return '';
+	const s = String(raw);
+	let out = '';
+	for (let i = 0; i < s.length; i++) {
+		const c = s.charCodeAt(i);
+		if (c < 0x20) continue;                 // C0 controls, incl. NUL, BEL, newline, ESC
+		if (c >= 0x7f && c <= 0x9f) continue;   // DEL and the C1 block
+		out += s.charAt(i);
+	}
+	return out.trim().slice(0, NAME_MAX);
+}
+
 class JoinGate {
 	/** @param {{build?: string}} opts — `build` is this host's build id; guests must match it. */
 	constructor(opts) {
@@ -46,6 +84,15 @@ class JoinGate {
 		this.guest = null;
 		/** `{ clientId, name, build }` awaiting the host's answer, or null. */
 		this.pending = null;
+		/**
+		 * KDM-237 — the display name of each SEATED player, keyed by clientId.
+		 *
+		 * On the seat rather than on the socket, because the seat is what survives a drop: a
+		 * reconnecting player never re-seats (`ws-bridge.js` answers a known id with a bare
+		 * `joined`), so a socket-scoped name would bring them back as `Player B`. See `release` vs
+		 * `releasePending` below — the same asymmetry that holds the seat holds the name.
+		 */
+		this.names = new Map();
 	}
 
 	// ----- membership ----------------------------------------------------------------------
@@ -59,6 +106,17 @@ class JoinGate {
 	}
 
 	has(clientId) { return clientId === this.host || clientId === this.guest; }
+
+	/**
+	 * KDM-237 — the name this player chose, or `''` if they gave none.
+	 *
+	 * Deliberately NOT a fallback: it answers what the player said and nothing else. The one place
+	 * that turns an absent name into a label is `SwapSession.displayNameOf`, and keeping that
+	 * decision in exactly one place is what guarantees the `#coop=` path keeps its legacy
+	 * `Player <id>` strings byte-for-byte (NF2).
+	 */
+	nameOf(clientId) { return this.names.get(clientId) || ''; }
+
 
 	slotOf(clientId) {
 		if (clientId && clientId === this.host) return HOST_SLOT;
@@ -80,6 +138,9 @@ class JoinGate {
 		// the session's, so N1 works without the operator setting anything. An EXPLICIT build wins —
 		// a claim can supply the answer, never overrule one already given.
 		if (!this.build && info && info.build) this.build = String(info.build);
+		// KDM-237 N1/N3 — the host names themselves too. An absent name is left absent rather than
+		// defaulted here: `SwapSession.displayNameOf` owns the one fallback (NF2).
+		if (info && info.name !== undefined) this.names.set(clientId, sanitizeName(info.name));
 		return { accept: true, slot: HOST_SLOT };
 	}
 
@@ -104,7 +165,9 @@ class JoinGate {
 	 * comes before parking, so nothing that cannot work ever reaches the host's dialogue (N1).
 	 */
 	requestJoin(clientId, info) {
-		const name = (info && info.name) || '';
+		// KDM-237 N2 — sanitised HERE, where it is stored, so the host's accept prompt shows exactly
+		// the string the world will seat. Two spellings of one name is a bug report waiting to happen.
+		const name = sanitizeName(info && info.name);
 		const build = (info && info.build) || '';
 
 		if (!this.host) return { accept: false, reason: 'no_host' };
@@ -132,8 +195,12 @@ class JoinGate {
 	accept() {
 		if (!this.pending) return { admitted: false, reason: 'not_pending' };
 		const clientId = this.pending.clientId;
+		// KDM-237 N2 — the name is promoted from the QUESTION to the SEAT, in the same statement that
+		// seats them. Read before `pending` is cleared, for the obvious reason.
+		const name = this.pending.name || '';
 		this.pending = null;
 		this.guest = clientId;
+		if (name) this.names.set(clientId, name);
 		return { admitted: true, clientId, slot: GUEST_SLOT };
 	}
 
@@ -164,6 +231,10 @@ class JoinGate {
 		this.releasePending(clientId);
 		if (clientId === this.host) this.host = null;
 		if (clientId === this.guest) this.guest = null;
+		// KDM-237 P2 — the name goes with the SEAT, and only with the seat. `releasePending` above
+		// deliberately does not touch it: a player who merely dropped still owns their seat (KDM-252
+		// E4) and must come back as themselves rather than as `Player B`.
+		this.names.delete(clientId);
 	}
 
 	/**
@@ -185,4 +256,4 @@ class JoinGate {
 	}
 }
 
-module.exports = { JoinGate, HOST_SLOT, GUEST_SLOT };
+module.exports = { JoinGate, sanitizeName, NAME_MAX, HOST_SLOT, GUEST_SLOT };

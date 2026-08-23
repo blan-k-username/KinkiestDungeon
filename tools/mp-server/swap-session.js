@@ -27,6 +27,7 @@ const { HeadlessHost, KDGAMEDATA_WORLD_KEYS } = require('./headless-host');
 const { PeaceRegistry } = require('./peace');
 const { KD_PEACE_DIALOGUE } = require('./kd-peace-dialogue');
 const { KD_DISCONNECT_DIALOGUE, HOST_LOST_DIALOGUE, PEER_LOST_DIALOGUE } = require('./kd-disconnect-dialogue');
+const { sanitizeName } = require('./join-gate');
 
 const PARK = { x: 1, y: 1 };
 
@@ -142,6 +143,12 @@ class SwapSession {
 		this.bundles = new Map();     // id -> player-state bundle
 		this.avatars = new Map();     // id -> world avatar entity id
 		this.startOf = new Map();     // id -> {x,y}
+		/**
+		 * KDM-237 — the name each player chose, keyed by clientId. Empty/absent means "unnamed",
+		 * which `displayNameOf` turns into the legacy label. Registered in `_perClientStores()` so a
+		 * departing player takes it with them.
+		 */
+		this.nameOf = new Map();     // id -> chosen display name ('' / absent = unnamed)
 		this.logs = new Map();        // id -> per-player message log (KD-090)
 		this.actionMsgOf = new Map(); // id -> {text,color} transient floating combat text (KD-098)
 		// KDM-186: monotonic id per client for ONE-SHOT EVENTS on the wire.
@@ -1168,6 +1175,34 @@ class SwapSession {
 	}
 
 	/**
+	 * KDM-237 N2 — record the name a player chose. Called by the bridge as it seats them, from the
+	 * gate's seat record; the session never invents one.
+	 *
+	 * Idempotent and order-independent: it may be called before `join()` (the normal path, since the
+	 * gate knows the name before the session knows the player) or after. `_seatPlayer` reads it at
+	 * seating time, which is the only moment it matters.
+	 */
+	setPlayerName(clientId, name) {
+		const n = sanitizeName(name);
+		if (n) this.nameOf.set(clientId, n);
+		else this.nameOf.delete(clientId);
+		return n;
+	}
+
+	/**
+	 * KDM-237 — what this player is CALLED. The single fallback in the whole feature.
+	 *
+	 * ⚠️ NF2 lives here. The legacy `#coop=` path supplies no name and is what the entire MP e2e
+	 * suite runs on, so the unnamed answer must stay byte-identical to what `_seatPlayer` used to
+	 * concatenate inline. Every consumer — the avatar label, the captured bundle — asks this one
+	 * function; nothing else builds a label. A fallback copied to a second call site is how that
+	 * guarantee rots quietly.
+	 */
+	displayNameOf(clientId) {
+		return this.nameOf.get(clientId) || ('Player ' + clientId);
+	}
+
+	/**
 	 * KDM-235 A1 — seat ONE player: the recipe `_start` used to inline, now shared with join-late.
 	 *
 	 * The exact mirror of `removePlayer`, and kept that way on purpose — a player is seated in one
@@ -1179,10 +1214,30 @@ class SwapSession {
 	 */
 	_seatPlayer(clientId, pos) {
 		if (this._newPlayerTemplate) this.world.restorePlayer(this._newPlayerTemplate);
+		/*
+		 * KDM-237 S1/S2 — what this player is called, in the two places it has to appear.
+		 *
+		 * ⚠️ ORDER IS THE WHOLE MECHANISM. `setPlayerName` writes `KDGameData.PlayerName` into the
+		 * world's player slot, and `capturePlayer()` two lines down snapshots `KDGameData` — so the
+		 * name rides inside THIS player's bundle only because it is set between the template restore
+		 * and the capture. Set it after, and it lands on whoever is restored into the slot next.
+		 * `PlayerName` is deliberately absent from `KDGAMEDATA_WORLD_KEYS`, so per-player
+		 * replication needs nothing beyond being here.
+		 *
+		 * ⚠️ AND ONLY A CHOSEN NAME IS WRITTEN. The avatar LABEL always falls back to `Player <id>`
+		 * (that is what the other player sees, and what it has always been), but a player who chose
+		 * nothing keeps KD's own default `PlayerName` — their character's name, in their own UI.
+		 * Stamping `'Player A'` there instead made a 1-player session diverge from a reference
+		 * single-player run, which `mp-parity-oracle` caught: the two fields answer different
+		 * questions, and only one of them has a co-op fallback.
+		 */
+		const label = this.displayNameOf(clientId);
+		const chosen = this.nameOf.get(clientId) || '';
+		if (chosen) this.world.setPlayerName(chosen);
 		this.world.placePlayer(pos.x, pos.y);
 		this.bundles.set(clientId, this.world.capturePlayer());
 		this.vitalsOf.set(clientId, this.world.getVitals());   // KD-098: seed for the HP bar
-		const av = this.world.spawnAvatar(pos.x, pos.y, 'Player ' + clientId);
+		const av = this.world.spawnAvatar(pos.x, pos.y, label);
 		this.avatars.set(clientId, av.entityId);
 		this.startOf.set(clientId, pos);
 		// KD-090: a personal log to append per-turn deltas to. At boot `_start` re-seeds every log
@@ -1270,7 +1325,7 @@ class SwapSession {
 	 */
 	_perClientStores() {
 		return [
-			this.bundles, this.avatars, this.startOf, this.logs, this.actionMsgOf,
+			this.bundles, this.avatars, this.startOf, this.logs, this.actionMsgOf, this.nameOf,
 			this._eventSeq, this.pendingEvents, this._sentSoundDesc, this.vitalsOf,
 			this.defeated, this.tiedOf, this._pending, this._stateFp,
 		];

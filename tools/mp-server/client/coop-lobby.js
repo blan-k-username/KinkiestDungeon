@@ -47,11 +47,18 @@
 			var el = document.getElementById('KDMPAddress');
 			return el ? String(el.value || '') : '';
 		},
-		/** The name the host will see in their accept/decline dialogue — all approval-only gives them. */
-		playerName: function () {
-			var el = document.getElementById('KDMPName');
-			return el ? String(el.value || '') : '';
-		},
+		/**
+		 * KDM-237 — the name this player will be known by, cached from the field every frame it is
+		 * drawn.
+		 *
+		 * ⚠️ CACHED, not read on demand. `KDCullTempElements` destroys any field not drawn this
+		 * frame, so by the time a button handler runs on a different view the element may be gone —
+		 * and the host's is exactly that case: `KDMPHost` connects from the ROOT view, and a DOM read
+		 * at that moment used to find nothing because the field only ever existed on the Join view.
+		 * The cache is what lets one field serve both flows.
+		 */
+		name: '',
+		playerName: function () { return lobby.name; },
 		open: function () { KinkyDungeonState = 'Multiplayer'; lobby.view = 'menu'; lobby.error = ''; lobby.status = ''; },
 		close: function () { lobby.leave(); KinkyDungeonState = 'Menu'; },
 		/**
@@ -111,11 +118,33 @@
 		if (lobby.view === 'join') return drawJoin();
 	}
 
+	/**
+	 * KDM-237 N1 — "Your name", drawn by the root view AND the join view from this one function.
+	 *
+	 * Two call sites, one field: the host is asked on the root (they connect straight from there, so
+	 * the field has to exist before Host is pressed), and the guest keeps theirs beside the address
+	 * where it already was. Writing it twice is how the two would drift apart.
+	 *
+	 * Seeded from `lobby.name` on creation, and caching back into it every frame, for the same reason
+	 * `addressDefault()` exists: `KDTextField` honours `Value` only when it CREATES the element, and
+	 * `KDCullTempElements` destroys any field not drawn this frame — so moving between views destroys
+	 * and re-creates this input, and the cache is what carries what the player typed across.
+	 */
+	function drawNameField(y) {
+		DrawTextKD(text('KDMPYourName', 'Your name'), W, y, '#ffffff', '#000000', 28);
+		KDTextField('KDMPName', MID, y + 30, 350, 56, 'text', lobby.name, '24');
+		var el = document.getElementById('KDMPName');
+		if (el) lobby.name = String(el.value || '');
+	}
+
 	function drawRoot() {
+		// Asked BEFORE either choice, because the host connects straight from this view. y=190 puts
+		// the field at ~192-248, clear of the Host button at 268-332.
+		drawNameField(190);
 		DrawButtonKDEx('KDMPHost', function () {
 			lobby.view = 'host';
 			lobby.error = '';
-			connect({ role: 'host' });
+			connect({ role: 'host', name: lobby.playerName() });
 			return true;
 		}, true, MID, 300, 350, 64, text('KDMPHostGame', 'Host Game'), '#ffffff', '');
 
@@ -182,8 +211,7 @@
 	function drawJoin() {
 		DrawTextKD(text('KDMPHostAddress', 'Host address'), W, 250, '#ffffff', '#000000', 28);
 		KDTextField('KDMPAddress', MID, 280, 350, 56, 'text', addressDefault(), '64');
-		DrawTextKD(text('KDMPYourName', 'Your name'), W, 370, '#ffffff', '#000000', 28);
-		KDTextField('KDMPName', MID, 400, 350, 56, 'text', '', '24');
+		drawNameField(370);
 
 		if (lobby.error) DrawTextKD(lobby.error, W, 480, '#ff8080', '#000000', 24);
 		else if (lobby.status) DrawTextKD(lobby.status, W, 480, '#ffffff', '#000000', 24);

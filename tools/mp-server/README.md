@@ -260,7 +260,7 @@ Co-op is opt-in: run the plain static server (`npm run serve`) and nothing liste
 |---|---|
 | `join-gate.js` | Membership: two seats (host = slot 0, guest = slot 1) and the one unanswered question. Pure — no socket, no world. Unit-tested in ms (`tests/unit/mp-join-gate.spec.ts`). |
 | `ws-bridge.js` | Carries answers between the gate and the sockets: `join{role}` → `join_pending` → `join_answer` → `joined`. |
-| `client/coop-lobby.js` | The menu entry and the host/join screens, as a wrap of `KinkyDungeonRun`. |
+| `client/coop-lobby.js` | The menu entry, the host/join screens and the name field, as a wrap of `KinkyDungeonRun`. |
 | `client/coop-bootstrap.js` | The socket and the storage: `__coopConnect({role, address, name})`, `__coopAnswerJoin(accept)`, `__coopDisconnect()`, `__coopLastAddress()`. |
 
 **Rules worth not re-deriving**
@@ -302,7 +302,24 @@ Co-op is opt-in: run the plain static server (`npm run serve`) and nothing liste
 - **Every way out of the lobby goes through `lobby.leave()`**, including the root Back — which is
   reachable with a host socket still open, via Host → Cancel → Back.
 
-**Not done here:** per-player characters (KDM-237). Heartbeat and disconnect handling (KDM-234) and
-joining a run already in progress (KDM-235) have since landed. The legacy `#coop=` path still joins
-directly, bypassing the gate, so two entry paths exist until **KDM-255** converges them — that path
-is also what keeps the MP e2e suite green, which is why retiring it is its own task.
+- **A player's NAME lives on the SEAT, and only a chosen one is written.** `JoinGate.names` is keyed
+  by clientId and survives `releasePending` but not `release` — the same asymmetry that holds a seat
+  across a drop (KDM-252 E4), which is what makes a reconnecting player come back as themselves.
+  `sanitizeName()` (exported, char-code scan not a regex) is the single N4 enforcement point.
+  `SwapSession.displayNameOf()` is the single fallback: chosen name, else `Player <id>`.
+  ⚠️ The avatar LABEL falls back; the player's own `KDGameData.PlayerName` does **not** — an unnamed
+  player keeps KD's default `'Ada'`. Stamping `'Player A'` there made a 1-player session diverge from
+  a reference single-player run (`mp-parity-oracle` caught it). The two fields answer different
+  questions: one is what your partner sees over your head, the other is your character's own name.
+- **`setPlayerName` must sit BETWEEN the template restore and the capture** in `_seatPlayer`.
+  `capturePlayer()` snapshots `KDGameData`, and `PlayerName` is deliberately absent from
+  `KDGAMEDATA_WORLD_KEYS`, so that ordering is the entire per-player replication story. Set it after
+  and the name lands on whoever is restored into the slot next.
+- **The lobby caches the name field rather than reading the DOM on demand.** `KDCullTempElements`
+  destroys any field not drawn this frame, and `KDMPHost` connects from the ROOT view — so a read at
+  press time finds nothing. `lobby.name` is what lets one `drawNameField()` serve both views.
+
+**Not done here:** per-player character CREATION — appearance, outfit, class, pronouns (KDM-256);
+names themselves landed in KDM-237. The legacy `#coop=` path still joins directly, bypassing the
+gate, so two entry paths exist until **KDM-255** converges them — that path is also what keeps the MP
+e2e suite green, which is why retiring it is its own task.

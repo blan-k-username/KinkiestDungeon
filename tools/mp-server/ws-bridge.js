@@ -239,6 +239,22 @@ class WSBridge {
 	}
 
 	/**
+	 * KDM-237 N2 — hand the seat's name to the session, immediately before it seats the player.
+	 *
+	 * One helper rather than three copies of the same gate lookup, because the three seating sites
+	 * (accept, join-late, and the plain/legacy join) must not be able to disagree about where a name
+	 * comes from. The gate is the source; the session is told; neither invents anything.
+	 *
+	 * Safe on the roleless `#coop=` path (NF2): `nameOf` answers `''` for a player who never gave
+	 * one, and `setPlayerName('')` clears rather than sets — so those sessions reach `displayNameOf`
+	 * with nothing stored and keep the legacy `Player <id>` label.
+	 */
+	_carryName(clientId) {
+		try { this.session.setPlayerName(clientId, this.gate.nameOf(clientId)); }
+		catch (e) { /* a session that predates names, or an id the gate never seated */ }
+	}
+
+	/**
 	 * KDM-186: a write that the kernel could not take immediately is queued INSIDE Node, and the
 	 * client sees it whenever the socket drains — latency the server's own clock never sees. With
 	 * ~40 KB snapshots this is a prime suspect for round-trips that are ~60x the measured CPU cost,
@@ -291,6 +307,7 @@ class WSBridge {
 				return clientId;
 			}
 			try {
+				this._carryName(res.clientId);
 				const r = this.session.join(res.clientId);
 				this.presence.seat(res.clientId, 'guest', now());   // KDM-250
 				if (guestSock) {
@@ -345,7 +362,7 @@ class WSBridge {
 				// `#coop=<id>` path, which still joins directly — the two converge in KDM-236, and until
 				// then the e2e suite and `tools/coop-demo.sh` keep working unchanged.
 				if (msg.role === 'host') {
-					const c = this.gate.claimHost(clientId, { build: msg.build });
+					const c = this.gate.claimHost(clientId, { name: msg.name, build: msg.build });
 					if (!c.accept) { this._reject(socket, c); return clientId; }
 				} else if (msg.role === 'guest') {
 					const q = this.gate.requestJoin(clientId, { name: msg.name, build: msg.build });
@@ -368,6 +385,7 @@ class WSBridge {
 				// known id is a reconnect and never reaches here; a dismissed one was refused at the
 				// top of this branch.) `join()` is the pre-start collector and throws once started, so
 				// the two cases get the two different methods they always needed.
+				this._carryName(clientId);
 				if (this.session.started) { this._joinLate(clientId); return clientId; }
 				const r = this.session.join(clientId);
 				this._send(socket, { type: 'joined', clientId, started: r.started, players: this.session.players });

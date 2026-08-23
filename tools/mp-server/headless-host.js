@@ -1277,6 +1277,26 @@ class HeadlessHost {
 	}
 
 	/**
+	 * KDM-237 S2 — set the display name of the player currently in the world's player slot.
+	 *
+	 * `KDGameData.PlayerName` is KD's own field for this (`KinkyDungeon.ts:647` seeds it, the "Name"
+	 * creation screen writes it). Deliberately NOT `KinkyDungeonPlayer` / `CharacterLoadNPC`: that is
+	 * the BC-era Character path, and this repo prefers KD-native state.
+	 *
+	 * Whoever is in the slot — that is the point. Callers sandwich this between `restorePlayer` and
+	 * `capturePlayer` so the name lands inside one player's bundle (see `SwapSession._seatPlayer`);
+	 * `PlayerName` is absent from `KDGAMEDATA_WORLD_KEYS`, so the generic capture already carries it
+	 * per player and nothing else is needed.
+	 */
+	setPlayerName(name) {
+		return this.eval(`(function(){
+			if (typeof KDGameData === 'undefined' || !KDGameData) return '';
+			KDGameData.PlayerName = ${JSON.stringify(String(name || ''))};
+			return KDGameData.PlayerName;
+		})()`);
+	}
+
+	/**
 	 * Inject an avatar entity representing another player at (x,y). Returns the
 	 * real KD entity id (the engine now sees/targets/collides with it).
 	 */
