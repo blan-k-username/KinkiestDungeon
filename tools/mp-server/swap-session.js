@@ -167,6 +167,10 @@ class SwapSession {
 		// real player pipeline (see installPeerDamageRecorder / _reconcilePeers).
 		this._joined = [];
 		this._pending = new Map();    // id -> { kdType, data }
+		// KDM-235: ids admitted mid-turn, waiting for the barrier to clear. See `joinInProgress`.
+		this._pendingJoins = [];
+		// KDM-235 A2: the fresh-character template, captured in `_start`. See the note there.
+		this._newPlayerTemplate = null;
 		this.unknownInputs = new Map(); // KDM-163 AC3: input type -> count the world had no handler for
 		// KDM-163 AC3: `_pending` is ONE slot per player, so a second turn-consuming input REPLACES the
 		// first. That is deliberate (a player may change their mind before the peer acts) but it must
@@ -304,17 +308,25 @@ class SwapSession {
 				this._dbg(`wear-restraint: slowLevel now ${JSON.stringify(this.world.playerSlowLevel())}`);
 			} catch (e) { this._dbg('wear-restraint: slow refresh failed — ' + e.message); }
 		}
+		/*
+		 * KDM-235 A2 — THE FRESH-CHARACTER TEMPLATE, captured here and nowhere else.
+		 *
+		 * Right now the global player slot holds the pristine new-game character, which is why every
+		 * bundle below is a clone of it. Mid-run that is no longer true: the slot holds whoever last
+		 * acted (parked between turns), so a latecomer seated with a bare `capturePlayer()` would be
+		 * handed a full copy of that player — stats, restraints, inventory. It would look like a
+		 * working feature and is exactly what KDM-235 R6 forbids.
+		 *
+		 * Captured AFTER the start-restraint / perk seeding above, so a latecomer arrives on the same
+		 * terms as everyone else. This is also the one seam KDM-237 (own character) and KDM-243
+		 * (import a save) replace — they change what the template IS, and touch no seating code.
+		 */
+		this._newPlayerTemplate = this.world.capturePlayer();
 		const base = this.world.findOpenTile();
 		let i = 0;
 		for (const id of this._joined) {
-			const pos = { x: base.x + i, y: base.y };
 			// give each player a starting bundle at a distinct position
-			this.world.placePlayer(pos.x, pos.y);
-			this.bundles.set(id, this.world.capturePlayer());
-			this.vitalsOf.set(id, this.world.getVitals());   // KD-098: seed for the HP bar
-			const av = this.world.spawnAvatar(pos.x, pos.y, 'Player ' + id);
-			this.avatars.set(id, av.entityId);
-			this.startOf.set(id, pos);
+			this._seatPlayer(id, { x: base.x + i, y: base.y });
 			i++;
 		}
 		// one shared enemy near the players; park the global player between turns
@@ -1112,6 +1124,9 @@ class SwapSession {
 		this.world.parkGlobalPlayer(PARK.x, PARK.y);
 		this.turn += 1;
 		this._pending.clear();
+		// KDM-235 A3 — THE TURN BOUNDARY. The barrier is empty exactly here, so this is the only
+		// moment a new seat can appear without disturbing a turn in flight.
+		this._flushPendingJoins();
 		this.lastTurn = { order, applied };
 		return { turn: this.turn, applied };
 	}
@@ -1150,6 +1165,91 @@ class SwapSession {
 			try { this.world.setAvatarHostile(eid, false); } catch (e) { /* avatar gone; nothing to clear */ }
 		}
 		this._dbg('HUB RESET — every pair back to co-op on arrival at ' + HUB_ROOM_TYPE);
+	}
+
+	/**
+	 * KDM-235 A1 — seat ONE player: the recipe `_start` used to inline, now shared with join-late.
+	 *
+	 * The exact mirror of `removePlayer`, and kept that way on purpose — a player is seated in one
+	 * place and unseated in one place, so the two can be read against each other. Every container it
+	 * fills is one `removePlayer` empties.
+	 *
+	 * The template restore is the load-bearing line (see `_start`): it is what makes a latecomer their
+	 * own character instead of a copy of whoever last held the player slot.
+	 */
+	_seatPlayer(clientId, pos) {
+		if (this._newPlayerTemplate) this.world.restorePlayer(this._newPlayerTemplate);
+		this.world.placePlayer(pos.x, pos.y);
+		this.bundles.set(clientId, this.world.capturePlayer());
+		this.vitalsOf.set(clientId, this.world.getVitals());   // KD-098: seed for the HP bar
+		const av = this.world.spawnAvatar(pos.x, pos.y, 'Player ' + clientId);
+		this.avatars.set(clientId, av.entityId);
+		this.startOf.set(clientId, pos);
+		// KD-090: a personal log to append per-turn deltas to. At boot `_start` re-seeds every log
+		// from the intro after the loop — harmless and deliberate, so boot behaviour is unchanged.
+		this.logs.set(clientId, (this.world.messageLog() || []).slice(-this.maxLog));
+		return av.entityId;
+	}
+
+	/**
+	 * KDM-235 — admit a NEW player to a session that is already running.
+	 *
+	 * Deliberately NOT `join()`: that one is the pre-start collector and throws once started, and the
+	 * two have genuinely different rules (a free slot vs a quorum). Reconnect is a third thing again
+	 * and lives in the bridge — a known id re-attaching never reaches here.
+	 *
+	 * ⚠️ TIMING IS THE WHOLE RISK, not the world. `_advanceTurn` is synchronous, so a join can never
+	 * interleave inside a turn. What it CAN do is arrive while the submit barrier is open — and since
+	 * `waitingOn()` is `_joined` minus `_pending`, seating immediately would either stall a turn that
+	 * was one submit from resolving, or enrol someone in a turn they never saw. So an arrival during
+	 * an open turn is QUEUED and flushed at the boundary (end of `_advanceTurn`). One rule, one place.
+	 *
+	 * Returns `{seated, deferred}` — `deferred` says the seat is promised but not yet present, which
+	 * the caller needs in order to decide when to send the first snapshot.
+	 */
+	joinInProgress(clientId) {
+		if (!this.started) return { seated: false, reason: 'not-started' };
+		if (!clientId) return { seated: false, reason: 'no-id' };
+		if (this._joined.includes(clientId)) return { seated: false, reason: 'already-seated' };
+		if (this._pendingJoins.includes(clientId)) return { seated: true, deferred: true };
+		if (this._pending.size > 0) {
+			this._pendingJoins.push(clientId);
+			this._dbg(`JOIN-LATE ${clientId} queued — a turn is open`);
+			return { seated: true, deferred: true };
+		}
+		this._admit(clientId);
+		return { seated: true, deferred: false };
+	}
+
+	/** Actually take the seat. Only ever called with the barrier closed — see `joinInProgress`. */
+	_admit(clientId) {
+		// J1/J2 — next to the HOST (seat 0), on a legal tile nothing else is standing on. Falls back
+		// to the map-wide open tile rather than failing the join: arriving somewhere odd beats not
+		// arriving at all.
+		const hostId = this._joined[0];
+		const hostAv = hostId != null ? this.avatars.get(hostId) : null;
+		const hostPos = hostAv != null ? this.world.entityPos(hostAv) : null;
+		const pos = (hostPos && this.world.findFreeTileNear(hostPos.x, hostPos.y)) || this.world.findOpenTile();
+		this._joined.push(clientId);
+		this._seatPlayer(clientId, pos);
+		// KDM-253 lowered `required` on a departure; raise it back, or a solo-then-rejoin session ends
+		// with a quorum below its own seat count.
+		this.required = Math.max(this.required, this._joined.length);
+		this.world.parkGlobalPlayer(PARK.x, PARK.y);
+		this._dbg(`JOIN-LATE ${clientId} seated at ${pos.x},${pos.y} — ${this._joined.length} player(s)`);
+		return true;
+	}
+
+	/** Flush whatever arrived mid-turn. Called at the turn boundary, where the barrier is empty. */
+	_flushPendingJoins() {
+		if (!this._pendingJoins.length) return [];
+		const admitted = [];
+		for (const id of this._pendingJoins.splice(0)) {
+			if (this._joined.includes(id)) continue;
+			this._admit(id);
+			admitted.push(id);
+		}
+		return admitted;
 	}
 
 	/**
@@ -1221,6 +1321,9 @@ class SwapSession {
 		//    THIS is what lets the survivor's own submit resolve a turn — not `required`, which is
 		//    only ever read by `join()`. Lowered anyway so the two can never disagree.
 		this._joined = this._joined.filter((id) => id !== clientId);
+		// KDM-235: …and any promised-but-unseated arrival, or a player dismissed while their join was
+		// queued would be seated moments later by the turn-boundary flush.
+		this._pendingJoins = this._pendingJoins.filter((id) => id !== clientId);
 		this.required = Math.max(1, this._joined.length);
 		this._dbg(`REMOVED ${clientId} — ${this._joined.length} player(s) remain`);
 		return true;

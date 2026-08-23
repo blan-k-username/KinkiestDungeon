@@ -668,6 +668,51 @@ class HeadlessHost {
 		})()`);
 	}
 
+	/** Where does this entity stand? `null` if it is not in the world. */
+	entityPos(entityId) {
+		return this.eval(`(function(){
+			var e = KDMapData.Entities.find(function(x){ return x.id === ${entityId | 0}; });
+			return e ? { x: e.x, y: e.y } : null;
+		})()`);
+	}
+
+	/**
+	 * KDM-235 J1/J2 — the nearest legal, UNOCCUPIED tile to (x,y), searched in expanding rings.
+	 *
+	 * `findOpenTile` above answers a different question: it scans the whole map for the most open
+	 * spot, which is a boot-time layout choice. This one is "put them next to their friend", so the
+	 * ring order IS the requirement — the first hit is the nearest, and J2's "nearest legal tile if
+	 * every neighbour is blocked" falls out of continuing the search rather than being a special case.
+	 *
+	 * ⚠️ `KinkyDungeonMovableTilesEnemy`, NOT `KinkyDungeonMovableTiles`. The latter is the
+	 * INTERACTABLE alias (chests, doors, orbs) — tiles you can spend a turn on without standing on
+	 * them — so using it here would drop a player inside a chest.
+	 *
+	 * Occupancy matters as much as terrain: without the entity check the joiner lands on top of the
+	 * shared enemy or the host's own avatar, which reads to the player as "I spawned inside a rat".
+	 *
+	 * Bounded (`maxR`) and returns `null` rather than searching for ever; the caller falls back.
+	 */
+	findFreeTileNear(x, y, maxR = 12) {
+		return this.eval(`(function(){
+			var cx = ${x | 0}, cy = ${y | 0}, maxR = ${maxR | 0};
+			function free(px, py){
+				if (KinkyDungeonMovableTilesEnemy.indexOf(KinkyDungeonMapGet(px, py)) < 0) return false;
+				return !KDMapData.Entities.some(function(e){ return e.x === px && e.y === py; });
+			}
+			for (var r = 1; r <= maxR; r++) {
+				for (var dx = -r; dx <= r; dx++) {
+					for (var dy = -r; dy <= r; dy++) {
+						if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;   // ring edge only
+						var px = cx + dx, py = cy + dy;
+						if (free(px, py)) return { x: px, y: py };
+					}
+				}
+			}
+			return null;
+		})()`);
+	}
+
 	/** Is (x,y) a movable tile for the player/enemy? */
 	isMovable(x, y) {
 		return this.eval(`KinkyDungeonMovableTilesEnemy.indexOf(KinkyDungeonMapGet(${x|0}, ${y|0})) >= 0`);

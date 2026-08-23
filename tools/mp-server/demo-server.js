@@ -273,7 +273,7 @@ function serveStatic(req, res) {
 	});
 }
 
-function start(port = PORT) {
+function start(port = PORT, overrides = null) {
 	// Boot-time policy gate: a BUNDLE_PATCHES entry without its repro/upstream report/removal
 	// condition is a patch nobody can ever retire. Loud, not fatal — the demo must still start.
 	for (const v of validateBundlePatchPolicy()) {
@@ -311,11 +311,14 @@ function start(port = PORT) {
 	// that is wedged, and a tight window would declare a live player dead for a slow frame.
 	const hbIntervalMs = parseInt(process.env.KD_HB_INTERVAL_MS || '5000', 10);
 	const hbTimeoutMs = parseInt(process.env.KD_HB_TIMEOUT_MS || '30000', 10);
-	const bridge = new WSBridge({
+	// KDM-235: `overrides` lets a caller (a spec) change a session knob without an env var. The
+	// default is unchanged — two players, as every existing caller expects — and the one this exists
+	// for is `requiredPlayers: 1`, a host who starts playing ALONE and is joined later.
+	const bridge = new WSBridge(Object.assign({
 		requiredPlayers: 2, seed: 'coop-demo-seed', idleGraceMs: graceMs,
 		hbIntervalMs, hbTimeoutMs,
 		pvp, startRestraint, wearRestraint, classicHeels,
-	});
+	}, overrides || {}));
 	const server = http.createServer(serveStatic);
 	bridge.attach(server);
 	return new Promise((resolve) => {

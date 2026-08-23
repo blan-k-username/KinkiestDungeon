@@ -364,6 +364,11 @@ class WSBridge {
 				// still the newest arrival — `_roleFor`'s legacy fallback reads arrival order.
 				const role = this._roleFor(clientId, msg.role);
 				this.presence.seat(clientId, role, now());
+				// KDM-235 — a NEW id arriving at a RUNNING session is a join-late, not an error. (A
+				// known id is a reconnect and never reaches here; a dismissed one was refused at the
+				// top of this branch.) `join()` is the pre-start collector and throws once started, so
+				// the two cases get the two different methods they always needed.
+				if (this.session.started) { this._joinLate(clientId); return clientId; }
 				const r = this.session.join(clientId);
 				this._send(socket, { type: 'joined', clientId, started: r.started, players: this.session.players });
 				if (r.started) this._broadcastState();   // both in → push initial render-state
@@ -646,6 +651,49 @@ class WSBridge {
 	_acceptQuit(clientId) {
 		if (!this._seatGone([clientId], 'quit')) return false;
 		this.session._dbg(`QUIT — ${clientId} left deliberately`);
+		return true;
+	}
+
+	/**
+	 * KDM-235 A5 — admit a newcomer to a run in progress and get everyone looking at the same world.
+	 *
+	 * The session decides WHETHER and WHEN (it may defer the seat to the turn boundary); the bridge
+	 * only carries the answer to the sockets, exactly as it does for presence and seats elsewhere.
+	 *
+	 * A deferred seat is told `joined` immediately — the client needs to leave its lobby screen — but
+	 * its first state frame waits for the seat to actually exist, because `snapshotFor` throws for a
+	 * player with no bundle. The turn that flushes the queue broadcasts to everyone anyway
+	 * (`_broadcastState`), so the joiner's first frame arrives there, and `_resetDelta` guarantees it
+	 * is a full snapshot (R3).
+	 */
+	_joinLate(clientId) {
+		const sock = this.sockets.get(clientId);
+		const res = this.session.joinInProgress(clientId);
+		if (!res.seated) {
+			if (sock) this._send(sock, { type: 'error', error: `cannot join: ${res.reason}` });
+			return false;
+		}
+		if (sock) {
+			this._send(sock, { type: 'joined', clientId, started: true, players: this.session.players });
+		}
+		if (res.deferred) return true;      // the flushing turn will broadcast to everyone, including them
+		this._resetDelta(clientId);         // they hold nothing to diff against
+		if (sock) {
+			try {
+				this._send(sock, Object.assign({ type: 'state', tick: this.session.turn },
+					this._stateFrame(clientId)));
+			} catch (e) { /* socket gone */ }
+		}
+		// The players already here get a new avatar in their world. `push`, not `ui`: nobody asked for
+		// this frame, so it must not unwind anyone's in-flight bookkeeping (KDM-252).
+		for (const [cid, s] of this.sockets) {
+			if (cid === clientId) continue;
+			try {
+				this._send(s, { type: 'peer_joined', clientId, players: this.session.players });
+				this._send(s, Object.assign({ type: 'state', kind: 'push', tick: this.session.turn },
+					this._stateFrame(cid)));
+			} catch (e) { /* that one is gone too */ }
+		}
 		return true;
 	}
 
