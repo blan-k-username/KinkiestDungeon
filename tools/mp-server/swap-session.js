@@ -27,7 +27,7 @@ const { HeadlessHost, KDGAMEDATA_WORLD_KEYS } = require('./headless-host');
 const { PeaceRegistry } = require('./peace');
 const { KD_PEACE_DIALOGUE } = require('./kd-peace-dialogue');
 const { KD_DISCONNECT_DIALOGUE, HOST_LOST_DIALOGUE, PEER_LOST_DIALOGUE } = require('./kd-disconnect-dialogue');
-const { sanitizeName } = require('./join-gate');
+const { sanitizeName, sanitizePerks } = require('./join-gate');
 
 const PARK = { x: 1, y: 1 };
 
@@ -136,9 +136,18 @@ class SwapSession {
 		// drive lockstep turns — so it never commits in co-op. Wearing at start sidesteps that
 		// entirely, which is what you want when testing movement speed while bound.
 		this.wearRestraint = opts.wearRestraint || '';
-		// KDM-164 UAT: enable the stock ClassicHeels perk. OPT-IN — the MP layer does not choose a
-		// player's perks; it used to be switched on implicitly whenever a restraint was seeded.
-		this.classicHeels = !!opts.classicHeels;
+		/**
+		 * KDM-238 R10 — perks applied to any player who declared none of their own.
+		 *
+		 * This replaces KDM-164's `classicHeels` / `_setClassicHeels`, which was a second, parallel
+		 * way to put a perk on a player and named a perk inside `tools/mp-server/**`. It is a list of
+		 * KEYS supplied by the operator (`KD_COOP_PERKS=ClassicHeels`), fed through the one
+		 * `applyPerks` path like anybody else's declaration — so there is exactly one mechanism, and
+		 * no perk name in this layer's source (epic AC2).
+		 *
+		 * A DEFAULT, not an override: a player who chose their own perks gets theirs and nothing else.
+		 */
+		this.defaultPerks = sanitizePerks(opts.defaultPerks);
 		this.world = new HeadlessHost({ id: 'world' });
 		this.bundles = new Map();     // id -> player-state bundle
 		this.avatars = new Map();     // id -> world avatar entity id
@@ -149,6 +158,12 @@ class SwapSession {
 		 * departing player takes it with them.
 		 */
 		this.nameOf = new Map();     // id -> chosen display name ('' / absent = unnamed)
+		/**
+		 * KDM-238 R3 — the perk keys each player chose, keyed by clientId. Absent means "declared
+		 * none", which `perksOf` turns into `defaultPerks`. Registered in `_perClientStores()` beside
+		 * `nameOf` so a departing player takes it with them.
+		 */
+		this.perkOf = new Map();     // id -> string[] of chosen perk keys
 		this.logs = new Map();        // id -> per-player message log (KD-090)
 		this.actionMsgOf = new Map(); // id -> {text,color} transient floating combat text (KD-098)
 		// KDM-186: monotonic id per client for ONE-SHOT EVENTS on the wire.
@@ -295,12 +310,10 @@ class SwapSession {
 				this._dbg(`start-restraint(loose) ${name} -> ${JSON.stringify(r)}`);
 			}
 		}
-		// KDM-164: `ClassicHeels` is a PLAYER PERK, and the server was switching it on behind the
-		// player's back as a side effect of seeding a restraint. Convenient for one UAT scenario
-		// (without it `KinkyDungeonCalculateSlowLevel` ignores `heelpower`, so seeded heels feel like
-		// nothing) — but the MP layer does not get to choose a player's perks. It is now an explicit,
-		// opt-in flag and nothing turns it on implicitly.
-		this._setClassicHeels();
+		// KDM-238 R10: the perk seeding that used to happen HERE is gone. KDM-164 made it explicit and
+		// opt-in; this task makes it the SAME path everyone else's perks take — each seat gets its own
+		// perks inside `_seatPlayer`, from `perksOf(clientId)`, and an operator's blanket default is
+		// just the answer that path gives a player who declared nothing (`defaultPerks`).
 		// Worn-at-start items: applied BEFORE each bundle is captured below, so every player
 		// starts wearing them (and their slow level is already derived from them).
 		for (const name of KDParseStartRestraints(this.wearRestraint)) {
@@ -1203,6 +1216,36 @@ class SwapSession {
 	}
 
 	/**
+	 * KDM-238 R3 — record the perks a player chose. Called by the bridge as it seats them, from the
+	 * gate's seat record; the session never invents one.
+	 *
+	 * Idempotent and order-independent, exactly like `setPlayerName`: it may be called before
+	 * `join()` (the normal path, since the gate knows the declaration before the session knows the
+	 * player) or after. `_seatPlayer` reads it at seating time, the only moment it matters.
+	 */
+	setPerks(clientId, perks) {
+		const p = sanitizePerks(perks);
+		if (p.length) this.perkOf.set(clientId, p);
+		else this.perkOf.delete(clientId);
+		return p;
+	}
+
+	/**
+	 * KDM-238 — what perks this player STARTS WITH. The single fallback in the whole feature.
+	 *
+	 * The counterpart of `displayNameOf`, and it exists for the same reason: the legacy `#coop=` path
+	 * declares nothing and is what the entire MP e2e suite runs on, so "declared nothing" has to have
+	 * exactly one answer and one home. That answer is `defaultPerks` — normally empty, which is KD's
+	 * own new-game state, and non-empty only when an operator asked for it (`KD_COOP_PERKS`).
+	 *
+	 * A player's own declaration is never merged with the default: they chose, so they get theirs.
+	 */
+	perksOf(clientId) {
+		const own = this.perkOf.get(clientId);
+		return (own && own.length) ? own.slice() : this.defaultPerks.slice();
+	}
+
+	/**
 	 * KDM-235 A1 — seat ONE player: the recipe `_start` used to inline, now shared with join-late.
 	 *
 	 * The exact mirror of `removePlayer`, and kept that way on purpose — a player is seated in one
@@ -1231,6 +1274,19 @@ class SwapSession {
 		 * single-player run, which `mp-parity-oracle` caught: the two fields answer different
 		 * questions, and only one of them has a co-op fallback.
 		 */
+		/*
+		 * KDM-238 R4/R5 — this player's own perks, in the same window and for the same reason.
+		 *
+		 * FIRST among the per-player mutations, because it is the one with side effects: `applyPerks`
+		 * runs KD's own `KDInitPerks()`, which adds restraints, weapons, consumables and spell points
+		 * to whoever is in the slot. Everything after it (the name, the position) is a plain
+		 * assignment and does not care about the order; a perk's starting collar very much does.
+		 *
+		 * Unconditional, unlike the name: a player who declared nothing still needs the map RESET to
+		 * their own answer, or they would inherit whatever the previous occupant of the slot chose.
+		 * `perksOf` is what makes "declared nothing" mean KD's default rather than "leave it alone".
+		 */
+		this.world.applyPerks(this.perksOf(clientId));
 		const label = this.displayNameOf(clientId);
 		const chosen = this.nameOf.get(clientId) || '';
 		if (chosen) this.world.setPlayerName(chosen);
@@ -1326,6 +1382,7 @@ class SwapSession {
 	_perClientStores() {
 		return [
 			this.bundles, this.avatars, this.startOf, this.logs, this.actionMsgOf, this.nameOf,
+			this.perkOf,
 			this._eventSeq, this.pendingEvents, this._sentSoundDesc, this.vitalsOf,
 			this.defeated, this.tiedOf, this._pending, this._stateFp,
 		];
@@ -1605,23 +1662,6 @@ class SwapSession {
 
 	/** KDM-164: "down" is KD's own floor — Will at zero. No MP-specific threshold, no hysteresis. */
 	_isDown(vitals) { return !!vitals && vitals.will != null && vitals.will <= 0; }
-
-	/**
-	 * KDM-164: opt-in ONLY (`classicHeels: true` / `KD_CLASSIC_HEELS=1`). This is a stock PLAYER PERK;
-	 * the server used to switch it on implicitly whenever a restraint was seeded, which is the MP layer
-	 * making a gameplay choice on the player's behalf. Off unless asked for.
-	 */
-	_setClassicHeels() {
-		if (!this.classicHeels) return;
-		try {
-			this.world.eval(`(function(){
-				if (typeof KinkyDungeonStatsChoice !== 'undefined' && KinkyDungeonStatsChoice)
-					KinkyDungeonStatsChoice.set("ClassicHeels", true);
-				if (typeof KinkyDungeonCalculateSlowLevel === 'function') KinkyDungeonCalculateSlowLevel(0);
-			})()`);
-			this._dbg('ClassicHeels perk enabled BY REQUEST (heelpower counts toward slow)');
-		} catch (e) { this._dbg('could not enable ClassicHeels — ' + e.message); }
-	}
 
 	/** Clear a player's defeat + broadcast a shared "recovered" message to everyone. KD-099 "freed". */
 	_markRecovered(id, why) {

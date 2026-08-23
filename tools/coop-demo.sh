@@ -12,12 +12,14 @@
 #      URL form `#coop=A&startitem=Name` only seeds the browser's client-local Items inventory.)
 #   KD_PVP=1 tools/coop-demo.sh          # peers are hostile to each other (KD-094) — needed to UAT
 #     anything about PvP: real bump-attacks, tying a worn-down peer, defeat/recovery.
-#   KD_CLASSIC_HEELS=1 tools/coop-demo.sh    # stock perk that makes heelpower count toward slow
+#   KD_COOP_PERKS=ClassicHeels tools/coop-demo.sh  # perks for a player who picked none (KDM-238);
+#     ClassicHeels is the stock perk that makes heelpower count toward slow
 #   KD_IDLE_GRACE_MS=30000 tools/coop-demo.sh   # auto-"wait" a silent player instead of strict lockstep
 #
 # ⚠️ Every env var the server reads must ALSO be listed in the `-e` flags below — the container gets
 # only what is forwarded, so exporting one the launcher does not pass is silently ignored. KD_PVP,
-# KD_CLASSIC_HEELS and KD_IDLE_GRACE_MS were all read by demo-server.js and unreachable through this
+# KD_COOP_PERKS (was KD_CLASSIC_HEELS) and KD_IDLE_GRACE_MS were all read by demo-server.js and
+# were unreachable through this
 # script until 2026-08-20: `KD_PVP=1 tools/coop-demo.sh` started a session with PvP OFF and said
 # nothing (found while setting up a PvP UAT — the demo simply came up co-op).
 #
@@ -53,6 +55,6 @@ exec docker run "${MODE[@]}" --init \
 	-e "KD_WEAR_RESTRAINT=${KD_WEAR_RESTRAINT:-}" \
 	-e "KD_MP_DEBUG=${KD_MP_DEBUG:-}" \
 	-e "KD_PVP=${KD_PVP:-}" \
-	-e "KD_CLASSIC_HEELS=${KD_CLASSIC_HEELS:-}" \
+	-e "KD_COOP_PERKS=${KD_COOP_PERKS:-}" \
 	-e "KD_IDLE_GRACE_MS=${KD_IDLE_GRACE_MS:-}" \
 	"$IMAGE" bash -c 'npm i --no-audit --no-fund && npx tsc && exec node tools/mp-server/demo-server.js'

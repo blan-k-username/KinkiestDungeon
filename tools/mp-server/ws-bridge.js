@@ -249,19 +249,24 @@ class WSBridge {
 	}
 
 	/**
-	 * KDM-237 N2 — hand the seat's name to the session, immediately before it seats the player.
+	 * KDM-237 N2 / KDM-238 R3 — hand what the SEAT knows about a player to the session, immediately
+	 * before it seats them: the name they chose, and the perks they chose.
 	 *
-	 * One helper rather than three copies of the same gate lookup, because the three seating sites
-	 * (accept, join-late, and the plain/legacy join) must not be able to disagree about where a name
-	 * comes from. The gate is the source; the session is told; neither invents anything.
+	 * One helper rather than copies of the same gate lookup at each site, because the three seating
+	 * sites (accept, join-late, and the plain/legacy join) must not be able to disagree about where a
+	 * player's identity comes from. The gate is the source; the session is told; neither invents
+	 * anything. The two fields travel together for the same reason they are stored together — they
+	 * are answers to "who is this player", and splitting them would let one arrive without the other.
 	 *
-	 * Safe on the roleless `#coop=` path (NF2): `nameOf` answers `''` for a player who never gave
-	 * one, and `setPlayerName('')` clears rather than sets — so those sessions reach `displayNameOf`
-	 * with nothing stored and keep the legacy `Player <id>` label.
+	 * Safe on the roleless `#coop=` path (NF2/R9): `nameOf` answers `''` and `perksOf` answers `[]`
+	 * for a player who declared neither, and both setters CLEAR rather than set on an empty value —
+	 * so those sessions keep the legacy `Player <id>` label and KD's own default perk state.
 	 */
-	_carryName(clientId) {
+	_carrySeat(clientId) {
 		try { this.session.setPlayerName(clientId, this.gate.nameOf(clientId)); }
 		catch (e) { /* a session that predates names, or an id the gate never seated */ }
+		try { this.session.setPerks(clientId, this.gate.perksOf(clientId)); }
+		catch (e) { /* a session that predates perk choice (KDM-238) */ }
 	}
 
 	/**
@@ -333,7 +338,7 @@ class WSBridge {
 				return clientId;
 			}
 			try {
-				this._carryName(res.clientId);
+				this._carrySeat(res.clientId);
 				const r = this.session.join(res.clientId);
 				this.presence.seat(res.clientId, 'guest', now());   // KDM-250
 				if (guestSock) {
@@ -388,10 +393,10 @@ class WSBridge {
 				// `#coop=<id>` path, which still joins directly — the two converge in KDM-236, and until
 				// then the e2e suite and `tools/coop-demo.sh` keep working unchanged.
 				if (msg.role === 'host') {
-					const c = this.gate.claimHost(clientId, { name: msg.name, build: msg.build, mods: msg.mods });
+					const c = this.gate.claimHost(clientId, { name: msg.name, build: msg.build, mods: msg.mods, perks: msg.perks });
 					if (!c.accept) { this._reject(socket, c); return clientId; }
 				} else if (msg.role === 'guest') {
-					const q = this.gate.requestJoin(clientId, { name: msg.name, build: msg.build, mods: msg.mods });
+					const q = this.gate.requestJoin(clientId, { name: msg.name, build: msg.build, mods: msg.mods, perks: msg.perks });
 					if (q.pending) {
 						// Asking is not joining: no seat is taken and the session is untouched until the
 						// host answers. The guest is told it is waiting so the join screen can say so
@@ -414,7 +419,7 @@ class WSBridge {
 				// known id is a reconnect and never reaches here; a dismissed one was refused at the
 				// top of this branch.) `join()` is the pre-start collector and throws once started, so
 				// the two cases get the two different methods they always needed.
-				this._carryName(clientId);
+				this._carrySeat(clientId);
 				if (this.session.started) { this._joinLate(clientId); return clientId; }
 				const r = this.session.join(clientId);
 				this._send(socket, { type: 'joined', clientId, started: r.started, players: this.session.players });

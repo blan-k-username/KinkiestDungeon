@@ -59,6 +59,18 @@
 		 */
 		name: '',
 		playerName: function () { return lobby.name; },
+		/**
+		 * KDM-238 — the perk keys this player committed on KD's own perk screen, and whether a pick
+		 * is in progress right now.
+		 *
+		 * `perkPick` is what makes the `KDPerksStart` / `KDPerksBack` override CONDITIONAL: outside a
+		 * co-op pick those two buttons must keep doing KD's own thing (see `drawPerkPickOverrides`).
+		 * Both survive moving between views, unlike the DOM-backed name field — there is no element
+		 * for `KDCullTempElements` to destroy.
+		 */
+		perks: [],
+		perkPick: false,
+		playerPerks: function () { return lobby.perks.slice(); },
 		open: function () { KinkyDungeonState = 'Multiplayer'; lobby.view = 'menu'; lobby.error = ''; lobby.status = ''; },
 		close: function () { lobby.leave(); KinkyDungeonState = 'Menu'; },
 		/**
@@ -144,7 +156,7 @@
 		DrawButtonKDEx('KDMPHost', function () {
 			lobby.view = 'host';
 			lobby.error = '';
-			connect({ role: 'host', name: lobby.playerName() });
+			connect({ role: 'host', name: lobby.playerName(), perks: lobby.playerPerks() });
 			return true;
 		}, true, MID, 300, 350, 64, text('KDMPHostGame', 'Host Game'), '#ffffff', '');
 
@@ -154,8 +166,17 @@
 			return true;
 		}, true, MID, 380, 350, 64, text('KDMPJoinGame', 'Join Game'), '#ffffff', '');
 
+		// KDM-238 R1 — asked BEFORE either choice, like the name above it: the host connects straight
+		// from this view, so anything that has to ride the handshake must be pickable here.
+		DrawButtonKDEx('KDMPPerks', function () {
+			lobby.error = '';
+			lobby.perkPick = true;
+			KinkyDungeonState = 'Stats';       // KD's OWN perk screen — see drawPerkPickOverrides
+			return true;
+		}, true, MID, 460, 350, 64, text('KDMPPerksBtn', 'Perks'), '#ffffff', '');
+
 		DrawButtonKDEx('KDMPBack', function () { lobby.close(); return true; },
-			true, MID, 480, 350, 64, text('KDMPBack', 'Back'), '#ffffff', '');
+			true, MID, 560, 350, 64, text('KDMPBack', 'Back'), '#ffffff', '');
 	}
 
 	function drawHost() {
@@ -182,6 +203,70 @@
 		DrawButtonKDEx('KDMPBack', function () { lobby.leave(); return true; },
 			true, MID, 480, 350, 64, text('KDMPCancel', 'Cancel'), '#ffffff', '');
 	}
+
+	/**
+	 * KDM-238 R1 — the perk pick, on KD's OWN screen.
+	 *
+	 * `KinkyDungeonState = 'Stats'` is KD's perk screen (`KinkyDungeon.ts:2861`), and everything on
+	 * it — the grid, the point budget, Clear All, the three configs, the filter, copy/paste — is
+	 * stock. Nothing here re-implements any of it, which is epic AC2 satisfied by not writing code.
+	 *
+	 * Two of that screen's buttons do the wrong thing for a co-op player, and exactly two are taken
+	 * back while `lobby.perkPick` is set:
+	 *
+	 *   KDPerksStart  stock: KinkyDungeonStartNewGame() — would start a SOLO game
+	 *   KDPerksBack   stock: KinkyDungeonState = "Diff"
+	 *
+	 * ⚠️ THE SAME CACHE MECHANIC AS THE MENU ENTRY, and it works for the same reason: `DrawButtonKDEx`
+	 * registers `KDButtonsCache[name] = params` (`:3720`), the cache is wiped per frame (`:1670`), and
+	 * clicks are dispatched by iterating it (`:4321`). Registration is keyed by NAME, so replacing the
+	 * entry AFTER `_prev` has drawn it replaces its handler. Do it before `_prev` and it is wiped.
+	 *
+	 * ⚠️ AND IT IS CONDITIONAL. Without `perkPick` the stock buttons are left entirely alone, so a
+	 * solo player's perk screen is untouched — asserted from both sides in `mp-lobby-perks.spec.ts`,
+	 * because an unconditional override would pass the co-op half and silently break the game's own.
+	 */
+	function drawPerkPickOverrides() {
+		if (!lobby.perkPick) return;
+		var b = (typeof KDButtonsCache !== 'undefined') && KDButtonsCache;
+		if (!b || !b.KDPerksStart || !b.KDPerksBack) return;   // not the perk screen (yet)
+		// The stock geometry and label are kept — it is the button the player is already looking at;
+		// only the handler is ours.
+		b.KDPerksStart = withHandler(b.KDPerksStart, lobby.commitPerks);
+		b.KDPerksBack = withHandler(b.KDPerksBack, lobby.commitPerks);
+	}
+
+	/** A copy of a cache entry with its click handler replaced. */
+	function withHandler(params, func) {
+		var out = {};
+		for (var k in params) if (Object.prototype.hasOwnProperty.call(params, k)) out[k] = params[k];
+		out.func = func;
+		return out;
+	}
+
+	/**
+	 * Take what KD says is chosen, and go back to the lobby.
+	 *
+	 * READ FROM `KinkyDungeonStatsChoice`, never from a field of our own: the grid, Clear All, the
+	 * three config buttons and the paste box all write there, so it is the only value that is true
+	 * whatever route the player took through the screen.
+	 *
+	 * Both overridden buttons come here. Start and Back differ in stock KD only in where they go
+	 * next, and for a co-op pick there is one answer to that — the lobby.
+	 */
+	lobby.commitPerks = function () {
+		var chosen = [];
+		try {
+			if (typeof KinkyDungeonStatsChoice !== 'undefined' && KinkyDungeonStatsChoice) {
+				KinkyDungeonStatsChoice.forEach(function (on, key) { if (on) chosen.push(String(key)); });
+			}
+		} catch (e) { chosen = []; }
+		lobby.perks = chosen;
+		lobby.perkPick = false;
+		KinkyDungeonState = 'Multiplayer';
+		lobby.view = 'menu';
+		return true;
+	};
 
 	function answer(accept) {
 		lobby.pending = null;
@@ -219,7 +304,7 @@
 		DrawButtonKDEx('KDMPConnect', function () {
 			lobby.error = '';
 			lobby.status = text('KDMPConnecting', 'Connecting…');
-			connect({ role: 'guest', address: lobby.address(), name: lobby.playerName() });
+			connect({ role: 'guest', address: lobby.address(), name: lobby.playerName(), perks: lobby.playerPerks() });
 			return true;
 		}, true, MID, 540, 350, 64, text('KDMPConnectBtn', 'Join'), '#ffffff', '');
 
@@ -237,6 +322,10 @@
 		try {
 			if (KinkyDungeonState === 'Menu') drawMenuEntry();
 			else if (KinkyDungeonState === 'Multiplayer') drawLobby();
+			// KDM-238 — KD's own perk screen, with two of its buttons pointed back at the lobby. Not
+			// an `else if` on 'Stats' alone: the override only applies to a co-op pick, and that
+			// condition lives in one place, inside the function.
+			else if (KinkyDungeonState === 'Stats') drawPerkPickOverrides();
 		} catch (e) {
 			if (window.__KDMP_DEBUG) { try { console.error('[coop lobby]', e); } catch (_) { /* noop */ } }
 		}

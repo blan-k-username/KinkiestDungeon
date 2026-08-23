@@ -33,6 +33,10 @@
 	var endpoint = null;      // 'host:port' — null means same-origin
 	var role = null;          // 'host' | 'guest' | null (legacy direct join)
 	var playerName = '';      // what the host sees in their accept/decline prompt
+	// KDM-238 R3 — the perk keys this player picked on KD's own perk screen, carried on the join
+	// handshake beside the name. Empty means "I never opened that screen", which the server reads as
+	// KD's default terms (R9) rather than as a refusal.
+	var playerPerks = [];
 
 	// KD-098 diagnostics: ON by default for the co-op demo (it's a debug harness). Logs to the
 	// browser console: every KDSendInput classification (render-client) + every submit() here.
@@ -857,6 +861,11 @@
 				// offered mods it already has. The dangerous reading — absent as "nothing to do" —
 				// is the one that would leave it silently mod-less, and the gate refuses it.
 				try { join.mods = window.__coopMods ? window.__coopMods.declaration() : []; } catch (e) { join.mods = []; }
+				// KDM-238 R3 — the perks this player picked on KD's own perk screen, beside the name
+				// and the mods. An empty list is the honest answer for a player who never opened that
+				// screen, and the server reads it as "seat me on KD's default terms" (R9) — there is
+				// no dangerous reading of absence here, unlike `mods` above.
+				join.perks = playerPerks.slice();
 			}
 			ws.send(JSON.stringify(join));
 			// KDM-249 R6 — a HOST publishes its zips so a guest can fetch them, then re-states the
@@ -1231,6 +1240,7 @@
 		opts = opts || {};
 		role = opts.role || 'guest';
 		playerName = String(opts.name || '');
+		playerPerks = Array.isArray(opts.perks) ? opts.perks.slice() : [];
 		endpoint = opts.address ? String(opts.address).replace(/^wss?:\/\//, '').replace(/\/+$/, '') : null;
 		// Identity is ours to pick and must be stable for a reconnect to be recognised (S2). It is not
 		// a credential — there is nothing to authenticate against (KDM-226, LAN-only).

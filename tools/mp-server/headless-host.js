@@ -1297,6 +1297,48 @@ class HeadlessHost {
 	}
 
 	/**
+	 * KDM-238 R4/R5 — give the player currently in the world's player slot the perks they chose.
+	 *
+	 * Whoever is in the slot, exactly as `setPlayerName` above: callers sandwich this between
+	 * `restorePlayer` and `capturePlayer` so everything it does lands inside ONE player's bundle
+	 * (`SwapSession._seatPlayer`). Applied anywhere else, the start-effects below would attach to
+	 * whoever happens to be swapped in — a stranger's starting rope on your character.
+	 *
+	 * ⚠️ A PERK IS NOT A FLAG. `KDInitPerks()` (`KinkyDungeonPerks.ts:711`) walks `KDPerkStart` and
+	 * runs real start-effects: `Submissive` adds a BasicCollar and a BasicLeash, `Pacifist` and
+	 * `Rigger` add weapons, `Unchained` adds a RedKey, `Studious` adds a spell point, `FuukaCollar`
+	 * swaps the outfit and pushes a spell. Writing the map without this call gives the player a
+	 * checkbox and nothing else, which is why the tests assert on what is on the body.
+	 *
+	 * ⚠️ KD'S OWN TABLE IS THE WHITELIST. A key is applied only if `KinkyDungeonStatsPresets` has it,
+	 * so an unknown or malicious key is dropped by the GAME rather than by a perk list of ours —
+	 * epic AC2 forbids gameplay tables in `tools/mp-server/**`, and `join-gate.js` deliberately does
+	 * not validate names for the same reason. This is where an unknown declaration dies.
+	 *
+	 * The map is REPLACED, not merged: starting from the template's own choices would let a previous
+	 * player's perks survive into this one, which is the bug R6 exists to prevent.
+	 *
+	 * @param {string[]} keys perk keys, already sanitised by `sanitizePerks`
+	 * @returns {string[]} the keys that were actually switched on — i.e. minus anything KD rejected
+	 */
+	applyPerks(keys) {
+		const list = Array.isArray(keys) ? keys.filter((k) => typeof k === 'string') : [];
+		return this.eval(`(function(){
+			if (typeof KinkyDungeonStatsChoice === 'undefined') return [];
+			var want = ${JSON.stringify(list)};
+			KinkyDungeonStatsChoice = new Map();
+			for (var i = 0; i < want.length; i++) {
+				// KD's own perk table answers "is this a perk?" — see the note above.
+				if (typeof KinkyDungeonStatsPresets !== 'undefined' && KinkyDungeonStatsPresets
+					&& KinkyDungeonStatsPresets[want[i]]) KinkyDungeonStatsChoice.set(want[i], true);
+			}
+			if (typeof KDInitPerks === 'function') KDInitPerks();
+			return Array.from(KinkyDungeonStatsChoice.keys())
+				.filter(function(k){ return KinkyDungeonStatsChoice.get(k); });
+		})()`);
+	}
+
+	/**
 	 * Inject an avatar entity representing another player at (x,y). Returns the
 	 * real KD entity id (the engine now sees/targets/collides with it).
 	 */

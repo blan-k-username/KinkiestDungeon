@@ -365,11 +365,15 @@ function start(port = PORT, overrides = null) {
 	// from the inventory is a delayed action that cannot complete in co-op (see SwapSession), so this
 	// is the way to UAT anything about being bound — e.g. movement speed in heels + ankle shackles.
 	const wearRestraint = process.env.KD_WEAR_RESTRAINT || '';
-	// KDM-164: KD_CLASSIC_HEELS=1 turns on the stock ClassicHeels perk, which is what makes
-	// `heelpower` count toward slow (KinkyDungeonCalculateSlowLevel ignores it otherwise). Seeding a
-	// restraint used to switch this on implicitly — the MP layer choosing a perk for the player. Now
-	// you ask for it, or it stays off.
-	const classicHeels = /^(1|true|on)$/i.test(process.env.KD_CLASSIC_HEELS || '');
+	// KDM-238 R10: KD_COOP_PERKS=<Key[,Key]> gives every player who did NOT pick their own perks
+	// these ones. It replaces KDM-164's KD_CLASSIC_HEELS, which was a second way to put a perk on a
+	// player and named a perk inside this layer — a gameplay table in the gateway (epic AC2). The
+	// same UAT case still works: KD_COOP_PERKS=ClassicHeels is what makes `heelpower` count toward
+	// slow (`KinkyDungeonCalculateSlowLevel` ignores it otherwise).
+	//
+	// The keys are the player's to choose; this is only the answer given to someone who chose none,
+	// and it goes through the one `applyPerks` path like anybody else's declaration.
+	const defaultPerks = String(process.env.KD_COOP_PERKS || '').split(',').map(function (s) { return s.trim(); }).filter(Boolean);
 	// KDM-250: the heartbeat. ON by default — a safety mechanism that ships off is the mistake
 	// `idleGraceMs` above made, and "one dead tab freezes the game" is the bug this epic is fixing.
 	// KD_HB_INTERVAL_MS=0 turns it off for a UAT session that wants the old behaviour; the timeout is
@@ -383,7 +387,7 @@ function start(port = PORT, overrides = null) {
 	const bridge = new WSBridge(Object.assign({
 		requiredPlayers: 2, seed: 'coop-demo-seed', idleGraceMs: graceMs,
 		hbIntervalMs, hbTimeoutMs,
-		pvp, startRestraint, wearRestraint, classicHeels,
+		pvp, startRestraint, wearRestraint, defaultPerks,
 	}, overrides || {}));
 	// KDM-249: the mod routes read the session's declaration and payload store off the bridge.
 	const server = http.createServer((req, res) => serveStatic(req, res, bridge));

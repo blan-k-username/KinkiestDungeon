@@ -77,6 +77,58 @@ function sanitizeName(raw) {
 	return out.trim().slice(0, NAME_MAX);
 }
 
+/**
+ * KDM-238 R8 — the one place a player-supplied PERK DECLARATION is made safe to seat.
+ *
+ * A declaration is a list of perk KEYS the player switched on in KD's own perk screen. It reaches
+ * the world as `KinkyDungeonStatsChoice` keys and then as arguments to `KDInitPerks()`, so the rules
+ * are the same three the name gets — control characters stripped, trimmed, capped — plus two this
+ * shape needs:
+ *
+ *   - **deduplicated**, because a declaration is a set. `KDInitPerks` runs a perk's start-effect
+ *     once per entry, so a duplicated `Rigger` would hand out two pairs of scissors.
+ *   - **capped in COUNT** (`PERKS_MAX`), so a malformed message cannot wedge the session. That is
+ *     correctness, not authentication — there is nobody to authenticate against (KDM-226, LAN-only).
+ *
+ * ⚠️ IT DOES NOT JUDGE WHETHER A PERK EXISTS, and must not learn to. Validating a name needs a perk
+ * list, and a perk list in `tools/mp-server/**` is a gameplay table in the gateway — exactly what
+ * epic AC2 forbids and what the KDM-164 comment on `_setClassicHeels` was written about. KD's own
+ * `KinkyDungeonStatsPresets` is the whitelist, consulted by `HeadlessHost.applyPerks`, which drops
+ * anything it does not recognise. An unknown key is therefore carried politely and applied never.
+ *
+ * `MagicHands` is the one key removed by NAME, and it is not an exception to the rule above: it is
+ * not a player choice at all. `KDInitPerks` sets it before its own loop and deletes it afterwards
+ * unless the player already had it (`KinkyDungeonPerks.ts:712-715, :729-730`) — carried in as a
+ * declaration it would survive that delete and silently change what KD's start scenarios do.
+ */
+const PERKS_MAX = 64;
+const PERK_KEY_MAX = 64;
+const PERK_SENTINELS = Object.freeze(['MagicHands']);
+
+function sanitizePerks(raw) {
+	if (!Array.isArray(raw)) return [];
+	const seen = new Set();
+	const out = [];
+	for (let i = 0; i < raw.length && out.length < PERKS_MAX; i++) {
+		const entry = raw[i];
+		if (typeof entry !== 'string') continue;
+		let key = '';
+		for (let j = 0; j < entry.length; j++) {
+			const c = entry.charCodeAt(j);
+			if (c < 0x20) continue;                 // C0 controls, incl. NUL, BEL, newline, ESC
+			if (c >= 0x7f && c <= 0x9f) continue;   // DEL and the C1 block
+			key += entry.charAt(j);
+		}
+		key = key.trim().slice(0, PERK_KEY_MAX);
+		if (!key) continue;
+		if (PERK_SENTINELS.indexOf(key) >= 0) continue;
+		if (seen.has(key)) continue;
+		seen.add(key);
+		out.push(key);
+	}
+	return out;
+}
+
 class JoinGate {
 	/** @param {{build?: string}} opts — `build` is this host's build id; guests must match it. */
 	constructor(opts) {
@@ -96,6 +148,14 @@ class JoinGate {
 		 * `releasePending` below — the same asymmetry that holds the seat holds the name.
 		 */
 		this.names = new Map();
+		/**
+		 * KDM-238 R3 — the perks each SEATED player declared, keyed by clientId.
+		 *
+		 * On the seat for exactly the reason the name is (see `names` above): a reconnecting player
+		 * never re-seats, so a socket-scoped declaration would bring them back as a differently-built
+		 * character. `release` drops it, `releasePending` does not — the same asymmetry.
+		 */
+		this.perks = new Map();
 		/**
 		 * KDM-249 R2 — the SESSION's mod set, which is the host's, adopted on `claimHost`.
 		 *
@@ -128,6 +188,16 @@ class JoinGate {
 	 */
 	nameOf(clientId) { return this.names.get(clientId) || ''; }
 
+	/**
+	 * KDM-238 R3 — the perks this player declared, or `[]` if they declared none.
+	 *
+	 * A COPY, for the same reason `hostMods()` hands one back: a caller must not be able to quietly
+	 * edit what the session believes a player chose. Like `nameOf`, it answers what the player said
+	 * and applies no default of its own — a player who declared nothing is seated on KD's own terms,
+	 * and that decision lives in `SwapSession.perksOf`, in one place.
+	 */
+	perksOf(clientId) { return (this.perks.get(clientId) || []).slice(); }
+
 
 	slotOf(clientId) {
 		if (clientId && clientId === this.host) return HOST_SLOT;
@@ -152,6 +222,10 @@ class JoinGate {
 		// KDM-237 N1/N3 — the host names themselves too. An absent name is left absent rather than
 		// defaulted here: `SwapSession.displayNameOf` owns the one fallback (NF2).
 		if (info && info.name !== undefined) this.names.set(clientId, sanitizeName(info.name));
+		// KDM-238 R3 — the host declares their own perks with the same claim. Guarded on
+		// `!== undefined` for the same reason `mods` is below: a claim that says nothing about perks
+		// leaves what is already seated alone, while an explicit `[]` correctly means "none".
+		if (info && info.perks !== undefined) this.perks.set(clientId, sanitizePerks(info.perks));
 		// KDM-249 R2 — the host's declaration IS the session's. Unlike `build` above (where an
 		// explicit value wins and a claim may only supply a missing one), a later claim REPLACES:
 		// the host is the source of truth including when what they are running changes. Guarded on
@@ -191,6 +265,9 @@ class JoinGate {
 		// KDM-237 N2 — sanitised HERE, where it is stored, so the host's accept prompt shows exactly
 		// the string the world will seat. Two spellings of one name is a bug report waiting to happen.
 		const name = sanitizeName(info && info.name);
+		// KDM-238 R3 — sanitised HERE, where it is stored, exactly as the name is: what the host is
+		// shown and what the world will seat must be the same value.
+		const perks = sanitizePerks(info && info.perks);
 		const build = (info && info.build) || '';
 
 		if (!this.host) return { accept: false, reason: 'no_host' };
@@ -217,7 +294,7 @@ class JoinGate {
 		// the files — which is unreachable if the join was refused first.
 		const modDiff = diffDeclarations(this.mods, info && info.mods);
 
-		this.pending = { clientId, name, build, mods: normalizeDeclaration(info && info.mods), modDiff };
+		this.pending = { clientId, name, perks, build, mods: normalizeDeclaration(info && info.mods), modDiff };
 		return { accept: false, pending: true, modDiff };
 	}
 
@@ -230,6 +307,9 @@ class JoinGate {
 		// KDM-237 N2 — the name is promoted from the QUESTION to the SEAT, in the same statement that
 		// seats them. Read before `pending` is cleared, for the obvious reason.
 		const name = this.pending.name || '';
+		// KDM-238 R3 — and so is the perk declaration, in the same breath. Asking is not being
+		// seated: until this line the guest holds no seat, so `perksOf` answers `[]` for them.
+		const perks = this.pending.perks || [];
 		// KDM-249 — read alongside the name, and for the same reason: the answer CONSUMES the
 		// question, so anything the caller will need afterwards must be taken before `pending` is
 		// cleared. Handing it back means no caller has to have kept its own copy.
@@ -237,6 +317,7 @@ class JoinGate {
 		this.pending = null;
 		this.guest = clientId;
 		if (name) this.names.set(clientId, name);
+		if (perks.length) this.perks.set(clientId, perks);
 		return { admitted: true, clientId, slot: GUEST_SLOT, modDiff };
 	}
 
@@ -277,6 +358,10 @@ class JoinGate {
 		// deliberately does not touch it: a player who merely dropped still owns their seat (KDM-252
 		// E4) and must come back as themselves rather than as `Player B`.
 		this.names.delete(clientId);
+		// KDM-238 R3 — the declaration goes with the SEAT, on the same terms as the name: a player
+		// who merely DROPPED keeps it (releasePending does not touch this), or a reconnect would hand
+		// them a differently-built character than the one they have been playing.
+		this.perks.delete(clientId);
 	}
 
 	/**
@@ -298,4 +383,4 @@ class JoinGate {
 	}
 }
 
-module.exports = { JoinGate, sanitizeName, NAME_MAX, HOST_SLOT, GUEST_SLOT };
+module.exports = { JoinGate, sanitizeName, sanitizePerks, NAME_MAX, PERKS_MAX, PERK_KEY_MAX, HOST_SLOT, GUEST_SLOT };
