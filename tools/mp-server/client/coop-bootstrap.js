@@ -50,6 +50,14 @@
 		// front rather than sprung into existence on the first drop, so "nobody has left" is a value
 		// a test can assert on instead of an absent property.
 		peerMissing: null,
+		// KDM-258: what `KinkyDungeonStartNewGame` threw during `forceGameScreen`, or '' if it did
+		// not. Declared up front, like `peerMissing` above and for the same reason: "the game came up
+		// cleanly" must be a value a test can assert on, not an absent property. See forceGameScreen.
+		_startError: '',
+		// KDM-258: how many times a state frame asked to pin the Game screen before the game could be
+		// drawn. Counted rather than merely returned-from, so "we refused, and how often" is
+		// observable — a silent guard is how the original silent catch hid this for a whole epic.
+		_pinDeferred: 0,
 		// KDM-252: the retry state. `total` is a LATCH — it counts every attempt ever made and is
 		// never reset, because `connected === true` is not evidence of a reconnect (it is also what a
 		// socket that never dropped looks like). `attempts` is the backoff position and DOES reset on
@@ -603,11 +611,33 @@
 		submit({ kdType: 'move', data: { dir: { x: dx, y: dy }, delta: 1, AllowInteract: true } }, true);
 	}
 
-	/** Start a game ONCE to bring up dungeon structures, then pin to the Game screen. */
+	/**
+	 * Start a game ONCE to bring up dungeon structures, then pin to the Game screen.
+	 *
+	 * ⚠️ THIS CATCH USED TO BE SILENT, and that silence hid KDM-258. `KinkyDungeonStartNewGame` is
+	 * what reaches `KinkyDungeonInitialize` -> `KDInitCanvas()` (`KinkyDungeonGame.ts:568, :577`),
+	 * the ONLY place `KinkyDungeonContext` is ever assigned — it is `null` until then
+	 * (`KinkyDungeonGame.ts:95`). If this throws before that point we swallow it, `pinGameScreen()`
+	 * pins the screen to `'Game'` regardless, and the next frame runs
+	 * `KinkyDungeonContext.fillStyle = …` (`KinkyDungeonDraw.ts:1230`) against null. That throw
+	 * escapes `DrawProcess` into the PIXI ticker and the whole render loop stops: the player is left
+	 * looking at one frozen frame.
+	 *
+	 * The draw's own guard is `if (KinkyDungeonCanvas)` — and `KinkyDungeonCanvas` is a
+	 * `document.createElement("canvas")` at module scope (`:94`), so it is ALWAYS truthy and never
+	 * protects anything. Nothing downstream will catch this for us.
+	 *
+	 * So: record it and say so. The recovery decision (pin anyway vs. refuse) belongs to the caller,
+	 * but a failure this total must never again be invisible.
+	 */
 	function forceGameScreen() {
 		try {
 			KinkyDungeonStartNewGame(false);
-		} catch (e) { /* the server snapshot will populate the rest */ }
+		} catch (e) {
+			coop._startError = String((e && e.message) || e);
+			try { console.error('[coop] KinkyDungeonStartNewGame failed — the game may not render:', e); }
+			catch (_) { /* console gone */ }
+		}
 		pinGameScreen();
 	}
 
@@ -620,6 +650,53 @@
 	 * flag below was forcing a vision recompute every frame and starving the loop. It is not.
 	 */
 	function pinGameScreen() {
+		/*
+		 * KDM-258 — NEVER PIN A SCREEN THE GAME CANNOT DRAW.
+		 *
+		 * `KinkyDungeonContext` is the 2D context every map draw writes to. It is `null` until
+		 * `KDInitCanvas()` runs (`KinkyDungeonGame.ts:95, :577`), reachable only through
+		 * `KinkyDungeonStartNewGame` -> `KinkyDungeonInitialize` (`:568`) — i.e. through
+		 * `forceGameScreen()` below. Pinning `'Game'` before that makes the very next frame run
+		 * `KinkyDungeonContext.fillStyle = …` (`KinkyDungeonDraw.ts:1230`) against null; the throw
+		 * escapes `DrawProcess` into the PIXI ticker and the render loop STOPS FOR GOOD. One frozen
+		 * frame, for the rest of the session.
+		 *
+		 * ⚠️ THE DRAW'S OWN GUARD DOES NOT HELP: it tests `if (KinkyDungeonCanvas)`, and that is a
+		 * `document.createElement("canvas")` at module scope (`:94`) — always truthy.
+		 *
+		 * Why this only ever bit the LOBBY path: `boot()` runs `enterGame()` and only THEN `connect()`,
+		 * so on `#coop=` the game is initialised before any state frame exists. The lobby opens its
+		 * socket from the Host/Join button and runs `enterGame()` later, on `joined.started` — where it
+		 * also defers on assets and on mod execution. A state frame landing in that window pinned a
+		 * screen that could not be drawn. The HOST is the usual victim; it connects earliest.
+		 *
+		 * Refusing is strictly better than pinning: the player keeps looking at a live lobby for a few
+		 * hundred milliseconds until `enterGame()` catches up, instead of a dead canvas forever.
+		 */
+		if (typeof KinkyDungeonContext === 'undefined' || !KinkyDungeonContext) {
+			coop._pinDeferred++;
+			/*
+			 * …and BRING THE GAME UP, because on the lobby path nothing else will.
+			 *
+			 * `enterGame()` is called from exactly two places: `boot()` (the legacy `#coop=` path) and
+			 * the `joined.started` handler. The server sends that `joined` only to the GUEST when the
+			 * host accepts (`ws-bridge.js`, the accept branch) — the host is never told, in those
+			 * words, that its session has started. So a lobby HOST never ran `enterGame()` at all; it
+			 * only ever arrived at the Game screen because this function used to pin it there
+			 * unconditionally, with the game uninitialised. Fixing the pin alone would leave the host
+			 * sitting in the lobby forever.
+			 *
+			 * A state frame IS the signal: the server sends none until the session is live. Asking
+			 * here keeps the fix client-side, with no new protocol.
+			 *
+			 * Safe to call repeatedly: `enterGame()` is idempotent on `coop._entered` and re-schedules
+			 * itself while it waits for assets or mods. And it cannot recurse — by the time it calls
+			 * `forceGameScreen()` -> back into here, `KinkyDungeonStartNewGame` has set the context;
+			 * if it threw, `_entered` is already true and the re-entry returns immediately.
+			 */
+			enterGame();
+			return;
+		}
 		KinkyDungeonState = 'Game';
 		KinkyDungeonDrawState = 'Game';
 		// The client doesn't simulate, so vision/fog isn't recomputed after we adopt
