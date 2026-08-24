@@ -52,6 +52,43 @@ const { Presence, DEFAULT_HB_TIMEOUT_MS } = require('./presence');
  */
 const VERBATIM_CHANNELS = ['events', 'messages', 'unknownInputs', 'replacedInputs'];
 
+/**
+ * KDM-260 — what a `join` message contributes to a SEAT, declared once per role.
+ *
+ * ── WHY THIS IS DATA AND NOT A HAND-WRITTEN OBJECT LITERAL ────────────────────────────────────────
+ * It used to be the literal `{ name: msg.name, build: msg.build, mods: msg.mods, perks: msg.perks }`
+ * at each call site. KDM-239 added `world` to the handshake and did not add it here, and the failure
+ * was SILENT: the gate held an empty declaration, the session was built on KD's defaults, and all 605
+ * unit tests stayed green — because every one of them calls `claimHost`/`requestJoin` directly and
+ * never crosses this bridge. Only an e2e asserting what reached the guest's screen caught it.
+ *
+ * So: adding a handshake field is now a one-line change here, and
+ * `tests/unit/mp-join-fields.spec.ts` reads the CLIENT's own `join.<field> =` assignments and fails
+ * if one of them is not covered by a shape below.
+ *
+ * ⚠️ THE TWO LISTS DIFFER ON PURPOSE. `world` is the host's alone (KDM-239 A5): a guest must not be
+ * able to declare one, and "the gate is never even told" is a stronger guarantee than "the gate drops
+ * it". Do not unify these into one list with a runtime exception.
+ *
+ * `role`, `clientId` and `type` are deliberately ABSENT — they are routing, not declarations.
+ */
+const HOST_JOIN_FIELDS = Object.freeze(['name', 'build', 'mods', 'perks', 'world']);
+const GUEST_JOIN_FIELDS = Object.freeze(['name', 'build', 'mods', 'perks']);
+
+/**
+ * Copy the named fields that are actually PRESENT on `msg`.
+ *
+ * ⚠️ `in`, not `!== undefined` on the destination: the gate distinguishes "said nothing about perks"
+ * from "said I have none" with `if (info.perks !== undefined)`. Materialising every key as
+ * `undefined` would collapse that distinction, and an empty declaration would start overwriting a
+ * real one — the exact bug `mods_declare` (below) depends on NOT having.
+ */
+function pickFields(msg, fields) {
+	const out = {};
+	for (const f of fields) if (msg && f in msg) out[f] = msg[f];
+	return out;
+}
+
 /** Monotonic milliseconds. Never Date.now(): a wall-clock jump would corrupt every latency below. */
 function now() { return Number(process.hrtime.bigint()) / 1e6; }
 
@@ -398,14 +435,12 @@ class WSBridge {
 				// `#coop=<id>` path, which still joins directly — the two converge in KDM-236, and until
 				// then the e2e suite and `tools/coop-demo.sh` keep working unchanged.
 				if (msg.role === 'host') {
-					// KDM-239 R3 — `world` is forwarded ONLY here, on the host's claim. `requestJoin`
-					// below deliberately does not pass it: a guest does not declare a world (A5), and
-					// the gate would drop it anyway. Two guards, because this one is the one a reader
-					// will notice.
-					const c = this.gate.claimHost(clientId, { name: msg.name, build: msg.build, mods: msg.mods, perks: msg.perks, world: msg.world });
+					// KDM-260 — the shape is declared once, at the top of this file, so a new handshake
+					// field cannot be forgotten here. `world` is in the HOST shape only (KDM-239 A5).
+					const c = this.gate.claimHost(clientId, pickFields(msg, HOST_JOIN_FIELDS));
 					if (!c.accept) { this._reject(socket, c); return clientId; }
 				} else if (msg.role === 'guest') {
-					const q = this.gate.requestJoin(clientId, { name: msg.name, build: msg.build, mods: msg.mods, perks: msg.perks });
+					const q = this.gate.requestJoin(clientId, pickFields(msg, GUEST_JOIN_FIELDS));
 					if (q.pending) {
 						// Asking is not joining: no seat is taken and the session is untouched until the
 						// host answers. The guest is told it is waiting so the join screen can say so
@@ -1121,4 +1156,8 @@ class WSBridge {
 	}
 }
 
-module.exports = { WSBridge, encodeFrame, decodeFrames, acceptKey };
+module.exports = {
+	WSBridge, encodeFrame, decodeFrames, acceptKey,
+	// KDM-260 — exported so the drift guard can check the CLIENT's payload against them.
+	HOST_JOIN_FIELDS, GUEST_JOIN_FIELDS, pickFields,
+};

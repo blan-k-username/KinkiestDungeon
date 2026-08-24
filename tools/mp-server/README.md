@@ -463,3 +463,44 @@ co-op knowingly diverges from the stock start; the reason is recorded at the cal
 before that stops the render loop for good — one frozen frame for the rest of the session. The draw's
 own `if (KinkyDungeonCanvas)` test does not protect you; that value is a module-scope
 `createElement("canvas")` and is always truthy.
+
+## Adding a field to the join handshake (KDM-260)
+
+**Add it to a shape in `ws-bridge.js`. Do not add it to a call site.**
+
+```js
+const HOST_JOIN_FIELDS  = Object.freeze(['name', 'build', 'mods', 'perks', 'world']);
+const GUEST_JOIN_FIELDS = Object.freeze(['name', 'build', 'mods', 'perks']);
+```
+
+Both `join` branches forward with `pickFields(msg, <shape>)`, so the shape IS the forwarding.
+
+### Why this is not a hand-written literal any more
+
+It used to be `{ name: msg.name, build: msg.build, mods: msg.mods, perks: msg.perks }` at each site.
+KDM-239 added `world` to the handshake and did not add it there, and **nothing caught it**: the gate
+held an empty declaration, the session was built on KD's defaults, and all 605 unit tests stayed
+green — because every one of them calls `claimHost`/`requestJoin` directly and never crosses the
+bridge. Only an e2e asserting what reached the guest's *screen* found it.
+
+`tests/unit/mp-join-fields.spec.ts` now reads the client's own `join.<field> =` assignments and fails
+when one is not covered by a shape. It is mutation-tested, and its failure message names both
+remedies (add to a shape, or to `ROUTING_FIELDS` if it is not a seat declaration).
+
+### Three rules that are easy to break here
+
+1. **The two shapes differ on purpose.** `world` is the host's alone (KDM-239 A5). "The gate is never
+   even told" is stronger than "the gate drops it" — do not unify them with a runtime exception.
+2. **`mods_declare` stays PARTIAL.** The third `claimHost` call site passes `{mods}` alone, because
+   `claimHost` guards every field on `!== undefined` and a partial object must leave a seated host's
+   name/perks/world untouched. Widening it to the host shape would let a post-publish message blank a
+   declaration. There is a test asserting its keys are exactly `['mods']`.
+3. **`pickFields` copies only keys that are PRESENT** (`in`, not `!== undefined`). Materialising every
+   key as `undefined` collapses the gate's "said nothing" vs "said none" distinction — which the old
+   literal actually did.
+
+### The testing lesson, stated once
+
+A unit test that calls a collaborator **directly** cannot see a caller that forgets to forward a
+field. When you add anything to the wire, add a test that crosses the dispatch — `_handle` with a
+stubbed gate is cheap (no socket, no session, no boot) and is the layer where this class of bug lives.
