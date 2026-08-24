@@ -110,9 +110,21 @@ describe('KDM-227 — arriving at the between-floors hub ends every war', () => 
 			'armed by ARRIVING, not by being here — a second turn must not re-fire it').toBe(true);
 	});
 
-	/** D6: the optional detours are exactly what a grudge is supposed to survive. */
+	/**
+	 * D6: the optional detours are exactly what a grudge is supposed to survive.
+	 *
+	 * ⚠️ KDM-262 REMOVED `PerkRoom` FROM THIS LIST, on the owner's decision (2026-08-24). D6 called it
+	 * an optional detour; it is not one. `KDAdvanceAmount['s']` (`KinkyDungeonTiles.ts:930-946`)
+	 * FORCES `roomType: "PerkRoom"` whenever you take the main stairs down from the deepest floor you
+	 * have reached, so a `PerkRoom` follows EACH main floor on the way down. D6 and the `JourneyFloor`
+	 * trigger were one false belief about which room is the hub, expressed twice. The arrival that fires
+	 * at the real hub is KDM-262, whose tests are parked until KDM-265 makes a multi-floor descent work.
+	 *
+	 * The other three entries are untouched: they really are skippable (and `Tunnel` is marked
+	 * `// DEPRECATED DO NOT USE` upstream, `KinkyDungeonAlt.ts:340`).
+	 */
 	it('AC3/R12: a side room does NOT reset the war', () => {
-		for (const room of ['Tunnel', 'PerkRoom', 'ShopStart', 'ElevatorRoom']) {
+		for (const room of ['Tunnel', 'ShopStart', 'ElevatorRoom']) {
 			fight();
 			setRoom(room);
 			turn();
@@ -160,3 +172,4 @@ describe('KDM-227 — arriving at the between-floors hub ends every war', () => 
 			'KD_PVP is a session configuration, not a grudge — the hub must not expire it').toBe(true);
 	}, BOOT_TIMEOUT);
 });
+

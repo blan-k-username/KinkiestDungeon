@@ -19,6 +19,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { SwapSession } = require('../../tools/mp-server/swap-session');
+import { mapId as worldMapId, descend as worldDescend } from './helpers/world';
 
 const BOOT_TIMEOUT = 300_000;
 
@@ -32,12 +33,7 @@ describe('KDM-240 — a map change lands the whole party together', () => {
 
 	function turn() { s.submit('A', { kind: 'wait' }); s.submit('B', { kind: 'wait' }); }
 
-	function mapId(): string {
-		return s.world.eval(`(function(){
-			return [MiniGameKinkyDungeonLevel, KDGameData.RoomType || '',
-				KDMapData.mapX, KDMapData.mapY].join('|');
-		})()`);
-	}
+	function mapId(): string { return worldMapId(s); }
 
 	/** Everything the session promised about a player after a map change. */
 	function landing(cid: string) {
@@ -80,32 +76,10 @@ describe('KDM-240 — a map change lands the whole party together', () => {
 	}
 
 	/**
-	 * A real descent, with the party gate stood down so this file tests landing and not the gate.
-	 *
-	 * ⚠️ ARMING THE JOURNEY TARGET IS NOT OPTIONAL, and getting this wrong made an earlier draft of
-	 * this whole file pass vacuously. The session boots on the journey HUB (level 0,
-	 * `RoomType === 'JourneyFloor'`), and taking the stairs from there does not move anybody: the
-	 * stock `JourneyChoice` cancel filter claims the transition and opens the journey map instead
-	 * (`KinkyDungeonTiles.ts:12-21`). Only once `JourneyTarget` and `UseJourneyTarget` are set does
-	 * that filter stand down and the SECOND pass actually advance the level. Measured: without the
-	 * arming, `KinkyDungeonHandleStairs` returns cleanly and `mapId()` never moves, so every
-	 * "the party landed correctly" assertion here was checking a map change that never happened.
+	 * A real descent. The implementation — and the vacuous-pass warning that goes with it — lives in
+	 * `./helpers/world`, shared with every spec that needs a real transition (KDM-262).
 	 */
-	function descend() {
-		s.world.setPartyGate({ peers: [], down: [], radius: 1 });
-		s.world.restorePlayer(s.bundles.get('A'));
-		const out = s.world.eval(`(function(){
-			var slot = KDGameData.JourneyMap[KDGameData.JourneyX + ',' + KDGameData.JourneyY];
-			var c = slot && slot.Connections && slot.Connections[0];
-			if (!c) return 'no journey connection to descend to';
-			KDGameData.JourneyTarget = { x: c.x, y: c.y };
-			KDGameData.UseJourneyTarget = true;
-			try { KinkyDungeonHandleStairs('s', true); return 'ok'; }
-			catch (e) { return 'threw: ' + e.message; }
-		})()`);
-		s.bundles.set('A', s.world.capturePlayer());
-		return out;
-	}
+	function descend() { return worldDescend(s, 'A'); }
 
 	/**
 	 * F5 — descending must COMPLETE, not merely start.
