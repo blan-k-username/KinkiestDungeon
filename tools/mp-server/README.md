@@ -504,3 +504,38 @@ remedies (add to a shape, or to `ROUTING_FIELDS` if it is not a seat declaration
 A unit test that calls a collaborator **directly** cannot see a caller that forgets to forward a
 field. When you add anything to the wire, add a test that crosses the dispatch — `_handle` with a
 stubbed gate is cheap (no socket, no session, no boot) and is the layer where this class of bug lives.
+
+## Changing floor (KDM-240)
+
+The party shares ONE world, one `KDMapData` and one `MiniGameKinkyDungeonLevel`, so any map change
+moves everybody. Three things follow, all implemented rather than assumed:
+
+- **The level goal is CO-LOCATED.** The stairs do not fire until every other seated player is on or
+  adjacent to the stair tile, and never while a member is in `defeated`. Enforced through KD's own
+  cancellation path — a `beforeStairCancel` handler that sets `data.cancelevent` plus a matching
+  `KDCancelEvents` entry (`HeadlessHost.setPartyGate`) — never by intercepting `KinkyDungeonMove`, so
+  walking *across* a stair tile is unaffected. It abstains on `data.force` (a leash-drag or the jail
+  flow is not the party's choice), on an already-set `cancelevent`, and on an empty peer list, so a
+  one-player session behaves exactly as it always did.
+- **A map change is detected by the MAP, not by the level number.** `HeadlessHost.mapId()` is
+  `level | RoomType | mapX | mapY`. A capture regenerates the map at an unchanged level and a hub→floor
+  move changes only `RoomType`; a `getLevel()` comparison sees neither.
+- **Everybody lands together.** On a detected change every seated player is re-placed on distinct free
+  tiles around where KD put the arriving player (`landingTiles`), each is guaranteed a live avatar
+  (`_ensureAvatar` — `moveAvatar` returns `null` for an entity a map regeneration destroyed), and the
+  move is announced once to everyone.
+
+**`setPartyGate` must be called inside each player's swap window**, after `restorePlayer`.
+`KDEventMapGeneric` and `KDCancelEvents` are per-player bundle state, so a swap wipes the
+registration; the "already installed?" sentinel therefore lives on those registries and not on
+`globalThis`, which would survive the wipe and suppress re-installation forever.
+
+**`KDPostStairSave` is stubbed** (`_neuterStairAutosave`). It autosaves via
+`KinkyDungeonGenerateSaveData`, which reads model `Poses` off the paper doll `_neuterRendering`
+deliberately never builds — so it threw on *every* headless floor change, after the new map was
+generated but before `KDGenMapCallback = null`. `KinkyDungeonSaveGame` itself is untouched, so
+`saveOf()` and `_seedHeadlessModel` still work as the test instruments they are.
+
+**Still open:** one player's capture drags the uncaptured partner into the jail map with them. The
+party stays coherent (both land, both keep avatars, both are told) but the semantics are wrong — see
+KDM-261.

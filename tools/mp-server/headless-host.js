@@ -436,6 +436,7 @@ class HeadlessHost {
 
 		this._booted = true;
 		this._neuterRendering();
+		this._neuterStairAutosave();
 		this._installServerRoleShim();
 		return this;
 	}
@@ -476,14 +477,50 @@ class HeadlessHost {
 	 * never pixels. Add names here as boot/init surfaces new render calls.
 	 */
 	_neuterRendering() {
-		const noops = [
+		this._stubOut([
 			'DrawCharacter', 'DrawCharacterModels', 'DrawModelProcessPoses',
 			'KinkyDungeonDressPlayer', 'KDDrawPlayer',
-		];
-		const stub = noops
+		]);
+	}
+
+	/**
+	 * KDM-240 — the post-stairs AUTOSAVE, which made every headless floor transition throw.
+	 *
+	 * Measured stack (2026-08-24), reproduced on a real descent in a co-op session:
+	 *
+	 *   KDGoThruTile -> KDGenMapCallback -> KDPostStairSave -> KinkyDungeonSaveGame
+	 *     -> KinkyDungeonGenerateSaveData  ->  TypeError: cannot read 'Poses' of undefined
+	 *
+	 * This is NOT an upstream bug — it is the direct consequence of `_neuterRendering` above, which
+	 * no-ops `DrawModelProcessPoses` / `KinkyDungeonDressPlayer` on purpose so the server never builds
+	 * a paper-doll model. `KinkyDungeonGenerateSaveData` then reads `Poses` off the model that was
+	 * deliberately never built. The same limitation is why the README calls headless save generation
+	 * unsupported.
+	 *
+	 * The damage was not cosmetic. `KDPostStairSave` is the second-to-last statement of
+	 * `KDGenMapCallback` (KDStairActions.ts:239), so the throw escaped AFTER the new map had been
+	 * generated but BEFORE `KDGenMapCallback = null` ran — leaving a stale callback behind and taking
+	 * the rest of the acting player's turn with it, on every single floor change.
+	 *
+	 * Stubbing it loses nothing this layer wants. An autosave writes the browser's
+	 * `localStorage.KinkyDungeonSave` (shims.js provides only an in-memory stand-in that nothing ever
+	 * reads back), and a co-op run's persistence is the SERVER's, not KD's — see the note at :233 on
+	 * why replicating KD's own save to clients is actively harmful. `KinkyDungeonSaveGame` itself is
+	 * left alone, so `saveOf()` and `_seedHeadlessModel` keep working as the deliberate test
+	 * instruments they are; only the automatic call on the stairs goes away.
+	 */
+	_neuterStairAutosave() {
+		this._stubOut(['KDPostStairSave']);
+	}
+
+	/**
+	 * Replace named globals with no-ops. One place, because "assign a stub over a KD global" is the
+	 * mechanism BOTH neuterings use and a second hand-rolled copy is how the two drift apart.
+	 */
+	_stubOut(names) {
+		this.eval(names
 			.map((fn) => `if (typeof ${fn} === 'function') ${fn} = function(){ return undefined; };`)
-			.join('\n');
-		this.eval(stub);
+			.join('\n'));
 	}
 
 	/** Evaluate code inside the bundle's script scope. Returns the value. */
@@ -1624,6 +1661,194 @@ class HeadlessHost {
 				KinkyDungeonMove.__kdBumpVeto = true;
 			}
 			return globalThis.__KD_BUMP_VETO.size;
+		})()`);
+	}
+
+	/**
+	 * KDM-240 A1 — the LEVEL GOAL IS CO-LOCATED: the stairs do not fire until the whole party is at
+	 * them, and never while a member is down (owner decisions D1/D2, 2026-08-24).
+	 *
+	 * WHY THIS IS THE GATEWAY'S RULE AND NOT A GAME RULE. "Wait for the other player" cannot exist in
+	 * a one-player game — the epic's own test for what belongs here. What it must NOT do is invent a
+	 * second way to stop a transition, so it is expressed through KD's OWN cancellation path
+	 * (KDStairActions.ts:84-95): a beforeStairCancel handler sets data.cancelevent, and the matching
+	 * KDCancelEvents entry is what the game runs instead of advancing the level. Nothing here touches
+	 * KinkyDungeonMove, so walking ACROSS a stair tile is unaffected — only leaving by it is.
+	 *
+	 * The registry is a plain lookup with no memoisation
+	 * (KDMapHasEvent = (map, event) => map[event] != undefined, KinkyDungeonEvents.ts:51-53), so an
+	 * entry added at runtime takes effect on the next event, with no cache to bust.
+	 *
+	 * ⚠️ CALL THIS AFTER restorePlayer, AND EVERY TIME. Measured 2026-08-24: KDEventMapGeneric and
+	 * KDCancelEvents are both captured as per-player bundle state, so a swap REPLACES them and takes
+	 * the registration with it. The registration is therefore not a one-off — it has to be re-asserted
+	 * inside each player's swap window, which is exactly where _pushPartyGate calls it.
+	 *
+	 * That is also why the "already installed?" sentinel lives on the guarded registry itself and not
+	 * on globalThis. A globalThis sentinel SURVIVES the swap that wipes the registry, so it reports
+	 * "installed" about an object that no longer has the handler — the gate then never fires again and
+	 * nothing says so. (That was the first version of this method, and it failed exactly this way.)
+	 *
+	 * THREE DELIBERATE ABSTENTIONS, each of which would otherwise make us the author of a game rule:
+	 *   - data.force is never gated. It is the game's own flag for "this transition is not the
+	 *     player's choice" — a leash-drag (KinkyDungeonEnemies.ts:5117) or the jail flow — and the
+	 *     stock JourneyChoice cancel abstains on it too (KinkyDungeonTiles.ts:6). Gating it would
+	 *     make a player un-jailable, which is not ours to decide.
+	 *   - An ALREADY-CANCELLED transition is left alone. If the game or a mod has set cancelevent it
+	 *     had a reason and it owns the message; overwriting it would swallow that reason.
+	 *   - Empty facts disable the gate completely, so a one-player session behaves exactly as before.
+	 *
+	 * The stair tile is not on the event's data object (KDStairActions.ts:55-79 builds it without
+	 * x/y), and it does not need to be: the player-initiated path is
+	 * KinkyDungeonHandleStairs -> KDGoThruTile(KDPlayer().x, KDPlayer().y, ...) (KDStairActions.ts:289),
+	 * i.e. the stairs are wherever the acting player is standing. The forced path is the only one that
+	 * passes some other tile, and that one is abstained from above.
+	 *
+	 * @param {{peers?: Array<{x:number,y:number,name:string}>, down?: string[], radius?: number,
+	 *          waitText?: string, downText?: string}} facts  the party facts, which only the session
+	 *          knows. Pass no peers to disable.
+	 */
+	setPartyGate(facts) {
+		const f = facts || {};
+		const peers = (Array.isArray(f.peers) ? f.peers : [])
+			.filter((p) => p && Number.isFinite(p.x) && Number.isFinite(p.y))
+			.map((p) => ({ x: p.x | 0, y: p.y | 0, name: String(p.name || '') }));
+		// The refusal wording is composed HERE and passed in, so the eval'd handler carries no text of
+		// its own — the same division as _announceFloorChange, which is likewise the proxy speaking in
+		// its own voice about a session-level fact rather than repeating game content.
+		const state = {
+			peers,
+			down: (Array.isArray(f.down) ? f.down : []).map((n) => String(n)),
+			// The session owns the radius (swap-session.js PARTY_GATE_RADIUS). The 1 here is only the
+			// answer to a caller who supplied none, so the two cannot drift into two different rules.
+			radius: Number.isFinite(f.radius) ? Math.max(0, f.radius | 0) : 1,
+			waitText: String(f.waitText || 'Waiting for {name} to reach the stairs.'),
+			downText: String(f.downText || '{name} is down — the party cannot leave yet.'),
+		};
+		// TWO payloads, on purpose. The installer's source text never varies, so V8's eval compilation
+		// cache serves it for free on every apply; only the tiny state assignment carries per-call data
+		// (measured elsewhere in this layer: interpolating into a large hot eval costs ~8.7x).
+		this.eval(`globalThis.__KD_PARTY_GATE = ${JSON.stringify(state)};`);
+		return this.eval(`(function(){
+			if (typeof KDEventMapGeneric === 'undefined' || !KDEventMapGeneric) return false;
+			if (typeof KDCancelEvents === 'undefined' || !KDCancelEvents) return false;
+			// Already registered on THIS copy of the registries? Then there is nothing to do. The
+			// sentinel deliberately lives on the guarded object rather than on globalThis — see the
+			// note above setPartyGate on why a globalThis sentinel is silently wrong here.
+			if (KDEventMapGeneric.beforeStairCancel
+				&& KDEventMapGeneric.beforeStairCancel.MPPartyGate
+				&& KDCancelEvents.MPPartyGate) return true;
+			KDCancelEvents.MPPartyGate = function(_x, _y, _tile, _data){
+				var msg = globalThis.__KD_PARTY_GATE_MSG || '';
+				if (msg && typeof KinkyDungeonSendTextMessage === 'function')
+					KinkyDungeonSendTextMessage(10, msg, '#ffcc66', 2);
+			};
+			if (!KDEventMapGeneric.beforeStairCancel) KDEventMapGeneric.beforeStairCancel = {};
+			KDEventMapGeneric.beforeStairCancel.MPPartyGate = function(_e, data){
+				var g = globalThis.__KD_PARTY_GATE;
+				if (!g || !data) return;
+				if (data.force) return;                    // not the party's choice, not the party's rule
+				if (data.cancelevent) return;              // somebody already refused, and owns the why
+				if (!g.peers || !g.peers.length) return;   // nobody to wait for: solo behaviour, untouched
+				var p = (typeof KinkyDungeonPlayerEntity !== 'undefined') ? KinkyDungeonPlayerEntity : null;
+				if (!p) return;
+				for (var i = 0; i < g.peers.length; i++) {
+					var peer = g.peers[i];
+					var why = null;
+					if (g.down.indexOf(peer.name) >= 0) why = g.downText;
+					else if (Math.max(Math.abs(peer.x - p.x), Math.abs(peer.y - p.y)) > g.radius) why = g.waitText;
+					if (why) {
+						globalThis.__KD_PARTY_GATE_MSG = why.split('{name}').join(peer.name);
+						globalThis.__KD_PARTY_GATE_HITS = (globalThis.__KD_PARTY_GATE_HITS || 0) + 1;
+						data.cancelevent = 'MPPartyGate';
+						return;
+					}
+				}
+			};
+			return true;
+		})()`);
+	}
+
+	/** KDM-240: take-once count of stair transitions the party gate refused (never a silent drop). */
+	takePartyGateHits() {
+		return this.eval(`(function(){
+			var n = globalThis.__KD_PARTY_GATE_HITS || 0;
+			globalThis.__KD_PARTY_GATE_HITS = 0;
+			return n;
+		})()`);
+	}
+
+	/**
+	 * KDM-240 A3/R5 — WHICH MAP the party is on, in the game's own vocabulary.
+	 *
+	 * The level number alone is not the map, which is exactly what made a party-wide relocation
+	 * invisible: a capture regenerates the map at an UNCHANGED level (KinkyDungeonDefeat ->
+	 * KinkyDungeonCreateMap, KinkyDungeonJail.ts:1725), and a side room is likewise a different map at
+	 * the same level. This is the same tuple the jail code itself uses to name a map
+	 * (KDGetNearestExitTo(currentMapData.RoomType, currentMapData.mapX, currentMapData.mapY, ...)).
+	 */
+	mapId() {
+		return this.eval(`(function(){
+			var lvl = (typeof MiniGameKinkyDungeonLevel !== 'undefined') ? MiniGameKinkyDungeonLevel : -1;
+			var room = (typeof KDGameData !== 'undefined' && KDGameData) ? (KDGameData.RoomType || '') : '';
+			var mx = (typeof KDMapData !== 'undefined' && KDMapData) ? KDMapData.mapX : undefined;
+			var my = (typeof KDMapData !== 'undefined' && KDMapData) ? KDMapData.mapY : undefined;
+			return [lvl, room, mx, my].join('|');
+		})()`);
+	}
+
+	/**
+	 * KDM-240 A3/R4 — where the party should be standing on the map it has just arrived on.
+	 *
+	 * KD has already placed whoever triggered the transition, and that tile is the truth about "where
+	 * the party landed" — preferred over StartPosition, which is the map's nominal entrance and is NOT
+	 * where a jail relocation puts you (KinkyDungeonJail.ts:1746 moves the player to an exit instead).
+	 * Everyone else gets a free neighbouring tile, so two players never land on one tile.
+	 *
+	 * @param {number} count how many distinct tiles are needed
+	 */
+	landingTiles(count) {
+		return this.eval(`(function(){
+			var n = ${count | 0};
+			var p = (typeof KinkyDungeonPlayerEntity !== 'undefined') ? KinkyDungeonPlayerEntity : null;
+			var ox = p ? p.x : (KDMapData.StartPosition ? KDMapData.StartPosition.x : 1);
+			var oy = p ? p.y : (KDMapData.StartPosition ? KDMapData.StartPosition.y : 1);
+			// The anchor is only trustworthy while the swapped-in player really is standing on the new
+			// map. When a map change is noticed a turn late, the player in the slot was restored from a
+			// bundle holding an OLD-map coordinate — the very defect this method exists to repair — so
+			// anchoring on it would land the whole party in a wall. Fall back to the map's own entrance.
+			var okOrigin = (typeof KinkyDungeonMapGet === 'function'
+				&& typeof KinkyDungeonMovableTilesEnemy === 'string')
+				? KinkyDungeonMovableTilesEnemy.indexOf(KinkyDungeonMapGet(ox, oy)) >= 0
+				: true;
+			if (!okOrigin && KDMapData.StartPosition) {
+				ox = KDMapData.StartPosition.x; oy = KDMapData.StartPosition.y;
+			}
+			var out = [{ x: ox, y: oy }];
+			var taken = {}; taken[ox + ',' + oy] = true;
+			// Widening rings around the landing tile. Bounded on purpose: a fixed four-ring spiral,
+			// never a map-wide search, so a cramped or malformed map cannot turn this into a scan.
+			for (var r = 1; r <= 4 && out.length < n; r++) {
+				for (var dx = -r; dx <= r && out.length < n; dx++) {
+					for (var dy = -r; dy <= r && out.length < n; dy++) {
+						if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+						var x = ox + dx, y = oy + dy, k = x + ',' + y;
+						if (taken[k]) continue;
+						// MovableTilesEnemy, not MovableTiles: the latter is the INTERACTABLE alias
+						// (chests, doors, orbs), which are not tiles anybody can stand on.
+						var t = (typeof KinkyDungeonMapGet === 'function') ? KinkyDungeonMapGet(x, y) : '';
+						if (typeof KinkyDungeonMovableTilesEnemy === 'string'
+							&& KinkyDungeonMovableTilesEnemy.indexOf(t) < 0) continue;
+						if (typeof KinkyDungeonEntityAt === 'function' && KinkyDungeonEntityAt(x, y)) continue;
+						taken[k] = true;
+						out.push({ x: x, y: y });
+					}
+				}
+			}
+			// Fewer free tiles than players is possible on a cramped map. Stacking on the landing tile
+			// is a worse outcome than spreading, and a far better one than being left on the old map.
+			while (out.length < n) out.push({ x: ox, y: oy });
+			return out;
 		})()`);
 	}
 

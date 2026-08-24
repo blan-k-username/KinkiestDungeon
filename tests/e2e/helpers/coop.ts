@@ -794,3 +794,37 @@ export async function killCoopSocket(P: Page, opts: { retry: boolean }): Promise
 		c.ws.close();
 	}, opts.retry);
 }
+
+/**
+ * Pre-existing browser noise that is NOT a crash, matched BY NAME.
+ *
+ * Three sources, all of them present in every MP spec regardless of what it is testing:
+ *   - `Logo.png` and friends 404 because the demo server does not serve every asset the bundle asks
+ *     for (`[Loader.load]` / `[WorkerManager.loadImageBitmap]`);
+ *   - a bare `Event`, which is what `String(e)` yields for a pageerror carrying no message — an
+ *     unmatchable string that no assertion can ever describe;
+ *   - Chromium's autoplay policy, for any sound the game plays before the user has clicked. KD plays
+ *     one on a floor transition, so this is unavoidable for anything that changes map.
+ *
+ * ⚠️ Excluded BY NAME and REPORTED, never by widening the oracle to "ignore errors". A crash filter
+ * nobody can see is how a crash oracle quietly stops working — see `reportedPageErrors`.
+ *
+ * KDM-240: hoisted here because it had been hand-copied into three specs with two different
+ * spellings (`mp-join-late` carried the `: Event$` clause, `mp-disconnect-solo` did not), which is
+ * the drift this helper file exists to prevent.
+ */
+export const PAGE_ERROR_NOISE =
+	/\[(Loader\.load|WorkerManager\.loadImageBitmap)\]|: Event$|^Event$|play\(\) failed because the user/;
+
+/**
+ * Split recorded pageerrors into the ones that matter and the ones that are known noise.
+ *
+ * Returns both halves so the caller can assert on `real` and PRINT `ignored` — the filter stays
+ * visible in the failure message instead of silently swallowing whatever it happens to match.
+ */
+export function reportedPageErrors(errs: string[]): { real: string[]; ignored: string[] } {
+	return {
+		real: errs.filter((e) => !PAGE_ERROR_NOISE.test(e)),
+		ignored: errs.filter((e) => PAGE_ERROR_NOISE.test(e)),
+	};
+}

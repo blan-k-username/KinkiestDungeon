@@ -14,7 +14,7 @@
  * second one.
  */
 import { test, expect } from '@playwright/test';
-import { MP_TEST_TIMEOUT, COOP_BOOT_TIMEOUT } from './helpers/coop';
+import { MP_TEST_TIMEOUT, COOP_BOOT_TIMEOUT, PAGE_ERROR_NOISE } from './helpers/coop';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
 
@@ -73,7 +73,7 @@ test('a friend can join a run already in progress, and the two then play togethe
 		A.on('pageerror', record('A'));
 		// Pre-existing boot noise: the demo server does not serve every asset (`Logo.png` 404s in
 		// every MP spec). Excluded by name and reported, never by widening the oracle.
-		const ASSET_NOISE = /\[(Loader\.load|WorkerManager\.loadImageBitmap)\]|: Event$/;
+		const ASSET_NOISE = PAGE_ERROR_NOISE;   // KDM-240: one definition, in the shared helper
 
 		try {
 			// ---- the host is playing, alone --------------------------------------------------------

@@ -41,6 +41,21 @@ const PARK = { x: 1, y: 1 };
  */
 const HUB_ROOM_TYPE = 'JourneyFloor';
 
+/**
+ * KDM-240 D1: how close the rest of the party must be to the stairs before they will fire.
+ *
+ * Chebyshev 1 — on the stair tile or touching it. It is the TIGHTEST rule that is satisfiable: the
+ * stair tile itself is occupied by whoever is leaving, so a partner physically cannot stand on it too,
+ * and demanding they do would soft-lock every run.
+ *
+ * This is the one number the feature adds, and it is MP-specific by construction — "how near does the
+ * other player have to be" has no meaning in a one-player game, which is the epic's own test for what
+ * belongs in this layer. It is not a gameplay rule about combat or progression, so it is outside what
+ * `mp-i6-no-gameplay-constants.spec.ts` guards. Named ONCE, here; `setPartyGate`'s own default exists
+ * only for a caller that supplies nothing.
+ */
+const PARTY_GATE_RADIUS = 1;
+
 /** KDM-230: the name of OUR dialogue, in `kd-peace-dialogue.js`. Named once; matched by it here. */
 const PEACE_DIALOGUE = 'KDCoopPeace';
 
@@ -332,6 +347,9 @@ class SwapSession {
 		// room the session STARTS in is not mistaken for an arrival — the game boots on the journey
 		// hub itself (level 0), so the very first turn of every session would otherwise fire a reset.
 		try { this._lastRoomType = this.world.getRoomType() || ''; } catch (e) { this._lastRoomType = ''; }
+		// KDM-240 A3: the same argument, for the same reason — the map the session BOOTS on is not a
+		// map change. Seeded here so the first turn of every session compares against something real.
+		try { this._lastMapId = this.world.mapId(); } catch (e) { this._lastMapId = undefined; }
 		// KD-101 UAT aid: give the (shared) starting player a CARRYABLE loose-restraint ITEM (Items
 		// inventory) BEFORE capturing each bundle, so the server can apply it; every capturePlayer below
 		// inherits it. The CLIENT shows it via coop-bootstrap (snapshots don't sync the loose inventory).
@@ -1080,10 +1098,14 @@ class SwapSession {
 			this.world.setBumpVeto([...this.avatars.entries()]
 				.filter(([cid, eid]) => cid !== id && arrived.has(eid))
 				.map(([, eid]) => eid));
+			// KDM-240 A2: and tell the world who else is in this party and where they are standing, so
+			// the co-located level goal can be decided from inside KD's own stair cancellation. Pushed
+			// per APPLY, not per turn: the facts are relative to whoever is acting, and a peer position
+			// from the previous apply is a gate that answers about a world that has moved on.
+			this._pushPartyGate(id);
 			// KD-090: capture this player's message-log delta (messages pushed while THEY
 			// are the swapped-in player are theirs — incl. enemy-AI lines aimed at them).
 			const logLen0 = this.world.messageLogLength();
-			const lvl0 = this.world.getLevel();
 			let result = null;
 			let cancelled = false;
 			// KDM-164: the synthetic `pvpAttack` / `pvpBind` primitive is GONE. It computed its own
@@ -1140,21 +1162,38 @@ class SwapSession {
 			// can see its subject — broadcasting it showed the peer things they may not be able to see.
 			//
 			// Genuinely session-level events are broadcast EXPLICITLY (see `_markDefeated`,
-			// `_markRecovered`, `_announceFloorChange`) — a concern the proxy legitimately owns, and one
+			// `_markRecovered`, `_onMapChanged`) — a concern the proxy legitimately owns, and one
 			// that never depends on reading game content.
 			if (added && added.length) this._pushLog(id, added);
-			// A floor change moves the whole party, so say so — once, in our own words, to everyone.
-			// This is a state comparison, not an inference over message text.
-			if (this.world.getLevel() !== lvl0) this._announceFloorChange(id, this.world.getLevel());
+			// KDM-240 A3/R5: the party has moved to another MAP, so say so and put everyone on it.
+			//
+			// This replaces a `getLevel()` comparison. The level number is not the map: a capture
+			// regenerates the map at an unchanged level (`KinkyDungeonDefeat` → `KinkyDungeonCreateMap`,
+			// KinkyDungeonJail.ts:1725) and relocates the WHOLE party, because there is one world. That
+			// went entirely undetected, so the partner kept an old-map coordinate and lost their avatar
+			// with nothing said. Comparing the map itself detects a descent, a side room, the hub and a
+			// capture with one rule — and it needs no stairs hook, so it never meets the doubled
+			// `afterHandleStairs` signal.
+			//
+			// The baseline is SESSION-level, not per-apply, so a map change that happened outside any
+			// apply window is still caught on the next one instead of being silently adopted.
+			const mapNow = this.world.mapId();
+			if (this._lastMapId !== undefined && mapNow !== this._lastMapId) this._onMapChanged(id, mapNow);
+			this._lastMapId = mapNow;
 			// swap out: persist this player's new state + move their avatar to its new spot
 			this.bundles.set(id, this.world.capturePlayer());
 			this.vitalsOf.set(id, this.world.getVitals());   // KD-098: refresh for the HP bar
 			const p = this.world.getPlayerPos();
-			if (avId != null) this.world.moveAvatar(avId, p.x, p.y);
+			// KDM-240 F1: …and re-spawn it if it is gone. `moveAvatar` answers `null` for an entity
+			// that no longer exists and that answer used to be dropped on the floor, which is how a
+			// map change made the players permanently invisible to each other.
+			const liveAvId = this._ensureAvatar(id, p.x, p.y);
 			// KDM-208: this avatar now stands somewhere it did not stand at turn start, so for everyone
 			// applied AFTER it, it is an arrival — present enough to block, not to be bumped.
+			// KDM-240: read the id back from `_ensureAvatar`, not from `avId` captured before the apply —
+			// a re-spawn changes it, and a stale id here would silently stop marking arrivals.
 			const s0 = startPos.get(id);
-			if (avId != null && s0 && (p.x !== s0.x || p.y !== s0.y)) arrived.add(avId);
+			if (liveAvId != null && s0 && (p.x !== s0.x || p.y !== s0.y)) arrived.add(liveAvId);
 			applied.push({ id, kdType, result, pos: p, cancelled });
 		}
 		// KDM-208: the veto is per-apply. Leave the world with it off, or the immediate ("ui") apply
@@ -1374,19 +1413,21 @@ class SwapSession {
 		 * the world" is the property, so it cannot depend on who joined when.
 		 */
 		this.world.applyModes((this._baseStats && this._baseStats.modes) || []);
-		const label = this.displayNameOf(clientId);
 		const chosen = this.nameOf.get(clientId) || '';
 		if (chosen) this.world.setPlayerName(chosen);
 		this.world.placePlayer(pos.x, pos.y);
 		this.bundles.set(clientId, this.world.capturePlayer());
 		this.vitalsOf.set(clientId, this.world.getVitals());   // KD-098: seed for the HP bar
-		const av = this.world.spawnAvatar(pos.x, pos.y, label);
-		this.avatars.set(clientId, av.entityId);
+		// KDM-240: seating goes through the SAME avatar path as everything else. The delete keeps the
+		// old semantics exactly — a seat always spawns a fresh avatar, never adopts one a previous
+		// seating left behind — while leaving `spawnAvatar` with a single caller.
+		this.avatars.delete(clientId);
+		const avId = this._ensureAvatar(clientId, pos.x, pos.y);
 		this.startOf.set(clientId, pos);
 		// KD-090: a personal log to append per-turn deltas to. At boot `_start` re-seeds every log
 		// from the intro after the loop — harmless and deliberate, so boot behaviour is unchanged.
 		this.logs.set(clientId, (this.world.messageLog() || []).slice(-this.maxLog));
-		return av.entityId;
+		return avId;
 	}
 
 	/**
@@ -1776,18 +1817,98 @@ class SwapSession {
 	isDefeated(id) { return this.defeated.has(id); }
 
 	/**
-	 * KDM-165: a floor change moves the whole party, so tell everyone — EXPLICITLY, in the proxy's own
+	 * KDM-240 A2 — hand the world the party facts it needs to decide a CO-LOCATED level goal.
+	 *
+	 * `actingId` is excluded: the gate asks "is everyone ELSE here", and a player who counted as their
+	 * own peer would be blocked by themselves forever. Down players are named rather than positioned,
+	 * because D2 blocks them wherever they are standing.
+	 *
+	 * A one-player session pushes an empty peer list, which disables the gate outright — see
+	 * `setPartyGate`. That is why this is unconditional: "there is nobody to wait for" has to be said
+	 * every apply, or a session that drops to one player would keep the last two-player facts.
+	 */
+	_pushPartyGate(actingId) {
+		const peers = [];
+		for (const cid of this._joined) {
+			if (cid === actingId) continue;
+			const p = this.posOf(cid);
+			if (!p) continue;                     // no avatar to stand anywhere: nothing to wait for
+			peers.push({ x: p.x, y: p.y, name: this.displayNameOf(cid) });
+		}
+		const down = this._joined.filter((cid) => cid !== actingId && this.defeated.has(cid))
+			.map((cid) => this.displayNameOf(cid));
+		this.world.setPartyGate({ peers, down, radius: PARTY_GATE_RADIUS });
+	}
+
+	/**
+	 * KDM-240 F1 — guarantee this player HAS an avatar at (x, y), and answer with its entity id.
+	 *
+	 * The single place an avatar comes into existence. `moveAvatar` returns `null` when the entity id
+	 * no longer resolves (`headless-host.js`), which is the game telling us the entity is gone — most
+	 * often because a map change replaced `KDMapData.Entities` wholesale. That answer used to be
+	 * discarded at all three call sites, so the avatar simply stopped existing and the players stopped
+	 * seeing each other with nothing logged.
+	 */
+	_ensureAvatar(clientId, x, y) {
+		const eid = this.avatars.get(clientId);
+		if (eid != null && this.world.moveAvatar(eid, x, y)) return eid;
+		const av = this.world.spawnAvatar(x, y, this.displayNameOf(clientId));
+		if (!av || av.entityId == null) return null;
+		this.avatars.set(clientId, av.entityId);
+		if (eid != null) this._dbg(`AVATAR ${clientId} re-spawned as ${av.entityId} (${eid} was gone)`);
+		return av.entityId;
+	}
+
+	/**
+	 * KDM-240 A3/R4 — the party has arrived on a different map. Put everyone on it, and say so.
+	 *
+	 * EVERY player is re-placed, including `actingId` — deliberately, and it is not a mistake that the
+	 * one player KD already positioned is moved too. `landingTiles` anchors on exactly where KD put
+	 * them, so the acting player is handed back their own tile and the others are spread onto free
+	 * neighbours. Attributing the move to an actor and skipping them would be both fragile (a capture
+	 * has no acting player in any meaningful sense) and pointless (the anchor is their tile anyway).
+	 *
+	 * Order matters: land first, THEN announce, so a client that reacts to the log line is reacting to
+	 * a world in which everybody already exists somewhere sane.
+	 */
+	_onMapChanged(actingId, mapId) {
+		const ids = [...this._joined];
+		const tiles = (ids.length ? this.world.landingTiles(ids.length) : []) || [];
+		ids.forEach((cid, i) => {
+			const t = tiles[i] || tiles[0];
+			if (!t) return;
+			this.world.restorePlayer(this.bundles.get(cid));
+			this.world.placePlayer(t.x, t.y);
+			this.bundles.set(cid, this.world.capturePlayer());
+			this._ensureAvatar(cid, t.x, t.y);
+		});
+		// Leave the acting player swapped back in: the caller is mid-apply and captures their bundle
+		// immediately after this returns, so anything else here would persist the wrong player's state.
+		if (this.bundles.has(actingId)) this.world.restorePlayer(this.bundles.get(actingId));
+		this._announceMapChange(mapId);
+		this._dbg(`MAP ${this._lastMapId} -> ${mapId} (party re-landed, ${ids.length} players)`);
+	}
+
+	/**
+	 * KDM-165 / KDM-240 R6: the party moved together, so tell everyone — EXPLICITLY, in the proxy's own
 	 * words. This replaces the old behaviour of duplicating whatever game text happened to be emitted
 	 * during the transition into every player's log: those lines are the acting player's (they passed
-	 * that player's vision check), while "we are all on floor N now" is genuinely session-level and is
-	 * ours to say.
+	 * that player's vision check), while "we are all somewhere else now" is genuinely session-level and
+	 * is ours to say.
+	 *
+	 * KDM-240 widened it from "descends to floor N": the party can arrive somewhere without the floor
+	 * number changing at all (a side room, the hub, a jail), and announcing a descent that did not
+	 * happen is worse than announcing nothing.
 	 */
-	_announceFloorChange(id, level) {
-		const txt = `The party descends to floor ${level}.`;
+	_announceMapChange(mapId) {
+		const room = String(mapId || '').split('|')[1] || '';
+		const level = this.world.getLevel();
+		const txt = room
+			? `The party arrives at ${room} on floor ${level}.`
+			: `The party descends to floor ${level}.`;
 		const fb = this.world.sendFeedback(txt, '#88ccff', 10);
 		const entries = (fb && fb.entries) || [];
 		for (const pid of this._joined) this._pushLog(pid, entries);
-		this._dbg(`FLOOR ${id} -> ${level} (announced to all)`);
 	}
 
 	/*

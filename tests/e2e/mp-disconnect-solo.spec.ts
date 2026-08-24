@@ -17,7 +17,7 @@
  * are silent in a spec that only asserts state.
  */
 import { test, expect } from '@playwright/test';
-import { bootCoopPair, killCoopSocket, MP_TEST_TIMEOUT } from './helpers/coop';
+import { bootCoopPair, killCoopSocket, MP_TEST_TIMEOUT, PAGE_ERROR_NOISE } from './helpers/coop';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -69,7 +69,7 @@ test('a host whose partner drops can choose to go on alone, and the run keeps wo
 		 * so it is excluded BY NAME rather than by widening the oracle — and what was excluded is
 		 * printed, because a filter nobody can see is how a crash oracle quietly stops working.
 		 */
-		const ASSET_NOISE = /\[(Loader\.load|WorkerManager\.loadImageBitmap)\]/;
+		const ASSET_NOISE = PAGE_ERROR_NOISE;   // KDM-240: one definition, in the shared helper
 
 		try {
 			await bootCoopPair(A, B, port);
