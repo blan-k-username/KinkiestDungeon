@@ -51,6 +51,9 @@
 		 * scope had drifted.
 		 */
 		modDiff: null,
+		// KDM-239 R4 — the host's world declaration (`{ modes, seed }`), shown to a guest that is
+		// waiting for approval. null = not told / nothing declared, which paints nothing.
+		world: null,
 		/** Whatever is currently typed as the host's address. */
 		address: function () {
 			var el = document.getElementById('KDMPAddress');
@@ -101,6 +104,7 @@
 			lobby.status = '';
 			lobby.error = '';
 			lobby.modDiff = null;
+			lobby.world = null;   // KDM-239 R4 — cleared with the diff; both describe one join attempt
 		},
 	};
 	window.KDMPLobby = lobby;
@@ -320,6 +324,10 @@
 		// once the host has been asked, so in practice this paints while the "waiting for the host"
 		// status is up — which is exactly the window in which the guest can still walk away.
 		var below = drawModDiff(510, text('KDMPModsToGet', 'The host is running COUNT mods you don\'t have:'));
+		// KDM-239 R4 — and the WORLD, under the mods, in the same window and for the same reason.
+		// Laid out from whatever the mod list left behind so the two stack instead of overlapping,
+		// and each is independently silent when it has nothing to say.
+		below = drawWorldSummary(below ? below + 12 : 510) || below;
 		var joinY = below ? below + 30 : 540;   // R4: nothing painted => the stock layout, unchanged
 
 		DrawButtonKDEx('KDMPConnect', function () {
@@ -358,6 +366,52 @@
 	 * @returns the y below the last line drawn, or 0 if it painted NOTHING — so a caller lays out
 	 * under it when there is something, and keeps its own stock layout byte-for-byte when there is not.
 	 */
+	/**
+	 * KDM-239 R4 — the world the guest is about to join, in words, before it commits.
+	 *
+	 * Deliberately built on `drawModDiff`'s shape rather than beside it: same "silence is the correct
+	 * output for nothing to say" contract (return 0, caller keeps its stock layout byte-for-byte),
+	 * same collapse-after-N, same window. A guest deciding whether to join is answering one question
+	 * — "what am I joining?" — and the mods and the world are two halves of that answer.
+	 *
+	 * The mode keys are printed as KD's own text keys where they exist, falling back to the raw key.
+	 * We do not invent prose for a mode: what each one MEANS is the game's to say, and a hand-written
+	 * description here would be a gameplay claim this layer is not allowed to make (epic AC2).
+	 *
+	 * @returns the y below the last line drawn, or 0 if it painted NOTHING.
+	 */
+	function drawWorldSummary(y) {
+		var w = lobby.world;
+		if (!w) return 0;
+		var modes = Array.isArray(w.modes) ? w.modes : [];
+		var seed = w.seed || '';
+		if (!modes.length && !seed) return 0;     // a host on KD's defaults: nothing worth a banner
+		DrawTextKD(text('KDMPWorldLead', 'The host\'s game:'), W, y, '#ffd98a', '#000000', 24);
+		var line = y + 28;
+		if (seed) {
+			DrawTextKD(text('KDMPWorldSeed', '• seed: SEED').replace('SEED', seed), W, line, '#ffffff', '#000000', 22);
+			line += 26;
+		}
+		var shown = Math.min(modes.length, MODLIST_SHOWN);
+		for (var i = 0; i < shown; i++) {
+			var key = String(modes[i]);
+			var label = key;
+			// KD names its own settings; prefer its word over ours when it has one.
+			try {
+				var t = (typeof TextGet === 'function') ? TextGet('KinkyDungeonStat' + key) : '';
+				if (t && t.indexOf('MISSING') < 0) label = t;
+			} catch (e) { /* fall back to the raw key */ }
+			DrawTextKD('• ' + label, W, line, '#ffffff', '#000000', 22);
+			line += 26;
+		}
+		if (modes.length > shown) {
+			DrawTextKD(text('KDMPModMore', '…and MORE more').replace('MORE', String(modes.length - shown)),
+				W, line, '#cccccc', '#000000', 22);
+			line += 26;
+		}
+		return line;
+	}
+
 	function drawModDiff(y, lead) {
 		var diff = lobby.modDiff;
 		var rows = (diff && Array.isArray(diff.hostOnly)) ? diff.hostOnly : [];

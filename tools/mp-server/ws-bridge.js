@@ -267,6 +267,11 @@ class WSBridge {
 		catch (e) { /* a session that predates names, or an id the gate never seated */ }
 		try { this.session.setPerks(clientId, this.gate.perksOf(clientId)); }
 		catch (e) { /* a session that predates perk choice (KDM-238) */ }
+		// KDM-239 R3/R5 — and the world this player declared. Only a HOST ever has one (the gate
+		// refuses to store a guest's), so this is a no-op for everyone else and needs no role check
+		// here: "who may declare a world" is answered in exactly one place, and it is not this one.
+		try { this.session.setWorldOptions(clientId, this.gate.worldOf(clientId)); }
+		catch (e) { /* a session that predates world declaration (KDM-239) */ }
 	}
 
 	/**
@@ -393,7 +398,11 @@ class WSBridge {
 				// `#coop=<id>` path, which still joins directly — the two converge in KDM-236, and until
 				// then the e2e suite and `tools/coop-demo.sh` keep working unchanged.
 				if (msg.role === 'host') {
-					const c = this.gate.claimHost(clientId, { name: msg.name, build: msg.build, mods: msg.mods, perks: msg.perks });
+					// KDM-239 R3 — `world` is forwarded ONLY here, on the host's claim. `requestJoin`
+					// below deliberately does not pass it: a guest does not declare a world (A5), and
+					// the gate would drop it anyway. Two guards, because this one is the one a reader
+					// will notice.
+					const c = this.gate.claimHost(clientId, { name: msg.name, build: msg.build, mods: msg.mods, perks: msg.perks, world: msg.world });
 					if (!c.accept) { this._reject(socket, c); return clientId; }
 				} else if (msg.role === 'guest') {
 					const q = this.gate.requestJoin(clientId, { name: msg.name, build: msg.build, mods: msg.mods, perks: msg.perks });
@@ -404,7 +413,7 @@ class WSBridge {
 						// KDM-249 R5 — the diff rides on BOTH replies, so each side learns it before the
 						// session exists. The guest needs to know what it will be missing before it
 						// commits; the host needs to know what it is about to be asked to supply.
-						this._send(socket, { type: 'awaiting_approval', modDiff: q.modDiff });
+						this._send(socket, { type: 'awaiting_approval', modDiff: q.modDiff, world: q.world });
 						const hostSock = this.sockets.get(this.gate.host);
 						if (hostSock) this._send(hostSock, { type: 'join_pending', clientId, name: this.gate.pending.name, modDiff: q.modDiff });
 						return clientId;

@@ -30,6 +30,10 @@ const { KD_DELTA_BROWSER } = require('./kd-delta');
 const { KD_PEACE_DIALOGUE_BROWSER } = require('./kd-peace-dialogue');
 const { KD_DISCONNECT_DIALOGUE_BROWSER } = require('./kd-disconnect-dialogue');
 const { KD_ABSENT_RESET_BROWSER } = require('./kd-absent-reset');
+// KDM-239 R3 — the world/player mode classification, shared with the host for the same reason the
+// codec and the delta are: a client that disagrees about which keys are the world's would declare a
+// world the server then silently drops.
+const { GAME_MODES_BROWSER } = require('./game-modes');
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 // Default :8090 (not :8080 — that's the stock `npm run serve` / kdrunner port).
@@ -64,6 +68,8 @@ const PEACE_DLG_ROUTE = '/mp/kd-peace-dialogue.js';
 // KDM-251: the disconnect dialogues, on the same two-runtime terms as the peace one.
 const DISCONNECT_DLG_ROUTE = '/mp/kd-disconnect-dialogue.js';
 const ABSENT_RESET_ROUTE = '/mp/kd-absent-reset.js';
+// KDM-239: the game-mode key -> source-global table, on the same two-runtime terms.
+const GAME_MODES_ROUTE = '/mp/game-modes.js';
 const CODEC_BODY = `${KD_CODEC}\n;(typeof window !== 'undefined' ? window : globalThis).KDCodec = ` +
 	`{ kdEnc: kdEnc, kdDec: kdDec, kdSer: kdSer };\n`;
 
@@ -80,6 +86,7 @@ SYNTHETIC_ROUTES[DELTA_ROUTE] = KD_DELTA_BROWSER;
 SYNTHETIC_ROUTES[PEACE_DLG_ROUTE] = KD_PEACE_DIALOGUE_BROWSER;
 SYNTHETIC_ROUTES[DISCONNECT_DLG_ROUTE] = KD_DISCONNECT_DIALOGUE_BROWSER;
 SYNTHETIC_ROUTES[ABSENT_RESET_ROUTE] = KD_ABSENT_RESET_BROWSER;
+SYNTHETIC_ROUTES[GAME_MODES_ROUTE] = GAME_MODES_BROWSER;
 
 // Scripts injected just before </body> in index.html (in order).
 const INJECT = [
@@ -90,6 +97,7 @@ const INJECT = [
 	CODEC_ROUTE,                    // must precede render-client.js — it consumes window.KDCodec
 	ABSENT_RESET_ROUTE,             // must precede render-client.js — it consumes window.KDAbsentReset
 	DELTA_ROUTE,                    // must precede coop-bootstrap.js — it consumes window.KDDelta
+	GAME_MODES_ROUTE,               // must precede coop-bootstrap.js — it consumes window.KDGameModes
 	'/tools/mp-server/client/render-client.js',
 	'/tools/mp-server/client/coop-bootstrap.js',
 	// KDM-225: the peace submenu. AFTER coop-bootstrap — it sends through `window.__coop.sendAction`.

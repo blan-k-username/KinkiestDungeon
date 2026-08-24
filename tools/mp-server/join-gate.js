@@ -35,6 +35,9 @@
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { diffDeclarations, normalizeDeclaration } = require('./mod-sync');
+// KDM-239 A5 — the host's world declaration is validated against the same classification the world
+// applies, so the gate cannot accept a key the world would then drop.
+const { sanitizeWorld } = require('./game-modes');
 
 const HOST_SLOT = 0;
 const GUEST_SLOT = 1;
@@ -157,6 +160,15 @@ class JoinGate {
 		 */
 		this.perks = new Map();
 		/**
+		 * KDM-239 R3/R5 — the WORLD the host declared: `{ modes, seed }`.
+		 *
+		 * A Map keyed by clientId rather than a single field, so it lives and dies with a seat exactly
+		 * as `names` and `perks` do — but only ever ONE entry, the host's. A guest's declaration is
+		 * dropped at `requestJoin` rather than stored and ignored later: a world has one author, and
+		 * a second stored copy is the thing that would eventually get merged by accident.
+		 */
+		this.world = new Map();
+		/**
 		 * KDM-249 R2 — the SESSION's mod set, which is the host's, adopted on `claimHost`.
 		 *
 		 * "HOST is source of truth" (owner, 2026-08-22) implemented the same way it already is for
@@ -198,6 +210,19 @@ class JoinGate {
 	 */
 	perksOf(clientId) { return (this.perks.get(clientId) || []).slice(); }
 
+	/**
+	 * KDM-239 R3/R5 — the world this player declared, or KD's defaults if they declared none.
+	 *
+	 * A fresh COPY every call, for the same reason `perksOf` hands one back. Answers
+	 * `{ modes: [], seed: '' }` for everyone except the host, including for an id the gate has never
+	 * seen — "declared nothing" and "is not the host" are the same answer here, and both mean
+	 * "KD's own defaults".
+	 */
+	worldOf(clientId) {
+		const w = this.world.get(clientId);
+		return w ? { modes: w.modes.slice(), seed: w.seed } : { modes: [], seed: '' };
+	}
+
 
 	slotOf(clientId) {
 		if (clientId && clientId === this.host) return HOST_SLOT;
@@ -226,6 +251,9 @@ class JoinGate {
 		// `!== undefined` for the same reason `mods` is below: a claim that says nothing about perks
 		// leaves what is already seated alone, while an explicit `[]` correctly means "none".
 		if (info && info.perks !== undefined) this.perks.set(clientId, sanitizePerks(info.perks));
+		// KDM-239 R3/R5 — and the world it is hosting, on the same terms. Only here: `requestJoin`
+		// deliberately does not read `info.world`, so a guest cannot declare one at all (A5).
+		if (info && info.world !== undefined) this.world.set(clientId, sanitizeWorld(info.world));
 		// KDM-249 R2 — the host's declaration IS the session's. Unlike `build` above (where an
 		// explicit value wins and a claim may only supply a missing one), a later claim REPLACES:
 		// the host is the source of truth including when what they are running changes. Guarded on
@@ -294,8 +322,18 @@ class JoinGate {
 		// the files — which is unreachable if the join was refused first.
 		const modDiff = diffDeclarations(this.mods, info && info.mods);
 
+		/*
+		 * KDM-239 R4 — and the WORLD the guest is about to join, on the same message and for exactly
+		 * the same reason the mod diff rides it: this is the only moment the guest can still walk
+		 * away, because the session does not exist yet.
+		 *
+		 * Note `info.world` is NOT read here — a guest does not declare a world (A5). This is the
+		 * HOST's, being shown to the guest.
+		 */
+		const world = this.worldOf(this.host);
+
 		this.pending = { clientId, name, perks, build, mods: normalizeDeclaration(info && info.mods), modDiff };
-		return { accept: false, pending: true, modDiff };
+		return { accept: false, pending: true, modDiff, world };
 	}
 
 	// ----- the host answers ----------------------------------------------------------------
@@ -352,6 +390,9 @@ class JoinGate {
 			// host's guests the previous host's mods, which is the wrong answer to "whose mods are
 			// these".
 			this.mods = [];
+			// KDM-239 R3 — and so does the world declaration, for the same reason and by the same
+			// rule as the perks and the name below: `release` drops it, `releasePending` does not.
+			this.world.delete(clientId);
 		}
 		if (clientId === this.guest) this.guest = null;
 		// KDM-237 P2 — the name goes with the SEAT, and only with the seat. `releasePending` above

@@ -398,3 +398,68 @@ join was refused. Mutation-tested, because breaking this makes the whole feature
 ⚠️ **Any e2e that needs the session to actually START must pass `{preload: true}`** to
 `openLobby`/`guestAsks`. Two boot-sequence traps make the alternative look like a product bug — see the
 comments in `tests/helpers/mp-lobby.ts`.
+
+## Game modes and the start ritual (KDM-239)
+
+### The one thing to know before touching this
+
+**`KinkyDungeonStatsChoice` does two jobs, and only one of them is perks.**
+
+KD's Diff screen funnels every game-mode toggle through `KDUpdatePlugSettings`
+(`Game/src/base/KinkyDungeon.ts:6114`) into that same Map — 22 keys, from `randomMode` to `classMode`.
+None of them is in `KinkyDungeonStatsPresets`, so KD's perk table answers "no" for every one.
+
+That matters because `HeadlessHost.applyPerks` rebuilds the Map from scratch and re-adds a key only
+`if (KinkyDungeonStatsPresets[k])`. So:
+
+- handing a mode key to `applyPerks` **drops it silently** — no error, just KD's defaults; and
+- every mode the world was built with is **wiped from the slot by the first `_seatPlayer`**.
+
+Hence a separate applier. `statsChoiceSnapshot()` captures the whole Map right after `init()`, split
+into the half `applyPerks` preserves and the half it destroys; `_seatPlayer` applies the base perks
+UNION the player's own, then restores the mode half with `applyModes`.
+
+### ⚠️ Modes keep their value, including `undefined`
+
+`KDUpdatePlugSettings` writes `set(key, undefined)` for every mode that is **off**. The key is
+therefore PRESENT in the Map with an undefined value — 20 of the 24 entries in a default new game —
+and the save serialiser sees it. Capturing only truthy entries leaves a seat holding 4 keys against a
+single-player run's 24. `null` encodes `undefined` across the eval boundary, because
+`JSON.stringify` drops the property otherwise.
+
+**`mp-parity-oracle` is what enforces all of this**, and it rejected three successive wrong versions
+of the restore before the right one. If you change `_seatPlayer`, that spec is your oracle — do not
+"fix" it.
+
+### World vs player
+
+`game-modes.js` classifies all 22 keys. World keys come from the HOST once (on its `join`, validated
+by `sanitizeWorld`) and are re-applied to every seat; player keys ride KDM-238's per-player channel.
+A guest's world declaration is **dropped at the gate** — one host, no silent blending.
+
+`MODE_SOURCE` maps each world key to the source global `KDUpdatePlugSettings` derives it from, and is
+served to the browser as `GAME_MODES_BROWSER` on the `kd-delta.js` precedent, so the client's read
+and the server's write cannot drift.
+
+**Write those globals with BARE assignments.** They are bundle-scope `let`s, so
+`globalThis[name] = value` creates a shadow property and KD's own bare-name reads never see it.
+
+### The start ritual
+
+`init()` runs what the stock start buttons run around `KinkyDungeonStartNewGame`
+(`KinkyDungeon.ts:2553`, `:2875`): `KDLose = false` and `KDUpdatePlugSettings` before,
+`KDAddListener("SpeciesChecker")` after.
+
+**The tutorial is suppressed for both players, on purpose** (owner, 2026-08-24) — it is a blocking
+dialogue in a lockstep session, and the guest cannot dismiss the host's copy. This is the one place
+co-op knowingly diverges from the stock start; the reason is recorded at the call site.
+
+### The screen is the session's, not the client's
+
+`pinGameScreen` no longer stamps `KinkyDungeonState = 'Game'`. It adopts `coop.screen`, read in
+`resolveState` (the single funnel every state frame passes through) and carried on the snapshot.
+
+**KDM-258's guard stays**: `KinkyDungeonContext` is null until `KDInitCanvas()`, and pinning a screen
+before that stops the render loop for good — one frozen frame for the rest of the session. The draw's
+own `if (KinkyDungeonCanvas)` test does not protect you; that value is a module-scope
+`createElement("canvas")` and is always truthy.

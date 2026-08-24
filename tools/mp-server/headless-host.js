@@ -274,6 +274,9 @@ const GLOBAL_BLACKLIST = Object.freeze([
 // KDM-162: the codec moved to its own module — the BROWSER thin client needs the same decoder to
 // adopt a state bundle, and two hand-kept copies in two runtimes is the drift this epic deletes.
 const { KD_CODEC } = require('./kd-codec');
+// KDM-239 A4 — the world/player classification of KD's game-mode keys. Own module so the
+// lightweight join-gate can validate a declaration without loading this engine host.
+const { MODE_WORLD_KEYS, MODE_PLAYER_KEYS, MODE_SOURCE, isModeKey } = require('./game-modes');
 
 /**
  * KD-088 entity re-resolution + the dispatch call, shared by applyInput and applyInputObserved
@@ -604,6 +607,53 @@ class HeadlessHost {
 		// map for the PoC). Set after KDReloadMainData (which randomizes) and before
 		// the map is generated inside StartNewGame.
 		if (opts.seed != null) this.eval(`KDsetSeed(${JSON.stringify(String(opts.seed))})`);
+		/*
+		 * KDM-239 R1 — the half of the stock start the co-op path never ran.
+		 *
+		 * `KinkyDungeonStartNewGame` below is genuinely KD's own new-game entry, so the FLOOR has
+		 * always been real. What was missing is everything the stock start BUTTONS do around it
+		 * (`KinkyDungeon.ts:2553-2565` for Quick/Kinky, `:2875-2884` for the perk screen's Start):
+		 *
+		 *     KDLose = false;  KDUpdatePlugSettings(true, false);  <StartNewGame>;
+		 *     if (!KDToggles.SkipTutorial) KDStartDialog("Tutorial");  KDAddListener("SpeciesChecker");
+		 *
+		 * `KDLose` first: it is a sticky "you lost" flag (`KinkyDungeonInput.ts:907`), and a session
+		 * booting with it set from a previous run is the same class of bug as inheriting a stale
+		 * `KDGameData` field.
+		 */
+		this.eval('KDLose = false');
+		/*
+		 * …then the game-mode toggles, BEFORE the map exists — `randomMode` changes generation.
+		 *
+		 * Driven through KD's OWN `KDUpdatePlugSettings`, which is the only thing that knows how the
+		 * nine `KinkyDungeonStatsChoice` keys derive from the nine source globals
+		 * (`KinkyDungeon.ts:6114-6127`). We set the SOURCE globals the host asked for and let KD
+		 * compute the keys; we never write the derived keys here. Anything not asked for keeps KD's
+		 * own default, which is what a host that chose nothing should get.
+		 */
+		const declared = Array.isArray(opts.worldModes) ? opts.worldModes : [];
+		// Walk MODE_SOURCE in ITS order, not the caller's: the multi-valued dials resolve by
+		// last-assignment-wins and the table is ordered ascending for exactly that (see game-modes.js).
+		/*
+		 * ⚠️ BARE ASSIGNMENTS, NOT `globalThis[name] = v`.
+		 *
+		 * These source globals are bundle-scope `let`s, so they are NOT properties of `globalThis`
+		 * (repo CLAUDE.md, "No module system at runtime"). Writing through `globalThis` would create a
+		 * brand-new property and leave KD's own bare-name reads seeing the unchanged original — the
+		 * modes would appear to be set here and have no effect whatsoever on the game.
+		 *
+		 * Emitting identifiers into source is safe because the names come from our own frozen
+		 * `MODE_SOURCE` table, never from the wire; the wire only ever supplies KEYS, which are
+		 * matched against that table.
+		 */
+		const writes = Object.keys(MODE_SOURCE)
+			.filter((k) => declared.indexOf(k) >= 0)
+			.map((k) => `${MODE_SOURCE[k].global} = ${JSON.stringify(MODE_SOURCE[k].value)};`)
+			.join('\n\t\t\t');
+		this.eval(`(function(){
+			${writes}
+			if (typeof KDUpdatePlugSettings === 'function') KDUpdatePlugSettings(true, false);
+		})()`);
 		// KinkyDungeonStartNewGame is the real new-game entry: it calls
 		// KinkyDungeonInitialize AND KinkyDungeonCreateMap (which fills the dungeon
 		// Grid). The Playwright fixtures call the bare Initialize (empty map — fine
@@ -612,6 +662,26 @@ class HeadlessHost {
 		this.eval('typeof KinkyDungeonInitReputation === "function" && KinkyDungeonInitReputation()');
 		this.eval('typeof KDInitPerks === "function" && KDInitPerks()');
 		this.eval('typeof KDSyncLocalPlayerSlot === "function" && KDSyncLocalPlayerSlot()');
+		/*
+		 * KDM-239 R1 — the listener the stock start registers after the game exists. `KDAddListener`
+		 * with no id pushes onto `KDGameData.ListenerList` (`KinkyDungeon.ts:8473-8489`); registered
+		 * here, before `_newPlayerTemplate` is captured, so it rides into every player's bundle.
+		 */
+		this.eval('typeof KDAddListener === "function" && KDAddListener("SpeciesChecker")');
+		/*
+		 * KDM-239 R2 — THE TUTORIAL IS SUPPRESSED ON PURPOSE, FOR BOTH PLAYERS. This is a decision,
+		 * not an omission, and it is the one place this task knowingly does not reproduce the stock
+		 * start (owner, 2026-08-24).
+		 *
+		 * The stock buttons run `if (!KDToggles.SkipTutorial) KDStartDialog("Tutorial")`. In a
+		 * lockstep co-op session a dialogue is server-driven and party-wide, so calling it would park
+		 * BOTH players on a dialogue neither asked for, and the guest has no way to dismiss the
+		 * host's copy. A co-op run is also unlikely to be anyone's first game.
+		 *
+		 * ⚠️ Do NOT "restore parity" by adding the call here without re-reading KDM-239 R2 first —
+		 * `mp-start-ritual.spec.ts` asserts no Tutorial dialogue is open after a co-op start, and it
+		 * will tell you about this comment rather than about a mistake.
+		 */
 		this.setServerMode(this.serverMode);
 		// KDM-161: record the post-init fingerprint. Anything that diverges from it later is mutable,
 		// hence a per-player state candidate — this is what lets an unknown feature or mod be captured
@@ -1339,6 +1409,114 @@ class HeadlessHost {
 	}
 
 	/**
+	 * KDM-239 A3 — re-assert KD's game-mode keys AFTER `applyPerks` has wiped them.
+	 *
+	 * ⚠️ THIS IS NOT A SECOND WAY TO SET PERKS, and it must not become one.
+	 *
+	 * `applyPerks` above does `KinkyDungeonStatsChoice = new Map()` and then re-adds a key only if
+	 * `KinkyDungeonStatsPresets[k]`. The nine game-mode keys are NOT in that table — they are written
+	 * into the same Map by KD's `KDUpdatePlugSettings`, not by the perk system — so `applyPerks`
+	 * silently discards every one of them. Which means the modes established at `init()` are gone
+	 * from the slot the moment the first player is seated, and each player would then be running
+	 * whatever the wipe left behind.
+	 *
+	 * So this runs immediately AFTER `applyPerks` on each seat, and sets only classified mode keys
+	 * (`isModeKey`). Anything else is dropped — an unknown key here would be this layer choosing
+	 * something for a player, which is exactly what KDM-164 forbids.
+	 *
+	 * `set(k, true)` from a VARIABLE, never from a literal name: `mp-perk-choice.spec.ts` greps this
+	 * source for `KinkyDungeonStatsChoice.set("<literal>"` and fails the build if one appears.
+	 *
+	 * No `KDInitPerks()` here. `applyPerks` already ran it for this seat, and a mode key has no
+	 * start-effect to run — re-running it would re-apply the player's starting restraints twice.
+	 */
+	/**
+	 * KDM-239 A3 — the game-mode keys currently set in the world, so they can be restored after a wipe.
+	 *
+	 * Read once, right after `init()`, rather than reconstructed from the host's declaration: what
+	 * `KDUpdatePlugSettings` produced is KD's DEFAULTS *plus* whatever the host chose, and a seat must
+	 * get the whole picture. Restoring only the declared half is what broke `mp-parity-oracle` — a
+	 * co-op player ended up with an empty `KinkyDungeonStatsChoice` where a single-player run has the
+	 * full default set, and the two runs diverged on `statchoice` from the very first turn.
+	 */
+	/**
+	 * KDM-239 A3 — the WHOLE of `KinkyDungeonStatsChoice` as the world's own init left it, split into
+	 * the half `applyPerks` preserves (`perks`) and the half it destroys (`modes`).
+	 *
+	 * Read once, right after `init()`. Both halves are needed to reconstruct a seat, and finding that
+	 * out took two rounds of `mp-parity-oracle`:
+	 *
+	 *  1. Restoring only the host's DECLARED modes left a co-op player with an empty StatsChoice
+	 *     where a single-player run has KD's full default set.
+	 *  2. Restoring all non-perk keys still diverged — because `KDUpdatePlugSettings` also runs
+	 *     `KDUpdateConsentSettings`, which sets REAL preset perks from the consent settings
+	 *     (`KinkyDungeon.ts:6100-6109`). Those are perks by KD's table, so `applyPerks` is willing to
+	 *     keep them, but a player who declared nothing passes `[]` and they are wiped with nothing to
+	 *     put them back.
+	 *
+	 * Hence a snapshot of both halves, rather than a cleverer filter. "What did KD's own new game
+	 * produce" is a question with one answer; this reads it instead of deriving it.
+	 */
+	statsChoiceSnapshot() {
+		return this.eval(`(function(){
+			if (typeof KinkyDungeonStatsChoice === 'undefined') return { perks: [], modes: [] };
+			var perks = [], modes = [];
+			KinkyDungeonStatsChoice.forEach(function(v, k){
+				var isPerk = (typeof KinkyDungeonStatsPresets !== 'undefined'
+					&& KinkyDungeonStatsPresets && !!KinkyDungeonStatsPresets[k]);
+				if (isPerk) { if (v) perks.push(k); return; }
+				// ⚠️ MODES KEEP THEIR VALUE, INCLUDING undefined. KDUpdatePlugSettings writes
+				// set(key, undefined) for every mode that is OFF, so the Map CONTAINS those keys with
+				// an undefined value -- 20 of the 24 entries in a default new game. Capturing only the
+				// truthy ones left a seat holding 4 keys against a single-player run's 24, which is
+				// the statchoice divergence mp-parity-oracle reported. null encodes undefined,
+				// because JSON.stringify would drop the property otherwise.
+				modes.push({ k: k, v: (v === undefined ? null : v) });
+			});
+			return { perks: perks, modes: modes };
+		})()`);
+	}
+
+	modeKeys() {
+		return this.eval(`(function(){
+			if (typeof KinkyDungeonStatsChoice === 'undefined') return [];
+			var out = [];
+			// EXACTLY the complement of what applyPerks keeps: it re-adds a key only when
+			// KinkyDungeonStatsPresets has it, so everything else in this Map is what it destroys.
+			// Defined as a complement rather than as "the mode keys" on purpose — the two must add up
+			// to the whole Map or a seat cannot reproduce what init built, and mp-parity-oracle
+			// measures exactly that against a reference single-player run.
+			KinkyDungeonStatsChoice.forEach(function(v, k){
+				if (v && !(typeof KinkyDungeonStatsPresets !== 'undefined'
+					&& KinkyDungeonStatsPresets && KinkyDungeonStatsPresets[k])) out.push(k);
+			});
+			return out;
+		})()`);
+	}
+
+	applyModes(keys) {
+		// NOT narrowed to the classified mode keys: this restores whatever `modeKeys()` saw the world's
+		// own init leave behind (the complement of the perk set). Narrowing it to MODE_WORLD_KEYS is
+		// exactly what made a co-op seat diverge from a single-player run in mp-parity-oracle. Wire
+		// safety lives where wire data enters — `sanitizeWorld` gates a HOST's declaration before it
+		// can ever reach `init`, so nothing unvalidated arrives here.
+		// Accepts either a bare key (meaning "set it true" — the wire/declaration shape) or a
+		// `{k, v}` pair from `statsChoiceSnapshot` (meaning "restore exactly this value", where
+		// `null` is KD's own `undefined`). One applier, because two would drift.
+		const list = (Array.isArray(keys) ? keys : [])
+			.map((e) => (typeof e === 'string' ? { k: e, v: true } : e))
+			.filter((e) => e && typeof e.k === 'string');
+		return this.eval(`(function(){
+			if (typeof KinkyDungeonStatsChoice === 'undefined') return [];
+			var want = ${JSON.stringify(list)};
+			for (var i = 0; i < want.length; i++) {
+				KinkyDungeonStatsChoice.set(want[i].k, want[i].v === null ? undefined : want[i].v);
+			}
+			return want.map(function(e){ return e.k; });
+		})()`);
+	}
+
+	/**
 	 * Inject an avatar entity representing another player at (x,y). Returns the
 	 * real KD entity id (the engine now sees/targets/collides with it).
 	 */
@@ -1798,6 +1976,23 @@ class HeadlessHost {
 					camY: (typeof KinkyDungeonCamY !== 'undefined') ? KinkyDungeonCamY : 0,
 				},
 				player: P ? entSnap(P) : null,
+				/*
+				 * KDM-239 R7 — WHICH SCREEN the session is on, so the client can follow the game
+				 * instead of overriding it.
+				 *
+				 * The client used to stamp KinkyDungeonState = 'Game' on every state frame, which
+				 * meant no screen the world legitimately entered could ever be seen. It now adopts
+				 * this value. Sent as the world's OWN KinkyDungeonState, never as a computed
+				 * instruction -- the client renders what the session is on, and this layer does not
+				 * get to invent a screen.
+				 *
+				 * Defaults to 'Game' because that is what an in-progress dungeon is, and because it
+				 * keeps every pre-KDM-239 client and the whole coop suite behaving identically.
+				 *
+				 * NOTE: no backticks in this comment on purpose -- it lives INSIDE an eval template
+				 * literal, where one would terminate the string and blame the requiring file.
+				 */
+				screen: (typeof KinkyDungeonState !== 'undefined' && KinkyDungeonState) ? String(KinkyDungeonState) : 'Game',
 				// KDM-162: the curated stats block is GONE. It named ~12 HUD fields by hand, in TWO
 				// languages (here and client/render-client.js), and shipped slowLevel — a value it
 				// RECOMPUTED and then sent, i.e. derived state crossing the network, which is exactly
@@ -2513,6 +2708,8 @@ class HeadlessHost {
 module.exports = {
 	HeadlessHost, loadSources, REPO_ROOT, BUNDLE_PATH,
 	WORLD_KEYS, KDGAMEDATA_WORLD_KEYS,
+	// KDM-239 A4 — re-exported so callers have ONE import for "what does the world own".
+	MODE_WORLD_KEYS, MODE_PLAYER_KEYS,
 	deriveBundleGlobals, GLOBAL_BLACKLIST, MIN_EXPECTED_GLOBALS, HOST_RESERVED,
 	BASELINE_MAX_LEN, OVERSIZE_AUDIT_EVERY, OVERSIZE_AUDIT_BUDGET_MS,
 };

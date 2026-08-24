@@ -58,6 +58,12 @@
 		// drawn. Counted rather than merely returned-from, so "we refused, and how often" is
 		// observable — a silent guard is how the original silent catch hid this for a whole epic.
 		_pinDeferred: 0,
+		// KDM-239 R7: the screen the SESSION says we are on, or '' for "the dungeon". Declared up
+		// front for the same reason as `peerMissing` and `_startError` above — "which screen does the
+		// session believe we are on" has to be a value a test can read, not an absent property that
+		// only exists once something has gone non-default. `pinGameScreen` reads it; the server sends
+		// it only when it is not 'Game', so an absent value keeps every pre-KDM-239 session identical.
+		screen: '',
 		// KDM-252: the retry state. `total` is a LATCH — it counts every attempt ever made and is
 		// never reset, because `connected === true` is not evidence of a reconnect (it is also what a
 		// socket that never dropped looks like). `attempts` is the backoff position and DOES reset on
@@ -542,6 +548,63 @@
 	function ensureStartItem() { addStartItem(getParam('startitem')); }
 
 	/**
+	 * KDM-239 R3 — the WORLD-level game modes this host has set, read from KD's own globals.
+	 *
+	 * These are the inputs `KDUpdatePlugSettings` derives `KinkyDungeonStatsChoice` from
+	 * (`KinkyDungeon.ts:6114-6127`). We read them rather than reading the derived keys because the
+	 * derived Map is also where perks live, and the host's perks are emphatically NOT the world's.
+	 *
+	 * Only the keys the server classifies as world-level appear here; the per-character ones
+	 * (`arousalMode` and the perk-difficulty pair) stay on KDM-238's per-player channel. The server
+	 * re-validates against the same list, so this list being wrong degrades to "KD's default"
+	 * rather than to a world nobody asked for.
+	 */
+	function worldModes() {
+		var table = (window.KDGameModes && window.KDGameModes.MODE_SOURCE) || {};
+		var now = sourceValues();
+		var out = [];
+		for (var key in table) {
+			if (!Object.prototype.hasOwnProperty.call(table, key)) continue;
+			var entry = table[key];
+			if (now[entry.global] !== undefined && now[entry.global] === entry.value) out.push(key);
+		}
+		return out;
+	}
+
+	/**
+	 * The current value of each source global `MODE_SOURCE` refers to.
+	 *
+	 * ⚠️ READ BY BARE NAME, and that is why this list is written out instead of being driven from the
+	 * table. These are bundle-scope `let`s: they are visible to this script by bare name but are NOT
+	 * properties of `window`, so `window[entry.global]` — the obvious generic form — reads
+	 * `undefined` for every one of them and this function would report that the host chose nothing.
+	 *
+	 * The part that must not drift (which keys are the world's, and which value produces each) lives
+	 * in the shared table. This is only "what are these six globals set to right now".
+	 */
+	function sourceValues() {
+		var v = {};
+		try { if (typeof KinkyDungeonRandomMode !== 'undefined') v.KinkyDungeonRandomMode = KinkyDungeonRandomMode; } catch (e) { /* absent */ }
+		try { if (typeof KinkyDungeonHardMode !== 'undefined') v.KinkyDungeonHardMode = KinkyDungeonHardMode; } catch (e) { /* absent */ }
+		try { if (typeof KinkyDungeonExtremeMode !== 'undefined') v.KinkyDungeonExtremeMode = KinkyDungeonExtremeMode; } catch (e) { /* absent */ }
+		try { if (typeof KinkyDungeonSaveMode !== 'undefined') v.KinkyDungeonSaveMode = KinkyDungeonSaveMode; } catch (e) { /* absent */ }
+		try { if (typeof KinkyDungeonItemMode !== 'undefined') v.KinkyDungeonItemMode = KinkyDungeonItemMode; } catch (e) { /* absent */ }
+		try { if (typeof KinkyDungeonEasyMode !== 'undefined') v.KinkyDungeonEasyMode = KinkyDungeonEasyMode; } catch (e) { /* absent */ }
+		try { if (typeof KinkyDungeonPerkProgressionMode !== 'undefined') v.KinkyDungeonPerkProgressionMode = KinkyDungeonPerkProgressionMode; } catch (e) { /* absent */ }
+		try { if (typeof KinkyDungeonProgressionMode !== 'undefined') v.KinkyDungeonProgressionMode = KinkyDungeonProgressionMode; } catch (e) { /* absent */ }
+		return v;
+	}
+
+	/**
+	 * KDM-239 R5 — the seed for this run. A URL override (`#coop=A&seed=foo`) if given, else ''.
+	 *
+	 * Empty means "use whatever the server was configured with", which is what every session did
+	 * before this task — so a host that names nothing changes nothing. Choosing a seed in the UI is
+	 * explicitly NOT part of R5; being able to state and reproduce one is.
+	 */
+	function worldSeed() { return getParam('seed') || ''; }
+
+	/**
 	 * KD-101: pre-select the player's binding material as the quick-bind item (stock
 	 * KinkyDungeonAttemptQuickRestraint). When "Tie Up" casts Bondage with a raw material
 	 * selected, the stock cast (KinkyDungeonMagicCode "Bondage") opens the bind submenu
@@ -697,8 +760,26 @@
 			enterGame();
 			return;
 		}
-		KinkyDungeonState = 'Game';
-		KinkyDungeonDrawState = 'Game';
+		/*
+		 * KDM-239 R7 — ADOPT the session's screen; do not stamp one.
+		 *
+		 * This used to be an unconditional `KinkyDungeonState = 'Game'`, re-applied on every state
+		 * frame. That is what made a co-op run a *pinned* game rather than a played one: any screen
+		 * the game legitimately entered — the journey map between floors, a death screen — was
+		 * stamped back to 'Game' before the player could see it, and no amount of correct
+		 * server-side work could ever become visible.
+		 *
+		 * `coop.screen` is set from the state frame (`_stateFrame`, so it rides the existing delta
+		 * wire — never diff a consume-once channel). Absent means 'Game', which keeps every existing
+		 * session and the whole `#coop=` e2e suite behaving exactly as before: the server only sends
+		 * a screen when it is NOT the dungeon.
+		 *
+		 * ⚠️ Still an assignment, not a request. The client does not simulate, so it must not decide
+		 * on its own that the screen has changed — that decision is the world's, and arrives here.
+		 */
+		var screen = coop.screen || 'Game';
+		KinkyDungeonState = screen;
+		KinkyDungeonDrawState = screen;
 		// The client doesn't simulate, so vision/fog isn't recomputed after we adopt
 		// new state — the map stays dark and entities stay hidden. Flag a vision
 		// recompute so the draw lights the map around the (server-set) player position
@@ -943,6 +1024,20 @@
 				// screen, and the server reads it as "seat me on KD's default terms" (R9) — there is
 				// no dangerous reading of absence here, unlike `mods` above.
 				join.perks = playerPerks.slice();
+				/*
+				 * KDM-239 R3/R5 — a HOST also declares the WORLD: the game-mode toggles that describe
+				 * the run, and the seed.
+				 *
+				 * Host only, and the server drops a guest's copy anyway (join-gate). Both halves are
+				 * deliberate: sending it from a guest would be a client asserting something that is
+				 * not its to assert, and refusing it only on the client would leave the server
+				 * trusting whoever sent it first.
+				 *
+				 * Read from KD's OWN globals — the same values `KDUpdatePlugSettings` derives its keys
+				 * from — so whatever the player set on KD's own screens is what travels. We choose
+				 * nothing here; `worldModes()` is a read, not a policy.
+				 */
+				if (role === 'host') join.world = { modes: worldModes(), seed: worldSeed() };
 			}
 			ws.send(JSON.stringify(join));
 			// KDM-249 R6 — a HOST publishes its zips so a guest can fetch them, then re-states the
@@ -985,11 +1080,25 @@
 		 * corrupt state SILENTLY, which is far worse than the bandwidth it saves. On any gap we throw
 		 * our copy away and ask for a full snapshot instead of guessing.
 		 */
+		/**
+		 * KDM-239 R7 — the screen the session says we are on, taken from the resolved snapshot.
+		 *
+		 * Done HERE, in `resolveState`, rather than at the three `pinGameScreen()` call sites: every
+		 * state frame passes through this one function, and three copies of the same read is exactly
+		 * the drift that lets one branch quietly keep the old behaviour. It also means the value
+		 * survives delta encoding for free — `kdMerge` carries `screen` like any other field, so a
+		 * frame that does not mention it leaves the last one standing.
+		 */
+		function adoptScreen(snap) {
+			if (snap && typeof snap.screen === 'string') coop.screen = snap.screen;
+			return snap;
+		}
+
 		function resolveState(m) {
 			if (m.snapshot) {                       // full: adopt it and re-baseline
 				coop._snapBase = m.snapshot;
 				coop._snapSeq = m.seq || 0;
-				return m.snapshot;
+				return adoptScreen(m.snapshot);
 			}
 			if (!m.delta) return null;
 			var expected = (coop._snapSeq || 0) + 1;
@@ -1004,7 +1113,7 @@
 			}
 			coop._snapSeq = m.seq || expected;
 			coop._snapBase = window.KDDelta.kdMerge(coop._snapBase, m.delta);
-			return coop._snapBase;
+			return adoptScreen(coop._snapBase);
 		}
 
 		ws.onmessage = function (e) {
@@ -1051,7 +1160,10 @@
 				// KDM-257 R1 — the diff rides this message and used to be dropped here. The guest must be
 				// able to SEE what it is about to load before the host answers, and this is the only
 				// moment it can: the session does not exist yet.
-				lobbySay({ status: 'Waiting for the host to let you in…', error: '', modDiff: m.modDiff || null });
+				lobbySay({ status: 'Waiting for the host to let you in…', error: '', modDiff: m.modDiff || null,
+					// KDM-239 R4 — the WORLD rides the same message, for the same reason and at the same
+					// moment: this is the last point the guest can still walk away.
+					world: m.world || null });
 				return;
 			}
 			if (m.type === 'join_pending') {

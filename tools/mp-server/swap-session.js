@@ -28,6 +28,9 @@ const { PeaceRegistry } = require('./peace');
 const { KD_PEACE_DIALOGUE } = require('./kd-peace-dialogue');
 const { KD_DISCONNECT_DIALOGUE, HOST_LOST_DIALOGUE, PEER_LOST_DIALOGUE } = require('./kd-disconnect-dialogue');
 const { sanitizeName, sanitizePerks } = require('./join-gate');
+// KDM-239 R3/R5 — same normaliser the gate uses, so what the session stores and what the gate
+// accepted cannot drift apart.
+const { sanitizeWorld } = require('./game-modes');
 
 const PARK = { x: 1, y: 1 };
 
@@ -164,6 +167,12 @@ class SwapSession {
 		 * `nameOf` so a departing player takes it with them.
 		 */
 		this.perkOf = new Map();     // id -> string[] of chosen perk keys
+		/**
+		 * KDM-239 R3/R5 — the WORLD each player declared, `{ modes, seed }`. Only the host's is ever
+		 * read (`_hostWorld()`), but it is stored per client on the same terms as `perkOf` so a
+		 * departing player takes their declaration with them via `_perClientStores()`.
+		 */
+		this.worldOf = new Map();    // id -> { modes: string[], seed: string }
 		this.logs = new Map();        // id -> per-player message log (KD-090)
 		this.actionMsgOf = new Map(); // id -> {text,color} transient floating combat text (KD-098)
 		// KDM-186: monotonic id per client for ONE-SHOT EVENTS on the wire.
@@ -260,7 +269,29 @@ class SwapSession {
 
 	_start() {
 		this.world.boot();
-		this.world.init({ seed: this.seed });
+		/*
+		 * KDM-239 R3/R5 — the host's world, adopted before the map exists.
+		 *
+		 * `randomMode` changes map generation, so this has to be the SAME call that generates it —
+		 * applying the modes afterwards would give the party a map built on the wrong terms while
+		 * every later assertion about "the modes are set" still passed.
+		 *
+		 * The seed follows the same "host is source of truth" rule as the build and the mod set: an
+		 * operator-configured `opts.seed` is the fallback, a host that named one wins. That is what
+		 * makes R5's "a session property, not a constant" true without anyone having to build a seed
+		 * picker.
+		 */
+		const hostWorld = this._hostWorld();
+		this.world.init({ seed: hostWorld.seed || this.seed, worldModes: hostWorld.modes });
+		/*
+		 * KDM-239 A3 — snapshot the game modes the world was built with, for `_seatPlayer` to restore.
+		 *
+		 * Captured from the WORLD rather than echoed back from the declaration, because
+		 * `KDUpdatePlugSettings` has just produced KD's defaults as well as the host's choices, and a
+		 * seat needs both. `mp-parity-oracle` is what proves this: restoring only the declared modes
+		 * left a co-op player with an empty StatsChoice against a single-player run's full set.
+		 */
+		this._baseStats = this.world.statsChoiceSnapshot();
 		this.world.setServerMode('world');
 		// KDM-197: ALWAYS run the classifier. `seedInputKinds` gates whether its VERDICTS are applied
 		// (that switch is about client routing — KDM-163 § CORRECTION 2); its CONFIDENCE is needed
@@ -1231,6 +1262,37 @@ class SwapSession {
 	}
 
 	/**
+	 * KDM-239 R3/R5 — record the world a player declared. Idempotent and order-independent, exactly
+	 * like `setPlayerName` and `setPerks`, and called from the same place (`_carrySeat`).
+	 *
+	 * ⚠️ ORDERING IS WHAT MAKES THIS FEATURE POSSIBLE. `_start()` is reached from `join()` only once
+	 * the required number of players have joined — i.e. on the SECOND join — so by the time the world
+	 * is built the host has long since joined and the gate has already handed us its declaration.
+	 * That is the only reason the host's choices can reach `world.init()` before the map is
+	 * generated, and it is why this must keep working before `join()`.
+	 */
+	setWorldOptions(clientId, world) {
+		const w = sanitizeWorld(world);
+		if (w.modes.length || w.seed) this.worldOf.set(clientId, w);
+		else this.worldOf.delete(clientId);
+		return w;
+	}
+
+	/**
+	 * KDM-239 R3 — the world declaration that governs THIS session: the host's.
+	 *
+	 * The host is `_joined[0]` — the first player to join is the one whose machine owns the world
+	 * (`join-gate.js` seats the host before it will accept any guest). A guest never has an entry
+	 * here at all (the gate refuses to store one), so this is a single lookup rather than a
+	 * precedence rule; there is nothing to resolve between.
+	 */
+	_hostWorld() {
+		const host = this._joined[0];
+		const w = host !== undefined ? this.worldOf.get(host) : null;
+		return w ? { modes: w.modes.slice(), seed: w.seed } : { modes: [], seed: '' };
+	}
+
+	/**
 	 * KDM-238 — what perks this player STARTS WITH. The single fallback in the whole feature.
 	 *
 	 * The counterpart of `displayNameOf`, and it exists for the same reason: the legacy `#coop=` path
@@ -1286,7 +1348,32 @@ class SwapSession {
 		 * their own answer, or they would inherit whatever the previous occupant of the slot chose.
 		 * `perksOf` is what makes "declared nothing" mean KD's default rather than "leave it alone".
 		 */
-		this.world.applyPerks(this.perksOf(clientId));
+		/*
+		 * KDM-239 A3 — a seat starts from KD's OWN new-game state, then adds what this player chose.
+		 *
+		 * The base is what `init()` produced (`_baseStats`), NOT an empty map. Those consent-derived
+		 * perks are settings, not choices — a player never picked them and never sees them on the perk
+		 * screen — so replacing them with a player's declaration would silently drop them, which is
+		 * precisely the single-player divergence `mp-parity-oracle` caught.
+		 *
+		 * A UNION, so KDM-238's rule is untouched: a player who declared nothing gets exactly KD's
+		 * default, and a player who declared perks gets those ON TOP of it rather than instead of it.
+		 */
+		const base = (this._baseStats && this._baseStats.perks) || [];
+		this.world.applyPerks([...new Set([...base, ...this.perksOf(clientId)])]);
+		/*
+		 * KDM-239 A3 — and IMMEDIATELY after it, the game modes `applyPerks` just destroyed.
+		 *
+		 * `applyPerks` above rebuilds `KinkyDungeonStatsChoice` from scratch and keeps only real
+		 * perks. KD's game-mode keys live in that same Map but are NOT perks (they are written by
+		 * `KDUpdatePlugSettings`, and none of them is in `KinkyDungeonStatsPresets`), so the line
+		 * above silently wipes every mode the world was built with. Without this, the two players end
+		 * up in one world running on two different sets of rules — and nothing would say so.
+		 *
+		 * Unconditional and applied to EVERY seat, including a latecomer's: "both players agree about
+		 * the world" is the property, so it cannot depend on who joined when.
+		 */
+		this.world.applyModes((this._baseStats && this._baseStats.modes) || []);
 		const label = this.displayNameOf(clientId);
 		const chosen = this.nameOf.get(clientId) || '';
 		if (chosen) this.world.setPlayerName(chosen);
@@ -1382,7 +1469,7 @@ class SwapSession {
 	_perClientStores() {
 		return [
 			this.bundles, this.avatars, this.startOf, this.logs, this.actionMsgOf, this.nameOf,
-			this.perkOf,
+			this.perkOf, this.worldOf,
 			this._eventSeq, this.pendingEvents, this._sentSoundDesc, this.vitalsOf,
 			this.defeated, this.tiedOf, this._pending, this._stateFp,
 		];
