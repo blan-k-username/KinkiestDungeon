@@ -418,8 +418,29 @@
 				// In production these ride along in the bundle (KDGameData whole, minus
 				// KDGAMEDATA_WORLD_KEYS), so this closes the BUNDLE-LESS path — a snapshot alone must
 				// still describe which map it is.
-				roomType: (typeof KDGameData !== 'undefined' && KDGameData) ? KDGameData.RoomType : undefined,
-				mapMod: (typeof KDGameData !== 'undefined' && KDGameData) ? KDGameData.MapMod : undefined,
+				// KDM-263: generic now, from the ONE declared list — served to the browser as
+				// window.KDWorldGameDataKeys, GENERATED from KDGAMEDATA_WORLD_KEYS rather than copied
+				// beside it. The per-field pair this replaces had to be edited in four mirrored places
+				// every time a world key was added, and forgetting one of the four is silent.
+				worldGameData: (function () {
+					var o = {}, ks = (typeof window !== 'undefined' && window.KDWorldGameDataKeys) || null;
+					if (!ks) {
+						// LOUD, not silent. Without the list this returns {} and the receiver adopts nothing
+						// — which is KDM-222's bug exactly (measured then: the wrong alt type moved 0.054 of
+						// the frame), and it looks like a working snapshot right up until the pixels differ.
+						// Production serves the list at WORLD_KEYS_ROUTE, ahead of this file.
+						try {
+							console.error('[mp-client] window.KDWorldGameDataKeys is missing — the WORLD half of '
+								+ 'KDGameData will not be serialised. Load /mp/kd-world-keys.js before render-client.js.');
+						} catch (e) { /* no console; the caller still gets an empty set */ }
+						return o;
+					}
+					if (typeof KDGameData === 'undefined' || !KDGameData) return o;
+					for (var i = 0; i < ks.length; i++) {
+						if (KDGameData[ks[i]] !== undefined) o[ks[i]] = clone(KDGameData[ks[i]]);
+					}
+					return o;
+				})(),
 			};
 		},
 
@@ -608,14 +629,26 @@
 			}
 			if (typeof MiniGameKinkyDungeonLevel !== 'undefined') MiniGameKinkyDungeonLevel = s.level;
 			if (s.checkpoint && typeof MiniGameKinkyDungeonCheckpoint !== 'undefined') MiniGameKinkyDungeonCheckpoint = s.checkpoint;
-			// KDM-222: restore the alt-type inputs alongside the level they are looked up with, so the
-			// lightmap invalidated below recomputes against the map we just adopted rather than the one
-			// we were on. `!== undefined` (not truthiness) on purpose: '' is the REAL value for a plain
-			// dungeon floor, and skipping it would leave the previous room's type in place — exactly
-			// the bug, mirrored. Older snapshots have neither field and are left untouched.
-			if (typeof KDGameData !== 'undefined' && KDGameData) {
-				if (s.roomType !== undefined) KDGameData.RoomType = s.roomType;
-				if (s.mapMod !== undefined) KDGameData.MapMod = s.mapMod;
+			/*
+			 * KDM-222/263: adopt the WORLD half of KDGameData — the room the party is in, the map mod,
+			 * where it stands on the journey and which route it agreed to take.
+			 *
+			 * KDM-222 shipped two of these by name because the lightmap needs them: KinkyDungeonVision
+			 * reads `KDGetAltType(level)`, which resolves off RoomType/MapMod rather than the level
+			 * number, so a snapshot carrying only the level recomputed the lightmap with the wrong alt
+			 * type. KDM-263 made the set generic — `_clientBundle` STRIPS every declared world key from
+			 * the per-player bundle, so each key the list gains is a key that must arrive here instead,
+			 * and the per-field form made that omission silent.
+			 *
+			 * Iterating what was SENT (not a list held here) keeps an older snapshot working and keeps
+			 * the declaration in ONE place, server-side. `!== undefined` is implicit in the same way it
+			 * was explicit before: the serializer omits only keys the world itself does not have, and
+			 * '' is a REAL RoomType that must come through.
+			 *
+			 * Runs AFTER adoptBundle, so the world's answer wins over any stale copy the bundle held.
+			 */
+			if (typeof KDGameData !== 'undefined' && KDGameData && s.worldGameData) {
+				for (var wk in s.worldGameData) KDGameData[wk] = s.worldGameData[wk];
 			}
 			/*
 			 * KDM-219: invalidate the derived vision/light cache HERE, where the state it derives

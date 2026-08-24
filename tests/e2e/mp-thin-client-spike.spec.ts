@@ -25,6 +25,8 @@
 import { test, expect } from '../helpers/playwright-fixtures';
 import { bootKD } from '../helpers/bundle';
 import { installRenderSurfaceReader, readRenderSurface, frameDiffRatio, PAINTED_MIN_COLORS } from './helpers/render-surface';
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { KDGAMEDATA_WORLD_KEYS } = require('../../tools/mp-server/headless-host');
 
 /** Long enough for the renderer to settle after a map swap (measured: the frame is stable well inside this). */
 const SETTLE = 2500;
@@ -70,6 +72,21 @@ test('stock renderer is driven purely from an applied render-state snapshot (no 
 	await installRenderSurfaceReader(isolatedPage);
 	await bootKD(isolatedPage);
 
+	/*
+	 * KDM-263: the world-key list, FIRST — render-client.js consumes `window.KDWorldGameDataKeys` to
+	 * decide which half of `KDGameData` belongs to the world and therefore travels in the snapshot.
+	 *
+	 * Production serves it from `demo-server.js` (WORLD_KEYS_ROUTE, injected ahead of render-client);
+	 * this spec injects render-client bare, so it must supply the same thing. It is taken from the
+	 * host's own constant rather than written out here — a second copy is exactly the drift the served
+	 * route exists to prevent.
+	 *
+	 * Without it, `serialize()` emits an empty world half and the applied frame lands ~0.055 from A's
+	 * picture: KDM-222's wrong-alt-type bug, re-created. That is how this was caught.
+	 */
+	await isolatedPage.addScriptTag({
+		content: `window.KDWorldGameDataKeys = ${JSON.stringify(KDGAMEDATA_WORLD_KEYS)};`,
+	});
 	// Inject the production thin-client core (classic script → shares bundle scope).
 	await isolatedPage.addScriptTag({ path: 'tools/mp-server/client/render-client.js' });
 	expect(await isolatedPage.evaluate(() => typeof (window as any).KDRenderClient)).toBe('object');

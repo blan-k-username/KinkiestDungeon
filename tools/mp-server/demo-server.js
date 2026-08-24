@@ -30,6 +30,12 @@ const { KD_DELTA_BROWSER } = require('./kd-delta');
 const { KD_PEACE_DIALOGUE_BROWSER } = require('./kd-peace-dialogue');
 const { KD_DISCONNECT_DIALOGUE_BROWSER } = require('./kd-disconnect-dialogue');
 const { KD_ABSENT_RESET_BROWSER } = require('./kd-absent-reset');
+// KDM-263 — the routed journey choice: the wrap that stops the client committing a route locally,
+// and the KDInputTypes entry the routed choice is dispatched through. Same two-runtime rule again.
+const { KD_JOURNEY_CHOICE_BROWSER } = require('./kd-journey-choice');
+// …and the world-key list itself, GENERATED from the host's own declaration below rather than
+// copied. render-client.js needs it to build the world half of a snapshot.
+const { KDGAMEDATA_WORLD_KEYS } = require('./headless-host');
 // KDM-239 R3 — the world/player mode classification, shared with the host for the same reason the
 // codec and the delta are: a client that disagrees about which keys are the world's would declare a
 // world the server then silently drops.
@@ -70,6 +76,10 @@ const DISCONNECT_DLG_ROUTE = '/mp/kd-disconnect-dialogue.js';
 const ABSENT_RESET_ROUTE = '/mp/kd-absent-reset.js';
 // KDM-239: the game-mode key -> source-global table, on the same two-runtime terms.
 const GAME_MODES_ROUTE = '/mp/game-modes.js';
+// KDM-263: the journey-choice wrap + its routed input type, on the same two-runtime terms.
+const JOURNEY_ROUTE = '/mp/kd-journey-choice.js';
+// KDM-263: the declared world-key list, serialised straight out of the host's own constant.
+const WORLD_KEYS_ROUTE = '/mp/kd-world-keys.js';
 const CODEC_BODY = `${KD_CODEC}\n;(typeof window !== 'undefined' ? window : globalThis).KDCodec = ` +
 	`{ kdEnc: kdEnc, kdDec: kdDec, kdSer: kdSer };\n`;
 
@@ -87,6 +97,9 @@ SYNTHETIC_ROUTES[PEACE_DLG_ROUTE] = KD_PEACE_DIALOGUE_BROWSER;
 SYNTHETIC_ROUTES[DISCONNECT_DLG_ROUTE] = KD_DISCONNECT_DIALOGUE_BROWSER;
 SYNTHETIC_ROUTES[ABSENT_RESET_ROUTE] = KD_ABSENT_RESET_BROWSER;
 SYNTHETIC_ROUTES[GAME_MODES_ROUTE] = GAME_MODES_BROWSER;
+SYNTHETIC_ROUTES[JOURNEY_ROUTE] = KD_JOURNEY_CHOICE_BROWSER;
+SYNTHETIC_ROUTES[WORLD_KEYS_ROUTE] = '(typeof window !== \'undefined\' ? window : globalThis)' +
+	`.KDWorldGameDataKeys = ${JSON.stringify(KDGAMEDATA_WORLD_KEYS)};\n`;
 
 // Scripts injected just before </body> in index.html (in order).
 const INJECT = [
@@ -96,6 +109,7 @@ const INJECT = [
 	'/tools/mp-server/client/coop-mods.js',
 	CODEC_ROUTE,                    // must precede render-client.js — it consumes window.KDCodec
 	ABSENT_RESET_ROUTE,             // must precede render-client.js — it consumes window.KDAbsentReset
+	WORLD_KEYS_ROUTE,               // must precede render-client.js — it consumes window.KDWorldGameDataKeys
 	DELTA_ROUTE,                    // must precede coop-bootstrap.js — it consumes window.KDDelta
 	GAME_MODES_ROUTE,               // must precede coop-bootstrap.js — it consumes window.KDGameModes
 	'/tools/mp-server/client/render-client.js',
@@ -107,6 +121,10 @@ const INJECT = [
 	'/tools/mp-server/client/coop-lobby.js',
 	PEACE_DLG_ROUTE,                // KDM-230: needs KDDialogue, so after the bundle is in scope
 	DISCONNECT_DLG_ROUTE,           // KDM-251: same — needs KDDialogue in scope
+	// KDM-263: wraps KDRenderJourneyMap and registers KDInputTypes.KDCoopJourney, so it needs the
+	// bundle in scope. After render-client.js, whose KDSendInput wrapper is what carries the routed
+	// choice to the server — the wrap calls KDSendInput, so the routing gate must already be on.
+	JOURNEY_ROUTE,
 ];
 
 /* ── Serve-time workarounds for UPSTREAM crashes ──────────────────────────────────────────────

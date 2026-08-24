@@ -119,10 +119,31 @@ const KDGAMEDATA_WORLD_KEYS = Object.freeze([
 	// which the game generates a PerkRoom instead of advancing (KinkyDungeonTiles.ts:930-946), so a
 	// per-player copy makes the between-floors room appear or not depending on WHO took the stairs.
 	//
-	// Deliberately NOT here: JourneyMap, JourneyTarget, UseJourneyTarget. Those are KDM-263's, whose
-	// arbitration design owns what a "target" means when two players disagree. A multi-floor descent
-	// does not need them — the acting player's target is used, which is correct until there is a rule.
 	'JourneyX', 'JourneyY', 'HighestLevelCurrent', 'HighestLevel',
+	// KDM-263 A6 — WHICH ROUTE the party is taking out of the hub, and the map of routes it is
+	// choosing from.
+	//
+	// KDM-265 deliberately left these three per-player, because until there was a rule for what a
+	// "target" means when two players disagree, the acting player's target was the only answer
+	// available. KDM-263 IS that rule — one pending proposal, one agreed target, arbitrated by the
+	// session — so the committed answer is now the PARTY's, and can no longer be a copy belonging to
+	// whoever happens to be swapped in.
+	//
+	// Criterion (b), and by the same evidence as JourneyX/JourneyY above: `KDAdvanceLevel`
+	// (KinkyDungeonTiles.ts:859-872) COPIES JourneyTarget into JourneyX/JourneyY and clears
+	// UseJourneyTarget in one statement block, so the five are written together and splitting them
+	// leaves the set half-classified. `KDStairActions.ts:45` then reads
+	// `JourneyMap[JourneyTarget]` for the next floor's MapMod / Faction / EscapeMethod / RoomType —
+	// a per-player copy makes the next floor whichever player's copy was swapped in, which is R11's
+	// bug stated exactly.
+	//
+	// JourneyMap belongs with them for a reason of its own: `KDAdvanceLevel` MUTATES it on every
+	// descent, pruning the departed slot's Connections down to the one actually taken. Two players'
+	// maps are byte-identical at boot — MEASURED, KDM-241 P2 — so the divergence does not exist until
+	// a descent creates it, and then one player's pruned map would be stamped onto the party (R10).
+	// A test comparing two boot-time maps would therefore be vacuous; the coverage constructs the
+	// divergence instead.
+	'JourneyMap', 'JourneyTarget', 'UseJourneyTarget',
 ]);
 
 /**
@@ -2310,13 +2331,27 @@ class HeadlessHost {
 				buffs: clone(typeof KinkyDungeonPlayerBuffs !== 'undefined' ? KinkyDungeonPlayerBuffs : {}),
 				level: (typeof MiniGameKinkyDungeonLevel !== 'undefined') ? MiniGameKinkyDungeonLevel : 1,
 				checkpoint: (typeof MiniGameKinkyDungeonCheckpoint !== 'undefined') ? MiniGameKinkyDungeonCheckpoint : 'grv',
-				// KDM-222: the other two inputs to the light-params lookup that level/checkpoint feed.
-				// KDGetAltType resolves off KDGameData.RoomType/.MapMod, not off the level number, so a
-				// snapshot carrying only the level recomputes the lightmap with the wrong alt type.
-				// Mirrors client/render-client.js serialize(); keep the two in step.
-				// (No backticks in this comment on purpose — it lives inside an eval template literal.)
-				roomType: (typeof KDGameData !== 'undefined' && KDGameData) ? KDGameData.RoomType : undefined,
-				mapMod: (typeof KDGameData !== 'undefined' && KDGameData) ? KDGameData.MapMod : undefined,
+				// KDM-263: the WORLD half of KDGameData, whole — every key KDGAMEDATA_WORLD_KEYS
+				// declares, taken from the world and adopted verbatim by the client.
+				//
+				// This replaced a hand-written roomType/mapMod pair (KDM-222), which was the same idea
+				// spelled out one field at a time in FOUR mirrored places: here, applyRenderState below,
+				// and render-client.js serialize/apply. _clientBundle already STRIPS these keys from the
+				// per-player bundle, so every world key the list gains is a key the client stops
+				// receiving and must be sent here instead - and the per-field form made that a silent
+				// omission, four edits wide, every single time. KDM-263 adds three at once.
+				//
+				// Cheap despite the size: the state frame is delta-encoded (KDM-206), so a value that
+				// did not change costs nothing on the wire.
+				// (No backticks in this comment on purpose - it lives inside an eval template literal.)
+				worldGameData: (function(){
+					var o = {}, ks = ${JSON.stringify(KDGAMEDATA_WORLD_KEYS)};
+					if (typeof KDGameData === 'undefined' || !KDGameData) return o;
+					for (var i = 0; i < ks.length; i++) {
+						if (KDGameData[ks[i]] !== undefined) o[ks[i]] = clone(KDGameData[ks[i]]);
+					}
+					return o;
+				})(),
 			};
 		})()`);
 	}
@@ -2359,11 +2394,12 @@ class HeadlessHost {
 			if (typeof KinkyDungeonActionMessageColor !== 'undefined') KinkyDungeonActionMessageColor = s.messages.actionColor;
 			if (typeof MiniGameKinkyDungeonLevel !== 'undefined') MiniGameKinkyDungeonLevel = s.level;
 			if (s.checkpoint && typeof MiniGameKinkyDungeonCheckpoint !== 'undefined') MiniGameKinkyDungeonCheckpoint = s.checkpoint;
-			// KDM-222 — see serializeRenderState. '' is a REAL RoomType (a plain dungeon floor), so
-			// test !== undefined, not truthiness, or the previous room's type survives the adopt.
-			if (typeof KDGameData !== 'undefined' && KDGameData) {
-				if (s.roomType !== undefined) KDGameData.RoomType = s.roomType;
-				if (s.mapMod !== undefined) KDGameData.MapMod = s.mapMod;
+			// KDM-263 — see serializeRenderState: the world half of KDGameData, adopted generically.
+			// AFTER restorePlayer (which ran before this eval), so the world's answer wins over any
+			// copy the bundle still carried. Iterating what was SENT rather than the declared list
+			// keeps an older snapshot working: a key it does not carry is simply left alone.
+			if (typeof KDGameData !== 'undefined' && KDGameData && s.worldGameData) {
+				for (var wk in s.worldGameData) KDGameData[wk] = s.worldGameData[wk];
 			}
 			return { ok: true, entities: KDMapData.Entities.length, grid: KDMapData.Grid.length };
 		})()`);

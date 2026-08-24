@@ -19,6 +19,7 @@ KD-069 (orchestrator), KD-070 (reconciler).
 | `lobby.js` | `Lobby` — generalized **N-player (2–4)** session over the transport: join flow, N-player turn clock + reconciler, **PvP**, and **server-side mod loading**. KD-080. |
 | `integration.js` | `IntegratedSession` (extends `Lobby`) — **real in-game integration**: players injected as real KD entities, enemy AI attacks routed to the target's instance, world-adjudicated P2P, independent params. KD-082. |
 | `kd-absent-reset.js` | The "absent from the bundle ⇒ back to its default" rule, exported as source text for both runtimes. The capture only records a global while it DIFFERS from the post-init baseline, so a global returning to its default drops OUT of the bundle; the host already reset those, the browser did not. Served to the client at `/mp/kd-absent-reset.js`. |
+| `kd-journey-choice.js` | KDM-263 — the routed journey choice, as source text for both runtimes: a `KDRenderJourneyMap` wrap that reverts KD's inline `JourneyTarget` write and re-emits it as `KDSendInput('KDCoopJourney', {x,y})`, plus the `KDInputTypes` entry that dispatches it server-side. Served to the client at `/mp/kd-journey-choice.js`. |
 | `transport/` | Transport boundary (KD-081): `protocol.js` (commands + `dispatch`), `in-process.js`, `worker-thread.js` (+`worker-entry.js`), `socket.js` (+`child-entry.js`), `index.js` (registry). |
 | `mod-sync.js` | KDM-249 — reconciling two mod sets: `diffDeclarations` (pure) + an in-memory, content-addressed `ModStore` for the payloads. No socket, no world, no game globals. |
 | `client/coop-mods.js` | KDM-249 — the browser half of mod sync: latches `KDGetMods` before the first frame, declares/publishes/fetches, then drives `KDExecuteMods`. See "Mod sync" below. |
@@ -539,3 +540,51 @@ generated but before `KDGenMapCallback = null`. `KinkyDungeonSaveGame` itself is
 **Still open:** one player's capture drags the uncaptured partner into the jail map with them. The
 party stays coherent (both land, both keep avatars, both are told) but the semantics are wrong — see
 KDM-261.
+
+## Agreeing the route out of the hub (KDM-263)
+
+Between floors the party stands in a `PerkRoom` and must pick a journey slot before the stairs will
+fire — KD's own `KDCancelFilters.JourneyChoice` refuses them while `JourneyTarget`/`UseJourneyTarget`
+are unset. Two things had to change for two players.
+
+- **The choice is now a routed input.** `KDRenderJourneyMap` writes `KDGameData.JourneyTarget` INLINE
+  from the mouse and from the keyboard (`KDJourney.ts:388-395`, `:434-452`) — inside the DRAW
+  function, never through `KDSendInput`. A render-only client therefore moved its own target and
+  nothing else, and the party could not leave the hub at all. `kd-journey-choice.js` wraps that draw
+  call (`_prev` first, so KD keeps owning what a legal slot is), REVERTS whatever it wrote and emits
+  `KDSendInput('KDCoopJourney', {x,y})` instead. The client is now structurally incapable of
+  committing a route; the only target it displays is the one the world sent it.
+  A write of `null` is reverted but not routed — KD nulls the target to REFUSE (an unconnected slot,
+  the Cancel button), and KD's own `JourneyChoice` cancellation stays the one refusal path.
+- **The party has to agree.** `SwapSession._journey = {pending, proposer}` — in the gateway, NOT in
+  `KDGameData`, because "wait for your partner to agree" cannot exist in a one-player game. The first
+  player's pick is a proposal announced to both; the same slot from the OTHER player commits it; a
+  different slot replaces it and makes that player the proposer, so a disagreement re-opens the
+  question instead of deadlocking. **One seat commits immediately**, so a solo player cannot tell
+  co-op from stock KD. A slot that is not a connection of the party's current slot is dropped.
+
+`JourneyMap`, `JourneyTarget` and `UseJourneyTarget` are `KDGAMEDATA_WORLD_KEYS` entries now, with
+`JourneyX`/`JourneyY` from KDM-265. `KDStairActions.ts:45` reads `JourneyMap[JourneyTarget]` for the
+next floor's `MapMod`/`Faction`/`EscapeMethod`/`RoomType`, and `KDAdvanceLevel` PRUNES `JourneyMap` on
+every descent — per-player copies made both of those "whoever was swapped in".
+
+### The world half of `KDGameData` crosses the wire in one piece
+
+`_clientBundle` strips every declared world key from the per-player bundle, so each key the list gains
+is a key the client stops receiving and must be sent another way. That used to be a hand-written
+`roomType`/`mapMod` pair mirrored in FOUR places (`serializeRenderState`, `applyRenderState`, and
+render-client's `serialize`/`apply`); it is now one generic `worldGameData` object built from the
+declared list. **Adding a world key needs no wire change at all.**
+
+The browser gets the list at `/mp/kd-world-keys.js`, generated from `KDGAMEDATA_WORLD_KEYS` itself.
+A page that injects `render-client.js` bare (as `mp-thin-client-spike.spec.ts` does) must supply it —
+`serialize()` says so loudly on the console rather than quietly shipping an empty world half, which
+is KDM-222's wrong-alt-type bug re-created.
+
+### ⚠️ This wrap is text-coupled to an upstream DRAW function
+
+If upstream moves the journey click out of `KDRenderJourneyMap`, the wrap silently stops routing and
+the feature reverts to the bug it fixes, with every arbitration test still green. So it counts what it
+sees (`__KDCoopJourneyStats.observed`) and `tests/unit/mp-journey-agreement.spec.ts` drives a real write
+through KD's own code path with a CONTROL that calls the UNWRAPPED original and demands it still
+writes. That control failing IS the drift alarm — read its message before assuming the wrap is wrong.

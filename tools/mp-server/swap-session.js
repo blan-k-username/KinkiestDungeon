@@ -26,6 +26,7 @@
 const { HeadlessHost, KDGAMEDATA_WORLD_KEYS } = require('./headless-host');
 const { PeaceRegistry } = require('./peace');
 const { KD_PEACE_DIALOGUE } = require('./kd-peace-dialogue');
+const { KD_JOURNEY_CHOICE } = require('./kd-journey-choice');
 const { KD_DISCONNECT_DIALOGUE, HOST_LOST_DIALOGUE, PEER_LOST_DIALOGUE } = require('./kd-disconnect-dialogue');
 const { sanitizeName, sanitizePerks } = require('./join-gate');
 // KDM-239 R3/R5 — same normaliser the gate uses, so what the session stores and what the gate
@@ -224,6 +225,20 @@ class SwapSession {
 		// KDM-196: whether this client's last delivered `sounddesc` list was non-empty, so a list that
 		// has just emptied is still sent once (to clear theirs) and silence stays silent afterwards.
 		this._sentSoundDesc = new Map();
+		/*
+		 * KDM-263 A2 — THE PARTY'S ROUTE NEGOTIATION. One pending proposal, and who made it.
+		 *
+		 * Deliberately here and NOT in `KDGameData`. "Wait for your partner to agree" cannot exist in a
+		 * one-player game, which is this epic's own test for what belongs in the gateway rather than in
+		 * the world (KDM-225 D-series). Keeping it off `KDGameData` also keeps it out of every state
+		 * bundle, so it never crosses the wire as replicated state and no client can be confused about
+		 * whose turn it is to agree.
+		 *
+		 * The AGREED answer is the opposite: it is `KDGameData.JourneyTarget`/`UseJourneyTarget`, KD's
+		 * own vocabulary, now world-scoped (KDGAMEDATA_WORLD_KEYS). There is no parallel route model —
+		 * R16 — only a proposal that has not become one yet.
+		 */
+		this._journey = { pending: null, proposer: null };
 		this.vitalsOf = new Map();    // id -> {will,willMax,...} last-known vitals (KD-098 HP bar)
 		this.defeated = new Set();    // ids whose Will hit 0 — incapacitated (KD-099)
 		this.tiedOf = new Map();      // id -> Set of restraint NAMES already reconciled onto this peer (KD-101)
@@ -362,6 +377,36 @@ class SwapSession {
 			globalThis.KDCoopPeerLostDecide = function (solo) { globalThis.__kdCoopSolo = !!solo; };
 			globalThis.__kdCoopSolo = undefined;
 		})()`);
+		/*
+		 * KDM-263 A3/A4 — the routed journey choice, and the hook its input type calls.
+		 *
+		 * Registered in the world for the same reason the peace dialogue is: this is where a routed
+		 * input is dispatched, so this is where `KDInputTypes.KDCoopJourney` has to exist. The browser
+		 * is served the SAME source text (demo-server INJECT), where the `KDRenderJourneyMap` wrap is
+		 * the half that actually fires.
+		 *
+		 * ONCE, with no re-assert loop: MEASURED in KDM-241 (P1) that `KDInputTypes` is in no player's
+		 * captured globals and a planted entry survives a full turn, so a swap cannot lose it. That
+		 * measurement is pinned by a test rather than trusted.
+		 */
+		this.world.loadMod(KD_JOURNEY_CHOICE);
+		this.world.eval(`(function(){
+			globalThis.KDCoopJourneyPropose = function (slot) {
+				globalThis.__kdCoopJourneyProposal = (slot && typeof slot.x === 'number' && typeof slot.y === 'number')
+					? { x: slot.x, y: slot.y } : undefined;
+			};
+			globalThis.__kdCoopJourneyProposal = undefined;
+		})()`);
+		/*
+		 * …and say what kind of input it is, rather than letting the session learn it the hard way.
+		 *
+		 * The lockstep default would make proposing a route WAIT for the other player to move — while
+		 * the thing they are waiting to be asked about is the proposal itself. It consumes no time
+		 * (the handler returns "" and calls nothing that advances), so 'ui' is the truth, not a
+		 * convenience. `_learnInputKind` may still PROMOTE it if it is ever observed advancing time;
+		 * the asymmetry there is deliberate and this does not weaken it.
+		 */
+		this.inputKind.set('KDCoopJourney', 'ui');
 		// KDM-227: baseline for the hub-arrival check. Seeded HERE rather than left undefined so the
 		// room the session STARTS in is not mistaken for an arrival — the game boots on the journey
 		// hub itself (level 0), so the very first turn of every session would otherwise fire a reset.
@@ -673,6 +718,20 @@ class SwapSession {
 	 * `null` means "nothing was answered", which is different from `false` ("answered: no").
 	 */
 	_takeCoopFlag(name) {
+		const v = this._takeCoopValue(name);
+		return (v === true || v === false) ? v : null;
+	}
+
+	/**
+	 * KDM-263 — the same read-and-clear, for a hook that records a VALUE rather than a yes/no.
+	 *
+	 * `_takeCoopFlag` narrows to booleans on purpose (its three callers must tell "answered: no" from
+	 * "nothing was answered"), so a journey proposal — an {x,y} — cannot use it directly. The
+	 * take-once eval is the load-bearing part and stays in ONE place; only the narrowing differs.
+	 *
+	 * `null` means nothing was recorded.
+	 */
+	_takeCoopValue(name) {
 		try {
 			/*
 			 * Two shapes here are load-bearing, both taught by KDM-218's payload guard:
@@ -688,7 +747,7 @@ class SwapSession {
 			 */
 			const key = JSON.stringify(String(name));
 			const v = this.world.eval(`(function(){ var v = globalThis[${key}]; globalThis[${key}] = undefined; return v; })()`);
-			return (v === true || v === false) ? v : null;
+			return (v === undefined) ? null : v;
 		} catch (e) { return null; }
 	}
 
@@ -700,6 +759,129 @@ class SwapSession {
 		if (res.ok && res.peace) this._settlePeace(clientId, res.from);
 		this._dbg(`PEACE ${accept ? 'ACCEPTED' : 'DECLINED'} by ${clientId} (via dialogue)`);
 		return true;
+	}
+
+	/* ── KDM-263: agreeing the route out of the hub ───────────────────────────────────────────────── */
+
+	/**
+	 * A5/R4-R7 — fold ONE routed journey choice into the party's decision.
+	 *
+	 * Called from the immediate-apply path with `clientId` already swapped out and banked, exactly
+	 * like `_settlePeaceAnswerFrom` and for the same reason: everything below writes to the WORLD (the
+	 * journey keys are world-scoped now), and a world write performed while the wrong player is
+	 * swapped in is how KDM-230 handed one player another's whole state.
+	 *
+	 * The rules, in the order they are asked:
+	 *
+	 *   · NOT A CONNECTION of the party's current slot → dropped, silently. R8: KD's own
+	 *     `KDCancelFilters.JourneyChoice` is the ONE refusal path, and it is already in force while
+	 *     nothing is committed. Inventing a second one here would mean two different answers to "why
+	 *     can't I take these stairs".
+	 *   · ONE SEAT → committed immediately (R15). With nobody to agree with, a proposal is the
+	 *     decision, and the player must not be able to tell co-op from stock KD.
+	 *   · THE SAME SLOT, FROM THE OTHER PLAYER → agreed, and committed (R6).
+	 *   · A DIFFERENT SLOT → replaces the pending proposal and makes the new player the proposer (R7).
+	 *     A disagreement re-opens the question instead of deadlocking; the alternative — refusing the
+	 *     second player's choice — is a soft-lock in which neither can move the party.
+	 *
+	 * A proposal arriving after a target is already committed re-opens it too, by the same rule. That
+	 * is deliberate: the party has not left yet, so the decision is not final, and there is no state
+	 * in which one player is stuck with a route they no longer want.
+	 */
+	_settleJourneyProposalFrom(clientId) {
+		const prop = this._takeCoopValue('__kdCoopJourneyProposal');
+		if (!prop || typeof prop.x !== 'number' || typeof prop.y !== 'number') return false;
+		const slot = { x: prop.x, y: prop.y };
+		if (!this._journeySlotIsConnected(slot)) {
+			this._dbg(`JOURNEY ${clientId} picked ${slot.x},${slot.y} — not a connection, dropped (KD refuses it)`);
+			return true;
+		}
+		if (this._joined.length <= 1) { this._commitJourneyTarget(slot, clientId); return true; }
+
+		const pend = this._journey.pending;
+		const same = pend && pend.x === slot.x && pend.y === slot.y;
+		if (same && this._journey.proposer === clientId) return true;   // re-picking your own: nothing new
+		if (same) { this._commitJourneyTarget(slot, clientId); return true; }
+
+		this._journey = { pending: slot, proposer: clientId };
+		// Not committed, so KD's JourneyChoice filter is still what stops the stairs — clear whatever a
+		// previous agreement had committed, or the party could leave on a route it has stopped agreeing on.
+		this._clearJourneyTarget();
+		this._broadcast(`${this.displayNameOf(clientId)} proposes the route to ${slot.x},${slot.y}. ` +
+			'Pick the same one to agree.', '#88ccff');
+		this._dbg(`JOURNEY proposal ${slot.x},${slot.y} by ${clientId}`);
+		return true;
+	}
+
+	/**
+	 * Is this slot reachable from where the party stands? KD's own answer, read from KD's own data.
+	 *
+	 * The connection test is duplicated from `KDRenderJourneyMap` (KDJourney.ts:385-388) rather than
+	 * shared, because the client's copy is the DRAW-side check and this is the authoritative one — a
+	 * server that trusted the client's verdict would let a modified client walk anywhere on the map.
+	 * It reads `Connections` directly, so it stays KD's model and not a second route graph (R16).
+	 */
+	_journeySlotIsConnected(slot) {
+		try {
+			return !!this.world.eval(`(function(){
+				if (typeof KDGameData === 'undefined' || !KDGameData || !KDGameData.JourneyMap) return false;
+				var cur = KDGameData.JourneyMap[KDGameData.JourneyX + ',' + KDGameData.JourneyY];
+				if (!cur || !cur.Connections) return false;
+				var t = ${JSON.stringify(slot)};
+				for (var i = 0; i < cur.Connections.length; i++) {
+					if (cur.Connections[i].x === t.x && cur.Connections[i].y === t.y) return true;
+				}
+				return false;
+			})()`);
+		} catch (e) { return false; }
+	}
+
+	/** R6 — the party agreed: write KD's own answer, in KD's own fields, and say so. */
+	_commitJourneyTarget(slot, byId) {
+		this._journey = { pending: null, proposer: null };
+		this.world.eval(`(function(){
+			if (typeof KDGameData === 'undefined' || !KDGameData) return;
+			KDGameData.JourneyTarget = ${JSON.stringify(slot)};
+			KDGameData.UseJourneyTarget = true;
+		})()`);
+		this._broadcast(`The party takes the route to ${slot.x},${slot.y}.`, '#88ff99');
+		this._dbg(`JOURNEY committed ${slot.x},${slot.y} (agreed by ${byId})`);
+	}
+
+	/**
+	 * Un-commit: back to "no route agreed", which is precisely the state KD's own JourneyChoice filter
+	 * refuses the stairs in. `UseJourneyTarget` is left alone — KD sets it true when it cancels
+	 * (`KDCancelEvents.JourneyChoice`) and reads the PAIR, so clearing the target is the whole of it.
+	 */
+	_clearJourneyTarget() {
+		try {
+			this.world.eval('(function(){ if (typeof KDGameData !== "undefined" && KDGameData) KDGameData.JourneyTarget = null; })()');
+		} catch (e) { /* no world to clear */ }
+	}
+
+	/**
+	 * A2 — the party is somewhere else now, so an unfinished negotiation about how to get there is
+	 * over. Called from `_onMapChanged`, which is strictly more general than KDM-262's hub detector
+	 * (arriving at the hub IS a map change) and therefore also covers LEAVING it — a second call site
+	 * on the hub detector would be a duplicate, not extra safety.
+	 */
+	_resetJourneyProposal() {
+		if (!this._journey.pending) return;
+		this._journey = { pending: null, proposer: null };
+		this._dbg('JOURNEY proposal cleared (the party changed map)');
+	}
+
+	/** What the party has agreed and what is merely proposed — for tests and diagnostics. */
+	journeyReport() {
+		let committed = null;
+		try {
+			committed = this.world.eval(`(function(){
+				if (typeof KDGameData === 'undefined' || !KDGameData || !KDGameData.JourneyTarget) return null;
+				return { x: KDGameData.JourneyTarget.x, y: KDGameData.JourneyTarget.y,
+					use: !!KDGameData.UseJourneyTarget };
+			})()`);
+		} catch (e) { committed = null; }
+		return { pending: this._journey.pending, proposer: this._journey.proposer, committed };
 	}
 
 	/**
@@ -736,9 +918,7 @@ class SwapSession {
 			if (eid == null) continue;
 			try { this.world.setAvatarHostile(eid, false); } catch (e) { /* avatar gone */ }
 		}
-		const entries = (this.world.sendFeedback('Peace between ' + a + ' and ' + b + '.',
-			'#88ff99', 10) || {}).entries || [];
-		for (const id of this._joined) this._pushLog(id, entries);
+		this._broadcast('Peace between ' + a + ' and ' + b + '.', '#88ff99');
 		this._dbg(`PEACE settled ${a} <-> ${b}`);
 	}
 
@@ -795,6 +975,13 @@ class SwapSession {
 			 * stats, wrong everything. Settle only once this player's own state is safely banked.
 			 */
 			const answered = this._settlePeaceAnswerFrom(clientId);
+			/*
+			 * KDM-263 — and a routed journey choice settles here for the same two reasons: it arrives
+			 * as an ordinary input, and everything it decides is a WORLD write that must not happen
+			 * while somebody else is swapped in. Placed after the capture above, exactly like the peace
+			 * answer, so this player's own state is banked before anything else touches the world.
+			 */
+			this._settleJourneyProposalFrom(clientId);
 			/*
 			 * KDM-253: the disconnect answers are `dialogue` inputs too, and they are READ here but
 			 * ACTED ON by the caller.
@@ -1818,10 +2005,7 @@ class SwapSession {
 	/** Clear a player's defeat + broadcast a shared "recovered" message to everyone. KD-099 "freed". */
 	_markRecovered(id, why) {
 		this.defeated.delete(id);
-		const txt = `Player ${id} is back on their feet!`;
-		const fb = this.world.sendFeedback(txt, '#33ff66', 12);
-		const entries = (fb && fb.entries) || [];
-		for (const pid of this._joined) this._pushLog(pid, entries);
+		this._broadcast(`Player ${id} is back on their feet!`, '#33ff66', 12);
 		this._emitEvent(id, { text: 'Recovered!', color: '#33ff66' });
 		this._dbg(`RECOVERED ${id} (${why})`);
 	}
@@ -1829,10 +2013,7 @@ class SwapSession {
 	/** Flag a player defeated + broadcast a shared "defeated" message to everyone. KD-099/100. */
 	_markDefeated(id, why) {
 		this.defeated.add(id);
-		const txt = `Player ${id} has been defeated!`;
-		const fb = this.world.sendFeedback(txt, '#ff3333', 12);
-		const entries = (fb && fb.entries) || [];
-		for (const pid of this._joined) this._pushLog(pid, entries);
+		this._broadcast(`Player ${id} has been defeated!`, '#ff3333', 12);
 		this._emitEvent(id, { text: 'Defeated!', color: '#ff3333' });
 		this._dbg(`DEFEAT ${id} (${why})`);
 	}
@@ -1909,6 +2090,8 @@ class SwapSession {
 		// Leave the acting player swapped back in: the caller is mid-apply and captures their bundle
 		// immediately after this returns, so anything else here would persist the wrong player's state.
 		if (this.bundles.has(actingId)) this.world.restorePlayer(this.bundles.get(actingId));
+		// KDM-263 A2: an unfinished argument about how to get here is over now that we are here.
+		this._resetJourneyProposal();
 		this._announceMapChange(mapId);
 		this._dbg(`MAP ${this._lastMapId} -> ${mapId} (party re-landed, ${ids.length} players)`);
 	}
@@ -1927,12 +2110,9 @@ class SwapSession {
 	_announceMapChange(mapId) {
 		const room = String(mapId || '').split('|')[1] || '';
 		const level = this.world.getLevel();
-		const txt = room
+		this._broadcast(room
 			? `The party arrives at ${room} on floor ${level}.`
-			: `The party descends to floor ${level}.`;
-		const fb = this.world.sendFeedback(txt, '#88ccff', 10);
-		const entries = (fb && fb.entries) || [];
-		for (const pid of this._joined) this._pushLog(pid, entries);
+			: `The party descends to floor ${level}.`);
 	}
 
 	/*
@@ -1977,6 +2157,26 @@ class SwapSession {
 		return this.pvp || this.rel.atWar(a, b);
 	}
 
+
+	/**
+	 * Say something to the WHOLE party, in the proxy's own words.
+	 *
+	 * KDM-263: extracted when this became the fifth copy of "render one line through the game's own
+	 * feedback, then push the resulting entries into every joined player's log". The four before it
+	 * (peace settled, defeated, recovered, the party arrived) were identical but for the text and the
+	 * colour, and each was free to get the `|| []` guard or the `_joined` loop subtly wrong.
+	 *
+	 * This is the only sanctioned way for the gateway to address everyone. It is NOT how game text
+	 * reaches a player: KD gates its own messages by vision at the source, so per-player game log
+	 * lines are captured inside that player's swap window and never broadcast (KDM-165). Broadcasting
+	 * is reserved for facts about the SESSION, which the gateway alone knows.
+	 */
+	_broadcast(text, color = '#88ccff', time = 10) {
+		const fb = this.world.sendFeedback(text, color, time);
+		const entries = (fb && fb.entries) || [];
+		for (const pid of this._joined) this._pushLog(pid, entries);
+		return entries;
+	}
 
 	/** Append message-log entries to a player's personal log, trimmed to maxLog (KD-098). */
 	_pushLog(id, entries) {
