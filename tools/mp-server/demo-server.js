@@ -33,6 +33,9 @@ const { KD_ABSENT_RESET_BROWSER } = require('./kd-absent-reset');
 // KDM-263 — the routed journey choice: the wrap that stops the client committing a route locally,
 // and the KDInputTypes entry the routed choice is dispatched through. Same two-runtime rule again.
 const { KD_JOURNEY_CHOICE_BROWSER } = require('./kd-journey-choice');
+// KDM-264 — buying by identity: the client tags the purchase with the ITEM it was showing, the
+// server re-finds it in the shared stock. Same two-runtime rule.
+const { KD_SHOP_BUY_BROWSER } = require('./kd-shop-buy');
 // …and the world-key list itself, GENERATED from the host's own declaration below rather than
 // copied. render-client.js needs it to build the world half of a snapshot.
 const { KDGAMEDATA_WORLD_KEYS } = require('./headless-host');
@@ -80,6 +83,8 @@ const GAME_MODES_ROUTE = '/mp/game-modes.js';
 const JOURNEY_ROUTE = '/mp/kd-journey-choice.js';
 // KDM-263: the declared world-key list, serialised straight out of the host's own constant.
 const WORLD_KEYS_ROUTE = '/mp/kd-world-keys.js';
+// KDM-264: buying by identity — the client tag + the server-side shrineBuy resolver.
+const SHOP_BUY_ROUTE = '/mp/kd-shop-buy.js';
 const CODEC_BODY = `${KD_CODEC}\n;(typeof window !== 'undefined' ? window : globalThis).KDCodec = ` +
 	`{ kdEnc: kdEnc, kdDec: kdDec, kdSer: kdSer };\n`;
 
@@ -98,6 +103,7 @@ SYNTHETIC_ROUTES[DISCONNECT_DLG_ROUTE] = KD_DISCONNECT_DIALOGUE_BROWSER;
 SYNTHETIC_ROUTES[ABSENT_RESET_ROUTE] = KD_ABSENT_RESET_BROWSER;
 SYNTHETIC_ROUTES[GAME_MODES_ROUTE] = GAME_MODES_BROWSER;
 SYNTHETIC_ROUTES[JOURNEY_ROUTE] = KD_JOURNEY_CHOICE_BROWSER;
+SYNTHETIC_ROUTES[SHOP_BUY_ROUTE] = KD_SHOP_BUY_BROWSER;
 SYNTHETIC_ROUTES[WORLD_KEYS_ROUTE] = '(typeof window !== \'undefined\' ? window : globalThis)' +
 	`.KDWorldGameDataKeys = ${JSON.stringify(KDGAMEDATA_WORLD_KEYS)};\n`;
 
@@ -125,6 +131,11 @@ const INJECT = [
 	// bundle in scope. After render-client.js, whose KDSendInput wrapper is what carries the routed
 	// choice to the server — the wrap calls KDSendInput, so the routing gate must already be on.
 	JOURNEY_ROUTE,
+	// KDM-264: wraps KDRenderClient.sendInput, so it must follow render-client.js. An object PROPERTY
+	// on purpose — render-client installs its own KDSendInput wrapper LATE (inside disableLocalSim)
+	// and does not call through when it routes, so a KDSendInput wrap installed here would be
+	// silently bypassed.
+	SHOP_BUY_ROUTE,
 ];
 
 /* ── Serve-time workarounds for UPSTREAM crashes ──────────────────────────────────────────────

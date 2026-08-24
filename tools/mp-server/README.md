@@ -20,6 +20,7 @@ KD-069 (orchestrator), KD-070 (reconciler).
 | `integration.js` | `IntegratedSession` (extends `Lobby`) — **real in-game integration**: players injected as real KD entities, enemy AI attacks routed to the target's instance, world-adjudicated P2P, independent params. KD-082. |
 | `kd-absent-reset.js` | The "absent from the bundle ⇒ back to its default" rule, exported as source text for both runtimes. The capture only records a global while it DIFFERS from the post-init baseline, so a global returning to its default drops OUT of the bundle; the host already reset those, the browser did not. Served to the client at `/mp/kd-absent-reset.js`. |
 | `kd-journey-choice.js` | KDM-263 — the routed journey choice, as source text for both runtimes: a `KDRenderJourneyMap` wrap that reverts KD's inline `JourneyTarget` write and re-emits it as `KDSendInput('KDCoopJourney', {x,y})`, plus the `KDInputTypes` entry that dispatches it server-side. Served to the client at `/mp/kd-journey-choice.js`. |
+| `kd-shop-buy.js` | KDM-264 — buying by identity: a client wrap that tags a routed `shrineBuy` with the item that browser was showing, and a server-side `KDInputTypes.shrineBuy` wrap that re-finds it in the shared stock (or refuses). Served at `/mp/kd-shop-buy.js`. |
 | `transport/` | Transport boundary (KD-081): `protocol.js` (commands + `dispatch`), `in-process.js`, `worker-thread.js` (+`worker-entry.js`), `socket.js` (+`child-entry.js`), `index.js` (registry). |
 | `mod-sync.js` | KDM-249 — reconciling two mod sets: `diffDeclarations` (pure) + an in-memory, content-addressed `ModStore` for the payloads. No socket, no world, no game globals. |
 | `client/coop-mods.js` | KDM-249 — the browser half of mod sync: latches `KDGetMods` before the first frame, declares/publishes/fetches, then drives `KDExecuteMods`. See "Mod sync" below. |
@@ -588,3 +589,45 @@ the feature reverts to the bug it fixes, with every arbitration test still green
 sees (`__KDCoopJourneyStats.observed`) and `tests/unit/mp-journey-agreement.spec.ts` drives a real write
 through KD's own code path with a CONTROL that calls the UNWRAPPED original and demands it still
 writes. That control failing IS the drift alarm — read its message before assuming the wrap is wrong.
+
+## Hub merchants, two players (KDM-264)
+
+Most of this already worked by construction, and it is worth knowing which half: the stock is
+`KDMapData.ShopItems` — world state, generated at `KDMapGen.ts:191-192` and spliced on purchase at
+`KinkyDungeonShrine.ts:423` — while the purse is `KinkyDungeonGold`, an ordinary small global and so
+per-player. **Two purses, one stock, no duplication and no double-sale come free.**
+
+**What did not work is the cursor.** `KinkyDungeonShopIndex` is a per-player index INTO that shared
+array, and the buy is a routed input carrying that index (`KinkyDungeonInput.ts:613-620`:
+`KinkyDungeonShopIndex = data.shopIndex; KinkyDungeonPayShrine(...)`). So if A bought row 0 while B was
+pointing at row 2, B's next click bought row 2 of a now-shorter array — a different item. Money spent,
+wrong goods.
+
+`kd-shop-buy.js` resolves the purchase by IDENTITY instead: the buyer's browser tags the routed payload
+with `shopItemId` (name + shop type) read from its OWN `KDMapData.ShopItems` at click time, and a
+server-side wrap of `KDInputTypes.shrineBuy` re-finds that id in the current shared stock, re-points
+the index and delegates to `_prev` — so KD still does the whole purchase. If the item is gone it
+refuses with a message rather than buying the neighbour. An UNTAGGED buy is passed through untouched,
+so a stock client is unaffected.
+
+### ⚠️ A gateway global needs the `__KD` prefix or it becomes player state
+
+`_candidateGlobals` (`headless-host.js`) unions the bundle's own bindings with
+`Object.keys(globalThis)` and skips only names starting with `__KD`. **A plain `globalThis.X` created
+by a mod is therefore a per-player state candidate**: the server captures it, ships it in the bundle,
+and the client's copy is overwritten by the server's on the next snapshot.
+
+This cost a long hunt. Named `KDCoopShopStats`, the browser's counters read back as the *server's* —
+the client-side counter it had just incremented was gone, and a server-side counter the browser never
+touches had appeared, which reads exactly like "the client wrap never ran". The feature was fine; only
+the evidence for it was being silently replaced. Both `__KDCoopShopStats` and `__KDCoopJourneyStats`
+carry the prefix for this reason, and it is not cosmetic.
+
+### Known gap: the highlight does not follow its item (KDM-266)
+
+R14 also asks that a selection left open while the stock changes keep DENOTING the same item. It does
+not. The PURCHASE is correct either way — the tag records the row the browser was showing at click
+time — so what is missing is the display between the other player's purchase and yours.
+`tests/e2e/mp-shop-identity.spec.ts` pins the current (wrong) behaviour explicitly rather than staying
+silent, with a note to invert the expectation when it is fixed. Two failed approaches and their causes
+are recorded in the `kd-shop-buy.js` header; read them before trying a third.

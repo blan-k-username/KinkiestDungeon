@@ -27,6 +27,7 @@ const { HeadlessHost, KDGAMEDATA_WORLD_KEYS } = require('./headless-host');
 const { PeaceRegistry } = require('./peace');
 const { KD_PEACE_DIALOGUE } = require('./kd-peace-dialogue');
 const { KD_JOURNEY_CHOICE } = require('./kd-journey-choice');
+const { KD_SHOP_BUY } = require('./kd-shop-buy');
 const { KD_DISCONNECT_DIALOGUE, HOST_LOST_DIALOGUE, PEER_LOST_DIALOGUE } = require('./kd-disconnect-dialogue');
 const { sanitizeName, sanitizePerks } = require('./join-gate');
 // KDM-239 R3/R5 — same normaliser the gate uses, so what the session stores and what the gate
@@ -407,6 +408,18 @@ class SwapSession {
 		 * the asymmetry there is deliberate and this does not weaken it.
 		 */
 		this.inputKind.set('KDCoopJourney', 'ui');
+		/*
+		 * KDM-264 — the hub merchants: resolve a purchase by the ITEM the buyer selected, not by the
+		 * index they selected it at.
+		 *
+		 * Loaded on the same terms and for the same reason as the journey choice above: the server half
+		 * is a wrap of `KDInputTypes.shrineBuy`, which only means anything where a routed input is
+		 * dispatched. The client halves in the same file are guarded on `KDRenderClient` and therefore
+		 * install only in the browser. NOT given an `inputKind` seed — `shrineBuy` is KD's own input
+		 * type with KD's own static classification, and overriding that would be the gateway deciding
+		 * something about a game input it has no business deciding.
+		 */
+		this.world.loadMod(KD_SHOP_BUY);
 		// KDM-227: baseline for the hub-arrival check. Seeded HERE rather than left undefined so the
 		// room the session STARTS in is not mistaken for an arrival — the game boots on the journey
 		// hub itself (level 0), so the very first turn of every session would otherwise fire a reset.
