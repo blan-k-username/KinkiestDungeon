@@ -35,11 +35,30 @@ const { sanitizeWorld } = require('./game-modes');
 const PARK = { x: 1, y: 1 };
 
 /**
- * KDM-227: KD's own room type for the mandatory between-floors hub — the "Floor N: Journey Selection"
- * screen with the buff/debuff picks and the merchants. Named once because it is the ONE room that
- * ends a war; every other non-empty room type is an optional detour a grudge survives.
+ * KDM-227/262: KD's own room types for the between-floors hub — the room with the perk pick, the
+ * merchants and the path choice. Named once because this is the ONE detector: every consumer asks it,
+ * nothing re-tests the room for itself.
+ *
+ * ⚠️ KDM-262 CORRECTED WHICH ROOM THIS IS, and the correction is the whole task. KDM-227 matched
+ * `JourneyFloor` alone, believing it to be "the mandatory between-floors hub". It is not — it is the
+ * level-0 START room, assigned only at new-game boot (KinkyDungeon.ts:6025, KinkyDungeonGame.ts:457)
+ * and holding the five journey-TYPE portals (KDJourneyList, KinkyDungeonAlt.ts:1227). No journey slot
+ * can carry it: the slot factories emit "" or "ShopStart" (KDJourney.ts:47/124/142).
+ *
+ * Since `_lastRoomType` is seeded from the world at session start — which IS that room — and the rule
+ * is arrival-not-presence, the reset could never fire from the only room it matched. Measured: a fresh
+ * two-player session reports RoomType === 'JourneyFloor' at level 0.
+ *
+ * The real between-floors room is `PerkRoom`. `KDAdvanceAmount['s']` (KinkyDungeonTiles.ts:930-946)
+ * FORCES it whenever the main stairs are taken down from the deepest floor reached, so one follows
+ * each main floor. It is also the room with `requireJourneyTarget` (KinkyDungeonAlt.ts:388), the shop
+ * and quest NPCs, and KD's own between-floors autosave (KDStairActions.ts:266).
+ *
+ * `JourneyFloor` stays in the set: arriving at the start room is a legitimate slate-clean, it costs
+ * nothing, and it keeps KDM-227's original cases meaningful. `Tunnel` / `ShopStart` / `ElevatorRoom`
+ * are deliberately absent — those really are the optional detours a grudge is meant to survive.
  */
-const HUB_ROOM_TYPE = 'JourneyFloor';
+const HUB_ROOM_TYPES = Object.freeze(['PerkRoom', 'JourneyFloor']);
 
 /**
  * KDM-240 D1: how close the rest of the party must be to the stairs before they will fire.
@@ -1203,7 +1222,7 @@ class SwapSession {
 		// owner's bundle (avatar.hp → Will; real capture/helpless → defeated + broadcast).
 		this._reconcilePeers();
 		// KDM-227: finishing a level clears the slate between players.
-		this._checkHubReset();
+		this._checkHubArrival();
 		// Per-turn state line: who is down and where everyone's Will sits. This is the view you
 		// need to tell "my input is ignored" apart from "my input did nothing".
 		this._dbg(`turn=${this.turn} done defeated=[${[...this.defeated].join(',')}] ` +
@@ -1222,13 +1241,17 @@ class SwapSession {
 	}
 
 	/**
-	 * KDM-227 — reaching the between-floors hub puts everyone back at peace.
+	 * KDM-227/262 — reaching the between-floors hub puts everyone back at peace.
+	 *
+	 * THE ONE HUB DETECTOR. Every consumer asks this; nothing re-tests the room for itself. (A second
+	 * hub test elsewhere is how the gateway would drift into two different answers to "are we at the
+	 * hub?" — `mp-peace-hub-reset.spec.ts` counts the room name in this file to keep it at one.)
 	 *
 	 * The trigger is the room the party is IN, not the floor number: descending goes floor → hub →
-	 * floor, and only the hub — the one with the buff/debuff picks and the merchants — ends a war.
-	 * The other room types (`Tunnel`, `PerkRoom`, `ShopStart`, `ElevatorRoom`, `Summit`, …) are the
-	 * optional detours a grudge is meant to survive, so this matches `JourneyFloor` exactly rather
-	 * than "any non-empty RoomType".
+	 * floor, and only the hub — the one with the perk pick, the merchants and the path choice — ends a
+	 * war. `Tunnel`, `ShopStart`, `ElevatorRoom`, `Summit` are the optional detours a grudge is meant
+	 * to survive, so this matches the named set exactly rather than "any non-empty RoomType". Which
+	 * rooms are in that set, and why KDM-227's original answer was wrong, is on HUB_ROOM_TYPES.
 	 *
 	 * ARRIVAL, NOT PRESENCE. It fires on the TRANSITION into the hub and not on the turns spent there,
 	 * so a fight that breaks out on the hub is not undone by simply standing on it. A compare-and-store
@@ -1240,12 +1263,13 @@ class SwapSession {
 	 * `MiniGameKinkyDungeonLevel` and one `KDGameData.RoomType` — a floor change moves the whole party
 	 * (KDM-165) — so no state exists in which one player is on the hub and the other is not.
 	 */
-	_checkHubReset() {
+	_checkHubArrival() {
 		let room = '';
 		try { room = this.world.getRoomType() || ''; } catch (e) { return; }
 		const prev = this._lastRoomType;
 		this._lastRoomType = room;
-		if (room !== HUB_ROOM_TYPE || prev === HUB_ROOM_TYPE) return;   // presence ≠ arrival
+		// Presence ≠ arrival: this fires on the TRANSITION into a hub, never on the turns spent there.
+		if (!HUB_ROOM_TYPES.includes(room) || HUB_ROOM_TYPES.includes(prev)) return;
 		this.rel.resetAll();
 		// KDM-230: and take down any peace dialogue the reset just made moot.
 		for (const id of this._joined) this._closePeaceDialogue(id);
@@ -1254,7 +1278,7 @@ class SwapSession {
 		for (const eid of this.avatars.values()) {
 			try { this.world.setAvatarHostile(eid, false); } catch (e) { /* avatar gone; nothing to clear */ }
 		}
-		this._dbg('HUB RESET — every pair back to co-op on arrival at ' + HUB_ROOM_TYPE);
+		this._dbg("HUB RESET — every pair back to co-op on arrival at " + room);
 	}
 
 	/**

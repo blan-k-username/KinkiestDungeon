@@ -19,6 +19,8 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { SwapSession } = require('../../tools/mp-server/swap-session');
+import { mapId, descend } from './helpers/world';
+import { readFileSync } from 'fs';
 
 const BOOT_TIMEOUT = 300_000;
 
@@ -173,3 +175,133 @@ describe('KDM-227 — arriving at the between-floors hub ends every war', () => 
 	}, BOOT_TIMEOUT);
 });
 
+
+/**
+ * KDM-262 — the reset fires at the room a real run actually reaches.
+ *
+ * ── WHAT WAS WRONG ────────────────────────────────────────────────────────────────────────────────
+ * KDM-227 matched `JourneyFloor`. That is the level-0 START room: it is assigned only at new-game boot
+ * (`KinkyDungeon.ts:6025`, `KinkyDungeonGame.ts:457`) and holds the five journey-TYPE portals
+ * (`KDJourneyList`, `KinkyDungeonAlt.ts:1227`). No journey slot can carry it — the slot factories emit
+ * `""` or `"ShopStart"` (`KDJourney.ts:47/124/142`). Meanwhile `_lastRoomType` is seeded from the
+ * world at session start (`swap-session.js:349`), which IS that room, and the rule is
+ * arrival-not-presence. So the reset could not fire from the only room it matched. Measured
+ * (KDM-241 P3): a fresh two-player session reports `RoomType === 'JourneyFloor'` at level 0.
+ *
+ * The between-floors room is `PerkRoom`: `KDAdvanceAmount['s']` (`KinkyDungeonTiles.ts:930-946`)
+ * forces it whenever the main stairs are taken down from the deepest floor reached, so one follows
+ * EACH main floor. It is also the room with `requireJourneyTarget` (`KinkyDungeonAlt.ts:388`), the
+ * shop and quest NPCs, and KD's own between-floors autosave (`KDStairActions.ts:266`).
+ *
+ * ── WHY THE TESTS ABOVE DID NOT CATCH IT ──────────────────────────────────────────────────────────
+ * Every one of them installs the room with `setRoom()`. That pins the MECHANISM ("given an arrival at
+ * X, the war ends") and says nothing about whether an arrival at X ever occurs. **A trigger test that
+ * constructs its own trigger proves nothing about reachability.** So this block drives REAL descents
+ * and lets the GAME choose the room — the fixture never names `PerkRoom` at all.
+ */
+describe('KDM-262 — a real descent reaches the hub, and the hub ends the war', () => {
+	let s: any;
+	beforeEach(async () => {
+		s = new SwapSession({ requiredPlayers: 2, seed: 'hub-reachable', pvp: false });
+		s.join('A'); s.join('B');
+		await s.ready();
+	}, BOOT_TIMEOUT);
+
+	function turn() { s.submit('A', { kind: 'wait' }); s.submit('B', { kind: 'wait' }); }
+	function fight() { s.rel.declareWar('A', 'B'); }
+	function room(): string { return s.world.eval('KDGameData.RoomType || ""'); }
+
+	/**
+	 * ONE real hop: take the stairs, let the turn settle, and insist the world actually moved.
+	 *
+	 * The map-moved assertion is not decoration. `descend` returning 'ok' only means the call did not
+	 * throw, and a descent that quietly does nothing is this file's oldest failure mode.
+	 */
+	function stepDown(tag: string): string {
+		const before = mapId(s);
+		expect(descend(s), `${tag}: the descent did not throw`).toBe('ok');
+		turn();
+		expect(mapId(s), `${tag}: the descent really moved the party`).not.toBe(before);
+		return room();
+	}
+
+	/**
+	 * Walk down the main path until the game puts the party in a room of its own choosing.
+	 *
+	 * NOTHING HERE NAMES THE DESTINATION, and the count is not hardcoded: the party leaves the start
+	 * room, crosses the opening rooms and a dungeon floor, and a `PerkRoom` appears when the game
+	 * decides one should. `KDAdvanceAmount['s']` (`KinkyDungeonTiles.ts:930-946`) forces it once the
+	 * stairs are taken down from the deepest floor reached — so if upstream ever stops doing that,
+	 * this goes red, which is the point.
+	 */
+	function walkUntil(want: (r: string) => boolean, max = 5): string {
+		const seen: string[] = [room()];
+		for (let i = 1; i <= max; i++) {
+			const r = stepDown(`hop ${i}`);
+			seen.push(r || '(floor)');
+			if (want(r)) return r;
+		}
+		throw new Error(`walked ${max} hops without reaching the wanted room; saw: ${seen.join(' -> ')}`);
+	}
+
+	const isHub = (r: string) => r === 'PerkRoom';
+	const isFloor = (r: string) => r === '';
+
+	/**
+	 * THE REACHABILITY ORACLE — the assertion whose absence let this hide for a whole slice.
+	 *
+	 * It is deliberately about the GAME, not about our detector: walking the main path must land the
+	 * party in a room that is neither the boot room nor a plain dungeon floor, with the fixture never
+	 * naming it. Kept separate from the reset tests so that "the hub is unreachable" and "the reset is
+	 * broken" can never be confused again.
+	 */
+	it('R2: walking the main path lands the party in the between-floors room', () => {
+		expect(room(), 'precondition: the session boots on the START room').toBe('JourneyFloor');
+		const arrived = walkUntil(isHub);
+		expect(arrived, 'the game itself chose this room — the fixture never named it').toBe('PerkRoom');
+	}, BOOT_TIMEOUT);
+
+	/** R2: and arriving there ends a war that started on the floor below. */
+	it('R2: a war started on the floor is over once the party reaches the hub', () => {
+		expect(walkUntil(isFloor), 'precondition: out on a real dungeon floor').toBe('');
+		fight();
+		expect(s._isPvP('A', 'B'), 'precondition: at war on a dungeon floor').toBe(true);
+		expect(walkUntil(isHub), 'precondition: the party really reached the hub — else this is vacuous')
+			.toBe('PerkRoom');
+		expect(s._isPvP('A', 'B'), 'reaching the hub clears the slate').toBe(false);
+	}, BOOT_TIMEOUT);
+
+	/**
+	 * R3: presence is not arrival, asserted on the REAL room rather than an assigned one.
+	 *
+	 * The discriminator against the easy, wrong implementation ("clear the war whenever RoomType is
+	 * the hub"), which would pass the test above and every mechanism test in the file.
+	 */
+	it('R3: a war started IN the hub survives the turns spent there', () => {
+		expect(walkUntil(isHub), 'precondition: in the hub').toBe('PerkRoom');
+		fight();
+		expect(s._isPvP('A', 'B'), 'precondition: at war while standing in the hub').toBe(true);
+		turn(); turn();
+		expect(s._isPvP('A', 'B'),
+			'armed by ARRIVING, not by being here — standing still must not re-fire it').toBe(true);
+	}, BOOT_TIMEOUT);
+
+	/**
+	 * R1 — ONE detector. A structural guard, deliberately: the failure it prevents is a SECOND hub
+	 * test being added elsewhere in the file (which is how the gateway would drift into two different
+	 * answers to "are we at the hub?"). Behaviour cannot see that; a count can.
+	 *
+	 * Coupled to our OWN source, not the game's, so it is a maintenance cost we control. It counts the
+	 * literal because the identifier is free to be renamed; consumers must ask the detector, never
+	 * re-test the room themselves.
+	 */
+	it('R1: the hub room type is named exactly once in swap-session.js', () => {
+		const src = readFileSync(require.resolve('../../tools/mp-server/swap-session.js'), 'utf8');
+		const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+		const hits = (code.match(/['"`]PerkRoom['"`]/g) || []).length;
+		expect(hits,
+			`'PerkRoom' appears ${hits}x in swap-session.js code (comments stripped). Exactly one is ` +
+			'expected — the hub-room set. A second occurrence is a second detector: consumers must ask ' +
+			'the one detector, not re-test the room.').toBe(1);
+	});
+});
