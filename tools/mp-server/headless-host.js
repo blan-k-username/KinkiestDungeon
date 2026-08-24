@@ -106,6 +106,23 @@ const KDGAMEDATA_WORLD_KEYS = Object.freeze([
 	// Pinned by tests/unit/mp-room-world-state.spec.ts (the divergence case) and, generically, by
 	// mp-noninterference.spec.ts, which checks declared world keys from both directions.
 	'RoomType', 'MapMod',
+	// KDM-265 — WHERE ON THE JOURNEY the party stands, and how deep this RUN has gone.
+	//
+	// JourneyX/JourneyY are committed by the transition itself
+	// (KinkyDungeonTiles.ts:861-862 copies them out of JourneyTarget), i.e. derived from the same
+	// event that sets MiniGameKinkyDungeonLevel — which is blacklisted just above for the same reason.
+	// A party walks one route; two players cannot stand on different journey nodes and be in the same
+	// map.
+	//
+	// HighestLevelCurrent/HighestLevel are how deep this run has been. One run, one answer. NOT
+	// cosmetic: `MiniGameKinkyDungeonLevel == KDGameData.HighestLevelCurrent` is the condition under
+	// which the game generates a PerkRoom instead of advancing (KinkyDungeonTiles.ts:930-946), so a
+	// per-player copy makes the between-floors room appear or not depending on WHO took the stairs.
+	//
+	// Deliberately NOT here: JourneyMap, JourneyTarget, UseJourneyTarget. Those are KDM-263's, whose
+	// arbitration design owns what a "target" means when two players disagree. A multi-floor descent
+	// does not need them — the acting player's target is used, which is correct until there is a rule.
+	'JourneyX', 'JourneyY', 'HighestLevelCurrent', 'HighestLevel',
 ]);
 
 /**
@@ -184,6 +201,17 @@ const GLOBAL_BLACKLIST = Object.freeze([
 	// --- shared world: the dungeon and its inhabitants -----------------------
 	'KDMapData', 'KDMapExtraData', 'KDWorldMap', 'KDCurrentWorldSlot',
 	'KinkyDungeonCurrentTick', 'KinkyDungeonEnemyID', 'KinkyDungeonSpellID',
+	// KDM-265: WHICH FLOOR the party is on, and which checkpoint that floor belongs to. Same
+	// category as KDMapData/KDCurrentWorldSlot above — this file already says so at the `level()`
+	// accessor ("The current dungeon floor … A change is a party-wide event"), it just did not act on
+	// it. Left per-player, each turn's restorePlayer installed the acting player's copy and their turn
+	// captured it straight back, so two disagreeing bundles made the world OSCILLATE between floors
+	// and the party never got past floor 1 (measured over ten real descents).
+	//
+	// This is KDM-228's RoomType argument applied to the level, including its client half: the thin
+	// client has always preferred the world's answer, restoring both from the snapshot's own
+	// `s.level` / `s.checkpoint` (render-client.js:609-610). This makes the server agree.
+	'MiniGameKinkyDungeonLevel', 'MiniGameKinkyDungeonCheckpoint',
 	'AIData', 'KDAwareEnemies', 'KDEnemiesTargetingPlayer', 'KDPathfindingCacheFails',
 	'KDPathfindingCacheHits', 'KDPathCache', 'KDUpdateEnemyCache',
 	// Derived lookup caches over the world's ENTITIES — same category as KDPathCache above, and the
@@ -286,6 +314,46 @@ const { MODE_WORLD_KEYS, MODE_PLAYER_KEYS, MODE_SOURCE, isModeKey } = require('.
  * One copy on purpose: the probed and unprobed paths must dispatch IDENTICALLY, or the classification
  * the probe reports would not describe what the real apply does.
  */
+
+/**
+ * KDM-265 — run KD's DEFERRED map generation, which nothing else on the server ever will.
+ *
+ * `KDGoThruTile` does not always build the new map inline. When
+ * `!forceInstant && level < maxLevel-1 && …` it sets `KinkyDungeonState = "GenMap"` and parks the work
+ * in `KDGenMapCallback` (KDStairActions.ts:251-258). The ONLY thing upstream that ever runs it is the
+ * DRAW loop — `if (KDGenMapCallback) setTimeout(RunGenMapCallback, 100)` (KinkyDungeon.ts:2858). The
+ * server has no draw loop, so the transition simply never completed: measured, four consecutive real
+ * descents left the callback armed and the session sitting in `GenMap` with the map unchanged. Since
+ * KDM-239 R7 the client ADOPTS the server's screen, so both players would stare at a `GenMap` screen
+ * that never resolves.
+ *
+ * ⚠️ CLEAR BEFORE CALLING. This is KDM-240's lesson as code, not a style choice: when
+ * `KDPostStairSave` threw, the exception escaped AFTER the map had been generated but BEFORE
+ * `KDGenMapCallback = null` ran, leaving a stale callback that poisoned every later turn
+ * (see `_neuterStairAutosave`). Clear-then-call makes a throw cost one transition instead of the
+ * session. It is also exactly what upstream's own `RunGenMapCallback` (KinkyDungeon.ts:7926) does.
+ *
+ * The loop is bounded because a callback may arm another; the bound is REPORTED rather than silently
+ * obeyed, since "nothing pending" and "we gave up" look identical from the outside.
+ *
+ * @returns {number} how many deferred generations ran (0 in the overwhelmingly common case)
+ */
+const KD_RUN_DEFERRED_MAPGEN = `(function(){
+	if (typeof KDGenMapCallback === 'undefined') return { ran: 0, exhausted: false, errors: [] };
+	var ran = 0, errors = [];
+	while (KDGenMapCallback && ran < 4) {
+		var ff = KDGenMapCallback;
+		KDGenMapCallback = null;              // BEFORE the call — see the note above
+		ran += 1;
+		// A throw must cost ONE transition, never the acting player's turn. Caught, never swallowed:
+		// the message is returned so the host can report it.
+		try {
+			var next = ff();
+			if (typeof next === 'string' && next) KinkyDungeonState = next;
+		} catch (e) { errors.push(String((e && e.message) || e)); }
+	}
+	return { ran: ran, exhausted: !!KDGenMapCallback, errors: errors };
+})()`;
 const KD_ENT_RESOLVE = `
 	function resolve(o){
 		if (!o || typeof o !== 'object') return o;
@@ -2733,8 +2801,19 @@ class HeadlessHost {
 					eval(n + ' = globalThis.__KD_V;');
 				} catch (e) { /* not assignable */ }
 			}
+			// KDM-265: SUBTRACT THE BLACKLIST HERE TOO, symmetrically with capture.
+			//
+			// The capture half stopped producing these names, but restore trusted whatever key set the
+			// bundle happened to carry — and a bundle outlives the build that made it (a reconnect, a
+			// stored bundle, a client-supplied one). A single stale MiniGameKinkyDungeonLevel in an
+			// old bundle would then MOVE THE PARTY to another floor on the next swap. "Not per-player"
+			// has to mean it on both sides of the round trip, exactly as KDGameData is captured whole
+			// and restored minus KDGAMEDATA_WORLD_KEYS.
 			var n, i;
-			for (n in g) assign(n, g[n]);
+			var blacklisted = ${JSON.stringify(GLOBAL_BLACKLIST)};
+			var isWorld = {};
+			for (i = 0; i < blacklisted.length; i++) isWorld[blacklisted[i]] = true;
+			for (n in g) if (!isWorld[n]) assign(n, g[n]);
 			// Anything this player does NOT carry must go back to its post-init DEFAULT, not stay at
 			// whatever the previous player left. Only touch globals that are currently dirty — resetting
 			// all ~2300 watched names on every swap would be pure waste.
@@ -2851,16 +2930,40 @@ class HeadlessHost {
 	}
 
 	/**
+	 * KDM-265 — complete any map generation the last input deferred. See KD_RUN_DEFERRED_MAPGEN.
+	 *
+	 * Called by BOTH apply paths, right after their dispatch returns — not from inside `__kdDispatch`,
+	 * even though that would be a single call site. `applyInputObserved` keeps a counting wrapper over
+	 * `KinkyDungeonAdvanceTime` installed for the duration of the dispatch; generating a map inside
+	 * that window would fold the generation's own time advances into the INPUT's `advanced` count and
+	 * mis-teach `inputKind`. The two call sites are pinned by a test that drives both paths.
+	 */
+	runDeferredMapGen() {
+		const out = this.eval(KD_RUN_DEFERRED_MAPGEN) || {};
+		// Never silent: "we stopped at the bound" must not read as "nothing was pending".
+		if (out.exhausted) {
+			console.warn(`[${this.id}] deferred map generation still pending after 4 rounds — ` +
+				'a callback is arming another. The world may be mid-transition.');
+		}
+		for (const e of out.errors || []) {
+			console.warn(`[${this.id}] deferred map generation threw: ${e}`);
+		}
+		return out.ran | 0;
+	}
+
+	/**
 	 * Run a player input through KD's REAL dispatcher (the swap model's uniform action
 	 * path). `type`/`data` are KD's own input types (move/doattack/struggle/…). The
 	 * acting player must be swapped in first (restorePlayer). Returns the dispatcher result.
 	 */
 	applyInput(type, data) {
 		this._context.__KD_INDATA = (data === undefined) ? {} : data;
-		return this.eval(`(function(){
+		const res = this.eval(`(function(){
 			${KD_ENT_RESOLVE}
 			return __kdDispatch(${JSON.stringify(type)});
 		})()`);
+		this.runDeferredMapGen();   // KDM-265 — a transition this input started must COMPLETE
+		return res;
 	}
 
 	/**
@@ -2886,7 +2989,7 @@ class HeadlessHost {
 	 */
 	applyInputObserved(type, data) {
 		this._context.__KD_INDATA = (data === undefined) ? {} : data;
-		return this.eval(`(function(){
+		const out = this.eval(`(function(){
 			${KD_ENT_RESOLVE}
 			var known = (typeof KDInputTypes !== 'undefined' && KDInputTypes) ? !!KDInputTypes[${JSON.stringify(type)}] : false;
 			var advanced = 0, res = null, err = null;
@@ -2901,6 +3004,10 @@ class HeadlessHost {
 			finally { KinkyDungeonAdvanceTime = orig; }
 			return { advanced: advanced, result: (typeof res === 'string') ? res : null, error: err, unknownType: !known };
 		})()`);
+		// KDM-265 — AFTER the eval, so the generation runs outside this method's own
+		// KinkyDungeonAdvanceTime wrapper and cannot inflate this input's `advanced` count.
+		this.runDeferredMapGen();
+		return out;
 	}
 
 	/** Serialize full game state via the bundle's own save path. */
