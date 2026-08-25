@@ -28,6 +28,7 @@ const { PeaceRegistry } = require('./peace');
 const { KD_PEACE_DIALOGUE } = require('./kd-peace-dialogue');
 const { KD_JOURNEY_CHOICE } = require('./kd-journey-choice');
 const { KD_SHOP_BUY } = require('./kd-shop-buy');
+const { KD_COOP_CAPTURE } = require('./kd-coop-capture');
 const { KD_DISCONNECT_DIALOGUE, HOST_LOST_DIALOGUE, PEER_LOST_DIALOGUE } = require('./kd-disconnect-dialogue');
 const { sanitizeName, sanitizePerks } = require('./join-gate');
 // KDM-239 R3/R5 — same normaliser the gate uses, so what the session stores and what the gate
@@ -369,6 +370,10 @@ class SwapSession {
 			globalThis.KDCoopPeaceDecide = function (accept) { globalThis.__kdCoopPeaceAnswer = !!accept; };
 			globalThis.__kdCoopPeaceAnswer = undefined;
 		})()`);
+		// KDM-261: and the capture rule — "jail only when nobody is free". Server-side only: this
+		// draws nothing, and `KinkyDungeonDefeat` runs in the authoritative world and only there.
+		this.world.loadMod(KD_COOP_CAPTURE);
+		this.world.eval('globalThis.__kdCoopPartnerFree = false; globalThis.__kdCoopCaptureHeld = undefined;');
 		// KDM-251: the disconnect dialogues, on the same terms and for the same reason.
 		this.world.loadMod(KD_DISCONNECT_DIALOGUE);
 		this.world.eval(`(function(){
@@ -1322,6 +1327,13 @@ class SwapSession {
 			// per APPLY, not per turn: the facts are relative to whoever is acting, and a peer position
 			// from the previous apply is a gate that answers about a world that has moved on.
 			this._pushPartyGate(id);
+			// KDM-261: …and whether anybody ELSE is still up, which is the whole capture rule. Written
+			// per APPLY, from two CONSTANT source strings so V8's eval compilation cache serves both
+			// for free — interpolating a per-call value into a hot eval costs ~8.7x (measured in this
+			// layer, and the same reason `setPartyGate` splits its two payloads).
+			this.world.eval(this._anyPartnerFree(id)
+				? 'globalThis.__kdCoopPartnerFree = true;'
+				: 'globalThis.__kdCoopPartnerFree = false;');
 			// KD-090: capture this player's message-log delta (messages pushed while THEY
 			// are the swapped-in player are theirs — incl. enemy-AI lines aimed at them).
 			const logLen0 = this.world.messageLogLength();
@@ -1384,6 +1396,18 @@ class SwapSession {
 			// `_markRecovered`, `_onMapChanged`) — a concern the proxy legitimately owns, and one
 			// that never depends on reading game content.
 			if (added && added.length) this._pushLog(id, added);
+			// KDM-261 R6: did KD's capture just get held in place because a partner is still up? Said
+			// ONCE, to everyone, in the proxy's own words — a partner who never hears it cannot come
+			// and free them, and KD's own "KinkyDungeonLeashed" line is the captured player's, not a
+			// broadcast (KDM-165). Read AFTER the delta above so the announcement is not also folded
+			// into the acting player's personal log twice.
+			if (this._takeCoopFlag('__kdCoopCaptureHeld') === true) {
+				// KD kicked the other players' avatars off the board on its way through
+				// (`KDKickEnemies`, `KinkyDungeonJail.ts:1888`) — put them back exactly where they
+				// were standing. Nobody MOVES: that is the whole point of holding the capture.
+				this._reseatParty(id, null, false);
+				this._announceCaptureHeld(id);
+			}
 			// KDM-240 A3/R5: the party has moved to another MAP, so say so and put everyone on it.
 			//
 			// This replaces a `getLevel()` comparison. The level number is not the map: a capture
@@ -2035,6 +2059,48 @@ class SwapSession {
 	isDefeated(id) { return this.defeated.has(id); }
 
 	/**
+	 * KDM-261 — is this player still able to come and free somebody?
+	 *
+	 * Three conditions, none of them ours:
+	 *   - they are seated in the session at all;
+	 *   - they are not `defeated` — the Will floor, KD's own single-player defeat condition, which
+	 *     `_updateDefeatFromVitals` / `_reconcilePeers` already maintain;
+	 *   - KD's own `defeat` flag is not standing on them. `KinkyDungeonDefeat` sets it in the very
+	 *     branch this rule selects (`KinkyDungeonJail.ts:1651`) and KD expires it on KD's schedule,
+	 *     so "currently held" is read from the game rather than tracked here. No timer of ours, and
+	 *     nothing to leak if a session ends mid-capture.
+	 *
+	 * Being merely TIED does not disqualify anyone: they can struggle, act and walk over. Being bound
+	 * is not being captured (R4).
+	 */
+	_isFree(id) {
+		if (!this._joined.includes(id)) return false;
+		if (this.defeated.has(id)) return false;
+		const v = this.vitalsOf.get(id) || {};
+		if (this._isDown(v)) return false;
+		return !(v.defeatTurns > 0);
+	}
+
+	/** KDM-261 R1 — is anybody OTHER than `actingId` still free? The whole input to the capture rule. */
+	_anyPartnerFree(actingId) {
+		return this._joined.some((cid) => cid !== actingId && this._isFree(cid));
+	}
+
+	/**
+	 * KDM-261 R6 — a capture was held in place. Everyone hears it, once, from the proxy.
+	 *
+	 * Deliberately shaped like `_markDefeated`'s line rather than KD's: this is a fact about the
+	 * SESSION (there are two of you, and that is why the jail door did not open), which is exactly
+	 * the class of message the gateway is the only one who can say (KDM-165).
+	 */
+	_announceCaptureHeld(id) {
+		this._broadcast(`${this.displayNameOf(id)} has been overpowered — free them before the party falls!`,
+			'#ff8844', 12);
+		this._emitEvent(id, { text: 'Overpowered!', color: '#ff8844' });
+		this._dbg(`CAPTURE HELD for ${id} (a partner is still free — no jail move)`);
+	}
+
+	/**
 	 * KDM-240 A2 — hand the world the party facts it needs to decide a CO-LOCATED level goal.
 	 *
 	 * `actingId` is excluded: the gate asks "is everyone ELSE here", and a player who counted as their
@@ -2056,6 +2122,55 @@ class SwapSession {
 		const down = this._joined.filter((cid) => cid !== actingId && this.defeated.has(cid))
 			.map((cid) => this.displayNameOf(cid));
 		this.world.setPartyGate({ peers, down, radius: PARTY_GATE_RADIUS });
+	}
+
+	/**
+	 * KDM-240 / KDM-261 — the world changed under the party; make every player whole again.
+	 *
+	 * ONE loop, two callers, because they want the same three things per player and differ only in
+	 * where that player ends up:
+	 *
+	 *   `_onMapChanged`      tiles = landing tiles   the map was regenerated, so everyone is placed
+	 *   held capture (R2)    tiles = null            nobody moves; only the avatars need rebuilding
+	 *
+	 * WHY THE HOLD NEEDS THIS AT ALL. `KinkyDungeonDefeat` calls `KDKickEnemies` (`:1888`) on BOTH
+	 * sides of the fork, and a peer avatar IS an enemy — so a held capture removes the partner's
+	 * avatar exactly as a jail move does. On the jail path `_onMapChanged` re-spawned it and the loss
+	 * was invisible; on the hold path nothing did, and the partner vanished from the captured
+	 * player's screen while standing right next to them. Measured, not reasoned: `posOf('B')` came
+	 * back `null`.
+	 *
+	 * `includeActing` is false for a hold and true for a map change. On a map change the acting
+	 * player's tile is the anchor and re-placing them is deliberate (see `_onMapChanged`). On a hold
+	 * they are mid-apply and their bundle has NOT been captured yet, so restoring it here would
+	 * re-seat them from their PRE-apply state and silently discard the capture that just happened to
+	 * them. Their avatar is re-ensured by the apply loop a few lines later either way.
+	 */
+	_reseatParty(actingId, tiles, includeActing = true) {
+		// When we are NOT re-seating the acting player, their live state has to be carried across the
+		// loop by hand: they are mid-apply, so `bundles.get(actingId)` is stale BY DEFINITION and
+		// restoring it at the end would discard the very capture that triggered this. Measured: KD's
+		// own `TimesJailed` increment vanished from the held player's bundle.
+		const liveActing = includeActing ? null : this.world.capturePlayer();
+		for (const [i, cid] of [...this._joined].entries()) {
+			if (!includeActing && cid === actingId) continue;
+			this.world.restorePlayer(this.bundles.get(cid));
+			let p;
+			if (tiles) {
+				const t = tiles[i] || tiles[0];
+				if (!t) continue;                    // nowhere to land: leave this player alone
+				this.world.placePlayer(t.x, t.y);
+				p = t;
+			} else {
+				p = this.world.getPlayerPos();       // stay exactly where the game left them
+			}
+			this.bundles.set(cid, this.world.capturePlayer());
+			if (p) this._ensureAvatar(cid, p.x, p.y);
+		}
+		// Leave the acting player swapped back in: the caller is mid-apply and captures their bundle
+		// immediately after this returns, so anything else here would persist the wrong player's state.
+		const back = liveActing || this.bundles.get(actingId);
+		if (back) this.world.restorePlayer(back);
 	}
 
 	/**
@@ -2090,23 +2205,12 @@ class SwapSession {
 	 * a world in which everybody already exists somewhere sane.
 	 */
 	_onMapChanged(actingId, mapId) {
-		const ids = [...this._joined];
-		const tiles = (ids.length ? this.world.landingTiles(ids.length) : []) || [];
-		ids.forEach((cid, i) => {
-			const t = tiles[i] || tiles[0];
-			if (!t) return;
-			this.world.restorePlayer(this.bundles.get(cid));
-			this.world.placePlayer(t.x, t.y);
-			this.bundles.set(cid, this.world.capturePlayer());
-			this._ensureAvatar(cid, t.x, t.y);
-		});
-		// Leave the acting player swapped back in: the caller is mid-apply and captures their bundle
-		// immediately after this returns, so anything else here would persist the wrong player's state.
-		if (this.bundles.has(actingId)) this.world.restorePlayer(this.bundles.get(actingId));
+		const n = this._joined.length;
+		this._reseatParty(actingId, (n ? this.world.landingTiles(n) : []) || []);
 		// KDM-263 A2: an unfinished argument about how to get here is over now that we are here.
 		this._resetJourneyProposal();
 		this._announceMapChange(mapId);
-		this._dbg(`MAP ${this._lastMapId} -> ${mapId} (party re-landed, ${ids.length} players)`);
+		this._dbg(`MAP ${this._lastMapId} -> ${mapId} (party re-landed, ${n} players)`);
 	}
 
 	/**

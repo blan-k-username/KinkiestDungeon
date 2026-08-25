@@ -1036,6 +1036,11 @@ class HeadlessHost {
 			disabled: (typeof KDPlayerIsDisabled === "function") ? !!KDPlayerIsDisabled() : null,
 			stunTurns: (typeof KinkyDungeonFlags !== "undefined" && KinkyDungeonFlags && KinkyDungeonFlags.get)
 				? (KinkyDungeonFlags.get("playerStun") || 0) : 0,
+			// KDM-261: how many turns KD still considers this player DEFEATED. Set by KinkyDungeonDefeat
+			// itself in the stay-put branch (KinkyDungeonJail.ts:1651) and expired by KD, so "currently
+			// held" is read from the game — the session keeps no timer of its own.
+			defeatTurns: (typeof KinkyDungeonFlags !== "undefined" && KinkyDungeonFlags && KinkyDungeonFlags.get)
+				? (KinkyDungeonFlags.get("defeat") || 0) : 0,
 			// Real worn bondage, summed from the GAME per-item power. No scale invented here.
 			bondage: (function(){ try {
 				var all = (typeof KinkyDungeonAllRestraint === "function") ? KinkyDungeonAllRestraint() : [];
