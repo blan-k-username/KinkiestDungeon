@@ -550,6 +550,35 @@ capture resolves as `KinkyDungeonDefeat(PutInJail = false)` — KD's own branch,
 where they stand and never regenerates the map, so nobody is relocated. Once every player is down the
 jail move fires unchanged and the whole party lands together. See `kd-coop-capture.js`.
 
+### Drop reports — four ways a real action produces nothing
+
+From the player's side a cancelled move and an ignored input look identical, so every way an action
+can vanish is RECORDED and put in the snapshot rather than left as a silent no-op. There are four,
+and they are deliberately separate fields — the causes are different and so are the fixes:
+
+| field | cause | added |
+|---|---|---|
+| `unknownInputs` | the world's own registry (`KDInputTypes`) has no handler for the type | KDM-163 |
+| `replacedInputs` | a second turn-consuming input displaced the first out of the lockstep slot | KDM-163 |
+| `cancelledMoves` | a peer reached the contested tile earlier in the same turn | KDM-208 |
+| `failedInputs` | the dispatch **threw** inside the world | KDM-268 |
+
+The last one was missing for a long time and was the worst of the four to diagnose:
+`applyInputObserved` catches the exception and returns it as `obs.error`, but on the turn path that
+field was read only by `_learnInputKind` (as *"do not learn from this one"*). Nothing logged it,
+nothing sent it — so an action truncated half-way reported a perfectly normal turn. That is how
+KDM-267's capture bug stayed invisible.
+
+All four are recorded on **both** apply paths, bounded to `maxLog` through the single `_recordDrop`
+helper, and exposed on `KDRenderClient` (`unhandledInputs()`, `failedInputs()`) so a browser test can
+assert the player's client actually heard about it — a `console.warn` alone is not readable by
+anything. Adding a fifth means: a list in the constructor, a `*Report()` accessor, a `snap.*` line,
+and a `_dbg` at the call site saying what is specifically wrong.
+
+**Recording is not handling.** None of the four changes what the turn does; they make a failure
+visible. Whether an errored input should be retried, refunded, or excluded from `applied` is an open
+behaviour question that no drop report answers.
+
 ## Agreeing the route out of the hub (KDM-263)
 
 Between floors the party stands in a `PerkRoom` and must pick a journey slot before the stairs will

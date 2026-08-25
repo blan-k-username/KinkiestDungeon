@@ -231,6 +231,10 @@
 	 * for anywhere, which is a real bug and now visible instead of a silent `return ''`.
 	 */
 	var _unhandled = [];                 // [{type, count}] — reported BY THE SERVER, see below
+	// KDM-268: inputs whose dispatch THREW in the authoritative world. Same source and same rule as
+	// _unhandled above: reported BY THE SERVER, exposed rather than only logged, because a console
+	// line is not readable by anything that wants to check the client actually heard about it.
+	var _failed = [];                    // [{clientId, turn, kdType, error}]
 	var _warned = {};
 
 	/*
@@ -467,6 +471,21 @@
 					if (ut && !_warned[ut]) {
 						_warned[ut] = 1;
 						try { console.warn('[mp-client] input "' + ut + '" has NO handler in the game (KDInputTypes) — it did nothing.'); } catch (e) { /* ignore */ }
+					}
+				}
+			}
+			// KDM-268: …and the louder sibling — an input whose dispatch THREW in the authoritative
+			// world. Warned once per type through the SAME `_warned` map as above, so one bad input
+			// type cannot produce two parallel warning streams. A throw is strictly louder than an
+			// unhandled type, so it must not be quieter here.
+			if (Array.isArray(s.failedInputs)) {
+				_failed = s.failedInputs;
+				for (var fi = 0; fi < s.failedInputs.length; fi++) {
+					var fr = s.failedInputs[fi] || {};
+					var fk = 'threw:' + (fr.kdType || '?');
+					if (!_warned[fk]) {
+						_warned[fk] = 1;
+						try { console.warn('[mp-client] input "' + (fr.kdType || '?') + '" THREW in the game and was cut short: ' + fr.error); } catch (e) { /* ignore */ }
 					}
 				}
 			}
@@ -765,6 +784,14 @@
 		 */
 		unhandledInputs: function () {
 			return _unhandled.slice();
+		},
+
+		/**
+		 * KDM-268: every input whose dispatch THREW inside the authoritative world, as the server
+		 * reported it. Fourth member of the drop-report family; empty is the healthy state.
+		 */
+		failedInputs: function () {
+			return _failed.slice();
 		},
 
 		/** True once disableLocalSim() has marked this browser render-only (KD-085). */

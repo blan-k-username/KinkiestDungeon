@@ -262,6 +262,10 @@ class SwapSession {
 		// KDM-208: moves cancelled because a peer took the contested tile earlier in the SAME turn.
 		// Third member of the same family: a real action by a real player that produced nothing.
 		this.cancelledMoves = [];
+		// KDM-268: …and the fourth: an input whose dispatch THREW inside the world. The exception is
+		// caught by applyInputObserved and handed back as obs.error, which until now was read only by
+		// _learnInputKind — so the player's action was truncated and the turn reported success.
+		this.failedInputs = [];
 		// KDM-163: input type -> "turn" | "ui", LEARNED from real turns (never from a speculative apply,
 		// which would double-apply world-mutating actions — see HeadlessHost.applyInputObserved).
 		this.inputKind = new Map();
@@ -1024,6 +1028,10 @@ class SwapSession {
 			// read of avatar/enemy positions) starts from a different state than it used to.
 			this.world.parkGlobalPlayer(PARK.x, PARK.y);
 			this._noteUnknown(kdType, res);
+			// KDM-268 R5: …and record a throw. This path RETURNS `error` to its caller below, but
+			// returning is not recording — without this the UI-path failure is still absent from the
+			// snapshot and from any later diagnosis, which is the whole complaint.
+			this._noteFailedInput(clientId, kdType, res);
 			return { advanced: false, kind: 'ui', changed, unknownType: !!res.unknownType,
 				error: res.error || null,
 				// KDM-253: `null` = not answered, `false` = Wait, `true` = go on alone. The three
@@ -1192,6 +1200,50 @@ class SwapSession {
 	cancelledMoveReport() { return this.cancelledMoves.slice(); }
 
 	/**
+	 * KDM-268 — inputs whose dispatch THREW inside the authoritative world. Fourth member of the same
+	 * family, and the one that was missing: `applyInputObserved` catches the exception and returns it
+	 * as `obs.error`, which the turn path read only inside `_learnInputKind`. Nothing logged it,
+	 * nothing sent it — so an action aborted half-way reported a perfectly normal turn.
+	 */
+	failedInputReport() { return this.failedInputs.slice(); }
+
+	/**
+	 * KDM-268 R7 — the one push-and-trim behind every drop report.
+	 *
+	 * `replacedInputs`, `cancelledMoves` and `failedInputs` each recorded a real action that produced
+	 * nothing, and each had its own copy of `push` + `while (len > maxLog) shift()`. Three copies of a
+	 * bound is three chances to forget it; the third one was about to be written by hand.
+	 *
+	 * The `_dbg` line stays at each CALL SITE on purpose — what is worth saying differs per case, and
+	 * a generic "something was dropped" message would be worth less than the three specific ones.
+	 */
+	_recordDrop(list, rec) {
+		list.push(rec);
+		while (list.length > this.maxLog) list.shift();
+		return rec;
+	}
+
+	/**
+	 * KDM-268 R1/R3/R5 — note that this player's input threw, from EITHER apply path.
+	 *
+	 * One place, so the record's shape is defined once: the two paths (lockstep turn and immediate
+	 * 'ui') cannot drift into two different records, and a consumer never has to ask which produced
+	 * the one it is looking at.
+	 *
+	 * Takes the whole observation rather than a message so the caller cannot forget to unwrap it, and
+	 * answers `null` when there was no error — which makes the call site a plain unconditional line
+	 * instead of a fourth `if` somebody has to keep in step with the other three.
+	 */
+	_noteFailedInput(clientId, kdType, obs) {
+		const err = obs && obs.error;
+		if (!err) return null;
+		const rec = this._recordDrop(this.failedInputs,
+			{ clientId, turn: this.turn, kdType: kdType || null, error: String(err) });
+		this._dbg(`FAILED input for ${clientId} ("${rec.kdType}") in turn ${this.turn}: ${rec.error}`);
+		return rec;
+	}
+
+	/**
 	 * KDM-251 — stop the turn loop, with a reason the player can be shown.
 	 *
 	 * The reason is an OPAQUE STRING to this class. Presence lives on the bridge (`presence.js`) and
@@ -1265,8 +1317,7 @@ class SwapSession {
 				displaced: this._toInput(clientId, displaced).kdType || displaced.kind || null,
 				by: this._toInput(clientId, action).kdType || action.kind || null,
 			};
-			this.replacedInputs.push(rec);
-			while (this.replacedInputs.length > this.maxLog) this.replacedInputs.shift();
+			this._recordDrop(this.replacedInputs, rec);
 			this._dbg(`REPLACED pending input for ${clientId}: "${rec.displaced}" never applied, ` +
 				`displaced by "${rec.by}" in turn ${this.turn}`);
 		}
@@ -1355,10 +1406,12 @@ class SwapSession {
 				// KDM-208: did the contested-tile veto fire for this action? Read it before anything else
 				// can, and RECORD it — a cancelled move is a real input that produced nothing, exactly the
 				// class of silent drop KDM-163 made reportable.
+				// KDM-268: did the dispatch THROW? applyInputObserved caught it into obs.error; until now
+				// nothing on this path read that, so the action was truncated in silence.
+				this._noteFailedInput(id, kdType, obs);
 				cancelled = (this.world.takeBumpVetoes() || 0) > 0;
 				if (cancelled) {
-					this.cancelledMoves.push({ clientId: id, turn: this.turn, kdType });
-					while (this.cancelledMoves.length > this.maxLog) this.cancelledMoves.shift();
+					this._recordDrop(this.cancelledMoves, { clientId: id, turn: this.turn, kdType });
 					this._dbg(`CANCELLED contested move for ${id} ("${kdType}") in turn ${this.turn} — ` +
 						`a peer arrived on the target tile earlier in this same turn`);
 				}
@@ -2531,6 +2584,9 @@ class SwapSession {
 		snap.replacedInputs = this.replacedInputReport();
 		// KDM-208: …and a move that really ran but was cancelled because a peer reached the tile first.
 		snap.cancelledMoves = this.cancelledMoveReport();
+		// KDM-268: …and an input whose dispatch threw inside the world. Additive field: an older client
+		// simply ignores it, and a newer one warns once per type exactly as it does for unknownInputs.
+		snap.failedInputs = this.failedInputReport();
 		// KD-098: the headless world never runs the draw-ease loop, so entities' visual_x/visual_y
 		// stay stuck near spawn while x/y jump via AI — the client then re-eases from the stale
 		// spot each turn (the "Rat teleports from its initial tile through several tiles"). Snap
