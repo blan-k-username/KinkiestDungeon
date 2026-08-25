@@ -23,7 +23,7 @@
  * Requirement ids refer to the `## Requirements` section of KDM-250 (EARS text in KDM-234).
  */
 import { describe, it, expect, afterEach, beforeAll, afterAll } from 'vitest';
-import { MPClient } from '../helpers/mp-ws-client';
+import { MPClient, seatPair } from '../helpers/mp-ws-client';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { WSBridge } = require('../../tools/mp-server/ws-bridge');
 
@@ -52,13 +52,10 @@ describe('KDM-250 — heartbeat and the drop report', () => {
 			requiredPlayers: 3, seed: 'heartbeat', hbIntervalMs: HB_INTERVAL, hbTimeoutMs: HB_TIMEOUT,
 		}, opts));
 		const port = await bridge.listen(0);
-		const A = await MPClient.connect(port);
-		const B = await MPClient.connect(port, opts.bPong === false ? { pong: false } : {});
+		// KDM-255 — through the join gate, the only road in. `bPong` wedges the GUEST only: the host
+		// has to keep answering, because it is the one that must notice.
+		const { host: A, guest: B } = await seatPair(port, { guestPong: opts.bPong !== false });
 		open.push(A, B);
-		A.send({ type: 'join', clientId: 'A' });
-		await A.next((m) => m.type === 'joined');
-		B.send({ type: 'join', clientId: 'B' });
-		await B.next((m) => m.type === 'joined');
 		return { A, B, port };
 	}
 
@@ -148,7 +145,7 @@ describe('KDM-250 — heartbeat and the drop report', () => {
 			const A = await MPClient.connect(port);
 			const W = await MPClient.connect(port);       // a watcher socket that never joins
 			open.push(A, W);
-			A.send({ type: 'join', clientId: 'A' });
+			A.send({ type: 'join', clientId: 'A', role: 'host' });   // KDM-255: the gate is the road in
 			await A.next((m) => m.type === 'joined');
 			A.close();
 			await W.never(isMissing, HB_TIMEOUT * 2);
@@ -176,11 +173,7 @@ describe('KDM-250 — heartbeat and the drop report', () => {
 				requiredPlayers: 2, seed: 'hb-live', hbIntervalMs: HB_INTERVAL, hbTimeoutMs: 30_000,
 			});
 			const port = await live.listen(0);
-			A = await MPClient.connect(port);
-			B = await MPClient.connect(port);
-			A.send({ type: 'join', clientId: 'A' });
-			await A.next((m) => m.type === 'joined');
-			B.send({ type: 'join', clientId: 'B' });
+			({ host: A, guest: B } = await seatPair(port));   // KDM-255: the gate is the road in
 			await A.next(isState);                        // both in → initial render-state
 			await B.next(isState);
 		}, BOOT_TIMEOUT);

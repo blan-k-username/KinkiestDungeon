@@ -31,7 +31,21 @@
 	// the bottom is declarations, and the only top-level effects are the debug flag and the boot call
 	// at the very end, which is now conditional. A normal single-player page is untouched.
 	var endpoint = null;      // 'host:port' — null means same-origin
-	var role = null;          // 'host' | 'guest' | null (legacy direct join)
+	var role = null;          // 'host' | 'guest' — always set by the time we send a join
+	/*
+	 * KDM-255 — THIS WINDOW IS THE `#coop=` SHORTCUT, so nobody is watching it.
+	 *
+	 * `#coop=` used to send a `join` with no role at all, which the bridge seated directly without
+	 * ever consulting the gate — a second implementation of joining that existed only because the
+	 * tests and the two-window UAT flow stood on it. It is now a shortcut *into* the approval flow:
+	 * the window asks for the host seat, and if someone already holds it, comes back as a guest.
+	 *
+	 * The one thing the shortcut still has to supply is the ANSWER, because the whole point is that
+	 * window A is unattended. That auto-answer lives here, in the client, and deliberately not in the
+	 * server: a server-side auto-approve flag would be the same duplication in a new coat — a second
+	 * admission rule beside the host's. Here it is one page choosing to say yes.
+	 */
+	var shortcut = false;
 	var playerName = '';      // what the host sees in their accept/decline prompt
 	// KDM-238 R3 — the perk keys this player picked on KD's own perk screen, carried on the join
 	// handshake beside the name. Empty means "I never opened that screen", which the server reads as
@@ -491,9 +505,15 @@
 		// back in 200 ms. This cannot spin forever because `coop-mods.js` runs a watchdog that always
 		// settles a status, so `done()` is guaranteed to go true whatever the game's loader does.
 		if (window.__coopMods && !window.__coopMods.done()) {
-			// KDM-249 — a GUEST pulls the host's mods first; a host (and the legacy `#coop=` path) has
-			// no host mod set to reconcile against and only executes its own.
-			window.__coopMods.ensureExecuted(role === 'guest' ? { fetchFrom: httpBase() } : {});
+			// KDM-249 — a GUEST pulls the host's mods first; a host has no host mod set to reconcile
+			// against and only executes its own.
+			//
+			// KDM-255 — the `#coop=` shortcut is excluded explicitly, and no longer merely by being
+			// roleless. Its two windows are the same page off the same origin running the same
+			// bundle, so there is nothing to reconcile; a shortcut guest fetching from itself would
+			// be work done to reach the state it is already in.
+			var pullsMods = role === 'guest' && !shortcut;
+			window.__coopMods.ensureExecuted(pullsMods ? { fetchFrom: httpBase() } : {});
 			if (!coop._modsQueued) {
 				coop._modsQueued = true;
 				setTimeout(function () { coop._modsQueued = false; enterGame(); }, 200);
@@ -1004,41 +1024,43 @@
 			clearConnectDeadline();                     // F1 — it answered; the deadline is spent
 			rememberAddress();                          // A2 — and it answered HERE, so this address is good
 			coop.connected = true;
+			// KDM-255 — every join names the seat it wants. There is no longer a roleless form: the
+			// bridge refuses one, because the gate is the only road in. The `#coop=` shortcut reaches
+			// here with `role = 'host'` on its first attempt and `'guest'` on the retry.
 			var join = { type: 'join', clientId: id };
-			// A role opts into the approval flow; without one this is the legacy direct join and the
-			// server behaves exactly as it always did.
-			if (role) {
-				join.role = role;
-				join.name = playerName;
-				join.build = buildId();
-				// KDM-249 R1 — this client's mod set rides on the handshake beside `build`.
-				//
-				// If `prepare()` has not finished hashing yet, this is `[]` — and that is SAFE by
-				// design rather than a race worth guarding: an absent declaration means "needs
-				// everything" at the gate (`mod-sync.js`), so the worst case is the guest being
-				// offered mods it already has. The dangerous reading — absent as "nothing to do" —
-				// is the one that would leave it silently mod-less, and the gate refuses it.
-				try { join.mods = window.__coopMods ? window.__coopMods.declaration() : []; } catch (e) { join.mods = []; }
-				// KDM-238 R3 — the perks this player picked on KD's own perk screen, beside the name
-				// and the mods. An empty list is the honest answer for a player who never opened that
-				// screen, and the server reads it as "seat me on KD's default terms" (R9) — there is
-				// no dangerous reading of absence here, unlike `mods` above.
-				join.perks = playerPerks.slice();
-				/*
-				 * KDM-239 R3/R5 — a HOST also declares the WORLD: the game-mode toggles that describe
-				 * the run, and the seed.
-				 *
-				 * Host only, and the server drops a guest's copy anyway (join-gate). Both halves are
-				 * deliberate: sending it from a guest would be a client asserting something that is
-				 * not its to assert, and refusing it only on the client would leave the server
-				 * trusting whoever sent it first.
-				 *
-				 * Read from KD's OWN globals — the same values `KDUpdatePlugSettings` derives its keys
-				 * from — so whatever the player set on KD's own screens is what travels. We choose
-				 * nothing here; `worldModes()` is a read, not a policy.
-				 */
-				if (role === 'host') join.world = { modes: worldModes(), seed: worldSeed() };
-			}
+			join.role = role;
+			// On the shortcut road these are the honest empty answers for a window nobody
+			// configured — `''` and `[]` are exactly what the gate reads as "unnamed" and "seat me
+			// on KD's default terms", which is what keeps the legacy `Player <id>` label.
+			join.name = playerName;
+			join.build = buildId();
+			// KDM-249 R1 — this client's mod set rides on the handshake beside `build`.
+			//
+			// If `prepare()` has not finished hashing yet, this is `[]` — and that is SAFE by
+			// design rather than a race worth guarding: an absent declaration means "needs
+			// everything" at the gate (`mod-sync.js`), so the worst case is the guest being
+			// offered mods it already has. The dangerous reading — absent as "nothing to do" —
+			// is the one that would leave it silently mod-less, and the gate refuses it.
+			try { join.mods = window.__coopMods ? window.__coopMods.declaration() : []; } catch (e) { join.mods = []; }
+			// KDM-238 R3 — the perks this player picked on KD's own perk screen, beside the name
+			// and the mods. An empty list is the honest answer for a player who never opened that
+			// screen, and the server reads it as "seat me on KD's default terms" (R9) — there is
+			// no dangerous reading of absence here, unlike `mods` above.
+			join.perks = playerPerks.slice();
+			/*
+			 * KDM-239 R3/R5 — a HOST also declares the WORLD: the game-mode toggles that describe
+			 * the run, and the seed.
+			 *
+			 * Host only, and the server drops a guest's copy anyway (join-gate). Both halves are
+			 * deliberate: sending it from a guest would be a client asserting something that is
+			 * not its to assert, and refusing it only on the client would leave the server
+			 * trusting whoever sent it first.
+			 *
+			 * Read from KD's OWN globals — the same values `KDUpdatePlugSettings` derives its keys
+			 * from — so whatever the player set on KD's own screens is what travels. We choose
+			 * nothing here; `worldModes()` is a read, not a policy.
+			 */
+			if (role === 'host') join.world = { modes: worldModes(), seed: worldSeed() };
 			ws.send(JSON.stringify(join));
 			// KDM-249 R6 — a HOST publishes its zips so a guest can fetch them, then re-states the
 			// declaration: `join` above carried whatever had been hashed by the time the socket
@@ -1047,7 +1069,10 @@
 			// Fire-and-forget: the host's own session needs nothing from the gateway's store, so a
 			// failed upload degrades the GUEST's presentation (named by R9) rather than blocking
 			// anyone's game.
-			if (role === 'host' && window.__coopMods) {
+			// KDM-255 — `!shortcut` for the same reason the guest-side fetch is skipped above: both
+			// `#coop=` windows are the same bundle off the same origin, so there is nothing for the
+			// guest to pull and publishing would be an upload to satisfy a fetch that never happens.
+			if (role === 'host' && !shortcut && window.__coopMods) {
 				try {
 					window.__coopMods.publish(httpBase()).then(function (rows) {
 						if (ws === myWs && ws.readyState === 1) ws.send(JSON.stringify({ type: 'mods_declare', mods: rows }));
@@ -1167,12 +1192,41 @@
 				return;
 			}
 			if (m.type === 'join_pending') {
+				/*
+				 * KDM-255 — on the `#coop=` road there is nobody at this window to click Accept, so it
+				 * answers for itself. This is the ONLY thing the shortcut adds to the flow; everything
+				 * else about the join is the same code the lobby uses.
+				 *
+				 * Note what is NOT here: no server-side auto-approve, no test-only flag. The gate still
+				 * decided who was allowed to ask, and it is still the HOST that answers — this host
+				 * simply always says yes, because that is what a two-window UAT session means.
+				 */
+				if (shortcut) { window.__coopAnswerJoin(true); return; }
 				// Someone is asking to join OUR game. The host answers this — it is the whole gate.
 				// KDM-257 R2 — same diff, other side: the host is agreeing to SEND these, so say so.
 				lobbySay({ view: 'host', pending: { clientId: m.clientId, name: m.name || 'Someone' }, error: '', modDiff: m.modDiff || null });
 				return;
 			}
 			if (m.type === 'reject') {
+				/*
+				 * KDM-255 — THE SHORTCUT'S SECOND HALF: window B asked for the host seat and was told
+				 * someone already has it, which is exactly how it learns it is the guest.
+				 *
+				 * It has to RECONNECT rather than re-send, because `_reject` ends the socket
+				 * (`ws-bridge.js`). That is deliberate on the server's side and left alone here: making
+				 * `already_hosting` a non-terminal refusal would add a terminal/non-terminal
+				 * distinction to a shared rule for the sake of one caller.
+				 *
+				 * `connect()` directly, not `scheduleReconnect()`: that one returns early while
+				 * `!coop.started` and would silently do nothing here, and its backoff is for a
+				 * connection that dropped — this is a handshake continuing on a fresh socket.
+				 */
+				if (shortcut && m.reason === 'already_hosting') {
+					role = 'guest';
+					setStatus('Co-op ' + id + ': joining ' + (endpoint || 'this game') + '…');
+					connect();
+					return;
+				}
 				var why = m.reason === 'declined' ? 'The host declined your request.'
 					: m.reason === 'build_mismatch' ? ('Different game versions — host has ' + (m.hostBuild || '?') + ', you have ' + (m.guestBuild || '?') + '.')
 					: m.reason === 'session_full' ? 'That game is full.'
@@ -1220,7 +1274,11 @@
 				// The session is live once BOTH are in — that is the moment the host's game becomes
 				// multiplayer, and the moment either side stops being a lobby screen.
 				if (m.started) { lobbySay({ pending: null, status: '' }); enterGame(); }
-				else if (role === 'host') lobbySay({ view: 'host', status: '' });
+				// KDM-255 — `!shortcut` matters: a `#coop=` window has already entered the game
+				// (`boot()` calls `enterGame()` before connecting, which is the shortcut's whole
+				// character), so painting the lobby's host screen here would cover a live window with a
+				// waiting-room it never opened. The lobby host, who IS on that screen, still gets it.
+				else if (role === 'host' && !shortcut) lobbySay({ view: 'host', status: '' });
 			}
 			else if (m.type === 'state' && m.kind === 'push') {
 				// KDM-252: a state frame the SERVER started — nothing of ours is being answered. Adopt
@@ -1432,6 +1490,9 @@
 	window.__coopConnect = function (opts) {
 		opts = opts || {};
 		role = opts.role || 'guest';
+		// KDM-255 — the lobby has a HUMAN at it, who answers join requests themselves. The shortcut's
+		// auto-answer must never be on here, or a host would silently admit whoever asked.
+		shortcut = false;
 		playerName = String(opts.name || '');
 		playerPerks = Array.isArray(opts.perks) ? opts.perks.slice() : [];
 		endpoint = opts.address ? String(opts.address).replace(/^wss?:\/\//, '').replace(/\/+$/, '') : null;
@@ -1454,7 +1515,14 @@
 		lobbySay({ pending: null, status: accept ? 'Starting…' : '' });
 	};
 
-	// The `#coop=<id>` path boots immediately, exactly as before. Without it we have only defined an
-	// API, and a normal single-player page is left alone.
-	if (id) boot();
+	/*
+	 * The `#coop=<id>` path boots immediately, exactly as before. Without it we have only defined an
+	 * API, and a normal single-player page is left alone.
+	 *
+	 * KDM-255 — it now opens by asking for the HOST seat. Whichever window loads first gets it; the
+	 * other is refused `already_hosting` and comes back as the guest (see the `reject` handler), which
+	 * reproduces the arrival-order semantics the old roleless join had — but through the gate, and
+	 * with every one of its rules applying.
+	 */
+	if (id) { role = 'host'; shortcut = true; boot(); }
 })();

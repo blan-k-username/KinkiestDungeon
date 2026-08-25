@@ -12,17 +12,15 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 const { WSBridge } = require('../../tools/mp-server/ws-bridge');
 
 const BOOT_TIMEOUT = 240_000;
-import { MPClient as Client } from '../helpers/mp-ws-client';
+import { MPClient as Client, seatPair } from '../helpers/mp-ws-client';
 
 
+// KDM-255: seated through the join gate, which is now the only road in. The four frames this used to
+// send by hand live in `seatPair` — one copy, shared with every other node-layer spec.
 async function joinBoth(bridge: any): Promise<{ A: Client; B: Client }> {
 	const port = await bridge.listen(0);
-	const A = await Client.connect(port);
-	const B = await Client.connect(port);
-	A.send({ type: 'join', clientId: 'A' });
-	await A.next((m) => m.type === 'joined');
-	B.send({ type: 'join', clientId: 'B' });
-	await A.next((m) => m.type === 'state');   // both joined → initial state
+	const { host: A, guest: B } = await seatPair(port);
+	await A.next((m) => m.type === 'state');   // both seated → initial state
 	await B.next((m) => m.type === 'state');
 	return { A, B };
 }

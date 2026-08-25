@@ -381,8 +381,22 @@ class WSBridge {
 			}
 			try {
 				this._carrySeat(res.clientId);
+				// KDM-250: seated before the session is told, so the seat exists by then.
+				this.presence.seat(res.clientId, 'guest', now());
+				/*
+				 * KDM-255 — A GUEST APPROVED INTO A RUNNING SESSION IS A JOIN-LATE, not an error.
+				 *
+				 * This branch used to call `session.join()` unconditionally, and that method is the
+				 * PRE-START collector: it throws once the session has started (KDM-235). So approving
+				 * a friend who turned up mid-run answered them `{type:'error'}` and seated nobody.
+				 *
+				 * It went unnoticed because the roleless join road had the very same two-way split a
+				 * few lines below and the whole join-late suite went that way. With that road gone
+				 * (R1/R2) this is the only way in, so the split has to exist here too — the same
+				 * `_joinLate` call, not a second implementation of it.
+				 */
+				if (this.session.started) { this._joinLate(res.clientId); return clientId; }
 				const r = this.session.join(res.clientId);
-				this.presence.seat(res.clientId, 'guest', now());   // KDM-250
 				if (guestSock) {
 					this._send(guestSock, {
 						type: 'joined', clientId: res.clientId, started: r.started, players: this.session.players,
@@ -431,9 +445,21 @@ class WSBridge {
 					this._reportBack(clientId);
 					return clientId;
 				}
-				// KDM-233: an explicit ROLE opts into the approval flow. Without one this is the legacy
-				// `#coop=<id>` path, which still joins directly — the two converge in KDM-236, and until
-				// then the e2e suite and `tools/coop-demo.sh` keep working unchanged.
+				/*
+				 * KDM-255 R1/R2 — THE GATE IS THE ONLY ROAD IN. Two branches, and no third.
+				 *
+				 * There used to be a fall-through: a `join` carrying no `role` was seated directly by
+				 * `_roleFor`'s arrival order, with `join-gate.js` never consulted — so `already_hosting`,
+				 * `session_full`, `busy` and the `build_mismatch` check (KDM-233 N1) were all skipped on
+				 * that road. It was the road `#coop=<id>` and eleven node-layer specs took, which is why
+				 * KDM-233 shipped the gate without being able to remove it.
+				 *
+				 * `#coop=` is now a SHORTCUT INTO this flow rather than a second implementation of it:
+				 * the window asks for the host seat, is refused `already_hosting` if someone already has
+				 * it, and comes back as a guest whom the host's own page auto-answers
+				 * (`coop-bootstrap.js`). The auto-answer is deliberately CLIENT-side — a server-side
+				 * auto-approve flag would be this same duplication in a new coat.
+				 */
 				if (msg.role === 'host') {
 					// KDM-260 — the shape is declared once, at the top of this file, so a new handshake
 					// field cannot be forgotten here. `world` is in the HOST shape only (KDM-239 A5).
@@ -454,11 +480,24 @@ class WSBridge {
 						return clientId;
 					}
 					if (!q.accept) { this._reject(socket, q); return clientId; }
+				} else {
+					// A join that names no seat cannot be admitted by any rule, so it is refused in
+					// words rather than guessed at. Note this is reached only by a client that never
+					// held a seat: a reconnect short-circuits above, before any of this.
+					this._reject(socket, { reason: 'no_role' });
+					return clientId;
 				}
-				// KDM-250: seated BEFORE `session.join`, so the role is decided while this client is
-				// still the newest arrival — `_roleFor`'s legacy fallback reads arrival order.
-				const role = this._roleFor(clientId, msg.role);
-				this.presence.seat(clientId, role, now());
+				/*
+				 * KDM-250: seated BEFORE `session.join`, so the seat exists by the time the session
+				 * knows about this client.
+				 *
+				 * KDM-255 — the role is simply what the client declared. This used to go through a
+				 * `_roleFor(clientId, msg.role)` helper whose real job was the ARRIVAL-ORDER fallback
+				 * the roleless branch needed ("no seat yet ⇒ you are the host"). With that branch gone
+				 * the helper could only ever return its first argument, so it is gone too rather than
+				 * left as a dead default that would quietly make a future bypass work.
+				 */
+				this.presence.seat(clientId, msg.role, now());
 				// KDM-235 — a NEW id arriving at a RUNNING session is a join-late, not an error. (A
 				// known id is a reconnect and never reaches here; a dismissed one was refused at the
 				// top of this branch.) `join()` is the pre-start collector and throws once started, so
@@ -847,19 +886,6 @@ class WSBridge {
 		if (!this.session.started) return false;
 		this.session.resume();
 		return true;
-	}
-
-	/**
-	 * Which seat is this, in the words the survivor needs? An explicit `role` from the join wins;
-	 * otherwise the gate knows (slot 0 is the host); otherwise this is the legacy `#coop=<id>` path,
-	 * where the first to arrive is the host by arrival order.
-	 */
-	_roleFor(clientId, declared) {
-		if (declared === 'host' || declared === 'guest') return declared;
-		const slot = this.gate.slotOf(clientId);
-		if (slot === 0) return 'host';
-		if (slot === 1) return 'guest';
-		return this.presence.seats().length === 0 ? 'host' : 'guest';
 	}
 
 	/** Arm the idle-grace timer: after idleGraceMs, auto-"wait" the non-submitters so a

@@ -242,7 +242,7 @@ describe('KDM-235 R3 — over the wire, the joiner gets the LIVE world in full',
 		bridge = new WSBridge({ requiredPlayers: 1, seed: 'join-late-wire', hbIntervalMs: 0 });
 		const port = await bridge.listen(0);
 		A = await MPClient.connect(port);
-		A.send({ type: 'join', clientId: 'A' });
+		A.send({ type: 'join', clientId: 'A', role: 'host' });   // KDM-255: the gate is the road in
 		await A.next((m) => m.type === 'joined');
 		await A.next((m) => m.type === 'state');
 		// A turn resolves before anyone else arrives, so "the live world" is distinguishable from
@@ -261,7 +261,11 @@ describe('KDM-235 R3 — over the wire, the joiner gets the LIVE world in full',
 		expect(turnAt, 'precondition: the run is past turn 0').toBeGreaterThan(0);
 
 		B = await MPClient.connect(bridge.port);
-		B.send({ type: 'join', clientId: 'B' });
+		// KDM-255 — joining LATE still goes through the gate: the friend who turned up mid-run is
+		// asking to be let in exactly like any other guest, and A answers.
+		B.send({ type: 'join', clientId: 'B', role: 'guest' });
+		await A.next((m) => m.type === 'join_pending' && m.clientId === 'B');
+		A.send({ type: 'join_answer', accept: true });
 		const joined = await B.next((m) => m.type === 'joined');
 		expect(joined.started, 'they join a session that is already running').toBe(true);
 

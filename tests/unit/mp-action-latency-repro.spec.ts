@@ -67,8 +67,13 @@ describe('KDM-192 — a burst of per-frame stream input must not cost a transact
 			const a = await connect(port);
 			const b = await connect(port);
 			a.on('data', () => {}); b.on('data', () => {});
-			a.write(maskFrame(JSON.stringify({ type: 'join', clientId: 'A' })));
-			b.write(maskFrame(JSON.stringify({ type: 'join', clientId: 'B' })));
+			// KDM-255 — through the join gate, the only road in. Written blind (this spec reads nothing
+			// off its sockets, by design); the `session.started` precondition below is the proof the
+			// handshake actually completed.
+			a.write(maskFrame(JSON.stringify({ type: 'join', clientId: 'A', role: 'host' })));
+			b.write(maskFrame(JSON.stringify({ type: 'join', clientId: 'B', role: 'guest' })));
+			await new Promise((r) => setTimeout(r, 250));
+			a.write(maskFrame(JSON.stringify({ type: 'join_answer', accept: true })));
 			await new Promise((r) => setTimeout(r, 4000));
 			expect(bridge.session.started, 'precondition: session must have started').toBe(true);
 			expect(bridge.session.inputKind.get('setMoveDirection'),

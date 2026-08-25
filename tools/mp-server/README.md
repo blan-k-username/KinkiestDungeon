@@ -253,8 +253,15 @@ typing the host's LAN address — there is no join code and no account: **the ho
 
 ```
 node tools/mp-server/demo-server.js    # game + co-op gateway on one port (PORT=… to move it)
-bash tools/coop-demo.sh                # the same, in docker, for UAT
+./run-kd-game.sh --mp                  # the same, in docker, for UAT — from the kd-mods-src sibling
 ```
+
+There is exactly one launcher script, and it lives in the `kd-mods-src` sibling repo (KDM-255). A
+second one here (`tools/coop-demo.sh`) used to do the same job with a different image, a different
+build step and a different set of forwarded environment variables — which is how `KD_PVP=1` came to
+start a session with PvP off and say nothing. `./run-kd-game.sh --mp` forwards every variable this
+server reads, and `tools/check-launcher-env.sh` over there fails a commit that adds one without it.
+For this checkout on its own, the `node` line above is the whole thing.
 
 Co-op is opt-in: run the plain static server (`npm run serve`) and nothing listens for co-op at all.
 

@@ -139,18 +139,24 @@ describe('KDM-206 — the bridge sends deltas, not captures', () => {
 		const bridge: any = new WSBridge({ requiredPlayers: 2, seed: 'kdm206-wire' });
 		const port = await bridge.listen(0);
 		const seen: any[] = [];
-		const mk = (id: string) => new Promise<any>((res) => {
+		// KDM-255 — the join gate is now the only road in, so each socket names the seat it wants. A
+		// hand-rolled client rather than `seatPair` because this spec measures RAW frame bytes and
+		// must not go through `MPClient`, which merges deltas into `m.snapshot` and would erase the
+		// very distinction being asserted.
+		const mk = (id: string, role: string) => new Promise<any>((res) => {
 			// eslint-disable-next-line no-undef
 			const ws = new WebSocket(`ws://127.0.0.1:${port}`);
 			ws.addEventListener('message', (e: any) => {
 				const m = JSON.parse(e.data);
 				if (m.type === 'state' && id === 'A') seen.push(m);
+				// A is the host: it answers the guest's request, which is what admits B.
+				if (m.type === 'join_pending') ws.send(JSON.stringify({ type: 'join_answer', accept: true }));
 			});
-			ws.addEventListener('open', () => { ws.send(JSON.stringify({ type: 'join', clientId: id })); res(ws); });
+			ws.addEventListener('open', () => { ws.send(JSON.stringify({ type: 'join', clientId: id, role })); res(ws); });
 		});
 		try {
-			const a: any = await mk('A');
-			await mk('B');
+			const a: any = await mk('A', 'host');
+			await mk('B', 'guest');
 			await new Promise((r) => setTimeout(r, 400));       // let the initial state land
 
 			for (const [x, y] of [[1, 0], [0, 1], [-1, 0]]) {

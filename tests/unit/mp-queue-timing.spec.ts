@@ -58,8 +58,17 @@ describe('KDM-186 — ws-bridge queue-timing instrumentation', () => {
 			const a = await connect(port);
 			const b = await connect(port);
 			a.on('data', () => {}); b.on('data', () => {});
-			a.write(maskFrame(JSON.stringify({ type: 'join', clientId: 'A' })));
-			b.write(maskFrame(JSON.stringify({ type: 'join', clientId: 'B' })));
+			/*
+			 * KDM-255 — through the join gate, which is now the only road in. This spec reads nothing
+			 * off its sockets on purpose (it is timing the raw wire, not the protocol), so the host's
+			 * answer is written blind after a short settle rather than on seeing `join_pending`. The
+			 * `session.started` precondition two lines down is what proves the handshake completed —
+			 * if the answer were mistimed, that assertion fails rather than the spec passing hollow.
+			 */
+			a.write(maskFrame(JSON.stringify({ type: 'join', clientId: 'A', role: 'host' })));
+			b.write(maskFrame(JSON.stringify({ type: 'join', clientId: 'B', role: 'guest' })));
+			await new Promise((r) => setTimeout(r, 250));
+			a.write(maskFrame(JSON.stringify({ type: 'join_answer', accept: true })));
 			await new Promise((r) => setTimeout(r, 4000));   // both boots + session start
 			expect(bridge.session.started, 'precondition: the session must have started').toBe(true);
 

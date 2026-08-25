@@ -33,6 +33,21 @@ test('two browser windows play one shared co-op dungeon via the demo server', as
 	try {
 		await bootCoopPair(A, B, port);
 
+		/*
+		 * KDM-255 R3 — the `#coop=` windows got in THROUGH THE GATE, not around it.
+		 *
+		 * `#coop=` used to send a roleless `join` that `ws-bridge` seated directly, leaving
+		 * `gate.slotOf` null for both windows while the session ran perfectly well. So this is the
+		 * one assertion that can tell the shortcut from the bypass, and it is made here — in the
+		 * spec that already boots the real pair through the real server — rather than in a
+		 * mock-shaped unit test that could not have caught the old shape at all.
+		 *
+		 * Window B necessarily lost the host claim and came back as the guest (D1): that is what
+		 * slot 1 records.
+		 */
+		expect(bridge.gate.slotOf('A'), 'A claimed the host seat').toBe(0);
+		expect(bridge.gate.slotOf('B'), 'B was admitted as the guest, by A answering').toBe(1);
+
 		// the game actually reaches the dungeon SCREEN (not stuck on the asset
 		// preloader, and not crashed) in both windows.
 		for (const P of [A, B]) {

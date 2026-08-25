@@ -146,11 +146,22 @@ describe('KDM-233 — join approval over the wire', () => {
 		expect(bridge.gate.pending, 'a requester who left is no longer asking').toBe(null);
 	});
 
-	it('legacy `join` with no role still works — the #coop= entry path is not broken', async () => {
+	/*
+	 * KDM-255 — this used to be `'legacy join with no role still works — the #coop= entry path is
+	 * not broken'`, and it asserted that a roleless `join` was seated WITHOUT the gate. That was
+	 * honest at the time: KDM-233 shipped the gate beside the old road rather than in place of it,
+	 * because the suite and `#coop=` both stood on the old one.
+	 *
+	 * The road is gone. `#coop=` now asks for the host seat and comes back as a guest if someone
+	 * already has it, so the entry path is not broken — it goes through here. Its successor lives in
+	 * `mp-join-one-road.spec.ts`, which owns the removal and its regression guards; this file keeps
+	 * only the assertion that belongs to the approval protocol.
+	 */
+	it('a join that names no seat is refused, so the gate cannot be walked around', async () => {
 		const port = await boot();
 		const A = await client(port);
 		A.send({ type: 'join', clientId: 'A' });
-		expect((await A.next(isJoined)).started).toBe(false);
-		expect(bridge.session.players).toEqual(['A']);
+		expect((await A.next(isReject)).reason).toBe('no_role');
+		expect(bridge.session.players, 'and nobody was seated on the way out').toEqual([]);
 	});
 });

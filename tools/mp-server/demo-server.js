@@ -11,7 +11,8 @@
  * untouched on disk): the thin-client core (render-client.js) and a co-op bootstrap
  * (coop-bootstrap.js) that reads `#coop=<id>` from the URL and wires render + input.
  *
- * UAT flow (run in Docker, port mapped to your host — see tools/coop-demo.sh):
+ * UAT flow (in Docker, port mapped to your host — `./run-kd-game.sh --mp` in the kd-mods-src
+ * sibling, which is the one launcher; KDM-255):
  *   1. window 1 → http://localhost:8090/#coop=A   (creates the session, waits)
  *   2. window 2 → http://localhost:8090/#coop=B   (both in → shared dungeon starts)
  *   3. arrow keys move; BOTH must move to advance a turn (lockstep co-op). You see

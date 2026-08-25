@@ -99,3 +99,48 @@ export class MPClient {
 		}
 	}
 }
+
+/**
+ * KDM-255 — seat a host/guest PAIR through the join gate, which is now the only road in.
+ *
+ * WHY IT EXISTS. Eleven node-layer specs used to open their clients with a bare
+ * `{ type: 'join', clientId: 'A' }`. That frame took the roleless branch of `ws-bridge._handle`,
+ * which seated a client by ARRIVAL ORDER without ever consulting `join-gate.js` — a second
+ * implementation of joining that existed only because the tests depended on it. KDM-255 removed the
+ * branch, so every spec has to go through the gate, and hand-editing eleven copies of the four-frame
+ * handshake is exactly the duplication `MPClient` itself was extracted to stop (see this file's
+ * header).
+ *
+ * IT IS NOT A BYPASS, and that is the point. It sends the same frames a browser sends and waits for
+ * the same replies; the host really does answer `join_answer`. A spec using it is subject to every
+ * gate rule — `already_hosting`, `session_full`, `busy`, `build_mismatch` — which is what
+ * `mp-join-one-road.spec.ts` asserts about this helper directly. If it ever grows a shortcut that
+ * skips `gate.accept()`, every spec that leans on it goes quietly, wrongly green.
+ *
+ * `build` is deliberately NOT sent. The bridges these specs construct configure none, so
+ * `gate.buildCheckActive()` is false and the check stands down — a spec that wants to exercise N1
+ * configures a build and sends its own frames.
+ *
+ * `hostPong` / `guestPong` are SEPARATE because the heartbeat specs wedge exactly one side and watch
+ * the other notice. A single shared flag would silence both, and "nobody is home" is not a test of
+ * "your peer is not home".
+ */
+export async function seatPair(
+	port: number,
+	opts: { host?: string; guest?: string; hostPong?: boolean; guestPong?: boolean } = {},
+): Promise<{ host: MPClient; guest: MPClient }> {
+	const hostId = opts.host || 'A';
+	const guestId = opts.guest || 'B';
+	const host = await MPClient.connect(port, { pong: opts.hostPong });
+	host.send({ type: 'join', clientId: hostId, role: 'host' });
+	await host.next((m) => m.type === 'joined');
+
+	const guest = await MPClient.connect(port, { pong: opts.guestPong });
+	guest.send({ type: 'join', clientId: guestId, role: 'guest' });
+	// The host is ASKED before anyone is seated — a pending request holds no seat, so waiting for the
+	// question before answering it is not politeness, it is the protocol.
+	await host.next((m) => m.type === 'join_pending' && m.clientId === guestId);
+	host.send({ type: 'join_answer', accept: true });
+	await guest.next((m) => m.type === 'joined');
+	return { host, guest };
+}

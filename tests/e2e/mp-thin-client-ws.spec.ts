@@ -59,6 +59,9 @@ test('a browser thin-client renders server snapshots and rounds input over a Web
 			w.__base = null;
 			ws.onmessage = (e: MessageEvent) => {
 				const m = JSON.parse(e.data);
+				// KDM-255: as the host, this client is the gate — the guest below waits on this answer.
+				if (m.type === 'joined') w.__seated = true;
+				if (m.type === 'join_pending') ws.send(JSON.stringify({ type: 'join_answer', accept: true }));
 				if (m.type === 'state') {
 					if (m.snapshot) w.__base = m.snapshot;
 					else if (m.delta && w.__base) w.__base = w.KDDelta.kdMerge(w.__base, m.delta);
@@ -67,8 +70,22 @@ test('a browser thin-client renders server snapshots and rounds input over a Web
 					w.__states.push({ tick: m.tick, grid: w.__base.map.Grid });
 				}
 			};
-			ws.onopen = () => ws.send(JSON.stringify({ type: 'join', clientId: 'A' }));
+			// KDM-255 — the join gate is the only road in. This client is the HOST, so it claims slot 0
+			// and answers the node-side guest's request below.
+			ws.onopen = () => ws.send(JSON.stringify({ type: 'join', clientId: 'A', role: 'host' }));
 		}, `ws://127.0.0.1:${port}`);
+
+		/*
+		 * KDM-255 — WAIT FOR THE HOST TO BE SEATED BEFORE THE GUEST ASKS.
+		 *
+		 * `page.evaluate` above returns once `onopen` is ASSIGNED, not once the socket has opened and
+		 * joined, so the two joins used to race. That was harmless while a roleless join simply seated
+		 * whoever arrived; through the gate it is not — a guest that asks before anyone holds slot 0 is
+		 * refused `no_host` and its socket is closed, and the session never starts. Ordering is a real
+		 * requirement of the flow now (the same one `helpers/coop.ts` has always observed), so it is
+		 * awaited rather than hoped for.
+		 */
+		await isolatedPage.waitForFunction(() => (window as any).__seated === true, undefined, { timeout: 20_000 });
 
 		// Node-side player B joins so the shared world starts.
 		// eslint-disable-next-line no-undef
@@ -76,7 +93,7 @@ test('a browser thin-client renders server snapshots and rounds input over a Web
 		const bMsgs: any[] = [];
 		B.addEventListener('message', (e: any) => bMsgs.push(JSON.parse(e.data)));
 		await new Promise<void>((res) => B.addEventListener('open', () => res()));
-		B.send(JSON.stringify({ type: 'join', clientId: 'B' }));
+		B.send(JSON.stringify({ type: 'join', clientId: 'B', role: 'guest' }));
 
 		// The browser should receive its first render-state and adopt it.
 		await isolatedPage.waitForFunction(() => (window as any).__states.length >= 1, undefined, { timeout: 20_000 });

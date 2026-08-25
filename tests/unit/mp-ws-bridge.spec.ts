@@ -37,15 +37,20 @@ describe('WSBridge — local WebSocket render+input round-trip (KD-071)', () => 
 		A?.close(); B?.close(); bridge?.close();
 	});
 
+	// KDM-255 — hand-written rather than `seatPair`, because the two cases below are deliberately
+	// SPLIT across the barrier: A is alone for the first, and B's arrival is the event the second one
+	// is about. A shared helper that seats both at once would erase exactly what is being asserted.
 	it('does not start until both clients join (barrier on join)', async () => {
-		A.send({ type: 'join', clientId: 'A' });
+		A.send({ type: 'join', clientId: 'A', role: 'host' });
 		const ja = await A.next((m) => m.type === 'joined');
 		expect(ja.clientId).toBe('A');
 		expect(ja.started).toBe(false);
 	}, BOOT_TIMEOUT);
 
 	it('starts the shared world and pushes each client its render-state on join', async () => {
-		B.send({ type: 'join', clientId: 'B' });
+		B.send({ type: 'join', clientId: 'B', role: 'guest' });
+		await A.next((m) => m.type === 'join_pending' && m.clientId === 'B');
+		A.send({ type: 'join_answer', accept: true });
 		const sa = await A.next((m) => m.type === 'state');
 		const sb = await B.next((m) => m.type === 'state');
 		// each gets a render-state v1 snapshot with a real dungeon map

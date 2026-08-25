@@ -17,7 +17,7 @@
  * Requirement ids refer to the `## Requirements` section of KDM-251 (EARS text in KDM-234).
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { MPClient } from '../helpers/mp-ws-client';
+import { MPClient, seatPair } from '../helpers/mp-ws-client';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { WSBridge } = require('../../tools/mp-server/ws-bridge');
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -38,11 +38,8 @@ describe('KDM-251 — the pause is honest', () => {
 	beforeAll(async () => {
 		bridge = new WSBridge({ requiredPlayers: 2, seed: 'peer-lost', hbIntervalMs: 0 });
 		const port = await bridge.listen(0);
-		A = await MPClient.connect(port);
-		B = await MPClient.connect(port);
-		A.send({ type: 'join', clientId: 'A' });
-		await A.next((m) => m.type === 'joined');
-		B.send({ type: 'join', clientId: 'B' });
+		// KDM-255 — through the join gate, the only road in.
+		({ host: A, guest: B } = await seatPair(port));
 		await A.next(isState);
 		await B.next(isState);
 		// B leaves. One boot serves every case below; the session stays paused throughout except
