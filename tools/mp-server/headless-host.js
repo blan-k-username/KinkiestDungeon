@@ -351,7 +351,7 @@ const { MODE_WORLD_KEYS, MODE_PLAYER_KEYS, MODE_SOURCE, isModeKey } = require('.
  * ⚠️ CLEAR BEFORE CALLING. This is KDM-240's lesson as code, not a style choice: when
  * `KDPostStairSave` threw, the exception escaped AFTER the map had been generated but BEFORE
  * `KDGenMapCallback = null` ran, leaving a stale callback that poisoned every later turn
- * (see `_neuterStairAutosave`). Clear-then-call makes a throw cost one transition instead of the
+ * (see `_neuterAutosave`). Clear-then-call makes a throw cost one transition instead of the
  * session. It is also exactly what upstream's own `RunGenMapCallback` (KinkyDungeon.ts:7926) does.
  *
  * The loop is bounded because a callback may arm another; the bound is REPORTED rather than silently
@@ -525,7 +525,7 @@ class HeadlessHost {
 
 		this._booted = true;
 		this._neuterRendering();
-		this._neuterStairAutosave();
+		this._neuterAutosave();
 		this._installServerRoleShim();
 		return this;
 	}
@@ -573,33 +573,57 @@ class HeadlessHost {
 	}
 
 	/**
-	 * KDM-240 — the post-stairs AUTOSAVE, which made every headless floor transition throw.
+	 * KDM-240 / KDM-267 — KD's OWN AUTOSAVE, which made headless game flows throw.
 	 *
-	 * Measured stack (2026-08-24), reproduced on a real descent in a co-op session:
+	 * `KinkyDungeonGenerateSaveData` reads `KDCurrentModels.get(KinkyDungeonPlayer).Poses` off a
+	 * paper-doll model that `_neuterRendering` above deliberately never builds, and it does so
+	 * WITHOUT a null guard (unlike its four sibling call sites). So every automatic save throws
+	 * `TypeError: cannot read 'Poses' of undefined`. This is NOT an upstream bug — it is the direct
+	 * consequence of a rendering neuter this layer chose, and it is why the README calls headless
+	 * save GENERATION unsupported.
 	 *
-	 *   KDGoThruTile -> KDGenMapCallback -> KDPostStairSave -> KinkyDungeonSaveGame
-	 *     -> KinkyDungeonGenerateSaveData  ->  TypeError: cannot read 'Poses' of undefined
+	 * The damage is never cosmetic, because KD autosaves from the MIDDLE of game flows — so whatever
+	 * was still to happen in that flow does not. The two measured cases differ in how far the throw
+	 * travelled, which is worth knowing before assuming a third one is loud:
 	 *
-	 * This is NOT an upstream bug — it is the direct consequence of `_neuterRendering` above, which
-	 * no-ops `DrawModelProcessPoses` / `KinkyDungeonDressPlayer` on purpose so the server never builds
-	 * a paper-doll model. `KinkyDungeonGenerateSaveData` then reads `Poses` off the model that was
-	 * deliberately never built. The same limitation is why the README calls headless save generation
-	 * unsupported.
+	 *   KDM-240  KDGoThruTile -> KDGenMapCallback -> KDPostStairSave -> KinkyDungeonSaveGame
+	 *            `KDPostStairSave` is the second-to-last statement of `KDGenMapCallback`
+	 *            (KDStairActions.ts:239), so the throw escaped AFTER the new map was generated but
+	 *            BEFORE `KDGenMapCallback = null` ran — a stale callback, on every floor change.
+	 *   KDM-267  KinkyDungeonAdvanceTime -> KDRunDefeatForEnemy -> KinkyDungeonDefeat
+	 *            `KinkyDungeonSaveGame()` is the LAST statement of `KinkyDungeonDefeat`
+	 *            (KinkyDungeonJail.ts:1894). `applyInputObserved` DOES catch this one, so the session
+	 *            survived — but on the turn path `obs.error` is read only by `_learnInputKind`
+	 *            (swap-session.js:1125), never logged and never shown. So a captured player had the
+	 *            rest of their own input discarded and the session reported a normal turn. The
+	 *            reporting hole itself is KDM-268; this only removes one cause of hitting it.
 	 *
-	 * The damage was not cosmetic. `KDPostStairSave` is the second-to-last statement of
-	 * `KDGenMapCallback` (KDStairActions.ts:239), so the throw escaped AFTER the new map had been
-	 * generated but BEFORE `KDGenMapCallback = null` ran — leaving a stale callback behind and taking
-	 * the rest of the acting player's turn with it, on every single floor change.
+	 * TWO NAMES, BOTH LOAD-BEARING — neither makes the other redundant:
 	 *
-	 * Stubbing it loses nothing this layer wants. An autosave writes the browser's
-	 * `localStorage.KinkyDungeonSave` (shims.js provides only an in-memory stand-in that nothing ever
-	 * reads back), and a co-op run's persistence is the SERVER's, not KD's — see the note at :233 on
-	 * why replicating KD's own save to clients is actively harmful. `KinkyDungeonSaveGame` itself is
-	 * left alone, so `saveOf()` and `_seedHeadlessModel` keep working as the deliberate test
-	 * instruments they are; only the automatic call on the stairs goes away.
+	 *   `KinkyDungeonSaveGame`  the save itself, and therefore all 12 of its call sites at once
+	 *                           (five in KinkyDungeonJail.ts alone). KDM-240 stubbed only the stairs
+	 *                           wrapper because it believed `saveOf()` needed this function; it does
+	 *                           NOT — `saveOf` calls `KinkyDungeonGenerateSaveData` directly
+	 *                           (see `saveOf`), as does the only other consumer. Nothing in
+	 *                           `tools/mp-server/**` or `tests/**` calls `KinkyDungeonSaveGame`.
+	 *   `KDPostStairSave`       does MORE than save: on the PerkRoom floor it sets
+	 *                           `KinkyDungeonState = "Save"` and builds a DOM textarea via
+	 *                           `KDTextArea` / `ElementValue` (KDStairActions.ts:265). Headless that
+	 *                           is just as unwanted as the throw was, and it survives the stub above.
+	 *
+	 * Losing the autosave costs this layer nothing and saves a little. It writes the browser's
+	 * `localStorage.KinkyDungeonSave`, for which shims.js provides an in-memory stand-in nothing ever
+	 * reads back, and a co-op run's persistence is the SERVER's (see the note at :233 on why
+	 * replicating KD's own save to clients is actively harmful). It also pushes to `KDSaveQueue`,
+	 * which is drained by the browser's async save loop (KinkyDungeon.ts:1520) that never runs here —
+	 * so each call used to add a >20 KB entry nothing would ever consume. That queue is already
+	 * GLOBAL_BLACKLISTed for exactly that reason; not calling the save is what stops the growth.
+	 *
+	 * `KinkyDungeonGenerateSaveData` is deliberately left ALONE: it is the parity/non-interference
+	 * instrument (`saveOf`, `_seedHeadlessModel`), and it is only unsafe when nobody seeded a model.
 	 */
-	_neuterStairAutosave() {
-		this._stubOut(['KDPostStairSave']);
+	_neuterAutosave() {
+		this._stubOut(['KDPostStairSave', 'KinkyDungeonSaveGame']);
 	}
 
 	/**

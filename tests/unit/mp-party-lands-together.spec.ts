@@ -100,7 +100,7 @@ describe('KDM-240 — a map change lands the whole party together', () => {
 
 		expect(out,
 			'the descent threw. The likely cause is a browser-only call reached from KDGenMapCallback ' +
-			'that the headless world cannot serve — see _neuterStairAutosave.').toBe('ok');
+			'that the headless world cannot serve — see _neuterAutosave.').toBe('ok');
 		expect(mapId(), 'precondition: the descent really did move the party').not.toBe(before);
 		expect(s.world.eval('KDGenMapCallback === null || KDGenMapCallback === undefined'),
 			'KDGenMapCallback was left set, which means KDGoThruTile did not reach the end of its own ' +

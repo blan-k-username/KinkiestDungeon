@@ -532,15 +532,23 @@ moves everybody. Three things follow, all implemented rather than assumed:
 registration; the "already installed?" sentinel therefore lives on those registries and not on
 `globalThis`, which would survive the wipe and suppress re-installation forever.
 
-**`KDPostStairSave` is stubbed** (`_neuterStairAutosave`). It autosaves via
-`KinkyDungeonGenerateSaveData`, which reads model `Poses` off the paper doll `_neuterRendering`
-deliberately never builds — so it threw on *every* headless floor change, after the new map was
-generated but before `KDGenMapCallback = null`. `KinkyDungeonSaveGame` itself is untouched, so
-`saveOf()` and `_seedHeadlessModel` still work as the test instruments they are.
+**KD's own autosave is stubbed** (`_neuterAutosave`) — both `KinkyDungeonSaveGame` and
+`KDPostStairSave`. `KinkyDungeonGenerateSaveData` reads model `Poses` off the paper doll
+`_neuterRendering` deliberately never builds, so every automatic save threw: on *every* headless
+floor change (after the new map was generated but before `KDGenMapCallback = null`), and on *every*
+capture — `KinkyDungeonSaveGame()` is the last statement of `KinkyDungeonDefeat`, so a grabbed player
+had the rest of their own input discarded and the session reported a normal turn (KDM-267).
 
-**Still open:** one player's capture drags the uncaptured partner into the jail map with them. The
-party stays coherent (both land, both keep avatars, both are told) but the semantics are wrong — see
-KDM-261.
+Stubbing the save covers all 12 call sites; `KDPostStairSave` keeps its own stub because it does more
+than save (on the PerkRoom floor it sets `KinkyDungeonState = "Save"` and builds a DOM textarea).
+`KinkyDungeonGenerateSaveData` itself is untouched, so `saveOf()` and `_seedHeadlessModel` still work
+as the test instruments they are — `saveOf` never went through `KinkyDungeonSaveGame` in the first
+place, which is why stubbing it is free.
+
+**A capture jails the party only when nobody is free** (KDM-261). While any partner is still up, the
+capture resolves as `KinkyDungeonDefeat(PutInJail = false)` — KD's own branch, which binds the player
+where they stand and never regenerates the map, so nobody is relocated. Once every player is down the
+jail move fires unchanged and the whole party lands together. See `kd-coop-capture.js`.
 
 ## Agreeing the route out of the hub (KDM-263)
 

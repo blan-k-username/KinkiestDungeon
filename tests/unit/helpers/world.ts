@@ -75,3 +75,77 @@ export function descend(s: any, actor = 'A'): string {
 	s.bundles.set(actor, s.world.capturePlayer());
 	return out;
 }
+
+/**
+ * KDM-261 / KDM-267: drive a REAL capture inside a REAL apply window, shared by every spec that
+ * needs one.
+ *
+ * It is here rather than copied into each spec for the same reason `descend` is: the part that is
+ * easy to get wrong fails GREEN. Specifically the party-gate fence below — an unfenced version fires
+ * during whichever player `_advanceTurn` happens to apply first (measured: **B**, not A), which
+ * silently turns "the partner did not move" into an assertion about the captured player.
+ *
+ * WHY THIS IS NOT CHEATING. `KinkyDungeonDefeat(true, …)` is called from inside
+ * `KinkyDungeonAdvanceTime`, which is exactly where a real capture runs it — `KDRunDefeatForEnemy`
+ * is the last statement of that function (`KinkyDungeonEnemies.ts:5040`). Reproducing a genuine
+ * leash chase would make the test about the leash machinery instead. What is NOT faked is everything
+ * the capture then does.
+ *
+ * @param actor    which seated player must be swapped in when the capture fires
+ * @param catchThrow  MANDATORY, no default — the two callers need OPPOSITE behaviour and a default
+ *                    would silently give one of them the wrong one:
+ *                      true  — contain the throw and record it (KDM-261 asks "which BRANCH ran?",
+ *                              and needs the session to survive to be asked)
+ *                      false — let it ESCAPE into the session (KDM-267 asks "does the turn survive
+ *                              a capture?", which is unanswerable if the test swallows it first)
+ */
+export function armCapture(s: any, actor: string, catchThrow: boolean) {
+	const actorName = s.displayNameOf(actor);
+	// One hook, re-armed per use. It sits UNDER the counting wrapper `applyInputObserved` installs
+	// for the duration of a dispatch (`headless-host.js`), so the call still reaches it.
+	//
+	// (No backtick and no escape sequences below: this is a template literal, and TypeScript would
+	// resolve them before the world ever saw the source — memory `backtick-in-template-literal`.)
+	return s.world.eval(`(function(){
+		if (!globalThis.__kdTestCaptureHook) {
+			var _prev = KinkyDungeonAdvanceTime;
+			KinkyDungeonAdvanceTime = function () {
+				var r = _prev.apply(this, arguments);
+				var gate = globalThis.__KD_PARTY_GATE;
+				var peers = (gate && gate.peers) || [];
+				var mine = false;
+				for (var i = 0; i < peers.length; i++) {
+					if (peers[i].name === globalThis.__kdTestCaptureActor) mine = true;
+				}
+				// The gate lists everyone EXCEPT whoever is acting, so our actor being ABSENT from it
+				// is what says they are the one swapped in right now.
+				if (globalThis.__kdTestCaptureArmed && !mine) {
+					globalThis.__kdTestCaptureArmed = false;
+					if (globalThis.__kdTestCaptureCatch) {
+						try { KinkyDungeonDefeat(true, undefined); globalThis.__kdTestCaptureRan = 'ok'; }
+						catch (e) { globalThis.__kdTestCaptureRan = 'threw: ' + e.message; }
+					} else {
+						// Deliberately unguarded: the throw is the thing under test.
+						globalThis.__kdTestCaptureRan = 'entered';
+						KinkyDungeonDefeat(true, undefined);
+						globalThis.__kdTestCaptureRan = 'ok';
+					}
+				}
+				return r;
+			};
+			globalThis.__kdTestCaptureHook = true;
+		}
+		globalThis.__kdTestCaptureActor = ${JSON.stringify(actorName)};
+		globalThis.__kdTestCaptureCatch = ${catchThrow ? 'true' : 'false'};
+		globalThis.__kdTestCaptureArmed = true;
+		globalThis.__kdTestCaptureRan = 'never ran';
+		return true;
+	})()`);
+}
+
+/**
+ * What the armed capture did: `'ok'`, `'never ran'`, `'entered'` (it started and the throw escaped),
+ * or `'threw: …'`. `'never ran'` must always fail an assertion — a hook that silently did nothing
+ * turns every downstream expectation into a green statement about nothing.
+ */
+export function captureRan(s: any): string { return s.world.eval('globalThis.__kdTestCaptureRan'); }
