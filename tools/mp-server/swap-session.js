@@ -152,6 +152,70 @@ function KDParseStartRestraints(spec) {
  * costs a HUD marker and bindability, not agency.
  */
 
+/**
+ * KDM-269 — THE FOUR WAYS A REAL ACTION PRODUCES NOTHING, DECLARED ONCE.
+ *
+ * A player pressed a key, the game did nothing, and nothing said so. There are four causes, and from
+ * the player's side they are indistinguishable — which is why they are one family and not four
+ * unrelated logs (`cancelledMoveReport`'s own note: *"a cancelled move and an ignored input look
+ * identical"*).
+ *
+ * ── WHY THIS IS DATA AND NOT FOUR HAND-WRITTEN COPIES ─────────────────────────────────────────────
+ * Each member used to be spelled out in four places: a field in the constructor, a `*Report()`
+ * accessor, a `snap.*` line in `snapshotFor`, and a `_dbg` at the call site. KDM-268 added the fourth
+ * member and unified only the push-and-trim (`_recordDrop`), leaving the DECLARATION fourfold and
+ * writing the ritual down in the README — a smell recorded, not a design.
+ *
+ * The dangerous one is the `snap.*` line, because forgetting it is SILENT: the recording works, the
+ * accessor answers correctly, and nothing whatsoever reaches the browser. That is precisely the bug
+ * KDM-268 existed to fix. `tests/unit/mp-drop-channels.spec.ts` iterates this registry, so a channel
+ * declared here and not carried to the client fails a test instead of disappearing quietly.
+ *
+ * ⚠️ THE FOUR WIRE FIELD NAMES ARE THE FIELD NAMES, and they stay four SEPARATE additive fields
+ * (KDM-269 R2). Collapsing them into one `drops: {reason -> []}` is a wire change that breaks any
+ * client older than the server, and `render-client.js` reads two of them by name. Do not do it here.
+ *
+ * ⚠️ `report` NAMES ARE IRREGULAR ON PURPOSE — `cancelledMoveReport`, not `cancelledMovesReport`.
+ * They are called from ~10 spec files and are API; they are listed rather than derived from `field`
+ * so that nobody "tidies" one and breaks the callers.
+ *
+ * ⚠️ NOT in `ws-bridge.js`'s `VERBATIM_CHANNELS`, and that is deliberate (KDM-269 R6). `kdDiff`
+ * treats an array as opaque and replaces it whole (`kd-delta.js` — `kdIsPlainObj` is false for
+ * arrays), so every channel already reaches the client intact. Listing these cumulative,
+ * `maxLog`-bounded arrays there would force them onto EVERY frame and work against the delta
+ * encoding, which is a wire regression rather than a fix.
+ *
+ * Adding a fifth cause: one entry here, plus the `_recordDrop` call and its `_dbg` at the site.
+ */
+const DROP_CHANNELS = Object.freeze([
+	// KDM-163 AC3 — the world's own registry (`KDInputTypes`) has no handler for the type.
+	// The odd one out: a Map of type -> count rather than a list, because the useful thing about an
+	// unhandled type is HOW OFTEN, not which occurrence. Carries its own `init`/`collect` instead of
+	// being flattened into the array shape, which would lose the count.
+	Object.freeze({
+		field: 'unknownInputs',
+		report: 'unknownInputReport',
+		init: () => new Map(),
+		collect: (m) => [...m.entries()].map(([type, count]) => ({ type, count })),
+	}),
+	// KDM-163 AC3 — `_pending` is ONE slot per player, so a second turn-consuming input REPLACES the
+	// first. Deliberate (a player may change their mind before the peer acts), but never silent: the
+	// displaced action was a real action that never happened.
+	Object.freeze({ field: 'replacedInputs', report: 'replacedInputReport' }),
+	// KDM-208 — a peer reached the contested tile earlier in the SAME turn, so the loser stalled: no
+	// attack, no step.
+	Object.freeze({ field: 'cancelledMoves', report: 'cancelledMoveReport' }),
+	// KDM-268 — the dispatch THREW inside the world. `applyInputObserved` catches it and hands it back
+	// as `obs.error`, which the turn path read only inside `_learnInputKind` — so an action aborted
+	// half-way reported a perfectly normal turn.
+	Object.freeze({ field: 'failedInputs', report: 'failedInputReport' }),
+]);
+
+/** A channel's list starts empty unless it declared a shape of its own. */
+const dropInit = (c) => (c.init ? c.init() : []);
+/** …and is reported as a COPY, so a caller cannot edit what the session believes was dropped. */
+const dropCollect = (c, held) => (c.collect ? c.collect(held) : held.slice());
+
 class SwapSession {
 	/** @param {object} opts { requiredPlayers=2, seed, enemyType='Rat' } */
 	constructor(opts = {}) {
@@ -253,19 +317,10 @@ class SwapSession {
 		this._pendingJoins = [];
 		// KDM-235 A2: the fresh-character template, captured in `_start`. See the note there.
 		this._newPlayerTemplate = null;
-		this.unknownInputs = new Map(); // KDM-163 AC3: input type -> count the world had no handler for
-		// KDM-163 AC3: `_pending` is ONE slot per player, so a second turn-consuming input REPLACES the
-		// first. That is deliberate (a player may change their mind before the peer acts) but it must
-		// never be SILENT — the displaced action was a real action that never happened. Recorded here
-		// and surfaced in the snapshot, exactly like an unhandled type.
-		this.replacedInputs = [];
-		// KDM-208: moves cancelled because a peer took the contested tile earlier in the SAME turn.
-		// Third member of the same family: a real action by a real player that produced nothing.
-		this.cancelledMoves = [];
-		// KDM-268: …and the fourth: an input whose dispatch THREW inside the world. The exception is
-		// caught by applyInputObserved and handed back as obs.error, which until now was read only by
-		// _learnInputKind — so the player's action was truncated and the turn reported success.
-		this.failedInputs = [];
+		// KDM-269: the drop-report family — `unknownInputs`, `replacedInputs`, `cancelledMoves`,
+		// `failedInputs`. What each one means, and why they are one family, is on `DROP_CHANNELS`
+		// above; this loop is the only place they are brought into existence.
+		for (const c of DROP_CHANNELS) this[c.field] = dropInit(c);
 		// KDM-163: input type -> "turn" | "ui", LEARNED from real turns (never from a speculative apply,
 		// which would double-apply world-mutating actions — see HeadlessHost.applyInputObserved).
 		this.inputKind = new Map();
@@ -1180,32 +1235,17 @@ class SwapSession {
 		this._dbg(`UNKNOWN input type "${kdType}" — no handler in KDInputTypes, it did nothing`);
 	}
 
-	/** Input types the authoritative world had no handler for, with counts (KDM-163 AC3). */
-	unknownInputReport() {
-		return [...this.unknownInputs.entries()].map(([type, count]) => ({ type, count }));
-	}
-
 	/**
-	 * Queued actions that were displaced before they could be applied (KDM-163 AC3). The OTHER way an
-	 * input disappears without a trace: not "the game had no handler" but "the lockstep slot was
-	 * overwritten". Both are silent drops; both are now reportable.
+	 * KDM-269 — the drop reports (`unknownInputReport`, `replacedInputReport`, `cancelledMoveReport`,
+	 * `failedInputReport`) are DEFINED ON THE PROTOTYPE from `DROP_CHANNELS`, just below this class.
+	 *
+	 * They are not written out here because four near-identical `return this.x.slice()` bodies are
+	 * four chances for the fifth to be forgotten — and a missing accessor is the least of it; see the
+	 * registry's note on the `snap.*` line, which fails silently.
+	 *
+	 * Each one still answers a COPY, under its exact published name. What each channel means is on the
+	 * registry entry, which is the one place worth reading.
 	 */
-	replacedInputReport() { return this.replacedInputs.slice(); }
-
-	/**
-	 * Moves cancelled by the contested-tile rule (KDM-208). The peer won the race for the tile, so the
-	 * loser stalled — no attack, no step. Reported for the same reason as the two above: from the
-	 * player's side a cancelled move and an ignored input look identical.
-	 */
-	cancelledMoveReport() { return this.cancelledMoves.slice(); }
-
-	/**
-	 * KDM-268 — inputs whose dispatch THREW inside the authoritative world. Fourth member of the same
-	 * family, and the one that was missing: `applyInputObserved` catches the exception and returns it
-	 * as `obs.error`, which the turn path read only inside `_learnInputKind`. Nothing logged it,
-	 * nothing sent it — so an action aborted half-way reported a perfectly normal turn.
-	 */
-	failedInputReport() { return this.failedInputs.slice(); }
 
 	/**
 	 * KDM-268 R7 — the one push-and-trim behind every drop report.
@@ -2576,17 +2616,18 @@ class SwapSession {
 		// the player/world split (the mistake the `stats` block made was giving the client a contract
 		// to maintain).
 		snap.bundle = this._clientBundle(bundle);
-		// KDM-163 AC3: input types the world had no handler for, so a dropped input is visible in the
-		// browser instead of being an indistinguishable no-op.
-		snap.unknownInputs = this.unknownInputReport();
-		// KDM-163 AC3: …and the other silent-drop path — an action displaced out of the lockstep slot
-		// before it could ever be applied.
-		snap.replacedInputs = this.replacedInputReport();
-		// KDM-208: …and a move that really ran but was cancelled because a peer reached the tile first.
-		snap.cancelledMoves = this.cancelledMoveReport();
-		// KDM-268: …and an input whose dispatch threw inside the world. Additive field: an older client
-		// simply ignores it, and a newer one warns once per type exactly as it does for unknownInputs.
-		snap.failedInputs = this.failedInputReport();
+		/*
+		 * KDM-269 — every drop channel reaches the browser, so a dropped input is visible instead of
+		 * being an indistinguishable no-op.
+		 *
+		 * This loop is the line that used to be forgotten. Four hand-written `snap.x = this.xReport()`
+		 * lines meant a fifth channel could record perfectly and never be sent — and nothing would say
+		 * so, because the recording and the accessor both work. Driven from the registry, a channel
+		 * cannot exist and be unsent.
+		 *
+		 * Each field is additive and separate (R2): an older client ignores one it does not know.
+		 */
+		for (const c of DROP_CHANNELS) snap[c.field] = this[c.report]();
 		// KD-098: the headless world never runs the draw-ease loop, so entities' visual_x/visual_y
 		// stay stuck near spawn while x/y jump via AI — the client then re-eases from the stale
 		// spot each turn (the "Rat teleports from its initial tile through several tiles"). Snap
@@ -2676,4 +2717,22 @@ class SwapSession {
 	}
 }
 
-module.exports = { SwapSession, KDParseStartRestraints };
+/*
+ * KDM-269 — the drop reports, defined once from the registry.
+ *
+ * On the PROTOTYPE rather than assigned per-instance in the constructor: these are methods, and a
+ * per-instance closure would put four functions on every session and would not show up on
+ * `SwapSession.prototype` for anything that introspects the class.
+ *
+ * `configurable`/`writable` are left at their defaults (false) — nothing should be reaching in to
+ * replace a report accessor at runtime, and a test that wants a different answer builds a session
+ * with different contents rather than swapping the method.
+ */
+for (const c of DROP_CHANNELS) {
+	Object.defineProperty(SwapSession.prototype, c.report, {
+		value: function () { return dropCollect(c, this[c.field]); },
+		enumerable: false,
+	});
+}
+
+module.exports = { SwapSession, KDParseStartRestraints, DROP_CHANNELS };

@@ -579,8 +579,28 @@ KDM-267's capture bug stayed invisible.
 All four are recorded on **both** apply paths, bounded to `maxLog` through the single `_recordDrop`
 helper, and exposed on `KDRenderClient` (`unhandledInputs()`, `failedInputs()`) so a browser test can
 assert the player's client actually heard about it — a `console.warn` alone is not readable by
-anything. Adding a fifth means: a list in the constructor, a `*Report()` accessor, a `snap.*` line,
-and a `_dbg` at the call site saying what is specifically wrong.
+anything.
+
+**Adding a fifth is one entry in `DROP_CHANNELS`** (`swap-session.js`, above the class), plus the
+`_recordDrop` call and its `_dbg` at the site. The registry is what the constructor, the `*Report()`
+accessors and the `snap.*` lines are all generated from, so a channel cannot exist without being
+reported (KDM-269). It used to be four hand-written places, and the dangerous one was the `snap.*`
+line: forgetting it is **silent** — the recording works, the accessor answers, and nothing reaches
+the browser, which is the very bug KDM-268 existed to fix. `tests/unit/mp-drop-channels.spec.ts`
+iterates the registry and fails on a declared-but-unsent channel; it is mutation-tested against
+exactly that omission.
+
+Two notes for whoever adds the fifth:
+
+- **Keep the wire fields separate and additive.** An older client ignores a field it does not know,
+  which is why KDM-268 could ship `failedInputs` without touching compatibility at all. Collapsing
+  them into one `drops: {reason -> []}` is a client-breaking change (`render-client.js` reads two by
+  name) and needs its own decision.
+- **Do not add them to `VERBATIM_CHANNELS`** in `ws-bridge.js`. `kdDiff` treats arrays as opaque and
+  replaces them whole, so every channel already arrives intact; listing these cumulative,
+  `maxLog`-bounded arrays there would force them onto every frame and work against the delta
+  encoding. Only `unknownInputs`/`replacedInputs` are listed, for historical reasons rather than
+  necessity.
 
 **Recording is not handling.** None of the four changes what the turn does; they make a failure
 visible. Whether an errored input should be retried, refunded, or excluded from `applied` is an open
