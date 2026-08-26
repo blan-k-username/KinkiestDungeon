@@ -1385,11 +1385,34 @@
 							: 'waiting for your partner to reconnect.')
 						: 'action refused (' + m.reason + ')'));
 			} else if (m.type === 'save_export') {
-				// KDM-244 — the run has come back as a single-player save. See `writeExportedSave`.
+				/*
+				 * KDM-244 — the run has come back as a single-player save. See `writeExportedSave`.
+				 *
+				 * KDM-275 A5 — …and now it arrives unbidden, so WHO ASKED decides what the player is
+				 * told. `reason` is `requested` / `solo` for the two explicit moments KDM-244 built, and
+				 * `floor` / `timer` for the automatic ones this task added.
+				 *
+				 * QUIET ON SUCCESS, LOUD ON FAILURE. A line every floor is noise the player learns to
+				 * ignore, which is worse than useless — but suppressing the FAILURE too would break the
+				 * promise the whole feature rests on, that a silent success and a silent failure are
+				 * indistinguishable until you close the tab and find out (KDM-244 A6). The automatic
+				 * path is the one nobody is watching, so its failures are the ones that most need
+				 * saying.
+				 *
+				 * The success is still RECORDED (R7/AC4). "Is my run safe, and how recently?" must be
+				 * answerable without acting, and without having caught a toast that has since scrolled
+				 * away — so the fact lives on `coop`, where the UI reads it, rather than in a message.
+				 */
 				var w = writeExportedSave(m.save);
-				setStatus('Co-op ' + id + ': ' + (w.ok
-					? 'run saved — you can continue it in single player.'
-					: 'COULD NOT SAVE THE RUN — ' + w.err + ' (your previous save is untouched)'));
+				var auto = (m.reason === 'floor' || m.reason === 'timer');
+				coop.lastSaveOk = !!w.ok;
+				coop.lastSaveAt = (w.ok && typeof Date !== 'undefined') ? Date.now() : coop.lastSaveAt;
+				coop.lastSaveWhy = m.reason || '';
+				if (!w.ok || !auto) {
+					setStatus('Co-op ' + id + ': ' + (w.ok
+						? 'run saved — you can continue it in single player.'
+						: 'COULD NOT SAVE THE RUN — ' + w.err + ' (your previous save is untouched)'));
+				}
 			} else if (m.type === 'error') {
 				setStatus('Co-op ' + id + ': error — ' + m.error);
 			}

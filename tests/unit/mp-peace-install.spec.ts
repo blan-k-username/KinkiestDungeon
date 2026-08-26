@@ -37,9 +37,12 @@ function vanillaBuilder() {
  * Evaluate the real script against a minimal fake bundle scope.
  * `coop` seeds `KDRenderClient.lastCoop`, the server state `decorate` reads.
  */
-function loadCoopPeace(coop: any = null) {
+function loadCoopPeace(coop: any = null, coopApi: any = null) {
 	const armed: string[] = [];
-	const win: any = { KDRenderClient: coop === null ? null : { lastCoop: coop } };
+	// KDM-275: `__coop` is the bootstrap's own handle — `isHost()` gates the save entry, and
+	// `lastSaveOk`/`lastSaveAt` are what it reports. Absent by default, so every existing case here
+	// keeps exercising a page that is not the host.
+	const win: any = { KDRenderClient: coop === null ? null : { lastCoop: coop }, __coop: coopApi || undefined };
 	const ctx: any = {
 		window: win,
 		KDGetContextActions: { Game: vanillaBuilder },
@@ -92,5 +95,52 @@ describe('KDM-229 — the peace context-menu wrap installs without a timer', () 
 		const { ctx } = loadCoopPeace();   // KDRenderClient absent → not in a session
 		const menu = ctx.KDGetContextActions.Game(null, 0, 0, {});
 		expect(menu.options).toEqual(['Wait', 'Inventory']);
+	});
+});
+
+/**
+ * KDM-275 R7/AC4 — the host can tell whether their run is safe, without doing anything.
+ *
+ * The run now saves itself and does so SILENTLY (a status line per floor is noise the player learns
+ * to ignore). Something therefore has to answer "is my run saved, and how recently?" on demand, and
+ * the answer is attached to the context-menu entry the player already reaches for when they think
+ * about saving — rather than to a second surface built for one sentence.
+ *
+ * Unit-level rather than e2e because the label is a pure function of `__coop`'s recorded state, and
+ * a browser boot would only make the same assertion slower and flakier. `mp-save-autoexport` pins
+ * the trigger, `mp-save-export-wire` pins the wire; this pins what the host is told.
+ */
+describe('KDM-275 — the save entry says when the run was last saved', () => {
+	const host = (extra: any = {}) => Object.assign({ isHost: () => true }, extra);
+	const saveText = (api: any) => {
+		const { ctx } = loadCoopPeace(null, api);
+		const menu = ctx.KDGetContextActions.Game(null, 0, 0, {});
+		const key = menu.options.find((o: string) => /save/i.test(menu.optionText[o] || ''));
+		return key ? menu.optionText[key] : null;
+	};
+
+	it('CONTROL — a guest is offered no save entry at all, so there is nothing to label', () => {
+		// Without this, every assertion below could be describing an entry that is shown to everybody.
+		expect(saveText({ isHost: () => false }), 'a guest has no world to keep (KDM-244 C1)').toBe(null);
+	});
+
+	it('before anything has been saved, the entry is the plain KDM-244 wording', () => {
+		// The regression this guards is a label that reads "(saved NaN min ago)" on the first frame of
+		// every session, which is what an unguarded Date arithmetic would produce.
+		expect(saveText(host())).toBe('Save this run for single player');
+	});
+
+	it('R7 — after an automatic save it says how long ago, without the player asking', () => {
+		expect(saveText(host({ lastSaveOk: true, lastSaveAt: Date.now() })))
+			.toBe('Save this run for single player (saved just now)');
+		expect(saveText(host({ lastSaveOk: true, lastSaveAt: Date.now() - 5 * 60_000 })))
+			.toBe('Save this run for single player (saved 5 min ago)');
+	});
+
+	it('R6 — and a FAILED save is stated, not merely left unmentioned', () => {
+		// The automatic path is the one nobody is watching. "No news" must not be able to mean "your
+		// last three saves failed" — that is precisely the silent-failure trap KDM-244 A6 names.
+		expect(saveText(host({ lastSaveOk: false, lastSaveAt: Date.now() })))
+			.toContain('LAST SAVE FAILED');
 	});
 });

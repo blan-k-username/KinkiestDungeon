@@ -14,6 +14,9 @@
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { MPClient } from '../helpers/mp-ws-client';
+// KDM-275: the SHARED descent helper. Its doc names two traps that make a hand-rolled descent pass
+// without moving the party; a third copy would be a third chance to hit them.
+import { descend, mapId } from './helpers/world';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { WSBridge } = require('../../tools/mp-server/ws-bridge');
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -131,5 +134,60 @@ describe('KDM-244 wire — going solo hands the host their run unprompted', () =
 		// The export is best-effort and must never be able to undo the decision that triggered it.
 		expect(bridge.session.started).toBe(true);
 		expect(bridge.gate.has('B')).toBe(false);
+	}, BOOT);
+});
+
+/**
+ * KDM-275 on the WIRE — the AUTOMATIC export reaches the host and nobody else.
+ *
+ * Here rather than in `mp-save-autoexport.spec.ts` for the reason this whole file exists (R-h, and
+ * now [[KDM-274]]): nothing guards the server→client direction, so the session could arm the flag
+ * perfectly, the bridge could drop it, and every session-level test would stay green. The `reason`
+ * field is the specific thing at risk — it is what tells an automatic export from a requested one,
+ * and it is new (memory `assert_at_the_deciding_layer`).
+ *
+ * It reuses `seated()` above rather than growing a second copy of the same fixture.
+ */
+describe('KDM-275 wire — the run saves itself, to the host only', () => {
+	let bridge: any, A: MPClient, B: MPClient;
+
+	beforeAll(async () => { ({ bridge, A, B } = await seated('kdm275-wire')); }, BOOT);
+	afterAll(() => { A?.close(); B?.close(); try { bridge && bridge.close(); } catch (e) { /* noop */ } });
+
+	it('R5 — a floor transition puts a save on the HOST\'s socket, labelled `floor`', async () => {
+		const before = mapId(bridge.session);
+		expect(descend(bridge.session, 'A')).toBe('ok');
+		// Trap 3 again: a descent that moved nobody would make the whole test vacuous.
+		expect(mapId(bridge.session), 'the party must really be on a different map').not.toBe(before);
+
+		A.send({ type: 'input', action: { kind: 'wait' } });
+		B.send({ type: 'input', action: { kind: 'wait' } });
+
+		const m: any = await A.next((x: any) => x.type === 'save_export' || x.type === 'error');
+		expect(m.type, m.error || '').toBe('save_export');
+		// The field the outbound direction has no drift guard for.
+		expect(m.reason, 'the client tells automatic from requested by this alone').toBe('floor');
+		expect(typeof m.save).toBe('string');
+
+		// Not merely "a string arrived": decoded with the SERVER's own world, so this asserts the
+		// bytes that crossed the wire rather than re-deriving them.
+		bridge.session.world._context.__KD_WIRE_CHK = m.save;
+		const decoded = bridge.session.world.eval(
+			'JSON.parse(DecompressB64(String(globalThis.__KD_WIRE_CHK).trim()))');
+		expect(decoded.level).toBe(bridge.session.world.eval('MiniGameKinkyDungeonLevel'));
+		expect(decoded.KDMapData.Entities.filter(
+			(e: any) => String((e.Enemy && e.Enemy.name) || '').startsWith('RemotePlayer')).length,
+		'an automatic export is stripped exactly like a requested one').toBe(0);
+	}, BOOT);
+
+	it('R10 — the GUEST is sent no save, on a trigger they never asked for', async () => {
+		// The failure this pins is a one-word slip: `_sendExport(clientId, …)` instead of
+		// `_sendExport(this.gate.host, …)`. The acting player on the transition turn may be either
+		// seat, so passing the actor through would export the world to a guest.
+		//
+		// `never` rather than a bare filter, because it says out loud how long it watched — and the
+		// guest's copy, if the bug existed, would have arrived on the same turn as the host's, which
+		// the test above has already awaited.
+		await B.never((m: any) => m.type === 'save_export');
 	}, BOOT);
 });

@@ -627,7 +627,7 @@ class WSBridge {
 						if (res.advanced) break;
 					}
 				}
-				if (res.advanced) { this._clearGrace(); this._broadcastState(); }
+				if (res.advanced) { this._clearGrace(); this._turnResolved(res); }
 				else {
 					this._send(socket, { type: 'waiting', waitingOn: res.waitingOn });
 					// tell the awaited players they're holding up the turn (UI can show it
@@ -956,6 +956,26 @@ class WSBridge {
 		return true;
 	}
 
+	/**
+	 * KDM-275 A4 — everything that must happen once a turn has actually resolved.
+	 *
+	 * ONE method rather than two copies, because there are two places a turn resolves — a player's
+	 * submit and the idle-grace auto-wait — and they had already drifted to the extent that only one
+	 * of them would have carried an export. The next thing owed to a resolved turn goes here too.
+	 *
+	 * ⚠️ `this.gate.host`, NEVER the acting player. Whoever moved last is whoever moved last; the run
+	 * belongs to the host. Passing the actor through would hand a guest the whole world on their own
+	 * turn — R10, and the one-word slip that `mp-save-export-wire` pins.
+	 *
+	 * Best-effort, and deliberately after the broadcast: `_sendExport` reports its own failures to the
+	 * host on the `error` channel (R6), and a failed export must not be able to hold up the state
+	 * frame that every player is waiting on.
+	 */
+	_turnResolved(res) {
+		this._broadcastState();
+		if (res && res.exportDue) this._sendExport(this.gate.host, res.exportDue);
+	}
+
 	/** Arm the idle-grace timer: after idleGraceMs, auto-"wait" the non-submitters so a
 	 *  still-acting player isn't deadlocked by an idle/finished partner (KD-087). */
 	_armGrace() {
@@ -969,7 +989,11 @@ class WSBridge {
 				try { res = this.session.submit(pid, { kind: 'wait' }); } catch (e) { /* noop */ }
 				if (res.advanced) break;
 			}
-			if (res.advanced) this._broadcastState();
+			// KDM-275: through `_turnResolved`, not `_broadcastState` — this is the SECOND path on which
+			// a turn resolves, and a turn that resolves here can arm an export just as readily as one a
+			// player submitted. Handling it in only one of the two is a silent drop that no
+			// session-level test can see.
+			if (res.advanced) this._turnResolved(res);
 		}, this.idleGraceMs);
 	}
 

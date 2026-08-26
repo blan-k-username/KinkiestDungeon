@@ -204,6 +204,26 @@ Two things the e2e pins that are easy to get wrong if you touch this flow:
     runtime and are not in the save, and the first reader of the resulting `undefined` throws (see
     `UPSTREAM_ISSUES.md` → `KinkyDungeonVision.ts:158`). `exportSave` does this; anything else
     generating a save for a player to keep must too.
+  - **The run saves itself, on KD's own cadence** (KDM-275). The export no longer fires only at the
+    two explicit moments KDM-244 built (the context-menu entry, and "go on alone") — because none of
+    those happen when the server process stops, which is what actually destroys a co-op run. The
+    trigger now mirrors what the stock game promises the player on its own settings screen:
+
+    | Host's save mode | On every floor transition | On a timer |
+    |---|---|---|
+    | **Save Codes** (KD's default) | yes | no |
+    | **Roguelike** | yes | yes, every `exportEveryTurns` turns (default 50, from KD's own `wt`) |
+
+    `SwapSession._onMapChanged` arms the flag and `_advanceTurn` hands it back; `WSBridge._turnResolved`
+    does the sending, to `gate.host` and nobody else. The session **arms, never sends** — the detector
+    runs mid-iteration over the party with another player in the slot, and `exportRun` swaps the slot.
+    `saveMode` is read from the world, where `game-modes.js` already classifies it as a world key.
+    An export measures **~55 ms**, i.e. less than one lockstep turn, so the floor trigger disappears
+    inside the map-generation stall.
+  - Automatic saves are **quiet on success and loud on failure**; the host reads "saved N min ago" off
+    the context-menu entry rather than being toasted every floor. `KDSaveQueue`'s replication
+    blacklist and `_neuterAutosave` are untouched by all of this — the export is an explicit, one-shot
+    transfer on its own channel, never generic replication of save state.
 - The shim layer tracks the bundle's PIXI/DOM surface as of this build; it must be
   updated as the game's rendering surface changes.
 - **Untying a peer wearing only locked or cursed gear spends the turn and frees nothing.** Protected

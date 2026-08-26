@@ -254,6 +254,31 @@ class SwapSession {
 		 * A DEFAULT, not an override: a player who chose their own perks gets theirs and nothing else.
 		 */
 		this.defaultPerks = sanitizePerks(opts.defaultPerks);
+		/**
+		 * KDM-275 A2 — how many resolved turns between timer-driven exports.
+		 *
+		 * A GATEWAY KNOB, not a gameplay constant (epic AC2): it says how often we mirror the run to
+		 * the host's browser, and nothing about what happens in the dungeon. The default is taken from
+		 * KD rather than invented — `KinkyDungeonDraw.ts:1107` opens its autosave check with
+		 * `let wt = 50`, i.e. 50 of KD's own ticks between forced autosaves. Denominated in TURNS
+		 * because a lockstep session's turn is its clock; a wall-clock timer would make every test
+		 * that touches this a race.
+		 */
+		this.exportEveryTurns = opts.exportEveryTurns || 50;
+		/**
+		 * KDM-275 A1/A3 — an export is ARMED here and SENT by the bridge, one turn-resolution later.
+		 *
+		 * ⚠️ ARM, NEVER ACT. The floor trigger lives in `_onMapChanged`, which runs *inside*
+		 * `_advanceTurn`'s per-player loop with the acting player swapped into the slot — and
+		 * `exportRun` swaps a different player in. Calling it from there is the re-entrancy that
+		 * corrupts the iteration (see `_onMapChanged`). So the trigger sets a flag, `_advanceTurn`
+		 * hands it back after the loop and the park, and the bridge — which owns sockets and knows
+		 * who the host is — does the sending.
+		 *
+		 * One-shot: consumed where it is read, so it can never be delivered twice.
+		 */
+		this._exportDue = null;
+		this._sinceExport = 0;
 		this.world = new HeadlessHost({ id: 'world' });
 		this.bundles = new Map();     // id -> player-state bundle
 		this.avatars = new Map();     // id -> world avatar entity id
@@ -1632,7 +1657,11 @@ class SwapSession {
 		this._dbg(`submit turn=${this.turn} ${clientId} action=${JSON.stringify(action)}`);
 		const waitingOn = this._joined.filter((id) => !this._pending.has(id));
 		if (waitingOn.length > 0) return { advanced: false, waitingOn };
-		return { advanced: true, turn: this._advanceTurn() };
+		const t = this._advanceTurn();
+		// KDM-275 A3 — hoisted to the top level for the same reason `solo` and `quit` are: the bridge
+		// reads one flat result and acts on it. Hoisted ONCE, here, rather than teaching every caller
+		// to reach two levels down.
+		return { advanced: true, turn: t, exportDue: t.exportDue || null };
 	}
 
 	/** Apply every player's action on the shared world, in random order (R8/R9). */
@@ -1821,7 +1850,30 @@ class SwapSession {
 		// moment a new seat can appear without disturbing a turn in flight.
 		this._flushPendingJoins();
 		this.lastTurn = { order, applied };
-		return { turn: this.turn, applied };
+		/*
+		 * KDM-275 A2/R5a — the Roguelike half of KD's cadence.
+		 *
+		 * `_exportDue` first: a transition already armed one AND reset the counter, so the two triggers
+		 * cannot fire on the same turn and the timer cannot drift into lockstep with floors.
+		 *
+		 * `_saveModeOn()` is the whole of D1/D2's mode-awareness. KD runs this timer only when
+		 * `saveMode` is on (`KinkyDungeonDraw.ts:1116`) — that is the "forced autosaves" Roguelike
+		 * mode promises and Save Codes mode does not — so we run it on exactly the same condition.
+		 *
+		 * The counter is reset whether or not the mode is on, so a Save Codes session neither grows an
+		 * unbounded number nor asks the world about `saveMode` on every single turn — the question is
+		 * put once per interval, in both modes, which is also what makes turning the mode on mid-run
+		 * take effect at the next interval rather than instantly.
+		 */
+		if (!this._exportDue && ++this._sinceExport >= this.exportEveryTurns) {
+			this._sinceExport = 0;
+			if (this._saveModeOn()) this._exportDue = 'timer';
+		}
+		// Consumed HERE, in the same statement that reads it, so an armed export cannot be delivered
+		// twice however many callers the return value grows.
+		const exportDue = this._exportDue;
+		this._exportDue = null;
+		return { turn: this.turn, applied, exportDue };
 	}
 
 	/**
@@ -2364,6 +2416,29 @@ class SwapSession {
 	}
 
 	/**
+	 * KDM-275 R13 — is this run under KD's "Roguelike" save mode, the one that forces autosaves?
+	 *
+	 * Read from the WORLD, and from nowhere else. `saveMode` is already a `MODE_WORLD_KEYS` entry
+	 * (`game-modes.js:44-46`), listed there with the note that it is *"a property of the session, not
+	 * of a character"* — so the world's copy IS the host's declaration, applied to every seat at
+	 * seating time. That makes this a plain read: no new wire field, no mirrored gateway state, and no
+	 * requirement that the host happen to be in the player slot when the question is asked.
+	 *
+	 * A second copy of this fact anywhere would be free to disagree with `applyModes`, which is
+	 * exactly the drift `game-modes.js` was written to end.
+	 *
+	 * Defensive: a world mid-teardown, or one that predates the mode machinery, answers "no" rather
+	 * than throwing out of a turn. Failing closed here costs a timer export; failing open would throw
+	 * inside `_advanceTurn`.
+	 */
+	_saveModeOn() {
+		try {
+			return !!this.world.eval(`(typeof KinkyDungeonStatsChoice !== 'undefined'
+				&& KinkyDungeonStatsChoice) ? !!KinkyDungeonStatsChoice.get('saveMode') : false`);
+		} catch (e) { return false; }
+	}
+
+	/**
 	 * KDM-244 R1 — who is hosting, as the session sees it.
 	 *
 	 * The session does not own the join gate (that is `join-gate.js`, and the bridge owns the two), so
@@ -2804,6 +2879,26 @@ class SwapSession {
 		this._resetJourneyProposal();
 		this._resetPerkProposal();
 		this._announceMapChange(mapId);
+		/*
+		 * KDM-275 R5 — the party is on a new map, so the run is worth keeping.
+		 *
+		 * UNCONDITIONAL, in every save mode, because KD's own `KDPostStairSave`
+		 * (`KDStairActions.ts:265-275`) is unconditional too and its Save Codes description promises
+		 * the player "autosaves only on floor start" in so many words. A co-op host must never be
+		 * worse off than a single-player one.
+		 *
+		 * Armed HERE rather than on a floor-number comparison because this is the file's ONE
+		 * transition detector and it is the more general of the two candidates: it catches the side
+		 * rooms, the hub and a jail capture, all of which are new maps and all of which KD itself
+		 * treats as checkpoints (`KinkyDungeonJail.ts` autosaves at five sites). A second, narrower
+		 * detector would buy a saving nobody can perceive — an export measures ~55 ms, less than one
+		 * lockstep turn — at the price of two answers to "did the floor change?".
+		 *
+		 * Resetting the counter here is the whole of R5b: the timer cannot double up with a
+		 * transition, because a transition puts its clock back to zero.
+		 */
+		this._exportDue = 'floor';
+		this._sinceExport = 0;
 		this._dbg(`MAP ${this._lastMapId} -> ${mapId} (party re-landed, ${n} players)`);
 	}
 

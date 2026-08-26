@@ -85,7 +85,31 @@
 		catch (e) { isHost = false; }
 		if (isHost) {
 			menu.options.push(SAVE_RUN);
-			menu.optionText[SAVE_RUN] = 'Save this run for single player';
+			/*
+			 * KDM-275 R7/AC4 — and say when it was last saved, right here.
+			 *
+			 * The run now saves itself (every floor, plus a timer for Roguelike hosts) and does so
+			 * SILENTLY, because a toast per floor is noise. Something must therefore answer "is my run
+			 * safe?" without the player having to act — and this entry is already the place they come
+			 * to when they think about saving, so it answers there rather than growing a second
+			 * surface. `coop-bootstrap.js` records the fact on every write, successful or not.
+			 *
+			 * A failed automatic save DOES still raise its own status line; this label is the calm
+			 * half, not the alarm.
+			 */
+			var last = '';
+			try {
+				var c = window.__coop || {};
+				if (c.lastSaveOk && c.lastSaveAt) {
+					var secs = Math.max(0, Math.round((Date.now() - c.lastSaveAt) / 1000));
+					last = secs < 60
+						? ' (saved just now)'
+						: ' (saved ' + Math.round(secs / 60) + ' min ago)';
+				} else if (c.lastSaveOk === false) {
+					last = ' (LAST SAVE FAILED)';
+				}
+			} catch (e) { last = ''; }
+			menu.optionText[SAVE_RUN] = 'Save this run for single player' + last;
 			menu.optionImages[SAVE_RUN] = 'Talk';
 			menu.optionActions[SAVE_RUN] = function () {
 				KDContextMenu = false;
