@@ -17,9 +17,12 @@
  * swapped in next.
  *
  * ── WHY IT IS NOT A VACUOUS GREEN ─────────────────────────────────────────────────────────────────
- *  1. The perked and the UNPERKED player ride the SAME booted session, so "the perk arrived" and
- *     "the other player is untouched" are asserted against each other. An implementation that perks
- *     everybody — or nobody — fails one of the pair.
+ *  1. 'The other player is untouched' was this file's central pair, and KDM-271 RETIRED it: a start
+ *     perk turned out to be the PARTY's, because several perks rewrite the shared world and are read
+ *     from whichever bundle is swapped in (KDM-242 F9/F10). The assertions that used to read
+ *     `not.toContain` now read `toContain` and say so at each site. What keeps them non-vacuous is a
+ *     perk NOBODY declared, asserted absent — see `mp-party-start-perks.spec.ts`, which owns the
+ *     union rule and its controls.
  *  2. The assertion is on the START-EFFECT (a BasicCollar on the body), not merely on the flag in
  *     the map. Writing the map without running `KDInitPerks` would pass a flag-only check while
  *     giving the player nothing, which is the actual bug this feature exists to avoid.
@@ -191,7 +194,9 @@ describe('KDM-238 — the choice reaches the world, and only its owner (R4, R5, 
 
 	beforeAll(async () => {
 		s = new SwapSession({ requiredPlayers: 2, seed: 'perk-choice' });
-		// A is perked; B deliberately is NOT — B is the `#coop=` path's control (R9).
+		// A declares; B declares NOTHING — B is the `#coop=` path (R9). Since KDM-271 that no longer
+		// means B has no perks: it means B chose none, and plays the party's set.
+
 		// `Submissive` on purpose: its start-effect is two visible restraints, so the assertion can be
 		// about what is on the body rather than about a flag in a map.
 		// The garbage key rides along to prove KD's own table is what rejects it (R8).
@@ -226,39 +231,47 @@ describe('KDM-238 — the choice reaches the world, and only its owner (R4, R5, 
 		expect(perksIn('A')).toContain('Submissive');
 	});
 
-	it('R6 — and it is NOT in the other player\'s', () => {
-		// The case that catches `applyPerks` called after `capturePlayer()` instead of before: the
-		// value would land on whoever is restored into the slot next.
-		expect(perksIn('B')).not.toContain('Submissive');
+	it('KDM-271 — and in the PARTNER\'s too: a start perk is the party\'s', () => {
+		// SUPERSEDED, deliberately. This assertion used to be `not.toContain` — R6, "the perk is NOT
+		// in the other player's bundle". F10 of KDM-242 showed that rule is the shipped defect:
+		// `Stealthy`, `Pristine`, `Fortify_Barricade` and friends are read from whichever bundle is
+		// swapped in when the floor is generated, so a perk one seat holds and another does not makes
+		// the map depend on swap order. KDM-271 unions the declarations across the party.
+		// The property R6 actually protected — `applyPerks` running INSIDE the seating window rather
+		// than after `capturePlayer()` — is still covered: it is what makes `perksIn` non-empty at all,
+		// and `mp-party-start-perks.spec.ts` pins the union with an undeclared control key.
+		expect(perksIn('B')).toContain('Submissive');
 	});
 
-	it('R5 — the perk\'s START-EFFECT landed on its owner, not just the flag', () => {
+	it('R5 — the perk\'s START-EFFECT landed, not just the flag', () => {
 		// `Submissive` adds a BasicCollar and a BasicLeash (`KinkyDungeonPerks.ts:737-740`). Writing
 		// the map without running KDInitPerks would pass the flag assertion above and give the player
 		// nothing — this is the assertion that separates the two.
 		expect(restraintsIn('A')).toEqual(expect.arrayContaining(['BasicCollar', 'BasicLeash']));
 	});
 
-	it('R5 — and the other player is NOT wearing it', () => {
-		expect(restraintsIn('B')).not.toContain('BasicCollar');
+	it('KDM-271 — and the partner is wearing it too, because a seat is built from the party set', () => {
+		// Also superseded (was `not.toContain('BasicCollar')`). A seat is a fresh character built from
+		// KD's own template, so `applyPerks` runs `KDInitPerks()` over the whole party set.
+		expect(restraintsIn('B')).toContain('BasicCollar');
 	});
 
 	it('R8 — an unknown perk key is dropped by KD\'s own table, not applied', () => {
 		expect(perksIn('A')).not.toContain('NoSuchPerkAtAll');
 	});
 
-	it('R9 — a player who declared nothing is seated on KD\'s default terms', () => {
-		// Not "has no perks at all": `KinkyDungeonStatsChoice` may legitimately hold KD's own
-		// defaults. What must be true is that B carries nothing A chose.
-		expect(perksIn('B')).not.toContain('Submissive');
+	it('R9 — a player who declared nothing is still seated on KD\'s default terms', () => {
+		// What survives KDM-271: B DECLARED nothing, and the session still says so. What the party
+		// plays with is a separate question, answered by `partyPerks()`.
 		expect(s.perksOf('B')).toEqual([]);
+		expect(perksIn('B'), 'and a perk NOBODY declared is on nobody').not.toContain('Pacifist');
 	});
 
 	it('P1 — a perk does not drift as the session runs', () => {
 		s.submit('A', { kind: 'wait' });
 		s.submit('B', { kind: 'wait' });
 		expect(perksIn('A')).toContain('Submissive');
-		expect(perksIn('B')).not.toContain('Submissive');
+		expect(perksIn('B')).toContain('Submissive');
 	});
 
 	it('P3 — a LATE arrival is perked on the same terms', () => {
@@ -268,6 +281,8 @@ describe('KDM-238 — the choice reaches the world, and only its owner (R4, R5, 
 		const res = s.joinInProgress('C');
 		expect(res.seated, 'the late join itself has to work for this to mean anything').toBe(true);
 		expect(perksIn('C')).toContain('Studious');
-		expect(perksIn('A'), 'and the late arrival did not re-perk anyone else').not.toContain('Studious');
+		// KDM-271 (was `not.toContain`): the late arrival widens the PARTY's set, so it does reach the
+		// seats already taken — see `mp-party-start-perks.spec.ts` for what that grant is and is not.
+		expect(perksIn('A'), 'and the party caught up with it').toContain('Studious');
 	});
 });

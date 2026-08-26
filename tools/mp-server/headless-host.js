@@ -1597,6 +1597,50 @@ class HeadlessHost {
 	}
 
 	/**
+	 * KDM-271 — ADD perk keys to whoever is swapped in, without rebuilding them as a new character.
+	 *
+	 * ⚠️ NOT A SECOND `applyPerks`, and the difference is the whole point. `applyPerks` above is the
+	 * SEATING operation: it replaces the map and runs `KDInitPerks()`, i.e. it decides what character
+	 * walks into the dungeon, starting rope and all. This is the MID-RUN operation: the party's start
+	 * perk set widened after a seat was already taken (a latecomer declared something the party did
+	 * not have), and the players already in the dungeon have to hold the same set or the shared world
+	 * stops being deterministic (KDM-242 F9 — `Stealthy` scales the floor's enemy and treasure counts
+	 * from whichever bundle is swapped in when generation runs).
+	 *
+	 * So it sets the flag and nothing else. No wipe — the seat's own perks and the game-mode keys in
+	 * the same Map must survive. No `KDInitPerks()` — re-running it would hand every already-seated
+	 * player a second copy of their OWN start-effects (`Submissive` adds its collar and leash
+	 * unconditionally), and somebody else's arrival is not a reason to re-equip a player mid-run.
+	 * This is the boundary KDM-242 drew: a mid-run grant is a perk, not a character.
+	 *
+	 * KD's own table is still the whitelist, exactly as in `applyPerks` — an unknown key dies in the
+	 * GAME, not in a perk list of ours (epic AC2).
+	 *
+	 * `set(k, true)` from a VARIABLE, never a literal name: `mp-perk-choice.spec.ts` greps this
+	 * source for a literal and fails the build if one appears.
+	 *
+	 * @param {string[]} keys perk keys, already sanitised by `sanitizePerks`
+	 * @returns {string[]} the keys that were actually switched on — i.e. minus anything KD rejected
+	 */
+	grantPerks(keys) {
+		const list = Array.isArray(keys) ? keys.filter((k) => typeof k === 'string') : [];
+		if (!list.length) return [];
+		return this.eval(`(function(){
+			if (typeof KinkyDungeonStatsChoice === 'undefined' || !KinkyDungeonStatsChoice) return [];
+			var want = ${JSON.stringify(list)};
+			var got = [];
+			for (var i = 0; i < want.length; i++) {
+				if (typeof KinkyDungeonStatsPresets !== 'undefined' && KinkyDungeonStatsPresets
+					&& KinkyDungeonStatsPresets[want[i]]) {
+					KinkyDungeonStatsChoice.set(want[i], true);
+					got.push(want[i]);
+				}
+			}
+			return got;
+		})()`);
+	}
+
+	/**
 	 * KDM-239 A3 — re-assert KD's game-mode keys AFTER `applyPerks` has wiped them.
 	 *
 	 * ⚠️ THIS IS NOT A SECOND WAY TO SET PERKS, and it must not become one.

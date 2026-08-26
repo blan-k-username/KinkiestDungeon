@@ -1860,6 +1860,84 @@ class SwapSession {
 	}
 
 	/**
+	 * KDM-271 — the START perk set of the PARTY: the union of what every seat declared.
+	 *
+	 * WHY A UNION AND NOT EACH PLAYER'S OWN. KDM-238 gave each seat its own perks, and F10 of
+	 * KDM-242 found that this is the same defect that task fixed for mid-run perks, shipped:
+	 * several perks REWRITE THE SHARED WORLD and are read from whichever bundle happens to be swapped
+	 * in when the read runs. `Stealthy` scales the floor's enemy count and doubles its treasure count
+	 * (`KDMapGen.ts:1049`, `:1770`), `Pristine` its rubble (`:297`), `Doorknobs` whether doors
+	 * generate open, `Fortify_Barricade` the enemy commander's AI (`KDCommander.ts:392`),
+	 * `Blackout` enemy vision (`KinkyDungeonEnemies.ts:1880`), plus the generic `obj.FilterPerk` gate.
+	 * All of them are selectable at character creation — the grid is populated from the whole of
+	 * `KinkyDungeonStatsPresets` by category with no `tags: ["start"]` filter
+	 * (`KinkyDungeon.ts:930-937`) and `KDValidatePerk` rejects only on `requireArousal`/`blockclass`.
+	 * So a host starting with `Stealthy` and a guest without it made the floor's difficulty depend on
+	 * SWAP ORDER, which is the non-determinism this whole epic exists to prevent.
+	 *
+	 * WHY NO "WORLD-AFFECTING PERK" LIST. That is the point of the union. The reads are scattered
+	 * across map generation, tile generation, furniture selection and commander AI in the game tree
+	 * we do not patch, and there is no seam to classify them at — so this does not classify them.
+	 * If no perk differs between two seats, no world read can differ either, whichever seat is loaded.
+	 * A subset would have to be named, and naming perks in `tools/mp-server/**` is what epic AC2
+	 * forbids (`mp-perk-choice.spec.ts:173` fails the build on a literal perk name in this source).
+	 *
+	 * WHY THIS IS THE SAME RULE KDM-242 D1 USES, not a second one. D1: "a perk is the PARTY's, not
+	 * the character's — on commit it is written into every seated player's `KinkyDungeonStatsChoice`."
+	 * That is this, at the other end of the run. One answer to "who owns a perk", in both places.
+	 *
+	 * WHAT THE PLAYER SEES. Character creation still belongs to each player, and both halves of its
+	 * ledger pool: a partner's `Studious` arrives, and so does the `KillSquad` they took to pay for
+	 * it. Nothing is ever revoked — a departing player's perks stay with the party, for the same
+	 * reason D1 never takes a perk back.
+	 *
+	 * Order is deterministic (seat order, then declaration order) so `applyPerks` runs
+	 * `KDPerkStart` in the same sequence for every seat.
+	 */
+	partyPerks() {
+		const out = [];
+		const seen = new Set();
+		for (const id of this._joined) {
+			for (const k of this.perksOf(id)) if (!seen.has(k)) { seen.add(k); out.push(k); }
+		}
+		return out;
+	}
+
+	/**
+	 * KDM-271 — a latecomer widened the party's perk set, so the seats already taken have to catch up.
+	 *
+	 * `_seatPlayer` gives the ARRIVING player the whole union, because seating builds a character from
+	 * KD's own new-game template and `applyPerks` is the operation for that. The players already in
+	 * the dungeon cannot be rebuilt — so they are granted the added keys and nothing else
+	 * (`HeadlessHost.grantPerks`: the flag, no wipe, no `KDInitPerks()`). Without this the union is
+	 * per-seat again the moment anyone joins late, which is the bug with extra steps.
+	 *
+	 * The asymmetry is deliberate and it is the same one KDM-242 drew: a seat is a character and
+	 * gets start-effects; a mid-run grant is a perk and does not. Nobody is re-equipped because
+	 * somebody else walked in.
+	 *
+	 * @param {Set<string>} before the union as it stood before the arrival
+	 * @param {string} arrivedId the newcomer, who already has the whole set from `_seatPlayer`
+	 */
+	_fanOutStartPerks(before, arrivedId) {
+		const added = this.partyPerks().filter((k) => !before.has(k));
+		if (!added.length) return [];
+		for (const cid of this._joined) {
+			if (cid === arrivedId) continue;
+			const bundle = this.bundles.get(cid);
+			if (!bundle) continue;
+			this.world.restorePlayer(bundle);
+			this.world.grantPerks(added);
+			this.bundles.set(cid, this.world.capturePlayer());
+		}
+		// Leave the arriving player in the slot, as `_seatPlayer` left it.
+		const mine = this.bundles.get(arrivedId);
+		if (mine) this.world.restorePlayer(mine);
+		this._dbg(`PARTY PERKS widened by ${arrivedId}: ${added.join(', ')}`);
+		return added;
+	}
+
+	/**
 	 * KDM-235 A1 — seat ONE player: the recipe `_start` used to inline, now shared with join-late.
 	 *
 	 * The exact mirror of `removePlayer`, and kept that way on purpose — a player is seated in one
@@ -1889,15 +1967,16 @@ class SwapSession {
 		 * questions, and only one of them has a co-op fallback.
 		 */
 		/*
-		 * KDM-238 R4/R5 — this player's own perks, in the same window and for the same reason.
+		 * KDM-238 R4/R5 — the party's perks, in the same window and for the same reason (KDM-271: they
+		 * used to be this player's alone; see `partyPerks`).
 		 *
 		 * FIRST among the per-player mutations, because it is the one with side effects: `applyPerks`
 		 * runs KD's own `KDInitPerks()`, which adds restraints, weapons, consumables and spell points
 		 * to whoever is in the slot. Everything after it (the name, the position) is a plain
 		 * assignment and does not care about the order; a perk's starting collar very much does.
 		 *
-		 * Unconditional, unlike the name: a player who declared nothing still needs the map RESET to
-		 * their own answer, or they would inherit whatever the previous occupant of the slot chose.
+		 * Unconditional, unlike the name: a party that declared nothing still needs the map RESET to
+		 * that answer, or a seat would inherit whatever the previous occupant of the slot chose.
 		 * `perksOf` is what makes "declared nothing" mean KD's default rather than "leave it alone".
 		 */
 		/*
@@ -1908,11 +1987,16 @@ class SwapSession {
 		 * screen — so replacing them with a player's declaration would silently drop them, which is
 		 * precisely the single-player divergence `mp-parity-oracle` caught.
 		 *
-		 * A UNION, so KDM-238's rule is untouched: a player who declared nothing gets exactly KD's
-		 * default, and a player who declared perks gets those ON TOP of it rather than instead of it.
+		 * A UNION, so nothing KD itself established is dropped: a party that declared nothing gets
+		 * exactly KD's default, and declared perks arrive ON TOP of it rather than instead of it.
+		 *
+		 * KDM-271 — and the declared half is the PARTY's (`partyPerks`), not this player's. KDM-238's
+		 * `perksOf(clientId)` here is exactly the defect F10 of KDM-242 found: a perk one seat holds and
+		 * another does not makes the generated floor depend on which bundle was swapped in. Every seat
+		 * is built from the same set, so no world read can disagree with itself.
 		 */
 		const base = (this._baseStats && this._baseStats.perks) || [];
-		this.world.applyPerks([...new Set([...base, ...this.perksOf(clientId)])]);
+		this.world.applyPerks([...new Set([...base, ...this.partyPerks()])]);
 		/*
 		 * KDM-239 A3 — and IMMEDIATELY after it, the game modes `applyPerks` just destroyed.
 		 *
@@ -1982,8 +2066,14 @@ class SwapSession {
 		const hostAv = hostId != null ? this.avatars.get(hostId) : null;
 		const hostPos = hostAv != null ? this.world.entityPos(hostAv) : null;
 		const pos = (hostPos && this.world.findFreeTileNear(hostPos.x, hostPos.y)) || this.world.findOpenTile();
+		// KDM-271: the party's start perk set BEFORE this arrival. Read here, while `_joined` still
+		// excludes the newcomer, because the whole question is what they ADD to it.
+		const perksBefore = new Set(this.partyPerks());
 		this._joined.push(clientId);
 		this._seatPlayer(clientId, pos);
+		// …and the seats already taken catch up, or the union is per-seat again the moment anyone
+		// joins late — which is the very defect `partyPerks` exists to close.
+		this._fanOutStartPerks(perksBefore, clientId);
 		// KDM-253 lowered `required` on a departure; raise it back, or a solo-then-rejoin session ends
 		// with a quorum below its own seat count.
 		this.required = Math.max(this.required, this._joined.length);
