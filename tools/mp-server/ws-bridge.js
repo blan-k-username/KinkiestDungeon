@@ -79,6 +79,78 @@ const HOST_JOIN_FIELDS = Object.freeze(['name', 'build', 'mods', 'perks', 'world
 const GUEST_JOIN_FIELDS = Object.freeze(['name', 'build', 'mods', 'perks']);
 
 /**
+ * KDM-274 — what the SERVER promises to put on the wire, declared once, per message kind.
+ *
+ * ── WHY THIS EXISTS, AND WHY IT IS THE MIRROR OF `HOST_JOIN_FIELDS` ───────────────────────────────
+ * KDM-260 declared the inbound handshake's fields because KDM-239 shipped a dropped one past a green
+ * suite: the client sent `world`, the bridge did not forward it, and 605 unit tests stayed green
+ * because every one of them called the gate directly and never crossed this bridge. The same guard
+ * caught the same class again on KDM-243 (`save`).
+ *
+ * It watched ONE DIRECTION. Nothing watched server → client: a payload composed correctly here and
+ * then not sent — or sent to the wrong socket — leaves the whole suite green while the feature does
+ * nothing, because a session-level test asserts on what a method returned rather than on what left
+ * the socket (memory: assert-at-the-deciding-layer). `save_export` (KDM-244/275) was the first field
+ * to travel that way, and was guarded only by its own per-feature spec — which is exactly the
+ * pattern KDM-260 replaced on the way in, and for the same reason: a per-feature test protects the
+ * field whose author thought of it, and nothing else.
+ *
+ * ── HOW TO ADD A MESSAGE ─────────────────────────────────────────────────────────────────────────
+ * Add an entry here. `tests/unit/mp-outbound-fields.spec.ts` then holds you to three things:
+ *   1. every `{ type: '…' }` this file puts on a socket is declared, and every key on it is named;
+ *   2. every declared kind is actually EXERCISED, and every `required` field is on the decoded wire
+ *      object when it is — a declaration nothing produces is a promise nobody keeps;
+ *   3. every `m.<field>` the CLIENT reads for that kind is declared here — the KDM-239 failure in
+ *      reverse, a receiver depending on a field the sender quietly stopped sending.
+ *
+ * `required` = present on the decoded wire object every time this kind is sent. `optional` = may be
+ * absent (a branch-specific extra, or a field whose value is legitimately `undefined` — JSON drops
+ * those keys, so "the call site names it" and "it arrives" are not the same claim).
+ *
+ * ⚠️ `to: 'host'` IS A CLAIM ABOUT DISCLOSURE, NOT A NOTE. `save_export` carries the entire world; a
+ * broadcast written where a unicast was meant would hand it to every guest (KDM-244 R11, and the
+ * one-word `_sendExport(clientId, …)` slip KDM-275 R10 pins). The spec fails if a frame of such a
+ * kind is ever seen on a socket that is not the host's.
+ */
+const OUTBOUND_MESSAGES = Object.freeze({
+	// ── the join handshake ───────────────────────────────────────────────────────────────────────
+	joined:            Object.freeze({ required: Object.freeze(['clientId', 'started', 'players']) }),
+	awaiting_approval: Object.freeze({ required: Object.freeze(['modDiff', 'world']) }),
+	// HOST-ONLY: it is the host that answers the gate, so nobody else is told somebody is asking.
+	join_pending:      Object.freeze({ required: Object.freeze(['clientId', 'name', 'modDiff']), to: 'host' }),
+	// `hostBuild`/`guestBuild` ride the build-mismatch refusal alone (KDM-233 N1) — the client prints
+	// them in that one branch, and the other refusals must not be required to carry them.
+	reject:            Object.freeze({ required: Object.freeze(['reason']),
+		optional: Object.freeze(['hostBuild', 'guestBuild']) }),
+
+	// ── play ─────────────────────────────────────────────────────────────────────────────────────
+	// `seq` comes from `_stateFrame`, not from any call site's literal: it is the client's gap
+	// detector, and a frame without one would be merged onto a base nobody can name (KDM-206).
+	// `kind` is absent on a turn-resolving frame, and 'ui' / 'push' otherwise (KDM-252).
+	state:             Object.freeze({ required: Object.freeze(['tick', 'seq']),
+		optional: Object.freeze(['kind', 'srv', 'serverLog', 'snapshot', 'delta']) }),
+	ack:               Object.freeze({ required: Object.freeze(['tick', 'srv']) }),
+	waiting:           Object.freeze({ required: Object.freeze(['waitingOn']) }),
+	'await':           Object.freeze({ required: Object.freeze(['waitingOn', 'graceMs']) }),
+	blocked:           Object.freeze({ required: Object.freeze(['reason']) }),
+	error:             Object.freeze({ required: Object.freeze(['error']) }),
+	ping:              Object.freeze({ required: Object.freeze(['t']) }),
+
+	// ── presence (KDM-250/251/252/253) ───────────────────────────────────────────────────────────
+	// `role` travels with the id because host and guest are not symmetric: a survivor told only
+	// "someone left" cannot tell which of the two situations they are in (KDM-234 D5).
+	peer_joined:       Object.freeze({ required: Object.freeze(['clientId', 'players']) }),
+	peer_missing:      Object.freeze({ required: Object.freeze(['clientId', 'role']) }),
+	peer_back:         Object.freeze({ required: Object.freeze(['clientId', 'role']) }),
+	peer_gone:         Object.freeze({ required: Object.freeze(['clientId', 'reason']) }),
+
+	// ── the run itself (KDM-244/275) ─────────────────────────────────────────────────────────────
+	// `reason` is what tells an automatic export ('floor'/'timer') from one the host asked for
+	// ('requested'/'solo'), and it is the whole basis on which the client decides to say anything.
+	save_export:       Object.freeze({ required: Object.freeze(['save', 'version', 'reason']), to: 'host' }),
+});
+
+/**
  * Copy the named fields that are actually PRESENT on `msg`.
  *
  * ⚠️ `in`, not `!== undefined` on the destination: the gate distinguishes "said nothing about perks"
@@ -1278,4 +1350,6 @@ module.exports = {
 	WSBridge, encodeFrame, decodeFrames, acceptKey,
 	// KDM-260 — exported so the drift guard can check the CLIENT's payload against them.
 	HOST_JOIN_FIELDS, GUEST_JOIN_FIELDS, pickFields,
+	// KDM-274 — the same, for the direction nothing used to watch.
+	OUTBOUND_MESSAGES,
 };

@@ -549,6 +549,41 @@ A unit test that calls a collaborator **directly** cannot see a caller that forg
 field. When you add anything to the wire, add a test that crosses the dispatch — `_handle` with a
 stubbed gate is cheap (no socket, no session, no boot) and is the layer where this class of bug lives.
 
+## Adding an OUTBOUND message or field (KDM-274)
+
+**Add it to `OUTBOUND_MESSAGES` in `ws-bridge.js`.** That table is the server→client half of the
+same idea: one declaration per message kind, naming its `required` and `optional` fields and — where
+it matters — who it may be addressed to.
+
+```js
+save_export: Object.freeze({ required: Object.freeze(['save', 'version', 'reason']), to: 'host' }),
+```
+
+`tests/unit/mp-outbound-fields.spec.ts` then holds you to four things, each of which fails on a drift
+the others cannot see:
+
+1. **SOURCE** — every `{ type: '…' }` the bridge puts on a socket is declared, with every key on it.
+2. **LIVE** — every declared kind is actually *exercised* against a real `WSBridge` (stubbed session,
+   recording sockets, no world boot), and each `required` field is on the **decoded wire object**.
+   `JSON.stringify` drops a key whose value is `undefined`, so "the call site names it" and "it
+   arrives" are genuinely different claims.
+3. **CLIENT** — every `m.<field>` `coop-bootstrap.js` reads for a kind is declared for that kind:
+   KDM-239 in reverse, a receiver depending on a field the sender quietly stopped sending.
+4. **ADDRESSING** — `to: 'host'` is checked over *every* frame *every* socket received. A host-only
+   payload reaching everybody is what a broadcast-written-where-a-unicast-was-meant looks like, and
+   for `save_export` — the entire world as a save string — that is a disclosure bug.
+
+### Why this exists at all
+
+Until KDM-274, nothing watched this direction. A payload composed correctly and then **not sent**, or
+sent to the wrong socket, left the whole suite green while the feature did nothing — because a
+session-level test asserts on what a method *returned*, not on what left the socket. `save_export`
+was guarded only by its own per-feature spec, which is exactly the pattern KDM-260 replaced on the
+way in: it protects the field whose author thought of it and nothing else.
+
+The COVERAGE assertion is the load-bearing one. A declaration nothing produces is a promise nobody
+keeps, so a new kind must come with a way to reach it in the rig — and deleting a send turns red.
+
 ## Changing floor (KDM-240)
 
 The party shares ONE world, one `KDMapData` and one `MiniGameKinkyDungeonLevel`, so any map change
