@@ -534,6 +534,22 @@ class WSBridge {
 			}
 			return clientId;
 		}
+		/*
+		 * KDM-244 — the host asks for the run as a single-player save.
+		 *
+		 * A REQUEST/RESPONSE pair rather than a server-initiated push, because the client must be
+		 * ready to write it: the reply overwrites `localStorage.KinkyDungeonSave` (D2), and a save
+		 * arriving unbidden mid-frame is a write nobody asked for. It also gives D3's mid-session
+		 * backup for nothing — the host may ask at any time, the session is untouched either way
+		 * (`exportRun` is read-only, R10), and this task simply does not paint a button for it yet.
+		 *
+		 * `_sendExport` re-checks the host, so this gate is a courtesy that saves the work, not the
+		 * authority. A client can lie about who it is; the gate cannot.
+		 */
+		if (msg.type === 'export_request' && clientId && this.session.started) {
+			this._sendExport(clientId, 'requested');
+			return clientId;
+		}
 		if (msg.type === 'input' && clientId && this.session.started) {
 			try {
 				// KDM-163 (option A): the client routes EVERY input and classifies nothing. `apply`
@@ -780,6 +796,50 @@ class WSBridge {
 		const leaving = this.presence.missing().map((m) => m.clientId).filter((id) => id !== deciderId);
 		if (!this._seatGone(leaving, 'dismissed')) return false;
 		this.session._dbg(`SOLO — ${deciderId} continues without ${leaving.join(', ')}`);
+		/*
+		 * KDM-244 D1 — the run just stopped being co-op, so this is the moment it becomes a
+		 * single-player save. Sent AFTER `_seatGone`, deliberately: `removePlayer` has already
+		 * despawned the departing peer's avatar (`swap-session.js` step 1), so the export is left
+		 * stripping the HOST's own avatar — the one entity nothing else removes, and the one that
+		 * would otherwise make the exported save unopenable.
+		 *
+		 * Best-effort by design: the solo decision has already been applied and broadcast, and a
+		 * failed export must not undo it. The host is told, and can ask again.
+		 */
+		this._sendExport(deciderId, 'solo');
+		return true;
+	}
+
+	/**
+	 * KDM-244 — hand the host their run as a single-player save string.
+	 *
+	 * HOST-ONLY, checked HERE and again in `session.exportRun` (R1/R11). Two checks for two different
+	 * questions: this one asks "is this the seat the join gate gave slot 0 to", which is the bridge's
+	 * business; the session's asks "is this the player whose world this is", which is the session's.
+	 * They agree today and must both be true; neither is a substitute for the other.
+	 *
+	 * Failure is REPORTED, never silent (R9). The whole feature is a promise about persistence, and a
+	 * silent failure is indistinguishable from a silent success until the player closes the tab and
+	 * discovers their run is gone.
+	 */
+	_sendExport(clientId, reason) {
+		const sock = this.sockets.get(clientId);
+		if (!sock) return false;
+		if (clientId !== this.gate.host) {
+			this._send(sock, { type: 'error', error: 'only the host can save the run' });
+			return false;
+		}
+		let res;
+		try {
+			res = this.session.exportRun(clientId);
+		} catch (e) {
+			res = { ok: false, err: String((e && e.message) || e) };
+		}
+		if (!res || !res.ok) {
+			this._send(sock, { type: 'error', error: `could not save the run: ${(res && res.err) || 'unknown'}` });
+			return false;
+		}
+		this._send(sock, { type: 'save_export', save: res.save, version: res.version || '', reason });
 		return true;
 	}
 

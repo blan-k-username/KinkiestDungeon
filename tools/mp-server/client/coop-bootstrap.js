@@ -1384,6 +1384,12 @@
 							? 'waiting for the host to reconnect.'
 							: 'waiting for your partner to reconnect.')
 						: 'action refused (' + m.reason + ')'));
+			} else if (m.type === 'save_export') {
+				// KDM-244 — the run has come back as a single-player save. See `writeExportedSave`.
+				var w = writeExportedSave(m.save);
+				setStatus('Co-op ' + id + ': ' + (w.ok
+					? 'run saved — you can continue it in single player.'
+					: 'COULD NOT SAVE THE RUN — ' + w.err + ' (your previous save is untouched)'));
 			} else if (m.type === 'error') {
 				setStatus('Co-op ' + id + ': error — ' + m.error);
 			}
@@ -1502,6 +1508,83 @@
 	 *
 	 * It does NOT enter the game: that happens on `joined.started`, once the host has said yes.
 	 */
+	/**
+	 * KDM-244 — write the exported run into KD's own save slot, without ever leaving it broken.
+	 *
+	 * ⚠️ WHY THIS DOES NOT USE KD'S OWN SAVE PATH. The elegant version pushes the save object onto
+	 * `KDSaveQueue` and lets `KinkyDungeonRun` compress and store it (`KinkyDungeon.ts:1520-1538`) —
+	 * upstream's code, no storage logic of ours. It is rejected for one line:
+	 *
+	 *     catch (e) { …; localStorage.setItem('KinkyDungeonSave', ""); saveError = true; }
+	 *
+	 * On a quota failure KD BLANKS the slot. Since D2 puts the co-op run in that same slot, a failed
+	 * export would leave the player with no run at all where a second earlier they had one — exactly
+	 * the "worse than none" outcome R9 forbids. So the write is ours and it is guarded: stash, write,
+	 * read back, and restore the stash if anything went wrong.
+	 *
+	 * This is NOT re-implementing the save format (R2). The bytes were produced by KD's own
+	 * `KinkyDungeonGenerateSaveData` and KD's own `LZString` on the server; what is owned here is the
+	 * storage write, which is the only place D2's single-slot answer can be made safe.
+	 *
+	 * The read-back check is `KDMPLobby.saveIsUsable` — KD's own seven-field acceptance rule
+	 * (`KinkyDungeon.ts:7079-7086`), already written for the import direction. Deliberately reused
+	 * rather than copied: a second copy of upstream's rule is a second thing to keep in step, and
+	 * this file would be the copy that drifts. `coop-lobby.js` loads AFTER this script, so it is
+	 * reached through `window.KDMPLobby` at message time (always after both have loaded) rather than
+	 * captured at load time.
+	 */
+	function writeExportedSave(str) {
+		var KEY = 'KinkyDungeonSave';
+		if (!str) return { ok: false, err: 'the server sent an empty save' };
+		var check = window.KDMPLobby && window.KDMPLobby.saveIsUsable;
+		if (typeof check !== 'function') return { ok: false, err: 'save validator unavailable' };
+		// Validate BEFORE touching storage: a save that would not load must never displace one that
+		// would, and this ordering means the bad case never writes at all.
+		if (!check(str)) return { ok: false, err: 'the exported save is not loadable' };
+		var stash;
+		try { stash = window.localStorage.getItem(KEY); }
+		catch (e) { return { ok: false, err: 'storage is unavailable' }; }
+		try {
+			window.localStorage.setItem(KEY, str);
+			// Read BACK, because a quota-limited store can accept a write and truncate it, and because
+			// "setItem did not throw" is not the same claim as "the run is on disk".
+			if (!check(window.localStorage.getItem(KEY))) throw new Error('stored save did not read back');
+			// KD keeps a slot list alongside the Continue key; leaving it stale would show the player
+			// an older run in the slot browser than the one Continue actually opens.
+			try {
+				if (typeof KinkyDungeonDBSave === 'function' && typeof KDSaveSlot !== 'undefined') {
+					KinkyDungeonDBSave(KDSaveSlot, str);
+				}
+			} catch (e) { /* the Continue slot is written; the slot list is a nicety */ }
+			return { ok: true, err: null };
+		} catch (e) {
+			// Put back exactly what was there — including the absence of anything.
+			try {
+				if (stash === null || stash === undefined) window.localStorage.removeItem(KEY);
+				else window.localStorage.setItem(KEY, stash);
+			} catch (e2) { /* nothing further we can do; the message below is the honest report */ }
+			return { ok: false, err: String((e && e.message) || e) };
+		}
+	}
+	// The e2e drives this directly: the write is the whole risk, and reaching it through a real
+	// server round trip would test the transport instead of the guard.
+	window.__coopWriteExportedSave = writeExportedSave;
+
+	/**
+	 * KDM-244 — is this page the host?
+	 *
+	 * A function rather than a mirrored `coop.role` field, because `role` is assigned in more than one
+	 * place (the join, and the host→guest fallback at the retry) and a copy would have to be updated
+	 * at each of them. Reading the closure variable cannot go stale.
+	 */
+	coop.isHost = function () { return role === 'host'; };
+
+	/** KDM-244 — ask the server for the run as a single-player save (host only; the server re-checks). */
+	window.__coopRequestExport = function () {
+		try { coop.ws.send(JSON.stringify({ type: 'export_request' })); return true; }
+		catch (e) { return false; }
+	};
+
 	window.__coopConnect = function (opts) {
 		opts = opts || {};
 		role = opts.role || 'guest';

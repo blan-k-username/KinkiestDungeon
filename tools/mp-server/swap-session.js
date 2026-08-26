@@ -871,7 +871,7 @@ class SwapSession {
 	_openOwnDialogue(target, name, speakerEntityId) {
 		const bundle = this.bundles.get(target);
 		if (!bundle) return false;
-		this.world.restorePlayer(bundle);
+		this._restorePlayer(target, bundle);
 		const res = this.world.eval(`(function(){
 			var speaker = ${speakerEntityId == null ? 'null'
 		: `KDMapData.Entities.find(function(e){ return e.id === ${speakerEntityId | 0}; })`};
@@ -921,7 +921,7 @@ class SwapSession {
 	_closeOwnDialogue(target, name) {
 		const bundle = this.bundles.get(target);
 		if (!bundle) return;
-		this.world.restorePlayer(bundle);
+		this._restorePlayer(target, bundle);
 		this.world.eval(`(function(){
 			if (typeof KDGameData !== 'undefined' && KDGameData
 				&& KDGameData.CurrentDialog === '${name}') {
@@ -1168,7 +1168,7 @@ class SwapSession {
 		const live = this.world.capturePlayer();
 		try {
 			for (const cid of this._joined) {
-				this.world.restorePlayer(cid === byId ? live : this.bundles.get(cid));
+				this._restorePlayer(cid, cid === byId ? live : this.bundles.get(cid));
 				this.world.eval(`(function(){
 					var i = ${JSON.stringify(card.index)};
 					if (typeof KDMapData === 'undefined' || !KDMapData || !Array.isArray(KDMapData.PerkShrines)) return;
@@ -1198,7 +1198,7 @@ class SwapSession {
 		} finally {
 			// Leave the acting player swapped back in: the caller is mid-apply and captures their bundle
 			// immediately after this returns.
-			this.world.restorePlayer(this.bundles.get(byId) || live);
+			this._restorePlayer(byId, this.bundles.get(byId) || live);
 		}
 		// …and spend the room, once, over the shared map.
 		this.world.eval(`(function(){
@@ -1296,7 +1296,7 @@ class SwapSession {
 		// Known NOT to consume a turn (learned from a real turn, below) → apply it now, exactly once.
 		if (ourDialogue || this.inputKind.get(kdType) === 'ui') {
 			const bundle = this.bundles.get(clientId);
-			this.world.restorePlayer(bundle);
+			this._restorePlayer(clientId, bundle);
 			const res = this.world.applyInputObserved(kdType, data) || {};
 			// KDM-197: same learning rule as the lockstep path — one function, so the two can never
 			// disagree about what an observation means. A `ui` type that advanced is promoted (and
@@ -1670,7 +1670,7 @@ class SwapSession {
 			// avatar so KD's own KDCanApplyBondage gate passes) and the HUD marker.
 			const { kdType, data } = this._toInput(id, action);
 			// swap this player in; park their avatar so it doesn't block their own move
-			this.world.restorePlayer(this.bundles.get(id));
+			this._restorePlayer(id, this.bundles.get(id));
 			const avId = this.avatars.get(id);
 			if (avId != null) this.world.moveAvatar(avId, PARK.x, PARK.y);
 			// KD-100: arm every PvP peer as a REAL hostile enemy (hp = their Will) so this player's
@@ -2041,13 +2041,13 @@ class SwapSession {
 			if (cid === arrivedId) continue;
 			const bundle = this.bundles.get(cid);
 			if (!bundle) continue;
-			this.world.restorePlayer(bundle);
+			this._restorePlayer(cid, bundle);
 			this.world.grantPerks(added);
 			this.bundles.set(cid, this.world.capturePlayer());
 		}
 		// Leave the arriving player in the slot, as `_seatPlayer` left it.
 		const mine = this.bundles.get(arrivedId);
-		if (mine) this.world.restorePlayer(mine);
+		if (mine) this._restorePlayer(arrivedId, mine);
 		this._dbg(`PARTY PERKS widened by ${arrivedId}: ${added.join(', ')}`);
 		return added;
 	}
@@ -2072,7 +2072,7 @@ class SwapSession {
 		 */
 		const imported = this._templateOf.get(clientId) || null;
 		const template = imported || this._newPlayerTemplate;
-		if (template) this.world.restorePlayer(template);
+		if (template) this._restorePlayer(clientId, template);
 		/*
 		 * KDM-237 S1/S2 — what this player is called, in the two places it has to appear.
 		 *
@@ -2287,6 +2287,92 @@ class SwapSession {
 	 * Idempotent and safe for an unknown id: this is called from a dialogue answer, and a double click
 	 * must not throw at a player who is already alone.
 	 */
+	/**
+	 * KDM-244 A3a — swap a player into the world slot, and REMEMBER that it was them.
+	 *
+	 * The only way this class restores a player. It used to be fourteen bare `world.restorePlayer(…)`
+	 * calls, none of which recorded anything, so "who is currently swapped in" was a fact the session
+	 * simply did not have — fine while every caller immediately restored somebody else, and not fine
+	 * the moment something needs to swap a player in TEMPORARILY and put the previous one back
+	 * (`exportRun`). Writing that bookkeeping at fourteen call sites is the same fact fourteen times,
+	 * and the fourteenth copy is the one that gets forgotten when a fifteenth site is added.
+	 *
+	 * The bundle is passed explicitly by every caller rather than looked up here, so this refactor
+	 * changed WHAT is restored at exactly zero sites — several callers restore a live capture, a
+	 * template, or `bundles.get(x) || live`, and re-deriving those here would have altered behaviour
+	 * while pretending to be bookkeeping.
+	 *
+	 * @param {string|null} id      whose character now occupies the slot (null = not a seated player)
+	 * @param {object} [bundle]     the exact bundle to restore; defaults to this id's seated bundle
+	 */
+	_restorePlayer(id, bundle = (id != null ? this.bundles.get(id) : null)) {
+		if (!bundle) return false;
+		this.world.restorePlayer(bundle);
+		this._slotOccupant = id || null;
+		return true;
+	}
+
+	/**
+	 * KDM-244 — this run as a single-player save the host can keep playing (MP → SP).
+	 *
+	 * The seat-aware half of the export; `HeadlessHost.exportSave` is the world-aware half and knows
+	 * nothing about players. That split is the same one every module here keeps, and it is why this
+	 * method is short: it decides WHOSE character and WHICH entities, and hands both to the world.
+	 *
+	 * HOST-ONLY (R1/R11), and it is one comparison, exactly as the import's host-only rule is. The
+	 * world belongs to whoever is hosting the simulation; a guest has no world to take with them
+	 * (KDM-244 C1/C3), so this refuses rather than quietly exporting somebody else's run.
+	 *
+	 * ⚠️ THE PLAYER SLOT DOES NOT HOLD THE HOST BETWEEN TURNS. `_advanceTurn` ends by parking the
+	 * global player off-field at PARK (1,1), so `KinkyDungeonPlayerEntity` — which
+	 * `KinkyDungeonGenerateSaveData` writes straight into the save (`KinkyDungeon.ts:7009`) — is a
+	 * ghost standing on tile 1,1 carrying whichever player was swapped in last. MEASURED in the POC:
+	 * a naive export produced exactly that, a save that loads perfectly and is quietly wrong. So the
+	 * host is swapped in first, and the previous occupant is put back after.
+	 *
+	 * ⚠️ AND THE WORLD IS PUT BACK, because R10 says the live session is undisturbed and D3 says the
+	 * export is non-terminal — a host may take a backup mid-run and carry on playing. Strictly, the
+	 * restore may be redundant: KDM-161's "absent ⇒ default" rule means the next `restorePlayer`
+	 * resets whatever a stale occupant left behind. It is done anyway, because a requirement upheld
+	 * by an argument about another subsystem's invariant is a requirement waiting for that subsystem
+	 * to change. It costs two lines.
+	 *
+	 * @returns {{ok: boolean, save: string, version: string, err: string|null}}
+	 */
+	exportRun(hostId) {
+		if (!hostId || hostId !== this.hostId()) {
+			return { ok: false, save: '', version: '', err: 'not the host' };
+		}
+		if (!this.bundles.get(hostId)) {
+			return { ok: false, save: '', version: '', err: 'host is not seated' };
+		}
+		const prev = this._slotOccupant;
+		this._restorePlayer(hostId, this.bundles.get(hostId));
+		let res;
+		try {
+			res = this.world.exportSave([...this.avatars.values()]);
+		} catch (e) {
+			res = { ok: false, save: '', version: '', err: String((e && e.message) || e) };
+		} finally {
+			// `finally`, so a throw in the generator cannot leave the host swapped in and the world
+			// standing in a state no turn ever produces.
+			if (prev && this.bundles.get(prev)) this._restorePlayer(prev, this.bundles.get(prev));
+			this.world.parkGlobalPlayer(PARK.x, PARK.y);
+		}
+		this._dbg(`EXPORT by ${hostId} — ${res.ok ? res.save.length + ' chars' : 'FAILED: ' + res.err}`);
+		return res;
+	}
+
+	/**
+	 * KDM-244 R1 — who is hosting, as the session sees it.
+	 *
+	 * The session does not own the join gate (that is `join-gate.js`, and the bridge owns the two), so
+	 * "the host" here is the seat that joined first — the same rule the gate applies when it hands
+	 * slot 0 out. Kept as one method so the export's host-only test and any later caller cannot
+	 * disagree about it.
+	 */
+	hostId() { return this._joined.length ? this._joined[0] : null; }
+
 	removePlayer(clientId) {
 		if (!clientId || !this._joined.includes(clientId)) return false;
 		// 1. the avatar entity leaves the shared world. Its enemy DEF stays: that is a template, and
@@ -2468,7 +2554,7 @@ class SwapSession {
 			// the same measured reason (installPeerUntieRecorder).
 			const untied = this.world.takePeerUnties(eid);
 			if (hits.length || newRestraints.length || untied > 0) {
-				this.world.restorePlayer(this.bundles.get(id));   // swap victim in once for both effects
+				this._restorePlayer(id, this.bundles.get(id));   // swap victim in once for both effects
 				for (const h of hits) {
 					// The victim is in the player slot, so this is KD's REAL player-damage pipeline
 					// applying the game's own damage — the victim's resistances, events and message
@@ -2661,7 +2747,7 @@ class SwapSession {
 		const liveActing = includeActing ? null : this.world.capturePlayer();
 		for (const [i, cid] of [...this._joined].entries()) {
 			if (!includeActing && cid === actingId) continue;
-			this.world.restorePlayer(this.bundles.get(cid));
+			this._restorePlayer(cid, this.bundles.get(cid));
 			let p;
 			if (tiles) {
 				const t = tiles[i] || tiles[0];
@@ -2677,7 +2763,7 @@ class SwapSession {
 		// Leave the acting player swapped back in: the caller is mid-apply and captures their bundle
 		// immediately after this returns, so anything else here would persist the wrong player's state.
 		const back = liveActing || this.bundles.get(actingId);
-		if (back) this.world.restorePlayer(back);
+		if (back) this._restorePlayer(actingId, back);
 	}
 
 	/**
@@ -2824,7 +2910,7 @@ class SwapSession {
 		if (!this.started) throw new Error('session not started');
 		const bundle = this.bundles.get(clientId);
 		if (!bundle) throw new Error(`unknown player ${clientId}`);
-		this.world.restorePlayer(bundle);
+		this._restorePlayer(clientId, bundle);
 		return this.world.getVitals();
 	}
 
@@ -3019,7 +3105,7 @@ class SwapSession {
 		if (!this.started) throw new Error('session not started');
 		const bundle = this.bundles.get(clientId);
 		if (!bundle) throw new Error(`unknown player ${clientId}`);
-		this.world.restorePlayer(bundle);
+		this._restorePlayer(clientId, bundle);
 		const snap = this.world.serializeRenderState();
 		// KDM-162: ship this player's OWN state bundle — the same generic capture the swap model uses
 		// (KDM-161), not a curated view of it. The browser runs a full KD instance; it needs its state,

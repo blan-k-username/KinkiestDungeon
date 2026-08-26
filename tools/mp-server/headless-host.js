@@ -3228,6 +3228,98 @@ class HeadlessHost {
 		})()`);
 	}
 
+	/**
+	 * KDM-244 — this world as a SINGLE-PLAYER save string, ready for a browser's save slot.
+	 *
+	 * The exact counterpart of `loadSave` above, and it produces what that function consumes: the
+	 * compressed-base64 form KD's own async save loop writes to `localStorage.KinkyDungeonSave`
+	 * (`KinkyDungeon.ts:1520-1538`). The save itself is `KinkyDungeonGenerateSaveData()` — upstream's,
+	 * versioned with the bundle — and nothing here parses or repairs the format, for the same reason
+	 * `loadSave` does not (epic AC1).
+	 *
+	 * ⚠️ NOT `saveOf()`, AND NOT A GENERALISATION OF IT. `saveOf` is the parity/non-interference
+	 * INSTRUMENT: one player MINUS the world (`WORLD_KEYS` deleted), used to ask "did the swap lose
+	 * anything". This is the PRODUCT: the whole world PLUS one player, for a person to keep playing.
+	 * They share `_seedHeadlessModel()` and nothing else, and collapsing them would mean one function
+	 * with a flag deciding whether its output is a measurement or a save file.
+	 *
+	 * ⚠️ `_seedHeadlessModel()` IS THE ONE PRECONDITION — the same one `saveOf` and `loadSave` have,
+	 * for the same reason: `KinkyDungeonGenerateSaveData` reads
+	 * `KDCurrentModels.get(KinkyDungeonPlayer).Poses` with no null guard (`KinkyDungeon.ts:6968`) off
+	 * a container `_neuterRendering` deliberately never builds. This is also why the README long said
+	 * headless save GENERATION was unsupported: it is supported, and has been since KDM-160 seeded
+	 * the container.
+	 *
+	 * ⚠️⚠️ EXCLUDING THE AVATARS IS WHAT MAKES THE SAVE LOADABLE — it is NOT tidiness.
+	 * `KDUnPackEnemies` re-resolves every entity's def BY NAME on load
+	 * (`KinkyDungeonGame.ts:734-739`), skipping only entities marked `modified`. The
+	 * `RemotePlayer_<name>` defs are created at runtime by `spawnAvatar` and are NOT in the save
+	 * (the save's key list is hand-picked and carries no enemy table), so a fresh world resolves them
+	 * to `undefined`. The very next reader then dereferences that undefined:
+	 *
+	 *     KinkyDungeonVision.ts:158
+	 *     if (Enemy && Enemy.blockVision || (Enemy.blockVisionWhileStationary && !EE.moved && EE.idle))
+	 *
+	 * `&&` binds tighter than `||`, so an undefined `Enemy` falls past the guarded first term into the
+	 * unguarded second one and throws. (Its sibling at `:353` is parenthesised correctly — this is an
+	 * upstream missing-paren bug, recorded in UPSTREAM_ISSUES.md. The game tree is read-only, so we
+	 * work around it rather than patch it.) MEASURED in KDM-244's POC: leaving even ONE avatar in
+	 * makes the save refuse to load, with any unknown def name reproducing it.
+	 *
+	 * Marking the avatars `modified` would ALSO make it load (measured) — by carrying the def inline.
+	 * That is rejected on its merits, not for lack of options: a peer's avatar is not part of anybody's
+	 * single-player run, and a save full of hostile ghosts of your friends is not the run they left.
+	 *
+	 * ⚠️ THE STRIP HAPPENS ON THE CLONE, NEVER ON THE WORLD. Despawning the avatars and re-spawning
+	 * them afterwards was the obvious first design and is wrong: `spawnAvatar` allocates a fresh
+	 * `KinkyDungeonGetEnemyID()`, so the round trip would move `KinkyDungeonEnemyID`, invalidate every
+	 * entity id the peers hold, and break the caller's `avatars` map. Editing the deep clone that
+	 * `saveOf` already pays for costs nothing and mutates nothing — which is what lets the caller
+	 * promise the live session is untouched.
+	 *
+	 * Entity ids are the authoritative filter; the `RemotePlayer` name prefix is belt-and-braces for an
+	 * avatar the caller has lost track of. Both, because they cost one predicate and disagree only in
+	 * the case worth catching.
+	 *
+	 * @param {number[]} excludeIds entity ids to drop (the caller's avatar entities)
+	 * @returns {{ok: boolean, save: string, version: string, err: string|null}}
+	 */
+	exportSave(excludeIds = []) {
+		this._seedHeadlessModel();
+		this._context.__KD_SAVE_EXCLUDE = (excludeIds || []).map((n) => n | 0);
+		return this.eval(`(function () {
+			try {
+				var drop = {};
+				(globalThis.__KD_SAVE_EXCLUDE || []).forEach(function (id) { drop[id] = true; });
+				var save = JSON.parse(JSON.stringify(KinkyDungeonGenerateSaveData()));
+				var isAvatar = function (e) {
+					return drop[e.id] || String((e.Enemy && e.Enemy.name) || '').indexOf('RemotePlayer') === 0;
+				};
+				var gone = {};
+				if (save.KDMapData && save.KDMapData.Entities) {
+					save.KDMapData.Entities = save.KDMapData.Entities.filter(function (e) {
+						if (!isAvatar(e)) return true;
+						gone[e.id] = true;
+						return false;
+					});
+				}
+				// KDM-244 A2a: NPCRestraints is keyed by ENTITY ID and rides in KDGameData, so a removed
+				// avatar would leave its ties behind as a record pointing at nothing.
+				var ties = save.KDGameData && save.KDGameData.NPCRestraints;
+				if (ties) { for (var k in ties) { if (gone[k]) delete ties[k]; } }
+				return {
+					ok: true, err: null,
+					version: String(save.version || ''),
+					save: LZString.compressToBase64(JSON.stringify(save)),
+				};
+			} catch (e) {
+				// A throw must never reach the caller as a half-built save: R9 forbids handing back
+				// anything a client might write over a real save slot.
+				return { ok: false, save: '', version: '', err: String((e && e.message) || e) };
+			}
+		})()`);
+	}
+
 	/** A small JSON-safe snapshot for assertions/reconciliation. */
 	getState() {
 		return this.eval(`(function(){

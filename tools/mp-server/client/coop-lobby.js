@@ -569,4 +569,8 @@
 	KinkyDungeonRun._kdmp_lobby_original = _prev;
 	// KDM-257 — the test seam for the notice; see drawModWarning's own note for why it exists.
 	lobby.drawModWarning = drawModWarning;
+	// KDM-244 — KD's own seven-field save rule, shared with the EXPORT direction's guarded write in
+	// coop-bootstrap.js. One definition of "is this save loadable", used on the way in and the way
+	// out; a second copy over there would be the one that drifts from upstream.
+	lobby.saveIsUsable = saveIsUsable;
 })();

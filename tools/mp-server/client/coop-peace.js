@@ -24,6 +24,8 @@
 	'use strict';
 
 	var OFFER = 'Peace';
+	/** KDM-244 — the host's "take this run back to single player" entry. */
+	var SAVE_RUN = 'CoopSaveRun';
 
 	function coopState() {
 		var rc = (typeof window !== 'undefined') ? window.KDRenderClient : null;
@@ -57,6 +59,40 @@
 	function decorate(menu) {
 		if (!menu || !Array.isArray(menu.options)) return menu;
 		if (!targetingSelf()) return menu;
+
+		/*
+		 * KDM-244 — "save this run", the HOST's way to take the world back to single player.
+		 *
+		 * ⚠️ ADDED BEFORE THE PEACE GUARDS, DELIBERATELY. It was first written at the bottom of this
+		 * function and never appeared: everything below is gated on `coopState()`, which is the
+		 * SERVER's peace/war block (`snap.coop`) and is absent in a session where nobody has ever been
+		 * at war — i.e. in every ordinary co-op game. Exporting your run has nothing to do with peace,
+		 * so it must not inherit peace's preconditions. Caught by the e2e's reachability check, which
+		 * is the only layer that can see a menu entry that is never painted.
+		 *
+		 * ⚠️ WHY IT LIVES IN THE PEACE FILE AT ALL. `KDGetContextActions.Game` is ONE global and this
+		 * project allows it ONE wrap — the rule this file's header states, and the duplication KDM-229
+		 * was raised for. A `coop-export.js` adding a second wrapper of the same function is exactly
+		 * that mistake, so the entry goes where the wrap already is. This file is now the CO-OP
+		 * CONTEXT MENU rather than the peace menu; renaming it (with its INJECT entry and its specs)
+		 * is filed as tech debt rather than smuggled into this task.
+		 *
+		 * Host-only in the UI (R1); the server re-checks in `_sendExport`, because a client can lie.
+		 * This gate is a courtesy that stops a guest being shown a button that would only refuse.
+		 */
+		var isHost = false;
+		try { isHost = !!(window.__coop && window.__coop.isHost && window.__coop.isHost()); }
+		catch (e) { isHost = false; }
+		if (isHost) {
+			menu.options.push(SAVE_RUN);
+			menu.optionText[SAVE_RUN] = 'Save this run for single player';
+			menu.optionImages[SAVE_RUN] = 'Talk';
+			menu.optionActions[SAVE_RUN] = function () {
+				KDContextMenu = false;
+				try { window.__coopRequestExport(); } catch (e) { /* not connected */ }
+			};
+		}
+
 		var coop = coopState();
 		if (!coop) return menu;
 
@@ -78,6 +114,7 @@
 				send({ mp: 'peace.offer' });
 			};
 		}
+
 		return menu;
 	}
 
