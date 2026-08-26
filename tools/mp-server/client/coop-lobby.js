@@ -83,6 +83,14 @@
 		perks: [],
 		perkPick: false,
 		playerPerks: function () { return lobby.perks.slice(); },
+		/**
+		 * KDM-256 R1 — the character this player built, or null, plus the same conditional flag the
+		 * perk pick uses. `null` (never `{}`) because "declared nothing" has exactly one meaning all
+		 * the way down to `SwapSession.characterOf`, and it is what keeps the `#coop=` road unchanged.
+		 */
+		character: null,
+		charPick: false,
+		playerCharacter: function () { return lobby.character ? JSON.parse(JSON.stringify(lobby.character)) : null; },
 		open: function () { KinkyDungeonState = 'Multiplayer'; lobby.view = 'menu'; lobby.error = ''; lobby.status = ''; },
 		close: function () { lobby.leave(); KinkyDungeonState = 'Menu'; },
 		/**
@@ -202,7 +210,7 @@
 		DrawButtonKDEx('KDMPHost', function () {
 			lobby.view = 'host';
 			lobby.error = '';
-			connect({ role: 'host', name: lobby.playerName(), perks: lobby.playerPerks() });
+			connect({ role: 'host', name: lobby.playerName(), perks: lobby.playerPerks(), character: lobby.playerCharacter() });
 			return true;
 		}, true, MID, 300, 350, 64, text('KDMPHostGame', 'Host Game'), '#ffffff', '');
 
@@ -229,7 +237,7 @@
 					return true;
 				}
 				lobby.view = 'host';
-				connect({ role: 'host', name: lobby.playerName(), perks: lobby.playerPerks(), save: str });
+				connect({ role: 'host', name: lobby.playerName(), perks: lobby.playerPerks(), character: lobby.playerCharacter(), save: str });
 				return true;
 			}, true, MID, 380, 350, 64, text('KDMPContinueSave', 'Continue Save'), '#ffffff', '');
 		}
@@ -252,8 +260,18 @@
 			// whole existing lobby suite asserts on) stays byte-identical.
 		}, true, MID, saved ? 540 : 460, 350, 64, text('KDMPPerksBtn', 'Perks'), '#ffffff', '');
 
+		// KDM-256 R1 — the character pick, beside the perk pick and for the same reason: the host
+		// connects straight from this view, so anything that must ride the handshake is chosen here.
+		// `'Diff'` is KD's own class screen, and the Wardrobe is one stock button beyond it.
+		DrawButtonKDEx('KDMPChar', function () {
+			lobby.error = '';
+			lobby.charPick = true;
+			KinkyDungeonState = 'Diff';        // KD's OWN class/start screen — see drawCharPickOverrides
+			return true;
+		}, true, MID, saved ? 640 : 560, 350, 64, text('KDMPCharBtn', 'Character'), '#ffffff', '');
+
 		DrawButtonKDEx('KDMPBack', function () { lobby.close(); return true; },
-			true, MID, saved ? 640 : 560, 350, 64, text('KDMPBack', 'Back'), '#ffffff', '');
+			true, MID, saved ? 740 : 660, 350, 64, text('KDMPBack', 'Back'), '#ffffff', '');
 	}
 
 	function drawHost() {
@@ -308,15 +326,74 @@
 	 * solo player's perk screen is untouched — asserted from both sides in `mp-lobby-perks.spec.ts`,
 	 * because an unconditional override would pass the co-op half and silently break the game's own.
 	 */
-	function drawPerkPickOverrides() {
-		if (!lobby.perkPick) return;
+	/**
+	 * Take back the named buttons on a KD screen we have borrowed, and send them to `commit`.
+	 *
+	 * ONE implementation, shared by the perk pick (KDM-238) and the character pick (KDM-256). It was
+	 * about to be a second near-identical copy differing only in a flag and three button names, which
+	 * is precisely the clone this repo's DRY rule forbids — and the copy would have been the one that
+	 * missed the next fix to the cache mechanics above.
+	 *
+	 * ⚠️ ALL-OR-NOTHING. If any named button is missing, NOTHING is overridden: a half-borrowed screen
+	 * is one where some buttons return to the lobby and others start a solo game. The commonest cause
+	 * is simply being a frame early — the cache is populated by `_prev`'s draw.
+	 */
+	function borrowButtons(active, names, commit) {
+		if (!active) return;
 		var b = (typeof KDButtonsCache !== 'undefined') && KDButtonsCache;
-		if (!b || !b.KDPerksStart || !b.KDPerksBack) return;   // not the perk screen (yet)
+		if (!b) return;
+		for (var i = 0; i < names.length; i++) if (!b[names[i]]) return;   // not that screen (yet)
 		// The stock geometry and label are kept — it is the button the player is already looking at;
 		// only the handler is ours.
-		b.KDPerksStart = withHandler(b.KDPerksStart, lobby.commitPerks);
-		b.KDPerksBack = withHandler(b.KDPerksBack, lobby.commitPerks);
+		for (var j = 0; j < names.length; j++) b[names[j]] = withHandler(b[names[j]], commit);
 	}
+
+	function drawPerkPickOverrides() {
+		borrowButtons(lobby.perkPick, ['KDPerksStart', 'KDPerksBack'], lobby.commitPerks);
+	}
+
+	/**
+	 * KDM-256 R1 — the CHARACTER pick, on KD's own screens, by exactly the same mechanic.
+	 *
+	 * `KinkyDungeonState = 'Diff'` is KD's class/start screen (`KinkyDungeon.ts:2546`). Everything on
+	 * it is stock — the class grid, and its own button through to the WARDROBE (`:6309`), which is
+	 * the outfit and appearance surface. The Wardrobe needs no override at all: its back button
+	 * returns to `Diff`, which is where we are borrowing from, so the player simply arrives back
+	 * under our buttons.
+	 *
+	 * THREE buttons are taken back, not two, and all three for one reason: every one of them starts a
+	 * SOLO game (`startQuick`, `startGameKinky`, `startGame`). Miss one and a co-op player who
+	 * pressed it is dropped into single-player with their lobby still open.
+	 */
+	function drawCharPickOverrides() {
+		borrowButtons(lobby.charPick, ['startQuick', 'startGameKinky', 'startGame'], lobby.commitCharacter);
+	}
+
+	/**
+	 * KDM-256 R1 — take what KD says the character is, and go back to the lobby.
+	 *
+	 * READ FROM KD'S OWN GLOBALS, never from fields of our own, for the reason `commitPerks` gives:
+	 * the class grid, the Wardrobe and its presets all write there, so those are the only values true
+	 * whatever route the player took through the screens.
+	 *
+	 * `style` is deliberately NOT collected. It is a declarable field (the server applies it to the
+	 * avatar) but KD has no player-facing style picker on these screens, so there is nothing honest to
+	 * read — and inventing a lobby control for it would be this layer choosing a look for the player.
+	 * The outfit is what the Wardrobe actually changes, and it is what the peer sees.
+	 *
+	 * Answers `null` rather than `{}` when nothing was read: "declared nothing" has one meaning.
+	 */
+	lobby.commitCharacter = function () {
+		var pkg = {};
+		try {
+			if (typeof KinkyDungeonClassMode === 'string' && KinkyDungeonClassMode) pkg.class = KinkyDungeonClassMode;
+			if (typeof KinkyDungeonCurrentDress === 'string' && KinkyDungeonCurrentDress) pkg.outfit = KinkyDungeonCurrentDress;
+		} catch (e) { pkg = {}; }
+		lobby.character = Object.keys(pkg).length ? pkg : null;
+		lobby.charPick = false;
+		lobby.open();
+		return true;
+	};
 
 	/** A copy of a cache entry with its click handler replaced. */
 	function withHandler(params, func) {
@@ -396,7 +473,7 @@
 		DrawButtonKDEx('KDMPConnect', function () {
 			lobby.error = '';
 			lobby.status = text('KDMPConnecting', 'Connecting…');
-			connect({ role: 'guest', address: lobby.address(), name: lobby.playerName(), perks: lobby.playerPerks() });
+			connect({ role: 'guest', address: lobby.address(), name: lobby.playerName(), perks: lobby.playerPerks(), character: lobby.playerCharacter() });
 			return true;
 		}, true, MID, joinY, 350, 64, text('KDMPConnectBtn', 'Join'), '#ffffff', '');
 
@@ -556,6 +633,7 @@
 			// an `else if` on 'Stats' alone: the override only applies to a co-op pick, and that
 			// condition lives in one place, inside the function.
 			else if (KinkyDungeonState === 'Stats') drawPerkPickOverrides();
+			else if (KinkyDungeonState === 'Diff') drawCharPickOverrides();
 			// KDM-257 R3 — the degraded-sync notice, on THIS wrap. A second wrap of KinkyDungeonRun
 			// from another client script is the duplication [[KDM-229]] was raised for; one global,
 			// one wrap, and the branch that needs it lives here with the others.

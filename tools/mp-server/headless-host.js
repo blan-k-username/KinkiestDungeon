@@ -1833,9 +1833,73 @@ class HeadlessHost {
 	 * Inject an avatar entity representing another player at (x,y). Returns the
 	 * real KD entity id (the engine now sees/targets/collides with it).
 	 */
-	spawnAvatar(x, y, name) {
+	/**
+	 * KDM-256 — apply a player's CHARACTER PACKAGE to whoever is currently in the world's player slot.
+	 *
+	 * Whoever is in the slot, exactly as `setPlayerName` and `applyPerks` are: callers sandwich this
+	 * between a template restore and `capturePlayer()`, and that sandwich is the entire mechanism.
+	 * See `swap-session._seatPlayer`.
+	 *
+	 * ⚠️ KD'S OWN TABLES ARE THE WHITELIST, AND THEY ARE CONSULTED HERE — never in `join-gate.js`.
+	 * The gate sanitises SHAPE (epic AC2 forbids a list of outfit names in `tools/mp-server/**`);
+	 * this is the layer with a world to ask, so this is the layer that decides what a value MEANS. An
+	 * unrecognised class or outfit is DROPPED, silently and per-field: a package is three independent
+	 * choices, and a typo in one must not cost the player the other two.
+	 *
+	 * Returns what was actually applied, so a caller (and a test) can tell "applied" from "dropped"
+	 * without re-deriving KD's tables.
+	 */
+	applyCharacter(pkg) {
+		if (!pkg || typeof pkg !== 'object') return {};
+		return this.eval(`(function(){
+			var want = ${JSON.stringify({
+		class: typeof pkg.class === 'string' ? pkg.class : '',
+		outfit: typeof pkg.outfit === 'string' ? pkg.outfit : '',
+	})};
+			var got = {};
+			// CLASS. KDClassStart is KD's own class table, and assigning KinkyDungeonClassMode from
+			// its keys is literally what KD's own class screen does (KDClasses.ts:174). An unknown
+			// name is not in the table and is simply not applied.
+			if (want.class && typeof KDClassStart !== 'undefined' && KDClassStart[want.class]) {
+				KinkyDungeonClassMode = want.class;
+				got.class = want.class;
+			}
+			// OUTFIT. KDGetDressList() is KD's own dress table and KinkyDungeonSetDress its own
+			// applier — it rebuilds the player's clothes and appearance, which is precisely the work
+			// this layer must not re-implement.
+			//
+			// The table is checked BEFORE the call, not caught after it: SetDress iterates
+			// KDGetDressList()[dress] unguarded (KinkyDungeonDress.ts:109), so an unknown name throws
+			// midway and would leave the slot half-dressed. Refusing up front leaves it untouched.
+			if (want.outfit && typeof KinkyDungeonSetDress === 'function'
+				&& typeof KDGetDressList === 'function' && (KDGetDressList() || {})[want.outfit]) {
+				KinkyDungeonSetDress(want.outfit, want.outfit);
+				got.outfit = want.outfit;
+			}
+			return got;
+		})()`);
+	}
+
+	/**
+	 * @param {object} [character] KDM-256 — `{ style, outfit }` this player chose, or null for the
+	 *   default look. Per-player-safe because each avatar owns its own def clone (below).
+	 */
+	spawnAvatar(x, y, name, character) {
 		this._ensureAvatarDef();
 		const label = name || 'Player';
+		/*
+		 * KDM-256 R2 — the look, which is what makes two players tell each other APART on screen.
+		 *
+		 * KD draws an entity carrying `CustomName` and (`style` or `outfit`) as a full paper-doll NPC
+		 * rather than a flat sprite (`KinkyDungeonEnemies.ts:1042`), building the model from
+		 * `KDModelStyles[style]` and dressing it from `outfit` (`:11211-11237`).
+		 *
+		 * `'BlueHair'` stays as the fallback — it is what every avatar has looked like since KD-100,
+		 * so a player who declared nothing keeps exactly the look they had (R4). An unknown style is
+		 * left to KD, which falls back on its own; nothing here judges the value (epic AC2).
+		 */
+		const style = (character && character.style) || 'BlueHair';
+		const outfit = (character && character.outfit) || '';
 		// KD-100: combat text reads TextGet("Name"+Enemy.Enemy.name) — the def name, NOT CustomName —
 		// so give each avatar its OWN def clone with a unique name + registered name key, so a hit reads
 		// the real peer ("Your attack hits Player A …") instead of the shared "the Rival".
@@ -1856,7 +1920,12 @@ class HeadlessHost {
 				movePoints: 0, attackPoints: 0,
 				// CustomName needs CustomNameColor — the HP/name draw calls string2hex on
 				// it (KinkyDungeonEnemies.ts:2356); undefined crashes the whole render.
-				CustomName: ${JSON.stringify(label)}, CustomNameColor: '#88bbff', style: 'BlueHair' };
+				CustomName: ${JSON.stringify(label)}, CustomNameColor: '#88bbff',
+				style: ${JSON.stringify(style)} };
+			// KDM-256 R2 — set only when the player chose one. An empty outfit key on every avatar
+			// would cross the wire as a change on a session that declared nothing.
+			var outfit = ${JSON.stringify(outfit)};
+			if (outfit) ent.outfit = outfit;
 			KDAddNewEntity(ent);
 			KDUpdateEnemyCache = true;
 			return { entityId: ent.id, x: ent.x, y: ent.y };

@@ -75,7 +75,8 @@ test.describe('KDM-233 — Multiplayer entry in the main menu', () => {
 		const names = await buttonNames(page);
 		expect(names.sort(), 'exactly the lobby\'s own buttons — a stock fallthrough would add more')
 			// KDM-238 added KDMPPerks to the root view — KD's own perk screen, reached from the lobby.
-			.toEqual(['KDMPBack', 'KDMPHost', 'KDMPJoin', 'KDMPPerks']);
+			// KDM-256 added KDMPChar beside it — KD's own class screen, and the Wardrobe beyond it.
+			.toEqual(['KDMPBack', 'KDMPChar', 'KDMPHost', 'KDMPJoin', 'KDMPPerks']);
 	});
 
 	test('Back returns to the menu; Host and Join each open their own view', async ({ isolatedPage: page }) => {

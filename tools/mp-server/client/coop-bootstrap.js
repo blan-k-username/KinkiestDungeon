@@ -51,6 +51,8 @@
 	// handshake beside the name. Empty means "I never opened that screen", which the server reads as
 	// KD's default terms (R9) rather than as a refusal.
 	var playerPerks = [];
+	// KDM-256 — the character package this player built in the lobby, or null for KD's default.
+	var playerCharacter = null;
 	// KDM-243 R1 — the single-player save this HOST is continuing, or `''` for a new game. Set only
 	// by `__coopConnect({role:'host', save})`, i.e. only by the lobby's Continue button.
 	var savePayload = '';
@@ -1050,6 +1052,12 @@
 			// screen, and the server reads it as "seat me on KD's default terms" (R9) — there is
 			// no dangerous reading of absence here, unlike `mods` above.
 			join.perks = playerPerks.slice();
+			// KDM-256 R1 — the character this player built, beside the perks and for the same
+			// reasons. Sent only when there is one: absence means "seat me as KD's default", which
+			// is the `#coop=` road's answer and the one the server already had (R4). Both roles send
+			// it — unlike `world`/`save` below, a character is per-seat, and the guest's is the whole
+			// point of the feature.
+			if (playerCharacter) join.character = playerCharacter;
 			/*
 			 * KDM-239 R3/R5 — a HOST also declares the WORLD: the game-mode toggles that describe
 			 * the run, and the seed.
@@ -1616,6 +1624,9 @@
 		shortcut = false;
 		playerName = String(opts.name || '');
 		playerPerks = Array.isArray(opts.perks) ? opts.perks.slice() : [];
+		// KDM-256 R1 — and the character. Cleared on every connect for the reason `savePayload` is:
+		// a player who backs out and reconnects must not carry a stale declaration in silently.
+		playerCharacter = (opts.character && typeof opts.character === 'object') ? opts.character : null;
 		// KDM-243 — the save to continue, if the lobby's Continue button supplied one. Cleared on
 		// every connect, so a host who backs out and presses Host instead starts a new game.
 		savePayload = (opts.role === 'host' && typeof opts.save === 'string') ? opts.save : '';

@@ -32,7 +32,7 @@ const { KD_JOURNEY_CHOICE } = require('./kd-journey-choice');
 const { KD_SHOP_BUY } = require('./kd-shop-buy');
 const { KD_COOP_CAPTURE } = require('./kd-coop-capture');
 const { KD_DISCONNECT_DIALOGUE, HOST_LOST_DIALOGUE, PEER_LOST_DIALOGUE } = require('./kd-disconnect-dialogue');
-const { sanitizeName, sanitizePerks } = require('./join-gate');
+const { sanitizeName, sanitizePerks, sanitizeCharacter } = require('./join-gate');
 // KDM-239 R3/R5 — same normaliser the gate uses, so what the session stores and what the gate
 // accepted cannot drift apart.
 const { sanitizeWorld } = require('./game-modes');
@@ -295,6 +295,9 @@ class SwapSession {
 		 * `nameOf` so a departing player takes it with them.
 		 */
 		this.perkOf = new Map();     // id -> string[] of chosen perk keys
+		// KDM-256 — id -> the character package this player built (class / outfit / style), or absent.
+		// A sibling of `perkOf` in every way, including that absence is meaningful (see `characterOf`).
+		this.charOf = new Map();
 		/**
 		 * KDM-239 R3/R5 — the WORLD each player declared, `{ modes, seed }`. Only the host's is ever
 		 * read (`_hostWorld()`), but it is stored per client on the same terms as `perkOf` so a
@@ -1961,6 +1964,38 @@ class SwapSession {
 	}
 
 	/**
+	 * KDM-256 R1 — record the CHARACTER this player built. Idempotent and order-independent, exactly
+	 * like `setPlayerName` and `setPerks`, and called from the same place (`_carrySeat`).
+	 *
+	 * Re-sanitised here even though the gate already did it, on the same principle `setPerks` follows:
+	 * this is a public method, and "the caller already cleaned it" is an assumption, not a guarantee.
+	 */
+	setCharacter(clientId, character) {
+		const c = sanitizeCharacter(character);
+		if (c) this.charOf.set(clientId, c);
+		else this.charOf.delete(clientId);
+		return c;
+	}
+
+	/**
+	 * KDM-256 R4 — what character this player STARTS AS, or `null` for KD's own default.
+	 *
+	 * THE SINGLE FALLBACK IN THE WHOLE FEATURE, and the counterpart of `displayNameOf` / `perksOf`.
+	 * It exists for the reason those do: the legacy `#coop=` road declares nothing and is what the
+	 * entire MP e2e suite runs on, so "declared nothing" has to have exactly one answer and one home.
+	 *
+	 * That answer is `null` — meaning "change nothing about the character the template already is" —
+	 * which is what keeps the no-declaration path byte-identical to everything before this task.
+	 * Deliberately NOT an empty object: `{}` would send `applyCharacter` down its write path with
+	 * nothing to write, and the difference between "apply nothing" and "do not apply" is the whole
+	 * of R4.
+	 */
+	characterOf(clientId) {
+		const c = this.charOf.get(clientId);
+		return c ? Object.assign({}, c) : null;
+	}
+
+	/**
 	 * KDM-239 R3/R5 — record the world a player declared. Idempotent and order-independent, exactly
 	 * like `setPlayerName` and `setPerks`, and called from the same place (`_carrySeat`).
 	 *
@@ -2212,6 +2247,28 @@ class SwapSession {
 		 */
 		const chosen = imported ? '' : (this.nameOf.get(clientId) || '');
 		if (chosen) this.world.setPlayerName(chosen);
+		/*
+		 * KDM-256 R1/R5 — the character this player built, in the same window and on the same terms.
+		 *
+		 * ⚠️ INSIDE THE RESTORE→CAPTURE WINDOW, like everything above it, and for the reason stated at
+		 * `setPlayerName`: `applyCharacter` writes globals into the world's ONE player slot, and
+		 * `capturePlayer()` below is what makes them this player's. Applied after the capture — or
+		 * anywhere outside — one player's outfit lands on whoever is swapped in next.
+		 *
+		 * ⚠️ AFTER `applyPerks`, not before. `applyPerks` runs KD's `KDInitPerks()`, which rebuilds
+		 * the slot's restraints, weapons and spell points from scratch; a dress applied before it
+		 * would be part of what gets rebuilt over.
+		 *
+		 * ⚠️ AND SKIPPED FOR AN IMPORTED SEAT (A4b's rule, third instance). A host continuing their
+		 * own run is not choosing a character — they already have one, at floor 9, wearing what they
+		 * were wearing. The lobby's creation screens are new-game screens.
+		 */
+		if (!imported) {
+			const pkg = this.characterOf(clientId);
+			// `null` means "declared nothing", and NOTHING is what happens — the seat keeps the
+			// template's character exactly as it did before this feature existed (R4).
+			if (pkg) this.world.applyCharacter(pkg);
+		}
 		this.world.placePlayer(pos.x, pos.y);
 		this.bundles.set(clientId, this.world.capturePlayer());
 		this.vitalsOf.set(clientId, this.world.getVitals());   // KD-098: seed for the HP bar
@@ -2317,7 +2374,9 @@ class SwapSession {
 			// containers like `worldOf` beside them, so a departing player takes both with them; a
 			// stale `_templateOf` entry would seat a RECONNECTING player from a character captured
 			// before the run moved on.
-			this.perkOf, this.worldOf, this.saveOf, this._templateOf,
+			// KDM-256 — `charOf` belongs with them: the character a departed player built must leave
+			// with them, or a later seat reusing that id would be dressed as somebody who has gone.
+			this.perkOf, this.charOf, this.worldOf, this.saveOf, this._templateOf,
 			this._eventSeq, this.pendingEvents, this._sentSoundDesc, this.vitalsOf,
 			this.defeated, this.tiedOf, this._pending, this._stateFp,
 		];
@@ -2853,7 +2912,10 @@ class SwapSession {
 	_ensureAvatar(clientId, x, y) {
 		const eid = this.avatars.get(clientId);
 		if (eid != null && this.world.moveAvatar(eid, x, y)) return eid;
-		const av = this.world.spawnAvatar(x, y, this.displayNameOf(clientId));
+		// KDM-256 R2 — the avatar the OTHER players see is dressed from the same package. `style` and
+		// `outfit` are already carried by `ENT_FIELDS`, so the look reaches the peer for free once it
+		// is on the entity; what this passes is which look, instead of `spawnAvatar`'s constant.
+		const av = this.world.spawnAvatar(x, y, this.displayNameOf(clientId), this.characterOf(clientId));
 		if (!av || av.entityId == null) return null;
 		this.avatars.set(clientId, av.entityId);
 		if (eid != null) this._dbg(`AVATAR ${clientId} re-spawned as ${av.entityId} (${eid} was gone)`);

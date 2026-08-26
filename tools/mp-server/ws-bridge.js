@@ -75,8 +75,11 @@ const VERBATIM_CHANNELS = ['events', 'messages', 'unknownInputs', 'replacedInput
 // KDM-243 — `save` joins `world` in the host-only half, for exactly the same reason: the host brings
 // the world, the guest brings a character. This guard did its job on the way in — the field was added
 // to the client and this line was not, and the spec named it rather than letting it ship silently.
-const HOST_JOIN_FIELDS = Object.freeze(['name', 'build', 'mods', 'perks', 'world', 'save']);
-const GUEST_JOIN_FIELDS = Object.freeze(['name', 'build', 'mods', 'perks']);
+// KDM-256 — `character` joins the SHARED half, not the host-only one, and that is the point: the
+// world has one author, but a character has one per seat. It is the field a guest most needs to
+// bring, so a shape that made it host-only would invert the whole feature.
+const HOST_JOIN_FIELDS = Object.freeze(['name', 'build', 'mods', 'perks', 'character', 'world', 'save']);
+const GUEST_JOIN_FIELDS = Object.freeze(['name', 'build', 'mods', 'perks', 'character']);
 
 /**
  * KDM-274 — what the SERVER promises to put on the wire, declared once, per message kind.
@@ -379,6 +382,11 @@ class WSBridge {
 		catch (e) { /* a session that predates names, or an id the gate never seated */ }
 		try { this.session.setPerks(clientId, this.gate.perksOf(clientId)); }
 		catch (e) { /* a session that predates perk choice (KDM-238) */ }
+		// KDM-256 R1 — and the character they built, carried on exactly the same terms as the perks
+		// above. Unconditional: `characterOf` answers `null` for a seat that declared nothing, and
+		// the session turns that one value into KD's own default in one place (R4).
+		try { this.session.setCharacter(clientId, this.gate.characterOf(clientId)); }
+		catch (e) { /* a session that predates character choice (KDM-256) */ }
 		// KDM-239 R3/R5 — and the world this player declared. Only a HOST ever has one (the gate
 		// refuses to store a guest's), so this is a no-op for everyone else and needs no role check
 		// here: "who may declare a world" is answered in exactly one place, and it is not this one.

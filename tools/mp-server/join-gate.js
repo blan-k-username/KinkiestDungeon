@@ -95,7 +95,63 @@ function sanitizeSave(raw) {
 	return cleaned;
 }
 
-function sanitizeName(raw) {
+/**
+ * KDM-256 R3 — the one place a player-supplied CHARACTER PACKAGE is made safe to seat.
+ *
+ * A package is what the player chose on KD's own creation screens: which class they are playing,
+ * what they are wearing, and how they look. Three declarable fields, all strings.
+ *
+ * ⚠️ IT DOES NOT JUDGE WHETHER A VALUE EXISTS, and must not learn to — the same rule, for the same
+ * reason, as `sanitizePerks` above. A list of outfits, styles or classes in `tools/mp-server/**` is
+ * a gameplay table in the gateway, which is exactly what epic AC2 forbids. KD's own tables
+ * (`KDModelStyles`, its outfit list) are the whitelist, consulted by `HeadlessHost.applyCharacter`,
+ * which drops what it does not recognise. An unknown value is carried politely and applied never.
+ *
+ * ⚠️ AND IT REFUSES RATHER THAN TRUNCATES. `sanitizeSave` sets the precedent: a truncated save is a
+ * broken save, and a truncated package is a character the player did not choose and cannot see is
+ * wrong. `null` means "declared nothing", which has exactly one meaning downstream (KD's default) —
+ * so a refusal degrades to the `#coop=` behaviour rather than to a corrupted seat.
+ *
+ * `CHAR_MAX` is a wire cap, not a gameplay constant: three short identifiers are ~100 bytes, so 4 KB
+ * is far above any real package and far below anything that could wedge a session.
+ */
+const CHAR_MAX = 4 * 1024;
+const CHAR_FIELD_MAX = 64;
+const CHAR_FIELDS = Object.freeze(['class', 'outfit', 'style']);
+
+function sanitizeCharacter(raw) {
+	if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+	// Size is judged on what ARRIVED, before the whitelist throws the bulk away — otherwise a
+	// megabyte of junk carrying one valid `class` would pass as a 5-byte package.
+	let wire = '';
+	try { wire = JSON.stringify(raw) || ''; } catch (e) { return null; }   // circular ⇒ not a package
+	if (wire.length > CHAR_MAX) return null;
+	const out = {};
+	for (const f of CHAR_FIELDS) {
+		// `hasOwnProperty` via the guard below, not `in`: a package is plain data, and a field
+		// inherited from a crafted prototype is not something the player declared.
+		if (!Object.prototype.hasOwnProperty.call(raw, f)) continue;
+		if (typeof raw[f] !== 'string') continue;
+		// `stripControls`, NOT `sanitizeName`: a name is a LABEL capped at 24 for the lobby field,
+		// and an outfit key is an IDENTIFIER. Borrowing the name's cap would silently truncate a
+		// long outfit into a value KD does not recognise, which applies as "no outfit" — a failure
+		// with no error anywhere.
+		const v = stripControls(raw[f]).slice(0, CHAR_FIELD_MAX);
+		if (v) out[f] = v;
+	}
+	// "Declared nothing" and "declared only junk" are the same answer, so they get the same value.
+	return Object.keys(out).length ? out : null;
+}
+
+/**
+ * Strip the characters no player-supplied string may carry into the world, and trim.
+ *
+ * ONE copy, shared by all three sanitisers. It was written out three times — once per declaration
+ * kind — and the LENGTH CAP is deliberately not part of it: that is the one rule that genuinely
+ * differs between them (a display name is 24, a perk key 64, a character field 64), and folding it
+ * in here is what would make a caller quietly inherit somebody else's limit.
+ */
+function stripControls(raw) {
 	if (raw === undefined || raw === null) return '';
 	const s = String(raw);
 	let out = '';
@@ -105,7 +161,11 @@ function sanitizeName(raw) {
 		if (c >= 0x7f && c <= 0x9f) continue;   // DEL and the C1 block
 		out += s.charAt(i);
 	}
-	return out.trim().slice(0, NAME_MAX);
+	return out.trim();
+}
+
+function sanitizeName(raw) {
+	return stripControls(raw).slice(0, NAME_MAX);
 }
 
 /**
@@ -143,14 +203,7 @@ function sanitizePerks(raw) {
 	for (let i = 0; i < raw.length && out.length < PERKS_MAX; i++) {
 		const entry = raw[i];
 		if (typeof entry !== 'string') continue;
-		let key = '';
-		for (let j = 0; j < entry.length; j++) {
-			const c = entry.charCodeAt(j);
-			if (c < 0x20) continue;                 // C0 controls, incl. NUL, BEL, newline, ESC
-			if (c >= 0x7f && c <= 0x9f) continue;   // DEL and the C1 block
-			key += entry.charAt(j);
-		}
-		key = key.trim().slice(0, PERK_KEY_MAX);
+		const key = stripControls(entry).slice(0, PERK_KEY_MAX);
 		if (!key) continue;
 		if (PERK_SENTINELS.indexOf(key) >= 0) continue;
 		if (seen.has(key)) continue;
@@ -187,6 +240,14 @@ class JoinGate {
 		 * character. `release` drops it, `releasePending` does not — the same asymmetry.
 		 */
 		this.perks = new Map();
+		/**
+		 * KDM-256 R3 — the CHARACTER PACKAGE each seated player declared: class, outfit, style.
+		 *
+		 * A Map on exactly the terms `names` and `perks` are, and for the same reason: it belongs to
+		 * the SEAT, so `release` drops it and `releasePending` does not. A player who merely dropped
+		 * must come back as the character they have been playing, not as KD's default.
+		 */
+		this.characters = new Map();
 		/**
 		 * KDM-239 R3/R5 — the WORLD the host declared: `{ modes, seed }`.
 		 *
@@ -248,6 +309,21 @@ class JoinGate {
 	perksOf(clientId) { return (this.perks.get(clientId) || []).slice(); }
 
 	/**
+	 * KDM-256 — the character this player declared, or `null`.
+	 *
+	 * Deliberately NOT a fallback, exactly like `nameOf`: it answers what the player said and nothing
+	 * else. Turning "declared nothing" into KD's own default is one decision and it lives in one
+	 * place — `SwapSession.characterOf` — which is what keeps the `#coop=` road byte-identical (R4).
+	 *
+	 * A fresh COPY every call, for the reason `perksOf` hands one back: a caller must not be able to
+	 * edit what the session believes a player chose.
+	 */
+	characterOf(clientId) {
+		const c = this.characters.get(clientId);
+		return c ? Object.assign({}, c) : null;
+	}
+
+	/**
 	 * KDM-239 R3/R5 — the world this player declared, or KD's defaults if they declared none.
 	 *
 	 * A fresh COPY every call, for the same reason `perksOf` hands one back. Answers
@@ -299,6 +375,13 @@ class JoinGate {
 		// `!== undefined` for the same reason `mods` is below: a claim that says nothing about perks
 		// leaves what is already seated alone, while an explicit `[]` correctly means "none".
 		if (info && info.perks !== undefined) this.perks.set(clientId, sanitizePerks(info.perks));
+		// KDM-256 R3 — sanitised HERE, where it is stored, on the same terms as the perks above. A
+		// refused package DELETES rather than storing, so a re-declaration that fails validation
+		// cannot leave the previous character quietly seated behind it.
+		if (info && info.character !== undefined) {
+			const ch = sanitizeCharacter(info.character);
+			if (ch) this.characters.set(clientId, ch); else this.characters.delete(clientId);
+		}
 		// KDM-239 R3/R5 — and the world it is hosting, on the same terms. Only here: `requestJoin`
 		// deliberately does not read `info.world`, so a guest cannot declare one at all (A5).
 		if (info && info.world !== undefined) this.world.set(clientId, sanitizeWorld(info.world));
@@ -365,6 +448,8 @@ class JoinGate {
 		// KDM-238 R3 — sanitised HERE, where it is stored, exactly as the name is: what the host is
 		// shown and what the world will seat must be the same value.
 		const perks = sanitizePerks(info && info.perks);
+		// KDM-256 R3 — and the character, sanitised at the same point and for the same reason.
+		const character = sanitizeCharacter(info && info.character);
 		const build = (info && info.build) || '';
 
 		if (!this.host) return { accept: false, reason: 'no_host' };
@@ -401,7 +486,7 @@ class JoinGate {
 		 */
 		const world = this.worldOf(this.host);
 
-		this.pending = { clientId, name, perks, build, mods: normalizeDeclaration(info && info.mods), modDiff };
+		this.pending = { clientId, name, perks, character, build, mods: normalizeDeclaration(info && info.mods), modDiff };
 		return { accept: false, pending: true, modDiff, world };
 	}
 
@@ -417,6 +502,7 @@ class JoinGate {
 		// KDM-238 R3 — and so is the perk declaration, in the same breath. Asking is not being
 		// seated: until this line the guest holds no seat, so `perksOf` answers `[]` for them.
 		const perks = this.pending.perks || [];
+		const pendingChar = this.pending.character || null;
 		// KDM-249 — read alongside the name, and for the same reason: the answer CONSUMES the
 		// question, so anything the caller will need afterwards must be taken before `pending` is
 		// cleared. Handing it back means no caller has to have kept its own copy.
@@ -425,6 +511,9 @@ class JoinGate {
 		this.guest = clientId;
 		if (name) this.names.set(clientId, name);
 		if (perks.length) this.perks.set(clientId, perks);
+		// KDM-256 R3 — and the character, promoted from the QUESTION to the SEAT in the same breath,
+		// read from `pending` before it is cleared exactly as the name and the perks are.
+		if (pendingChar) this.characters.set(clientId, pendingChar);
 		return { admitted: true, clientId, slot: GUEST_SLOT, modDiff };
 	}
 
@@ -472,6 +561,8 @@ class JoinGate {
 		// who merely DROPPED keeps it (releasePending does not touch this), or a reconnect would hand
 		// them a differently-built character than the one they have been playing.
 		this.perks.delete(clientId);
+		// KDM-256 — and the character, on exactly the same terms: it belongs to the seat.
+		this.characters.delete(clientId);
 	}
 
 	/**
@@ -494,6 +585,6 @@ class JoinGate {
 }
 
 module.exports = {
-	JoinGate, sanitizeName, sanitizePerks, sanitizeSave,
-	NAME_MAX, PERKS_MAX, PERK_KEY_MAX, SAVE_MAX, HOST_SLOT, GUEST_SLOT,
+	JoinGate, sanitizeName, sanitizePerks, sanitizeSave, sanitizeCharacter, stripControls,
+	NAME_MAX, PERKS_MAX, PERK_KEY_MAX, SAVE_MAX, CHAR_MAX, CHAR_FIELD_MAX, HOST_SLOT, GUEST_SLOT,
 };

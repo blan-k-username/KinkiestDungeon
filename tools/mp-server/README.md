@@ -543,6 +543,74 @@ remedies (add to a shape, or to `ROUTING_FIELDS` if it is not a seat declaration
    key as `undefined` collapses the gate's "said nothing" vs "said none" distinction — which the old
    literal actually did.
 
+## Each player's own character (KDM-256)
+
+A player picks a class and an outfit on **KD's own screens**, from the lobby's `Character` button.
+What travels is a small `join.character` package — `{class, outfit, style}` — and it is applied to
+that seat and no other.
+
+### It is a per-seat MUTATION, not a template
+
+`_seatPlayer` is a **restore → mutate → capture** window, and `applyCharacter` goes in it beside
+`setPlayerName` (KDM-237) and `applyPerks` (KDM-238):
+
+```js
+if (template) this._restorePlayer(clientId, template);
+if (!imported) { this.world.applyPerks(…); this.world.applyModes(…); }
+if (chosen) this.world.setPlayerName(chosen);
+if (!imported) { const pkg = this.characterOf(clientId); if (pkg) this.world.applyCharacter(pkg); }
+this.bundles.set(clientId, this.world.capturePlayer());     // <- what makes it THIS player's
+```
+
+**⚠️ Do NOT put a character package in `_templateOf`.** That container is KDM-243's and answers a
+different question — "this seat resumes an entire saved run". Its `imported` flag does DOUBLE DUTY:
+it also means *skip every new-game operation*, because a character resumed at floor 9 must not be
+handed a second starting collar by `KDInitPerks()`. Route a package through it and that player
+silently loses their perks, their modes and their name, while still looking perfectly seated. If a
+package ever genuinely needs its own template, split `imported` into `hasTemplate` and `isResumedRun`
+first.
+
+**⚠️ Order inside the window matters in exactly one place.** `applyPerks` runs KD's `KDInitPerks()`,
+which rebuilds the slot's restraints, weapons and spell points — so it stays first, and anything
+dressing the character comes after it.
+
+### Who validates what
+
+| Layer | Judges | Never judges |
+|---|---|---|
+| `join-gate.js` `sanitizeCharacter` | shape, type, length; refuses oversize outright | whether a value EXISTS |
+| `headless-host.js` `applyCharacter` | `KDClassStart[class]`, `KDGetDressList()[outfit]` | — |
+
+A list of outfit, style or class names in `tools/mp-server/**` is a gameplay table in the gateway —
+epic AC2, and `mp-i6-no-gameplay-constants.spec.ts` fails the build on one. KD's own tables are the
+whitelist, consulted in the layer that has a world to ask. An unknown value is carried politely and
+applied never, **per field**: a typo in the class must not cost the player their outfit.
+
+`KDGetDressList()[outfit]` is checked BEFORE calling `KinkyDungeonSetDress`, not caught after:
+SetDress iterates that list unguarded (`KinkyDungeonDress.ts:109`), so an unknown name throws midway
+and leaves the slot half-dressed.
+
+### The peer's avatar
+
+`style` and `outfit` were **already** in `ENT_FIELDS`, so the look crosses the wire for free. KD draws
+an entity carrying `CustomName` and (`style` or `outfit`) as a full paper-doll NPC rather than a flat
+sprite (`KinkyDungeonEnemies.ts:1042`), building the model from `KDModelStyles[style]` and dressing
+it from `outfit` (`:11211-11237`). Per-player-safe because `spawnAvatar` already gives every avatar
+its own `RemotePlayer_<label>` def clone. `'BlueHair'` remains the fallback, so an undeclared player
+looks exactly as they always did.
+
+### Borrowing a KD screen
+
+`borrowButtons(active, names, commit)` in `coop-lobby.js` is the ONE implementation, shared by the
+perk pick (`'Stats'`) and the character pick (`'Diff'`).
+
+- It is **conditional**. Without the pick flag the stock buttons are left completely alone, or a solo
+  player's start screen stops starting games. Both specs assert that pair from both sides.
+- It is **all-or-nothing**. A half-borrowed screen is one where some buttons return to the lobby and
+  others start a solo game.
+- `'Diff'` needs **three** buttons taken back, not two — `startQuick`, `startGameKinky`, `startGame`
+  all start a solo game. The Wardrobe beyond it needs none: its own back button returns to `'Diff'`.
+
 ### The testing lesson, stated once
 
 A unit test that calls a collaborator **directly** cannot see a caller that forgets to forward a
