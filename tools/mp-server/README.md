@@ -730,3 +730,50 @@ time — so what is missing is the display between the other player's purchase a
 `tests/e2e/mp-shop-identity.spec.ts` pins the current (wrong) behaviour explicitly rather than staying
 silent, with a note to invert the expectation when it is fixed. Two failed approaches and their causes
 are recorded in the `kd-shop-buy.js` header; read them before trying a third.
+
+## The transition-write audit — a standing guard over one recurring bug
+
+Four separate times, a global written by map generation or a floor transition turned out to be WORLD
+state that the swap layer was replicating per-player, and each time it was found by a feature that
+happened to make two players' copies diverge:
+
+| | keys | found by |
+|---|---|---|
+| KDM-228 | `KDGameData.RoomType` / `.MapMod` | a side-room visit |
+| KDM-265 | `MiniGameKinkyDungeonLevel` / `.Checkpoint`, `JourneyX`/`JourneyY`, `HighestLevelCurrent` | ten real descents |
+| KDM-243 | `KinkyDungeonSeed` / `KDGameData.LastMapSeed` | a save import, after a bisect with a `KDsetSeed` recorder |
+
+The cost is consistently "invisible until a specific feature exposes it, then expensive to diagnose".
+`tests/unit/mp-transition-write-audit.spec.ts` (KDM-273) is the attempt to catch the fifth when
+upstream introduces it instead.
+
+**It does not decide classifications — it enforces that a decision was made.** The obvious rule is
+wrong in both directions, which is the whole reason the guard has the shape it does:
+
+- *"written by a transition ⇒ world"* over-fires: `KinkyDungeonFastMovePath` and
+  `KinkyDungeonTargetTile` are written by `KDInitTempValues` and are plainly per-player. Being RESET
+  by a transition is not the same as being DERIVED from the world by one.
+- *"derived from the world ⇒ world"* under-fires: `KDGameData.ChestsGenerated = []` is a literal reset
+  and is correctly world state anyway, because its semantics are floor population.
+
+So the guard scans the four transition sites (`KinkyDungeonCreateMap`, `KDGoThruTile`,
+`KinkyDungeonHandleStairs`, `KDInitTempValues`) and requires every key they write to be either
+declared world in `GLOBAL_BLACKLIST` / `KDGAMEDATA_WORLD_KEYS`, or recorded in the spec's
+`PER_PLAYER_BY_DECISION` register with a reason. Its failure mode is "a human must look at key #55",
+not "state leaks" — which is what keeps the register from being the maintained whitelist this epic
+exists to delete. The register is checked for rot in BOTH directions: an entry naming a key no site
+writes any more fails, and so does a key that is in the register *and* declared world.
+
+### ⚠️ Text-coupled to the game source
+
+Same hazard as the journey draw-wrap above. Sites are located by function NAME, never by line number;
+each must match exactly once, each extracted body is size-checked, and the total write counts are
+asserted as lower bounds and logged on every run. A regex that quietly stops matching would otherwise
+report a clean audit — the most expensive possible false green. When an upstream fast-forward turns
+one of those checks red, update `SITES` / the bounds deliberately; do not delete the check.
+
+Running it for the first time produced a backlog of keys that are per-player **by default rather than
+by decision** — `KDGameData.PersistentItems` (keyed by `RoomType + KDCurrentWorldSlot`),
+`KDCommanderRoles` (`Map<number,…>`, i.e. entity-keyed), `KDStageBossGenerated`, `KinkyDungeonPOI`,
+and three render dirty flags that belong in a category `GLOBAL_BLACKLIST` already has. They are
+recorded as `flagged`, and KDM-277 decides them one at a time, each with its own divergence test.
