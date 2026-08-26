@@ -144,3 +144,70 @@ changes behaviour where the code currently throws.
 **Note for this repo:** the MP-side cause of the stale cache is fixed in `kd-absent-reset.js` — a
 per-player global whose key vanishes from the capture now goes back to its default on the client, as
 it already did on the host. This entry is defence in depth: a stale cache should not kill the renderer.
+
+---
+
+## `KinkyDungeonVision.ts:158` — operator precedence dereferences an undefined `Enemy`
+
+**Found by** KDM-244 (exporting a co-op run as a single-player save), bisected across five arms.
+
+**Symptom**
+
+`KinkyDungeonLoadGame` throws `TypeError: Cannot read properties of undefined (reading
+'blockVisionWhileStationary')` and returns nothing usable, whenever the loaded map contains an entity
+whose `Enemy.name` the loading world does not know. If the loader happens to get past it, the same
+dereference kills the first turn instead, from `KDUnPackEnemy`.
+
+**Cause**
+
+```js
+// KinkyDungeonVision.ts:158
+if (Enemy && Enemy.blockVision || (Enemy.blockVisionWhileStationary && !EE.moved && EE.idle))
+```
+
+`&&` binds tighter than `||`, so this parses as
+
+```js
+(Enemy && Enemy.blockVision) || (Enemy.blockVisionWhileStationary && !EE.moved && EE.idle)
+```
+
+When `Enemy` is `undefined` the first term is falsy, so evaluation falls through to the second — which
+dereferences the very value the first term was guarding. The `Enemy &&` guard therefore protects
+nothing.
+
+`Enemy` is `undefined` here whenever `KDUnPackEnemies` (`KinkyDungeonGame.ts:734-739`) could not
+resolve the entity's def: it does `enemy.Enemy = KinkyDungeonGetEnemyByName(enemy.Enemy.name)` for
+every entity not marked `modified`, and answers `undefined` for a name the world has never heard of.
+
+**The sibling 195 lines later has it right**
+
+```js
+// KinkyDungeonVision.ts:353 — correct
+if (Enemy && (Enemy.blockVision || (Enemy.blockVisionWhileStationary && !EE.moved && EE.idle)))
+```
+
+Same expression, same intent, parentheses in the right place. That asymmetry is what makes this a
+typo rather than a design.
+
+**Reproduction**
+
+Take any save, rename one entity's `Enemy.name` to a string no enemy definition uses
+(`ThisEnemyDoesNotExistAnywhere` will do — it need not be a mod entity), and load it. Measured: one
+such entity is enough; it is not a threshold effect.
+
+**Suggested fix**
+
+```diff
+-	if (Enemy && Enemy.blockVision || (Enemy.blockVisionWhileStationary && !EE.moved && EE.idle))
++	if (Enemy && (Enemy.blockVision || (Enemy.blockVisionWhileStationary && !EE.moved && EE.idle)))
+```
+
+i.e. make `:158` match `:353`.
+
+**Note for this repo:** the practical consequence is that a save carrying entities whose definitions
+were created at runtime is unopenable, because definitions are not part of the save format. Our peer
+avatars (`RemotePlayer_<name>`, pushed into `KinkyDungeonEnemies` by `spawnAvatar`) are exactly that,
+so `HeadlessHost.exportSave` strips them before compressing —
+`tests/unit/mp-save-export.spec.ts` → "THE STRIP IS LOAD-BEARING" pins it. Marking such entities
+`modified` also works (measured) by carrying the def inline, but that keeps the ghosts, which is not
+what a single-player save should contain.

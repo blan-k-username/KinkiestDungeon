@@ -186,14 +186,24 @@ Two things the e2e pins that are easy to get wrong if you touch this flow:
 
 ## Known limitations (PoC)
 
-- Save **generation** is not supported headless — `KinkyDungeonGenerateSaveData()` reads model
-  `Poses` produced by the (neutered) draw pipeline. That is the MP → SP direction (KDM-244).
-  **LOADING is supported and shipped** (KDM-243): `HeadlessHost.loadSave(str)` drives KD's own
-  `KinkyDungeonLoadGame` on the compressed-base64 string the browser keeps in
-  `localStorage.KinkyDungeonSave`, and restores floor, map, entities, gear and inventory intact. Its
-  one precondition is `_seedHeadlessModel()` — the same instrument `saveOf()` uses, for the same
-  reason (the loader assigns through the paper-doll container without a null guard). A host can
-  therefore continue an existing single-player run in co-op; the guest brings only a character.
+- **Saves work in BOTH directions, and neither is a limitation any more.** This entry used to say
+  headless save *generation* was unsupported; that was wrong from KDM-160 onwards and it made KDM-244
+  look far harder than it was, so the correction is recorded rather than quietly deleted.
+  - **Loading** (SP → MP, KDM-243): `HeadlessHost.loadSave(str)` drives KD's own
+    `KinkyDungeonLoadGame` on the compressed-base64 string the browser keeps in
+    `localStorage.KinkyDungeonSave`, restoring floor, map, entities, gear and inventory intact. A host
+    can continue an existing single-player run in co-op; the guest brings only a character.
+  - **Generating** (MP → SP, KDM-244): `HeadlessHost.exportSave(excludeIds)` calls
+    `KinkyDungeonGenerateSaveData()` and hands back the same compressed-base64 form. `saveOf()` has
+    done the same thing since KDM-160 and three unit specs depend on it.
+  - Both have the **same single precondition**, `_seedHeadlessModel()`: KD reads and writes
+    `KDCurrentModels.get(KinkyDungeonPlayer).Poses` with no null guard, through a paper-doll container
+    `_neuterRendering` deliberately never builds.
+  - ⚠️ **An export MUST strip the peer avatars, or the save cannot be opened.** Not tidiness:
+    `KDUnPackEnemies` re-resolves entity defs by name, the `RemotePlayer_*` defs are created at
+    runtime and are not in the save, and the first reader of the resulting `undefined` throws (see
+    `UPSTREAM_ISSUES.md` → `KinkyDungeonVision.ts:158`). `exportSave` does this; anything else
+    generating a save for a player to keep must too.
 - The shim layer tracks the bundle's PIXI/DOM surface as of this build; it must be
   updated as the game's rendering surface changes.
 - **Untying a peer wearing only locked or cursed gear spends the turn and frees nothing.** Protected
