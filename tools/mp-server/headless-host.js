@@ -144,6 +144,21 @@ const KDGAMEDATA_WORLD_KEYS = Object.freeze([
 	// A test comparing two boot-time maps would therefore be vacuous; the coverage constructs the
 	// divergence instead.
 	'JourneyMap', 'JourneyTarget', 'UseJourneyTarget',
+	// KDM-242 A6/D6 — WHICH ESCAPE the party is playing towards.
+	//
+	// Criterion (b), and by the same evidence as RoomType/MapMod above: the game itself says this is
+	// the source of a KDMapData field. `KDMapGen.ts:694-695` is literally
+	//
+	//     if (!KDGameData.SelectedEscapeMethod) KDGameData.SelectedEscapeMethod = "Key";
+	//     KDMapData.EscapeMethod = KDGameData.SelectedEscapeMethod;
+	//
+	// i.e. the next floor's LEVEL GOAL — KDM-240's subject — is a copy of it. A per-player copy makes
+	// the goal depend on which player took the stairs, which is the defect KDM-228 fixed for RoomType.
+	//
+	// It became reachable mid-run with KDM-242: a perk altar can set it (KinkyDungeonShrine.ts:965-967,
+	// and KD's own routed handler at KinkyDungeonInput.ts:1028-1030), and that grant now goes to the
+	// whole party.
+	'SelectedEscapeMethod',
 ]);
 
 /**
@@ -818,6 +833,24 @@ class HeadlessHost {
 		 * here, before `_newPlayerTemplate` is captured, so it rides into every player's bundle.
 		 */
 		this.eval('typeof KDAddListener === "function" && KDAddListener("SpeciesChecker")');
+		/*
+		 * KDM-242 — GAG PARTICLES OFF IN THE AUTHORITATIVE WORLD. The server has no screen.
+		 *
+		 * Not a workaround for a test: it is a real server-side crash. `KDSendGagParticles`
+		 * (KDParticles.ts:336-360) asks `GetHardpointLoc` where the player's MOUTH is, which walks the
+		 * paper-doll rig via `GetModelLoc` -- and `KDCurrentModels` is blacklisted from capture in this
+		 * very file as "render / dirty flags: the server has no screen". So the rig is empty and the
+		 * lookup throws `Cannot read properties of undefined (reading 'Mods')` inside
+		 * `KinkyDungeonAddRestraintIfWeaker` (KinkyDungeonRestraints.ts:5053), taking the whole call
+		 * with it. MEASURED by mp-perk-agreement: a perk whose bondage price includes a gag killed the
+		 * grant mid-loop, so one player got the perk and the other got nothing.
+		 *
+		 * Turned off through KD'S OWN TOGGLE (`KDToggles.GagParticles`, the function's first line)
+		 * rather than by wrapping the function: it is a presentation switch whose honest value on a
+		 * machine with no renderer is `false`, and the CLIENT keeps its own copy and its own particles.
+		 * Same category as the blacklist entry above, applied to the one call site that crashes.
+		 */
+		this.eval('(function(){ if (typeof KDToggles !== "undefined" && KDToggles) KDToggles.GagParticles = false; })()');
 		/*
 		 * KDM-239 R2 — THE TUTORIAL IS SUPPRESSED ON PURPOSE, FOR BOTH PLAYERS. This is a decision,
 		 * not an omission, and it is the one place this task knowingly does not reproduce the stock

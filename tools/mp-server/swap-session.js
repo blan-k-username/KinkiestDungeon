@@ -24,8 +24,10 @@
 'use strict';
 
 const { HeadlessHost, KDGAMEDATA_WORLD_KEYS } = require('./headless-host');
+const { PartyChoice } = require('./party-choice');
 const { PeaceRegistry } = require('./peace');
 const { KD_PEACE_DIALOGUE } = require('./kd-peace-dialogue');
+const { KD_PERK_CHOICE } = require('./kd-perk-choice');
 const { KD_JOURNEY_CHOICE } = require('./kd-journey-choice');
 const { KD_SHOP_BUY } = require('./kd-shop-buy');
 const { KD_COOP_CAPTURE } = require('./kd-coop-capture');
@@ -304,7 +306,54 @@ class SwapSession {
 		 * own vocabulary, now world-scoped (KDGAMEDATA_WORLD_KEYS). There is no parallel route model —
 		 * R16 — only a proposal that has not become one yet.
 		 */
-		this._journey = { pending: null, proposer: null };
+		this._journey = new PartyChoice({
+			label: 'JOURNEY',
+			seats: () => this._joined.length,
+			isValid: (slot) => this._journeySlotIsConnected(slot),
+			sameAs: (a, b) => a.x === b.x && a.y === b.y,
+			commit: (slot, byId) => this._commitJourneyTarget(slot, byId),
+			// Not committed any more, so KD's own JourneyChoice filter is again what stops the stairs —
+			// clear whatever a previous agreement had armed, or the party could leave on a route it has
+			// stopped agreeing on.
+			uncommit: () => this._clearJourneyTarget(),
+			announce: (kind, slot, byId) => {
+				if (kind === 'proposed') {
+					this._broadcast(`${this.displayNameOf(byId)} proposes the route to ${slot.x},${slot.y}. `
+						+ 'Pick the same one to agree.', '#88ccff');
+					this._dbg(`JOURNEY proposal ${slot.x},${slot.y} by ${byId}`);
+				} else {
+					this._broadcast(`The party takes the route to ${slot.x},${slot.y}.`, '#88ff99');
+					this._dbg(`JOURNEY committed ${slot.x},${slot.y} (agreed by ${byId})`);
+				}
+			},
+		});
+		/*
+		 * KDM-242 A2 — the party's perk-room negotiation, on the same terms as the route above and in
+		 * the same place, for the same reason: "wait for your partner to agree" cannot exist in a
+		 * one-player game. The RULES are `PartyChoice`'s (A1); these five hooks are the perk-specific
+		 * halves.
+		 */
+		this._perk = new PartyChoice({
+			label: 'PERK',
+			seats: () => this._joined.length,
+			isValid: (card) => this._perkCardIsOffered(card),
+			sameAs: (a, b) => a.index === b.index,
+			commit: (card, byId) => this._commitPerkCard(card, byId),
+			// Nothing to undo: R10 — a proposal consumes no altar and grants nothing, so until the
+			// commit there is no world state to roll back. (Contrast the route, where an agreed
+			// JourneyTarget is armed in the world and must be disarmed when the question re-opens.)
+			uncommit: () => {},
+			announce: (kind, card, byId) => {
+				if (kind === 'proposed') {
+					this._broadcast(`${this.displayNameOf(byId)} would take perk ${card.index + 1}. `
+						+ 'Pick the same one to agree.', '#88ccff');
+					this._dbg(`PERK proposal ${card.index} by ${byId}`);
+				} else {
+					this._broadcast(`The party takes perk ${card.index + 1}.`, '#88ff99');
+					this._dbg(`PERK committed ${card.index} (agreed by ${byId})`);
+				}
+			},
+		});
 		this.vitalsOf = new Map();    // id -> {will,willMax,...} last-known vitals (KD-098 HP bar)
 		this.defeated = new Set();    // ids whose Will hit 0 — incapacitated (KD-099)
 		this.tiedOf = new Map();      // id -> Set of restraint NAMES already reconciled onto this peer (KD-101)
@@ -472,6 +521,26 @@ class SwapSession {
 		 * the asymmetry there is deliberate and this does not weaken it.
 		 */
 		this.inputKind.set('KDCoopJourney', 'ui');
+		/*
+		 * KDM-242 A3/A4 — the routed perk-room choice, on exactly the terms above.
+		 *
+		 * Same reason, same shape: this is where a routed input is dispatched, so this is where
+		 * `KDInputTypes.KDCoopPerk` has to exist; the browser is served the SAME source text, where the
+		 * `KinkyDungeonDrawPerkOrb` wrap is the half that actually fires. Registered once — KDM-241 P1
+		 * again, pinned by a test rather than trusted.
+		 */
+		this.world.loadMod(KD_PERK_CHOICE);
+		this.world.eval(`(function(){
+			globalThis.KDCoopPerkPropose = function (card) {
+				globalThis.__kdCoopPerkProposal = (card && typeof card.index === 'number')
+					? { index: card.index } : undefined;
+			};
+			globalThis.__kdCoopPerkProposal = undefined;
+		})()`);
+		// 'ui' for the same reason as the route: accepting a card consumes no time (the handler returns
+		// "" and calls nothing that advances), and the lockstep default would make proposing a perk wait
+		// for the partner who is being asked about that very proposal.
+		this.inputKind.set('KDCoopPerk', 'ui');
 		/*
 		 * KDM-264 — the hub merchants: resolve a purchase by the ITEM the buyer selected, not by the
 		 * index they selected it at.
@@ -839,55 +908,23 @@ class SwapSession {
 	}
 
 	/* ── KDM-263: agreeing the route out of the hub ───────────────────────────────────────────────── */
-
 	/**
 	 * A5/R4-R7 — fold ONE routed journey choice into the party's decision.
 	 *
 	 * Called from the immediate-apply path with `clientId` already swapped out and banked, exactly
-	 * like `_settlePeaceAnswerFrom` and for the same reason: everything below writes to the WORLD (the
+	 * like `_settlePeaceAnswerFrom` and for the same reason: the commit writes to the WORLD (the
 	 * journey keys are world-scoped now), and a world write performed while the wrong player is
 	 * swapped in is how KDM-230 handed one player another's whole state.
 	 *
-	 * The rules, in the order they are asked:
-	 *
-	 *   · NOT A CONNECTION of the party's current slot → dropped, silently. R8: KD's own
-	 *     `KDCancelFilters.JourneyChoice` is the ONE refusal path, and it is already in force while
-	 *     nothing is committed. Inventing a second one here would mean two different answers to "why
-	 *     can't I take these stairs".
-	 *   · ONE SEAT → committed immediately (R15). With nobody to agree with, a proposal is the
-	 *     decision, and the player must not be able to tell co-op from stock KD.
-	 *   · THE SAME SLOT, FROM THE OTHER PLAYER → agreed, and committed (R6).
-	 *   · A DIFFERENT SLOT → replaces the pending proposal and makes the new player the proposer (R7).
-	 *     A disagreement re-opens the question instead of deadlocking; the alternative — refusing the
-	 *     second player's choice — is a soft-lock in which neither can move the party.
-	 *
-	 * A proposal arriving after a target is already committed re-opens it too, by the same rule. That
-	 * is deliberate: the party has not left yet, so the decision is not final, and there is no state
-	 * in which one player is stuck with a route they no longer want.
+	 * The RULES are not here. KDM-242 A1 extracted them into `party-choice.js`, because the perk-room
+	 * choice needs the identical ones and two copies is exactly the duplication that task's Notes
+	 * forbid. This method is now only the wire-to-choice adapter; the journey-specific halves are the
+	 * five hooks handed to `PartyChoice` in the constructor.
 	 */
 	_settleJourneyProposalFrom(clientId) {
 		const prop = this._takeCoopValue('__kdCoopJourneyProposal');
 		if (!prop || typeof prop.x !== 'number' || typeof prop.y !== 'number') return false;
-		const slot = { x: prop.x, y: prop.y };
-		if (!this._journeySlotIsConnected(slot)) {
-			this._dbg(`JOURNEY ${clientId} picked ${slot.x},${slot.y} — not a connection, dropped (KD refuses it)`);
-			return true;
-		}
-		if (this._joined.length <= 1) { this._commitJourneyTarget(slot, clientId); return true; }
-
-		const pend = this._journey.pending;
-		const same = pend && pend.x === slot.x && pend.y === slot.y;
-		if (same && this._journey.proposer === clientId) return true;   // re-picking your own: nothing new
-		if (same) { this._commitJourneyTarget(slot, clientId); return true; }
-
-		this._journey = { pending: slot, proposer: clientId };
-		// Not committed, so KD's JourneyChoice filter is still what stops the stairs — clear whatever a
-		// previous agreement had committed, or the party could leave on a route it has stopped agreeing on.
-		this._clearJourneyTarget();
-		this._broadcast(`${this.displayNameOf(clientId)} proposes the route to ${slot.x},${slot.y}. ` +
-			'Pick the same one to agree.', '#88ccff');
-		this._dbg(`JOURNEY proposal ${slot.x},${slot.y} by ${clientId}`);
-		return true;
+		return this._journey.propose(clientId, { x: prop.x, y: prop.y });
 	}
 
 	/**
@@ -913,16 +950,13 @@ class SwapSession {
 		} catch (e) { return false; }
 	}
 
-	/** R6 — the party agreed: write KD's own answer, in KD's own fields, and say so. */
-	_commitJourneyTarget(slot, byId) {
-		this._journey = { pending: null, proposer: null };
+	/** R6 — the party agreed: write KD's own answer, in KD's own fields. The announcement is PartyChoice's. */
+	_commitJourneyTarget(slot, _byId) {
 		this.world.eval(`(function(){
 			if (typeof KDGameData === 'undefined' || !KDGameData) return;
 			KDGameData.JourneyTarget = ${JSON.stringify(slot)};
 			KDGameData.UseJourneyTarget = true;
 		})()`);
-		this._broadcast(`The party takes the route to ${slot.x},${slot.y}.`, '#88ff99');
-		this._dbg(`JOURNEY committed ${slot.x},${slot.y} (agreed by ${byId})`);
 	}
 
 	/**
@@ -943,9 +977,12 @@ class SwapSession {
 	 * on the hub detector would be a duplicate, not extra safety.
 	 */
 	_resetJourneyProposal() {
-		if (!this._journey.pending) return;
-		this._journey = { pending: null, proposer: null };
-		this._dbg('JOURNEY proposal cleared (the party changed map)');
+		// Reset UNCONDITIONALLY, even with nothing pending: PartyChoice.reset also forgets that a route
+		// was committed, and skipping it would leave the next map's first pick un-committing a route
+		// belonging to the map the party has already left. Only the log line is conditional.
+		const had = this._journey.report().pending;
+		this._journey.reset();
+		if (had) this._dbg('JOURNEY proposal cleared (the party changed map)');
 	}
 
 	/** What the party has agreed and what is merely proposed — for tests and diagnostics. */
@@ -958,7 +995,141 @@ class SwapSession {
 					use: !!KDGameData.UseJourneyTarget };
 			})()`);
 		} catch (e) { committed = null; }
-		return { pending: this._journey.pending, proposer: this._journey.proposer, committed };
+		return { ...this._journey.report(), committed };
+	}
+
+	/* ── KDM-242: agreeing which perk the party takes ─────────────────────────────────────────────── */
+
+	/**
+	 * A5/R4-R7 — fold ONE routed perk choice into the party's decision.
+	 *
+	 * Called from the immediate-apply path with `clientId` already swapped out and banked, exactly like
+	 * `_settleJourneyProposalFrom` and for the same reason: the commit swaps every player in turn, and
+	 * doing that while a stale copy of the acting player is installed is how KDM-230 handed one player
+	 * another's whole state.
+	 *
+	 * The RULES live in `party-choice.js` (A1) — this is only the wire-to-choice adapter.
+	 */
+	_settlePerkProposalFrom(clientId) {
+		const prop = this._takeCoopValue('__kdCoopPerkProposal');
+		if (!prop || typeof prop.index !== 'number') return false;
+		return this._perk.propose(clientId, { index: prop.index });
+	}
+
+	/**
+	 * Is this card actually on offer? KD's own answer, read from KD's own data.
+	 *
+	 * `KDMapData.PerkShrines` is the list of altar coordinates the generator wrote
+	 * (KinkyDungeonAlt.ts:2746-2747), and an altar is still standing only while its tile keeps the
+	 * `PerkOrb` type — the commit clears exactly that (R11). So "on offer" is one lookup in the game's
+	 * own structures and there is no parallel offer model (R17). A card index outside the list, or one
+	 * whose altar is already spent, is dropped silently: KD's own gate is the ONE refusal path and this
+	 * does not invent a second.
+	 */
+	_perkCardIsOffered(card) {
+		if (!card || typeof card.index !== 'number') return false;
+		try {
+			return !!this.world.eval(`(function(){
+				var i = ${JSON.stringify(card.index)};
+				if (typeof KDMapData === 'undefined' || !KDMapData || !Array.isArray(KDMapData.PerkShrines)) return false;
+				if (i < 0 || i >= KDMapData.PerkShrines.length) return false;
+				var t = KinkyDungeonTilesGet(KDMapData.PerkShrines[i]);
+				return !!(t && t.Type === 'PerkOrb' && t.Perks && t.Perks.length);
+			})()`);
+		} catch (e) { return false; }
+	}
+
+	/**
+	 * R1/R11/R13/R16 — the party agreed: grant the card to EVERY seat, then spend the room once.
+	 *
+	 * WHY EVERY SEAT. F9: several perks rewrite the shared world — `Stealthy` scales the floor's enemy
+	 * and treasure counts (KDMapGen.ts:1049, :1770), `Fortify_Barricade` the commander's AI
+	 * (KDCommander.ts:392) — and all of them are read from whichever player happens to be swapped in
+	 * when generation runs. A perk one player has and the other does not therefore makes the shared map
+	 * depend on swap order. The owner's ruling: perks cannot be per-character.
+	 *
+	 * WHY KD'S OWN HANDLER. `KDInputTypes.perkorb` (KinkyDungeonInput.ts:1011-1040) already applies the
+	 * perk, the restraints, the escape method and the `choseperk` flag. Nothing here re-implements any
+	 * of it, so this layer contributes no perk logic and names no perk (R16/R17). It is dead upstream —
+	 * nothing in the game sends it — which is what makes it ours to drive.
+	 *
+	 * WHY THE BONDAGE IS RECOMPUTED PER SEAT (R13/D4). `KDGetPerkShrineBondage` reads `perkBondage` and
+	 * `perkNoBondage` out of `KinkyDungeonStatsChoice` — keys `game-modes.js` classifies as
+	 * PLAYER-level, "about their body … not the party's business". Generation baked one player's answer
+	 * into a shared tile (F6); calling it inside each player's own swap-in window means the values
+	 * already loaded are the right ones, with no argument threading.
+	 *
+	 * WHY THE WIPE IS OUTSIDE THE LOOP (R11). `KDMapData` is shared, so spending the room is a single
+	 * world write; a per-seat pass would be N redundant writes over the same state. It uses the MODAL's
+	 * wider behaviour (every entry of `PerkShrines`, KinkyDungeonShrine.ts:971-974) rather than
+	 * `perkorb`'s narrower row-scan (:1036-1039), because the modal is what a single-player run does and
+	 * both players must see the room spent.
+	 *
+	 * THE `_reseatParty` TRAP, inherited verbatim: the acting player is mid-apply, so
+	 * `bundles.get(actingId)` is stale BY DEFINITION. Their live state is captured by hand first and
+	 * restored last, or the very capture that triggered this commit is discarded.
+	 */
+	_commitPerkCard(card, byId) {
+		const live = this.world.capturePlayer();
+		try {
+			for (const cid of this._joined) {
+				this.world.restorePlayer(cid === byId ? live : this.bundles.get(cid));
+				this.world.eval(`(function(){
+					var i = ${JSON.stringify(card.index)};
+					if (typeof KDMapData === 'undefined' || !KDMapData || !Array.isArray(KDMapData.PerkShrines)) return;
+					var key = KDMapData.PerkShrines[i];
+					var t = KinkyDungeonTilesGet(key);
+					if (!t || !t.Perks) return;
+					var xy = String(key).split(',');
+					// RE-ARM THE ALTAR FOR EACH SEAT. KD's perkorb handler ends by scanning row data.y
+					// and setting every 'P' on it to 'p' (KinkyDungeonInput.ts:1036-1039) -- and all
+					// three altars share that row (KinkyDungeonAlt.ts:2723). It also GUARDS on the tile
+					// still being 'P' (:1012). So without this the first seat spends the room and every
+					// seat after it is silently skipped: MEASURED -- the proposer got the perk and the
+					// partner got nothing. These are world writes the post-loop wipe below overwrites
+					// anyway; re-arming simply makes each seat's window identical.
+					KinkyDungeonMapSet(parseInt(xy[0], 10), parseInt(xy[1], 10), 'P');
+					// The restraint price is THIS player's: KDGetPerkShrineBondage reads perkBondage /
+					// perkNoBondage out of the StatsChoice that is loaded right now, which is theirs.
+					var bondage = (typeof KDGetPerkShrineBondage === 'function')
+						? KDGetPerkShrineBondage(t.Perks) : (t.Bondage || []);
+					KDInputTypes.perkorb({
+						x: parseInt(xy[0], 10), y: parseInt(xy[1], 10),
+						perks: t.Perks, bondage: bondage, method: t.Method,
+					});
+				})()`);
+				this.bundles.set(cid, this.world.capturePlayer());
+			}
+		} finally {
+			// Leave the acting player swapped back in: the caller is mid-apply and captures their bundle
+			// immediately after this returns.
+			this.world.restorePlayer(this.bundles.get(byId) || live);
+		}
+		// …and spend the room, once, over the shared map.
+		this.world.eval(`(function(){
+			if (typeof KDMapData === 'undefined' || !KDMapData || !Array.isArray(KDMapData.PerkShrines)) return;
+			KDMapData.PerkShrines.forEach(function (key) {
+				var xy = String(key).split(',');
+				KinkyDungeonMapSet(parseInt(xy[0], 10), parseInt(xy[1], 10), 'p');
+				var t = KinkyDungeonTilesGet(key);
+				if (t) t.Type = undefined;
+			});
+		})()`);
+	}
+
+	/**
+	 * The party moved, so an unfinished argument about a perk room it has left is over. Same
+	 * `_onMapChanged` call site and same unconditional-reset reasoning as `_resetJourneyProposal`.
+	 */
+	_resetPerkProposal() {
+		const had = this._perk.report().pending;
+		this._perk.reset();
+		if (had) this._dbg('PERK proposal cleared (the party changed map)');
+	}
+
+	/** What the party has agreed and what is merely proposed — for tests and diagnostics. */
+	perkReport() {
+		return this._perk.report();
 	}
 
 	/**
@@ -1059,6 +1230,7 @@ class SwapSession {
 			 * answer, so this player's own state is banked before anything else touches the world.
 			 */
 			this._settleJourneyProposalFrom(clientId);
+			this._settlePerkProposalFrom(clientId);
 			/*
 			 * KDM-253: the disconnect answers are `dialogue` inputs too, and they are READ here but
 			 * ACTED ON by the caller.
@@ -2302,6 +2474,7 @@ class SwapSession {
 		this._reseatParty(actingId, (n ? this.world.landingTiles(n) : []) || []);
 		// KDM-263 A2: an unfinished argument about how to get here is over now that we are here.
 		this._resetJourneyProposal();
+		this._resetPerkProposal();
 		this._announceMapChange(mapId);
 		this._dbg(`MAP ${this._lastMapId} -> ${mapId} (party re-landed, ${n} players)`);
 	}

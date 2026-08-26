@@ -34,6 +34,7 @@ const { KD_ABSENT_RESET_BROWSER } = require('./kd-absent-reset');
 // KDM-263 — the routed journey choice: the wrap that stops the client committing a route locally,
 // and the KDInputTypes entry the routed choice is dispatched through. Same two-runtime rule again.
 const { KD_JOURNEY_CHOICE_BROWSER } = require('./kd-journey-choice');
+const { KD_PERK_CHOICE_BROWSER } = require('./kd-perk-choice');
 // KDM-264 — buying by identity: the client tags the purchase with the ITEM it was showing, the
 // server re-finds it in the shared stock. Same two-runtime rule.
 const { KD_SHOP_BUY_BROWSER } = require('./kd-shop-buy');
@@ -86,6 +87,8 @@ const JOURNEY_ROUTE = '/mp/kd-journey-choice.js';
 const WORLD_KEYS_ROUTE = '/mp/kd-world-keys.js';
 // KDM-264: buying by identity — the client tag + the server-side shrineBuy resolver.
 const SHOP_BUY_ROUTE = '/mp/kd-shop-buy.js';
+// KDM-242: the perk-room choice wrap + its routed input type, on the same two-runtime terms.
+const PERK_ROUTE = '/mp/kd-perk-choice.js';
 const CODEC_BODY = `${KD_CODEC}\n;(typeof window !== 'undefined' ? window : globalThis).KDCodec = ` +
 	`{ kdEnc: kdEnc, kdDec: kdDec, kdSer: kdSer };\n`;
 
@@ -105,6 +108,7 @@ SYNTHETIC_ROUTES[ABSENT_RESET_ROUTE] = KD_ABSENT_RESET_BROWSER;
 SYNTHETIC_ROUTES[GAME_MODES_ROUTE] = GAME_MODES_BROWSER;
 SYNTHETIC_ROUTES[JOURNEY_ROUTE] = KD_JOURNEY_CHOICE_BROWSER;
 SYNTHETIC_ROUTES[SHOP_BUY_ROUTE] = KD_SHOP_BUY_BROWSER;
+SYNTHETIC_ROUTES[PERK_ROUTE] = KD_PERK_CHOICE_BROWSER;
 SYNTHETIC_ROUTES[WORLD_KEYS_ROUTE] = '(typeof window !== \'undefined\' ? window : globalThis)' +
 	`.KDWorldGameDataKeys = ${JSON.stringify(KDGAMEDATA_WORLD_KEYS)};\n`;
 
@@ -137,6 +141,9 @@ const INJECT = [
 	// and does not call through when it routes, so a KDSendInput wrap installed here would be
 	// silently bypassed.
 	SHOP_BUY_ROUTE,
+	// KDM-242: wraps KinkyDungeonDrawPerkOrb and registers KDInputTypes.KDCoopPerk — same needs as
+	// JOURNEY_ROUTE above (the bundle in scope, and render-client.js's KDSendInput routing gate on).
+	PERK_ROUTE,
 ];
 
 /* ── Serve-time workarounds for UPSTREAM crashes ──────────────────────────────────────────────
