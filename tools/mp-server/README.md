@@ -186,9 +186,14 @@ Two things the e2e pins that are easy to get wrong if you touch this flow:
 
 ## Known limitations (PoC)
 
-- Full `KinkyDungeonGenerateSaveData()` is **not** supported headless — the save
-  path reads model `Poses` produced by the (neutered) draw pipeline. Full
-  save/load round-trip is production host scope (KD-067).
+- Save **generation** is not supported headless — `KinkyDungeonGenerateSaveData()` reads model
+  `Poses` produced by the (neutered) draw pipeline. That is the MP → SP direction (KDM-244).
+  **LOADING is supported and shipped** (KDM-243): `HeadlessHost.loadSave(str)` drives KD's own
+  `KinkyDungeonLoadGame` on the compressed-base64 string the browser keeps in
+  `localStorage.KinkyDungeonSave`, and restores floor, map, entities, gear and inventory intact. Its
+  one precondition is `_seedHeadlessModel()` — the same instrument `saveOf()` uses, for the same
+  reason (the loader assigns through the paper-doll container without a null guard). A host can
+  therefore continue an existing single-player run in co-op; the guest brings only a character.
 - The shim layer tracks the bundle's PIXI/DOM surface as of this build; it must be
   updated as the game's rendering surface changes.
 - **Untying a peer wearing only locked or cursed gear spends the turn and frees nothing.** Protected

@@ -3,7 +3,7 @@
  *
  * Headless Node game host (KD-067 PoC scope). Boots the stock out/main.js inside
  * an isolated V8 context (vm) behind the shim layer, and exposes a small API:
- *   init(opts) · step(n) · getState() · serialize() · loadState(save) · eval(code)
+ *   init(opts) · step(n) · getState() · loadSave(str) · saveOf() · eval(code)
  *
  * Isolation: each HeadlessHost owns its own vm.Context, so multiple instances
  * (a world instance + per-player instances) each get a private copy of every KD
@@ -71,6 +71,11 @@ const KDGAMEDATA_WORLD_KEYS = Object.freeze([
 	'NamesGenerated', 'Regiments', 'RegimentID',
 	'KinkyDungeonSpawnJailers', 'KinkyDungeonSpawnJailersMax',
 	'ChestsGenerated', 'PersistentNPCCache',
+	// KDM-243 — the seed the CURRENT map was generated from, and the value KD's save loader re-seeds
+	// the RNG to (`KinkyDungeon.ts:7379`). Classified with `KinkyDungeonSeed` in GLOBAL_BLACKLIST,
+	// which is where the full argument lives: they are written by one statement
+	// (`KinkyDungeonGame.ts:962-970`) and describe the party's one world, not a player.
+	'LastMapSeed',
 	// (a) NPC/avatar bondage, keyed by ENTITY ID (KDGetNPCRestraints / KDSetNPCRestraints,
 	// NPCRestrain.ts:541/550). It describes world ENTITIES — including the peer avatars that PvP
 	// ties are applied to — so it is world state under criterion (a), not player state.
@@ -248,6 +253,27 @@ const GLOBAL_BLACKLIST = Object.freeze([
 	// client has always preferred the world's answer, restoring both from the snapshot's own
 	// `s.level` / `s.checkpoint` (render-client.js:609-610). This makes the server agree.
 	'MiniGameKinkyDungeonLevel', 'MiniGameKinkyDungeonCheckpoint',
+	/*
+	 * KDM-243: THE MAP GENERATION SEED. Same argument as the floor directly above, and found the same
+	 * way — by a case that made the world's copy disagree with a bundle's.
+	 *
+	 * `KinkyDungeonSeed` decides what the NEXT floor looks like: `KDInitTempValues` re-randomises it
+	 * per map and stores it as `KDGameData.LastMapSeed` (`KinkyDungeonGame.ts:960-970`), and the save
+	 * loader restores from that pair (`KinkyDungeon.ts:7116`, `:7379`). One party, one world, one next
+	 * floor — a per-player copy makes map generation depend on whose bundle was swapped in, which is
+	 * the exact non-determinism this epic exists to prevent (cf. KDM-271 on world-affecting perks).
+	 *
+	 * MEASURED, in KDM-243's own unit spec: an imported world's seed was reverted to the pre-import
+	 * value by the FIRST restore of the guest's bundle, because the guest's template predates the
+	 * import and the seed was watched per-player. The floor already generated was unaffected (the map
+	 * is in `KDMapData`); the damage is entirely to what comes next, which is why it is invisible
+	 * until someone descends.
+	 *
+	 * `LastMapSeed` is classified with it, in KDGAMEDATA_WORLD_KEYS, for the reason KDM-228 gives for
+	 * RoomType/MapMod: they are written by the same statement, and splitting a pair leaves it
+	 * half-classified.
+	 */
+	'KinkyDungeonSeed',
 	'AIData', 'KDAwareEnemies', 'KDEnemiesTargetingPlayer', 'KDPathfindingCacheFails',
 	'KDPathfindingCacheHits', 'KDPathCache', 'KDUpdateEnemyCache',
 	// Derived lookup caches over the world's ENTITIES — same category as KDPathCache above, and the
@@ -3152,15 +3178,54 @@ class HeadlessHost {
 		return out;
 	}
 
-	/** Serialize full game state via the bundle's own save path. */
-	serialize() {
-		return this.eval('KinkyDungeonGenerateSaveData()');
-	}
-
-	/** Load a previously-serialized save. */
-	loadState(save) {
-		this._context.__KD_SAVE_IN = save;
-		return this.eval('KinkyDungeonLoadGameDataObject ? KinkyDungeonLoadGameDataObject(globalThis.__KD_SAVE_IN) : KinkyDungeonLoadGame(globalThis.__KD_SAVE_IN)');
+	/**
+	 * KDM-243 — load a player's SINGLE-PLAYER SAVE into this world, through KD's own loader.
+	 *
+	 * Takes the compressed-base64 string the browser keeps in `localStorage.KinkyDungeonSave`, i.e.
+	 * exactly what KD's async save loop wrote (`KinkyDungeon.ts:1520-1525`). Nothing here parses the
+	 * save format, and nothing here may learn to: `KinkyDungeonLoadGame` is upstream's, it is
+	 * versioned with the bundle, and re-implementing any of it in the gateway is what epic AC1
+	 * forbids.
+	 *
+	 * ⚠️ REPLACES `loadState()`, WHICH NEVER WORKED. That method set `__KD_SAVE_IN` to an OBJECT and
+	 * branched on `KinkyDungeonLoadGameDataObject`, which does not exist in this bundle — so it fell
+	 * through to `KinkyDungeonLoadGame(<object>)`, whose first act is `DecompressB64(String.trim())`.
+	 * It had no callers, so nothing ever noticed. `serialize()` went with it for the same reason:
+	 * caller-less, and `saveOf()` is the real instrument (see its comment).
+	 *
+	 * ⚠️ `_seedHeadlessModel()` IS THE ONE PRECONDITION, and it is measured, not assumed. Under
+	 * `!KDToggles.OverrideOutfit && saveData.saveStat` the loader ASSIGNS through the paper-doll
+	 * container — `KDCurrentModels.get(KinkyDungeonPlayer).Poses = …` (`KinkyDungeon.ts:7305`) — which
+	 * `_neuterRendering` deliberately never builds. Same family as the autosave crash `_neuterAutosave`
+	 * exists for (KDM-240/267). With the container seeded, the whole loader runs headless with no
+	 * further stubbing: floor, map, entities, worn restraints and inventory all arrive (measured in
+	 * KDM-243's POC, against a pre-load control).
+	 *
+	 * The save travels through the CONTEXT SLOT, never interpolated into the eval'd source. It is
+	 * player-supplied data reaching an eval'd realm, which is precisely the shape that has broken this
+	 * project before (memory: backtick-in-template-literal).
+	 *
+	 * @returns {{ok: boolean, version: string, err: string|null}} — `ok` is KD's own verdict
+	 *   (it returns `false` for anything that fails to decompress or lacks the seven fields it
+	 *   requires, `KinkyDungeon.ts:7079-7086`), `version` is the save's own `KDVersionStr` so a
+	 *   caller can WARN about a mismatch without decoding the save a second time, and `err` carries
+	 *   a throw rather than letting it escape into a half-built session.
+	 */
+	loadSave(str) {
+		this._seedHeadlessModel();
+		this._context.__KD_SAVE_IN = String(str || '');
+		return this.eval(`(function () {
+			var version = '';
+			try {
+				var raw = DecompressB64(String(globalThis.__KD_SAVE_IN || '').trim());
+				if (raw) { var parsed = JSON.parse(raw); version = String((parsed && parsed.version) || ''); }
+			} catch (e) { /* unreadable — KinkyDungeonLoadGame below answers false for the same reason */ }
+			try {
+				return { ok: !!KinkyDungeonLoadGame(globalThis.__KD_SAVE_IN), version: version, err: null };
+			} catch (e) {
+				return { ok: false, version: version, err: String((e && e.message) || e) };
+			}
+		})()`);
 	}
 
 	/** A small JSON-safe snapshot for assertions/reconciliation. */

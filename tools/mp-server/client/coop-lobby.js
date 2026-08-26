@@ -163,6 +163,38 @@
 		if (el) lobby.name = String(el.value || '');
 	}
 
+	/**
+	 * KDM-243 D1 — the save this player would continue: KD's own current slot, and nothing else.
+	 *
+	 * One read of the one key KD's async save loop writes (`KinkyDungeon.ts:1520-1525`). No slot
+	 * picker and no `KinkyDungeonDBSave`/indexedDB path — "continue the run I was playing" is the
+	 * whole feature, and a second source would be a second thing to keep in step.
+	 */
+	function localSave() {
+		try { return String(window.localStorage.getItem('KinkyDungeonSave') || ''); }
+		catch (e) { return ''; }              // storage disabled: the button simply never appears
+	}
+
+	/**
+	 * KDM-243 A6 — the courtesy check, run before the host advertises a session at all.
+	 *
+	 * Applies KD's OWN acceptance rule (`KinkyDungeon.ts:7079-7086`: a save is usable only if all
+	 * seven of these are present) rather than a rule of our own, so this cannot refuse something the
+	 * server would have loaded. It is NOT trusted — `_start` repeats it authoritatively, because a
+	 * client can be old, lying, or somebody else's. What it buys is that the failure arrives
+	 * privately and immediately, instead of after a friend has already been invited.
+	 */
+	function saveIsUsable(str) {
+		if (!str) return false;
+		try {
+			var raw = DecompressB64(String(str).trim());
+			if (!raw) return false;
+			var d = JSON.parse(raw);
+			return !!(d && d.spells && d.level !== undefined && d.checkpoint
+				&& d.inventory && d.costs && d.rep && d.dress);
+		} catch (e) { return false; }
+	}
+
 	function drawRoot() {
 		// Asked BEFORE either choice, because the host connects straight from this view. y=190 puts
 		// the field at ~192-248, clear of the Host button at 268-332.
@@ -174,11 +206,39 @@
 			return true;
 		}, true, MID, 300, 350, 64, text('KDMPHostGame', 'Host Game'), '#ffffff', '');
 
+		/*
+		 * KDM-243 A5 — hosting a run that is ALREADY IN PROGRESS.
+		 *
+		 * Drawn only when there is actually a save to continue, so a player who has never played does
+		 * not get a button that can only disappoint them. Beside Host rather than replacing it: "start
+		 * a new co-op game" and "continue my run with a friend" are two different intentions, and the
+		 * host chooses which one this session is.
+		 *
+		 * The save is read HERE, at the press, not cached at draw time — the player may have been
+		 * playing seconds ago, and the freshest save is the one they mean.
+		 */
+		var saved = localSave();
+		if (saved) {
+			DrawButtonKDEx('KDMPContinue', function () {
+				lobby.error = '';
+				var str = localSave();
+				if (!saveIsUsable(str)) {
+					// A6 — refuse privately, in words, and do NOT connect. `error` is what the lobby
+					// already paints for every other refusal.
+					lobby.error = text('KDMPSaveUnusable', 'That save cannot be continued.');
+					return true;
+				}
+				lobby.view = 'host';
+				connect({ role: 'host', name: lobby.playerName(), perks: lobby.playerPerks(), save: str });
+				return true;
+			}, true, MID, 380, 350, 64, text('KDMPContinueSave', 'Continue Save'), '#ffffff', '');
+		}
+
 		DrawButtonKDEx('KDMPJoin', function () {
 			lobby.view = 'join';
 			lobby.error = '';
 			return true;
-		}, true, MID, 380, 350, 64, text('KDMPJoinGame', 'Join Game'), '#ffffff', '');
+		}, true, MID, saved ? 460 : 380, 350, 64, text('KDMPJoinGame', 'Join Game'), '#ffffff', '');
 
 		// KDM-238 R1 — asked BEFORE either choice, like the name above it: the host connects straight
 		// from this view, so anything that has to ride the handshake must be pickable here.
@@ -187,10 +247,13 @@
 			lobby.perkPick = true;
 			KinkyDungeonState = 'Stats';       // KD's OWN perk screen — see drawPerkPickOverrides
 			return true;
-		}, true, MID, 460, 350, 64, text('KDMPPerksBtn', 'Perks'), '#ffffff', '');
+			// KDM-243 — everything below Continue moves down by one row when it is present. The
+			// offset is applied here rather than by re-numbering, so the no-save layout (which the
+			// whole existing lobby suite asserts on) stays byte-identical.
+		}, true, MID, saved ? 540 : 460, 350, 64, text('KDMPPerksBtn', 'Perks'), '#ffffff', '');
 
 		DrawButtonKDEx('KDMPBack', function () { lobby.close(); return true; },
-			true, MID, 560, 350, 64, text('KDMPBack', 'Back'), '#ffffff', '');
+			true, MID, saved ? 640 : 560, 350, 64, text('KDMPBack', 'Back'), '#ffffff', '');
 	}
 
 	function drawHost() {

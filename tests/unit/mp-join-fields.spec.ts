@@ -49,15 +49,27 @@ describe('KDM-260 — the declared shapes (R1, R2)', () => {
 		expect(Object.isFrozen(GUEST_JOIN_FIELDS)).toBe(true);
 	});
 
+	/**
+	 * The fields only a HOST may declare, and the one sentence that justifies each.
+	 *
+	 * KDM-243 added the second entry: the host brings the WORLD — as game modes and a seed
+	 * (`world`), or as a whole saved run (`save`) — and the guest brings only a character. Listed
+	 * here rather than filtered inline so the next addition has to state which side it is on.
+	 */
+	const HOST_ONLY = ['world', 'save'];
+
 	it('R2 — the host may declare a world and the guest may not, and that gap is the point', () => {
-		expect(HOST_JOIN_FIELDS).toContain('world');
-		expect(GUEST_JOIN_FIELDS,
-			'a guest declaring a world is KDM-239 A5 — one host, no silent blending').not.toContain('world');
+		for (const f of HOST_ONLY) {
+			expect(HOST_JOIN_FIELDS).toContain(f);
+			expect(GUEST_JOIN_FIELDS,
+				`a guest declaring '${f}' is KDM-239 A5 / KDM-243 R1 — one host, no silent blending`)
+				.not.toContain(f);
+		}
 	});
 
-	it('the guest shape is otherwise the host shape — no accidental second difference', () => {
-		const hostMinusWorld = [...HOST_JOIN_FIELDS].filter((f: string) => f !== 'world').sort();
-		expect([...GUEST_JOIN_FIELDS].sort()).toEqual(hostMinusWorld);
+	it('the guest shape is otherwise the host shape — no accidental extra difference', () => {
+		const hostMinusHostOnly = [...HOST_JOIN_FIELDS].filter((f: string) => !HOST_ONLY.includes(f)).sort();
+		expect([...GUEST_JOIN_FIELDS].sort()).toEqual(hostMinusHostOnly);
 	});
 });
 

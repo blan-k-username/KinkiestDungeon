@@ -51,6 +51,9 @@
 	// handshake beside the name. Empty means "I never opened that screen", which the server reads as
 	// KD's default terms (R9) rather than as a refusal.
 	var playerPerks = [];
+	// KDM-243 R1 — the single-player save this HOST is continuing, or `''` for a new game. Set only
+	// by `__coopConnect({role:'host', save})`, i.e. only by the lobby's Continue button.
+	var savePayload = '';
 
 	// KD-098 diagnostics: ON by default for the co-op demo (it's a debug harness). Logs to the
 	// browser console: every KDSendInput classification (render-client) + every submit() here.
@@ -1061,6 +1064,17 @@
 			 * nothing here; `worldModes()` is a read, not a policy.
 			 */
 			if (role === 'host') join.world = { modes: worldModes(), seed: worldSeed() };
+			/*
+			 * KDM-243 R1 — and, if this host chose to CONTINUE a run, the save itself.
+			 *
+			 * In the same `if` as the world above, so "only a host brings a world" is expressed once
+			 * on this side too. The value is whatever the player already has in KD's own current save
+			 * slot (D1) — this reads it, it never produces one.
+			 *
+			 * Absent unless `connect({save})` asked for it: pressing Host must keep starting a new
+			 * game even for a player who has a save sitting right there (the e2e control).
+			 */
+			if (role === 'host' && savePayload) join.save = savePayload;
 			ws.send(JSON.stringify(join));
 			// KDM-249 R6 — a HOST publishes its zips so a guest can fetch them, then re-states the
 			// declaration: `join` above carried whatever had been hashed by the time the socket
@@ -1483,6 +1497,7 @@
 	 * KDM-233 — the lobby's way in. `coop-lobby.js` calls this; nothing else does.
 	 *
 	 *   { role:'host' }                                  claim slot 0 on this machine's server
+	 *   { role:'host', save:'<b64>' }                    …continuing that save instead of a new game
 	 *   { role:'guest', address:'host:port', name:'Ada' } ask that host to let you in
 	 *
 	 * It does NOT enter the game: that happens on `joined.started`, once the host has said yes.
@@ -1495,6 +1510,9 @@
 		shortcut = false;
 		playerName = String(opts.name || '');
 		playerPerks = Array.isArray(opts.perks) ? opts.perks.slice() : [];
+		// KDM-243 — the save to continue, if the lobby's Continue button supplied one. Cleared on
+		// every connect, so a host who backs out and presses Host instead starts a new game.
+		savePayload = (opts.role === 'host' && typeof opts.save === 'string') ? opts.save : '';
 		endpoint = opts.address ? String(opts.address).replace(/^wss?:\/\//, '').replace(/\/+$/, '') : null;
 		// Identity is ours to pick and must be stable for a reconnect to be recognised (S2). It is not
 		// a credential — there is nothing to authenticate against (KDM-226, LAN-only).

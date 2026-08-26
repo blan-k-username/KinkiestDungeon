@@ -366,6 +366,26 @@ class SwapSession {
 		this._pendingJoins = [];
 		// KDM-235 A2: the fresh-character template, captured in `_start`. See the note there.
 		this._newPlayerTemplate = null;
+		/*
+		 * KDM-243 A4 — a player who is seated from something OTHER than the fresh template.
+		 *
+		 * Today it has exactly one occupant: the host of an imported run, whose character comes out of
+		 * their own save. A Map rather than an `if (isHost && imported)` because "which character does
+		 * this seat start from" is a question [[KDM-256]] asks too, and answering it in one lookup is
+		 * what keeps `_seatPlayer` a single path.
+		 *
+		 * Empty in every ordinary session, so `_seatPlayer` falls back to `_newPlayerTemplate` and the
+		 * pre-KDM-243 behaviour is reached by the same line it always was.
+		 */
+		this._templateOf = new Map();
+		/*
+		 * KDM-243 R1 — the host's single-player save, forwarded from the join gate, or `''`.
+		 *
+		 * Per-client for the same reason `worldOf` is: the bridge forwards it with the rest of the
+		 * seat and needs no role check of its own, because the gate already answered `''` for anyone
+		 * who is not the host.
+		 */
+		this.saveOf = new Map();
 		// KDM-269: the drop-report family — `unknownInputs`, `replacedInputs`, `cancelledMoves`,
 		// `failedInputs`. What each one means, and why they are one family, is on `DROP_CHANNELS`
 		// above; this loop is the only place they are brought into existence.
@@ -601,7 +621,82 @@ class SwapSession {
 		 * (import a save) replace — they change what the template IS, and touch no seating code.
 		 */
 		this._newPlayerTemplate = this.world.capturePlayer();
-		const base = this.world.findOpenTile();
+		/*
+		 * KDM-243 A3 — THE HOST'S SAVE, LOADED OVER THE WORLD WE JUST BUILT.
+		 *
+		 * ⚠️ AFTER THE TEMPLATE CAPTURE, AND THAT ORDER IS THE FEATURE. The line above snapshots the
+		 * pristine new-game character; the load below replaces the player slot with the HOST's saved
+		 * one. Swap the two and `_newPlayerTemplate` becomes a copy of the host — so the guest would
+		 * arrive at floor 9 wearing the host's restraints, carrying their inventory and their perks.
+		 * That is exactly what KDM-235 R6 forbids, and it would look like a working feature.
+		 *
+		 * The whole new-game path above still runs on this branch. It costs one map generation that is
+		 * about to be thrown away, and it buys the fresh template the guest needs (D2) plus R9: the
+		 * no-save path is byte-identical because nothing before this point knows about saves at all.
+		 */
+		const hostSave = this._hostSave();
+		if (hostSave) {
+			const res = this.world.loadSave(hostSave);
+			if (!res || !res.ok) {
+				// R8 — refuse loudly rather than run a half-built world. `started` is still false, so
+				// the bridge reports this on the same channel as every other start/join refusal.
+				throw new Error('cannot continue this save' + (res && res.err ? ` — ${res.err}` : ''));
+			}
+			/*
+			 * A7/D3 — a version difference is SAID, not refused. KD's own loader carries compat
+			 * branches for old saves, so refusing on a version string would reject saves the game
+			 * itself handles perfectly well. The proxy speaking about a session-level fact, in its own
+			 * voice — not game content.
+			 */
+			/*
+			 * ⚠️ AND ONLY WHEN THE LOCAL VERSION IS ACTUALLY KNOWN. `TextGet` answers
+			 * `'[NotFound] KDVersionStr'` until KD's text tables have loaded, which on the server is
+			 * an async fetch that may not have finished — measured, and it made every single import
+			 * warn about a version mismatch that did not exist. An unresolved lookup means "I cannot
+			 * tell", and the honest output for that is silence, not a warning.
+			 */
+			const build = this.world.eval('typeof TextGet === "function" ? String(TextGet("KDVersionStr")) : ""');
+			const known = build && build.indexOf('[NotFound]') < 0;
+			if (res.version && known && res.version !== build) {
+				this._broadcast(`This save was made in ${res.version}; this game is ${build}.`, '#ffcc66');
+			}
+			/*
+			 * A3 §5 — the modes a SEAT is rebuilt from are now the save's, not the pre-load world's.
+			 * `KinkyDungeonStatsChoice` arrives inside the save (`KinkyDungeon.ts:7160`), so the
+			 * snapshot taken right after `init()` describes a world that no longer exists.
+			 */
+			this._baseStats = this.world.statsChoiceSnapshot();
+			/*
+			 * ⚠️ A3 §6 REVERSED BY MEASUREMENT — THE BASELINE IS DELIBERATELY *NOT* RE-TAKEN HERE.
+			 *
+			 * The Architecture step argued for `_captureBaseline()` at this point, reasoning that a
+			 * load invalidates "what has gameplay touched since init". Implementing it made
+			 * `mp-save-import`'s R7 fail, and the failure is the real behaviour:
+			 *
+			 * KDM-161's baseline is not merely a change detector — its VALUES are the per-player
+			 * DEFAULTS that `restorePlayer` resets a watched global to when the incoming bundle does
+			 * not mention it. Re-baselining after the load makes the HOST's saved character the
+			 * default, so restoring the pristine `_newPlayerTemplate` into the slot leaves every field
+			 * the template does not name sitting at the host's value — measured: the guest arrived
+			 * wearing the host's `HingedCuffs`. That is precisely the KDM-235 R6 defect this task
+			 * exists to avoid, arriving by a route nobody would look at.
+			 *
+			 * Keeping init's baseline is also the CORRECT semantics, not just the working one: a
+			 * newly-seated player's defaults are KD's new-game defaults, and the host's resumed
+			 * character is a divergence from them — which is exactly what it is, and exactly what a
+			 * host who had played those floors inside the session would have had anyway. World state
+			 * is excluded from bundles by CATEGORY (`GLOBAL_BLACKLIST` / `KDGAMEDATA_WORLD_KEYS`),
+			 * never by the baseline, so nothing about the loaded map rides along either way.
+			 */
+			/*
+			 * A4 — the host is seated from their SAVED character, everyone else from the fresh
+			 * template. Captured here, while the loaded character is still the one in the slot.
+			 */
+			this._templateOf.set(this._joined[0], this.world.capturePlayer());
+		}
+		// A3 §7 — on an imported run the party starts where the host's own run left off, not on a
+		// tile chosen by the map scan. `findOpenTile` remains the answer for a generated world.
+		const base = (hostSave && this.world.getPlayerPos()) || this.world.findOpenTile();
 		let i = 0;
 		for (const id of this._joined) {
 			// give each player a starting bundle at a distinct position
@@ -1845,6 +1940,26 @@ class SwapSession {
 	}
 
 	/**
+	 * KDM-243 R1 — the save this session continues, declared by the host before they joined.
+	 *
+	 * Stored on the same terms as `setWorldOptions` and read by the same rule (`_joined[0]` is the
+	 * host, because the gate seats the host before it will accept any guest), so there is again no
+	 * precedence to resolve: a guest has no entry at all.
+	 */
+	setSaveOption(clientId, save) {
+		const s = (typeof save === 'string') ? save : '';
+		if (s) this.saveOf.set(clientId, s);
+		else this.saveOf.delete(clientId);
+		return s;
+	}
+
+	/** The host's declared save, or `''` — which means "start a new game", i.e. everything before this. */
+	_hostSave() {
+		const host = this._joined[0];
+		return (host !== undefined && this.saveOf.get(host)) || '';
+	}
+
+	/**
 	 * KDM-238 — what perks this player STARTS WITH. The single fallback in the whole feature.
 	 *
 	 * The counterpart of `displayNameOf`, and it exists for the same reason: the legacy `#coop=` path
@@ -1948,7 +2063,16 @@ class SwapSession {
 	 * own character instead of a copy of whoever last held the player slot.
 	 */
 	_seatPlayer(clientId, pos) {
-		if (this._newPlayerTemplate) this.world.restorePlayer(this._newPlayerTemplate);
+		/*
+		 * KDM-243 A4 — which character this seat starts from.
+		 *
+		 * One lookup with the old field as the fallback, so an ordinary session reaches
+		 * `_newPlayerTemplate` exactly as it always did and the import path needs no branch at the
+		 * call sites (`_start` and `_admit` both stay untouched).
+		 */
+		const imported = this._templateOf.get(clientId) || null;
+		const template = imported || this._newPlayerTemplate;
+		if (template) this.world.restorePlayer(template);
 		/*
 		 * KDM-237 S1/S2 — what this player is called, in the two places it has to appear.
 		 *
@@ -1995,8 +2119,25 @@ class SwapSession {
 		 * another does not makes the generated floor depend on which bundle was swapped in. Every seat
 		 * is built from the same set, so no world read can disagree with itself.
 		 */
-		const base = (this._baseStats && this._baseStats.perks) || [];
-		this.world.applyPerks([...new Set([...base, ...this.partyPerks()])]);
+		/*
+		 * KDM-243 A4a — AN IMPORTED SEAT SKIPS BOTH OF THE NEXT TWO CALLS.
+		 *
+		 * `applyPerks` and `applyModes` are NEW-GAME operations. `applyPerks` runs KD's own
+		 * `KDInitPerks()`, which hands the player in the slot their starting restraints, weapons,
+		 * consumables and spell points, and rebuilds `KinkyDungeonStatsChoice` from scratch. Run over
+		 * a character resumed at floor 9 that means a second starting collar and a reset to a fresh
+		 * run's rules — it would visibly damage the very character the host asked to continue.
+		 *
+		 * The save already carries both halves: its perks came back with the character, and its modes
+		 * are what `_start` re-read into `_baseStats` after the load. The lobby's perk screen is a
+		 * new-game screen, so a host continuing a run is not choosing perks with it.
+		 *
+		 * The guest's seat has no entry in `_templateOf`, so it still gets the full treatment — which
+		 * is what makes their fresh character a real fresh character.
+		 */
+		if (!imported) {
+			const base = (this._baseStats && this._baseStats.perks) || [];
+			this.world.applyPerks([...new Set([...base, ...this.partyPerks()])]);
 		/*
 		 * KDM-239 A3 — and IMMEDIATELY after it, the game modes `applyPerks` just destroyed.
 		 *
@@ -2009,8 +2150,15 @@ class SwapSession {
 		 * Unconditional and applied to EVERY seat, including a latecomer's: "both players agree about
 		 * the world" is the property, so it cannot depend on who joined when.
 		 */
-		this.world.applyModes((this._baseStats && this._baseStats.modes) || []);
-		const chosen = this.nameOf.get(clientId) || '';
+			this.world.applyModes((this._baseStats && this._baseStats.modes) || []);
+		}
+		/*
+		 * KDM-243 A4b — and an imported seat is not renamed either. `setPlayerName` writes
+		 * `KDGameData.PlayerName`, which is the CHARACTER's name; the lobby name is the SESSION
+		 * identity, and that is what every label and announcement already uses (`displayNameOf`). A
+		 * host continuing their own run keeps the name that character has always had.
+		 */
+		const chosen = imported ? '' : (this.nameOf.get(clientId) || '');
 		if (chosen) this.world.setPlayerName(chosen);
 		this.world.placePlayer(pos.x, pos.y);
 		this.bundles.set(clientId, this.world.capturePlayer());
@@ -2113,7 +2261,11 @@ class SwapSession {
 	_perClientStores() {
 		return [
 			this.bundles, this.avatars, this.startOf, this.logs, this.actionMsgOf, this.nameOf,
-			this.perkOf, this.worldOf,
+			// KDM-243 — the save a host declared, and the character template it produced. Per-client
+			// containers like `worldOf` beside them, so a departing player takes both with them; a
+			// stale `_templateOf` entry would seat a RECONNECTING player from a character captured
+			// before the run moved on.
+			this.perkOf, this.worldOf, this.saveOf, this._templateOf,
 			this._eventSeq, this.pendingEvents, this._sentSoundDesc, this.vitalsOf,
 			this.defeated, this.tiedOf, this._pending, this._stateFp,
 		];

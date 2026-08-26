@@ -67,6 +67,34 @@ const GUEST_SLOT = 1;
  */
 const NAME_MAX = 24;
 
+/**
+ * KDM-243 R2 — the one place a host-supplied SAVE is made safe to carry.
+ *
+ * The largest thing this gateway ever accepts, and the most opaque: it is LZString-base64 produced
+ * by KD's own save loop, and nothing here parses it. Two rules only, both structural —
+ *
+ *   - **anything outside the base64 alphabet is removed.** Not validation (a save is still opaque
+ *     afterwards) but a floor: the value ends up inside an eval'd realm via a context slot, and
+ *     "it is JSON-encoded so it is safe" is an assumption this project has already been bitten by
+ *     (memory: backtick-in-template-literal). `$` and `-`/`_` are kept because LZString's
+ *     URI-safe and default alphabets both appear in the wild.
+ *   - **over `SAVE_MAX` answers `''`,** which callers turn into a REFUSAL. Deliberately not a
+ *     truncation: a truncated save fails to decompress later and reads as a corrupt save, which is
+ *     a far worse bug report than "your save is too large".
+ *
+ * `SAVE_MAX` is a wire cap, not a gameplay constant (epic AC2). Measured: an early-floor save is
+ * ~26-31 KB; a long run accumulates `KDWorldMap`, `KDPersistentNPCs` and per-floor maps, so 4 MB is
+ * far above any real save and far below anything that could wedge a session.
+ */
+const SAVE_MAX = 4 * 1024 * 1024;
+
+function sanitizeSave(raw) {
+	if (typeof raw !== 'string') return '';
+	const cleaned = raw.replace(/[^A-Za-z0-9+/=$\-_]/g, '');
+	if (cleaned.length > SAVE_MAX) return '';
+	return cleaned;
+}
+
 function sanitizeName(raw) {
 	if (raw === undefined || raw === null) return '';
 	const s = String(raw);
@@ -176,6 +204,15 @@ class JoinGate {
 		 * here would surface as a crash at the far end of the handshake rather than as "no mods".
 		 */
 		this.mods = [];
+		/**
+		 * KDM-243 R1 — the host's SINGLE-PLAYER SAVE, when they chose to continue one.
+		 *
+		 * A single field rather than a Map (unlike `world` above), because unlike a world declaration
+		 * there is nothing per-seat about it even in principle: the guest brings a character, never a
+		 * world (owner, 2026-08-22), so a second entry could only ever be a mistake waiting to be
+		 * merged. `''` means "start a new game", which is the entire pre-KDM-243 behaviour.
+		 */
+		this.save = '';
 	}
 
 	// ----- membership ----------------------------------------------------------------------
@@ -239,6 +276,17 @@ class JoinGate {
 	 */
 	claimHost(clientId, info) {
 		if (this.host && this.host !== clientId) return { accept: false, reason: 'already_hosting' };
+		/*
+		 * KDM-243 R2/R8 — an over-cap save is refused BEFORE anything is seated.
+		 *
+		 * First, and before `this.host` is set, because a refusal that had already half-claimed the
+		 * slot would leave a host seated with no session. `sanitizeSave` answers `''` for both "too
+		 * large" and "not a string", so the size is re-checked here rather than inferred: only the
+		 * former deserves a refusal, and only the former can be told apart by looking at the input.
+		 */
+		if (info && typeof info.save === 'string' && info.save.length > SAVE_MAX) {
+			return { accept: false, reason: 'save_too_large' };
+		}
 		this.host = clientId;
 		// "HOST is source of truth" (owner, 2026-08-22): when nobody configured a build, the host's is
 		// the session's, so N1 works without the operator setting anything. An EXPLICIT build wins —
@@ -260,6 +308,12 @@ class JoinGate {
 		// `!== undefined` so a claim that says nothing about mods leaves the set alone, while an
 		// explicit `[]` correctly means "I have none".
 		if (info && info.mods !== undefined) this.mods = normalizeDeclaration(info.mods);
+		// KDM-243 R1/R11 — the save the host chose to continue, on the SAME terms as `mods` directly
+		// above: a later claim REPLACES (the host is the source of truth including when they change
+		// their mind), and a claim that says nothing leaves what is there alone. An explicit `''`
+		// correctly means "start a new game instead". Only here — `requestJoin` never reads
+		// `info.save`, which is the whole of "the guest does not bring a world".
+		if (info && info.save !== undefined) this.save = sanitizeSave(info.save);
 		return { accept: true, slot: HOST_SLOT };
 	}
 
@@ -278,6 +332,21 @@ class JoinGate {
 	 * believes the host is running.
 	 */
 	hostMods() { return this.mods.slice(); }
+
+	/**
+	 * KDM-243 R1 — the save this session is continuing, or `''` for a new game.
+	 *
+	 * A string is already a copy, so unlike `hostMods` there is nothing to defend here.
+	 */
+	hostSave() { return this.save; }
+
+	/**
+	 * KDM-243 R1 — the save THIS client declared: the host's own, and `''` for everybody else.
+	 *
+	 * The per-client shape exists so `ws-bridge._carrySeat` can forward it exactly as it forwards
+	 * `worldOf`, without a role check of its own — "who may declare a save" is answered once, here.
+	 */
+	saveOf(clientId) { return (clientId && clientId === this.host) ? this.save : ''; }
 
 	// ----- asking to join ------------------------------------------------------------------
 
@@ -424,4 +493,7 @@ class JoinGate {
 	}
 }
 
-module.exports = { JoinGate, sanitizeName, sanitizePerks, NAME_MAX, PERKS_MAX, PERK_KEY_MAX, HOST_SLOT, GUEST_SLOT };
+module.exports = {
+	JoinGate, sanitizeName, sanitizePerks, sanitizeSave,
+	NAME_MAX, PERKS_MAX, PERK_KEY_MAX, SAVE_MAX, HOST_SLOT, GUEST_SLOT,
+};

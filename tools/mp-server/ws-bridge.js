@@ -72,7 +72,10 @@ const VERBATIM_CHANNELS = ['events', 'messages', 'unknownInputs', 'replacedInput
  *
  * `role`, `clientId` and `type` are deliberately ABSENT — they are routing, not declarations.
  */
-const HOST_JOIN_FIELDS = Object.freeze(['name', 'build', 'mods', 'perks', 'world']);
+// KDM-243 — `save` joins `world` in the host-only half, for exactly the same reason: the host brings
+// the world, the guest brings a character. This guard did its job on the way in — the field was added
+// to the client and this line was not, and the spec named it rather than letting it ship silently.
+const HOST_JOIN_FIELDS = Object.freeze(['name', 'build', 'mods', 'perks', 'world', 'save']);
 const GUEST_JOIN_FIELDS = Object.freeze(['name', 'build', 'mods', 'perks']);
 
 /**
@@ -309,6 +312,11 @@ class WSBridge {
 		// here: "who may declare a world" is answered in exactly one place, and it is not this one.
 		try { this.session.setWorldOptions(clientId, this.gate.worldOf(clientId)); }
 		catch (e) { /* a session that predates world declaration (KDM-239) */ }
+		// KDM-243 R1 — and the single-player save this host asked to continue, on exactly the same
+		// terms as the world above: the gate answers `''` for anyone who is not the host, so this
+		// needs no role check either. "Who may bring a world" stays answered in one place.
+		try { this.session.setSaveOption(clientId, this.gate.saveOf(clientId)); }
+		catch (e) { /* a session that predates save import (KDM-243) */ }
 	}
 
 	/**
