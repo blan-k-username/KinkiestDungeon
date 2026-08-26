@@ -71,6 +71,29 @@ const KDGAMEDATA_WORLD_KEYS = Object.freeze([
 	'NamesGenerated', 'Regiments', 'RegimentID',
 	'KinkyDungeonSpawnJailers', 'KinkyDungeonSpawnJailersMax',
 	'ChestsGenerated', 'PersistentNPCCache',
+	// KDM-277 — three more that are keyed by MAP COORDINATES or by a world slot, found by KDM-273's
+	// transition-write audit rather than by a bug:
+	//   PersistentItems    keyed by `RoomType + "," + KDCurrentWorldSlot.x + "," + .y`
+	//                      (KDMapGen.ts:70) and read across every slot by KinkyDungeonInventory.ts:3369.
+	//   AlreadyOpened      `{x, y}` map coordinates (KinkyDungeonTilesList.ts:643/659/687), read by
+	//                      `KDAlreadyOpened(x, y)` (KinkyDungeonGame.ts:381). "Has the party opened
+	//                      this tile" — the direct sibling of ChestsGenerated directly above.
+	//   KeyringLocations   `{x, y}` map coordinates for jail keyring placement (KinkyDungeonJail.ts:651).
+	// Pinned by tests/unit/mp-world-generation-keys.spec.ts (divergence + control on each).
+	'PersistentItems', 'AlreadyOpened', 'KeyringLocations',
+	// KDM-277 — the run's JOURNEY TYPE ("Random"/"Harder"/"Explorer"), written at
+	// KDStairActions.ts:187 and KinkyDungeon.ts:4455. It is the INPUT to
+	// `KDInitializeJourney(KDGameData.Journey, level)` (KDStairActions.ts:188, KDMapGen.ts:681), which
+	// builds `JourneyMap` — already a world key since KDM-265. Leaving the input per-player while its
+	// output is world is exactly the half-classified pair KDM-228 warns about: two players holding
+	// different journey types would generate different journey maps for one party.
+	'Journey',
+	// KDM-277 — the jail-point selection timer for ENEMIES (KinkyDungeonEnemies.ts:202/205/215, reset
+	// at KDMapGen.ts:48). Decisive detail: it is compared against and assigned from
+	// `KinkyDungeonCurrentTick`, which is itself blacklisted world state. A per-player value
+	// denominated in a world clock is incoherent — whoever was swapped in last would move the party's
+	// shared jail timer. Pinned by tests/unit/mp-journey-jail-keys.spec.ts.
+	'PreferredJailPointTick',
 	// KDM-243 — the seed the CURRENT map was generated from, and the value KD's save loader re-seeds
 	// the RNG to (`KinkyDungeon.ts:7379`). Classified with `KinkyDungeonSeed` in GLOBAL_BLACKLIST,
 	// which is where the full argument lives: they are written by one statement
@@ -291,6 +314,18 @@ const GLOBAL_BLACKLIST = Object.freeze([
 	// player in. Excluded before this only by its 386 KB size, which meant a one-time append warned
 	// forever (the audit never re-baselines) while costing 3.9 ms of every audit.
 	'KinkyDungeonEnemies',
+	// KDM-277: the enemy COMMANDER ROLE table, `Map<number, string>` keyed by `enemy.id`
+	// (KDCommander.ts:174/179, deleted at :205/:209). A number key in KD is an entity id, so this is
+	// criterion (a) verbatim — the same argument KDIDCache and KDEntityFlagCache below already rest
+	// on. Flagged by KDM-273's transition-write audit because KinkyDungeonCreateMap resets it.
+	'KDCommanderRoles',
+	// KDM-277 (criterion b): generation state, by name and by use. Set during generation
+	// (KDMapGen.ts:239/245, KinkyDungeonSetpiece.ts:355, KinkyDungeonAlt.ts:2504/2548) and read BY
+	// generation to decide jail placement (KDMapGen.ts:460, :615).
+	'KDStageBossGenerated',
+	// KDM-277 (criterion b): map points of interest emitted by the generator (KDMapGen.ts:383-384),
+	// drawn at KinkyDungeonDraw.ts:4355. They describe the map, so they belong to the one map.
+	'KinkyDungeonPOI',
 	'KDEnemiesCache', 'KDEnemyCache', 'KDEnemyEventCache', 'KDIDCache', 'KDEntityFlagCache',
 	'KDEntityRestraintMetadata', 'KDThoughtBubbles',
 	'KDBuffedStatTypeMemo', 'KDBuffedStatTypeMemoUpdate',
@@ -327,6 +362,26 @@ const GLOBAL_BLACKLIST = Object.freeze([
 	// reaches `_auditOversize` (see KDM-221). MEASURED: a sub-20 KB entry rode the wire.
 	'KDSaveQueue',
 	'KDDrawUpdate', 'KDVisionUpdate', 'KDUpdateChokes', 'KDAlertCD',
+	// KDM-277: three more of exactly this category, found by KDM-273's transition-write audit rather
+	// than by a bug — they were missing from a decision that had already been made, which is the
+	// cheapest possible kind of finding and the reason that audit exists.
+	//
+	// Every read of each is on the DRAW path, and each is cleared only by draw-path code:
+	//   KinkyDungeonUpdateLightGrid  read at KinkyDungeonDraw.ts:1236 / :4906, cleared at :4887 by
+	//                                KDUpdateVision. Its eight writers all mean "re-render".
+	//   KDRedrawFog                  a countdown set by map gen (KDMapGen.ts:755), the save load
+	//                                (KinkyDungeon.ts:7901) and KDUpdateVision (Draw.ts:4888); read
+	//                                and decremented ONLY by the fog/minimap render
+	//                                (KinkyDungeonVision.ts:618, :917).
+	//   KDTileModes                  read by exactly one thing — a draw-time alpha oscillator
+	//                                (KinkyDungeonTiles.ts:392-393). Presentation, not state.
+	//
+	// Same consequence as KDDamageQueue (KDM-186): the server has no draw loop, so the clearing code
+	// never runs and these never return to baseline — they were captured as diverged per-player state
+	// on every bundle, letting the acting player's stale "please redraw" land on the world.
+	// Pinned by tests/unit/mp-render-dirty-flags.spec.ts, with a same-SHAPED control per flag
+	// (boolean / number / object) so "absent from the bundle" cannot pass on a broken capture layer.
+	'KinkyDungeonUpdateLightGrid', 'KDRedrawFog', 'KDTileModes',
 	'lastFloaterRefresh', 'KDParticleid', 'KDCurrentModels', 'KDRefreshCharacter',
 	// --- client audio: neither player nor world ------------------------------
 	'KDMusicToast', 'KDMusicUpdateTime',

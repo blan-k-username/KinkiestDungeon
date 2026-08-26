@@ -109,23 +109,26 @@ const PER_PLAYER_BY_DECISION: Record<string, { verdict: Verdict; why: string }> 
 	// These are the audit's yield. Each looks like world state; none is being moved here, because a
 	// classification change without its own divergence test is exactly the unproven state the epic
 	// already carries one of (NPCRestraints). KDM-277 decides them one at a time, with tests.
-	'KDGameData.PersistentItems':    { verdict: 'flagged', why: 'KDM-277: keyed by RoomType + KDCurrentWorldSlot (KDMapGen.ts:69-73)' },
-	'KDCommanderRoles':              { verdict: 'flagged', why: 'KDM-277: Map<number,string> — a number key is an entity id, criterion (a)' },
-	'KDGameData.AlreadyOpened':      { verdict: 'flagged', why: 'KDM-277: pushes {x,y} map coords; sibling of ChestsGenerated which IS world' },
-	'KDGameData.KeyringLocations':   { verdict: 'flagged', why: 'KDM-277: map locations, reset by KDInitTempValues' },
-	'KDStageBossGenerated':          { verdict: 'flagged', why: 'KDM-277: generation state, criterion (b)' },
-	'KinkyDungeonPOI':               { verdict: 'flagged', why: 'KDM-277: map points of interest emitted by the generator' },
-	'KinkyDungeonGrid_Last':         { verdict: 'flagged', why: 'KDM-277: cache over KDMapData.Grid, i.e. derived from shared world state' },
-	'KinkyDungeonUpdateLightGrid':   { verdict: 'flagged', why: 'KDM-277: render dirty flag; category already blacklisted (KDVisionUpdate et al)' },
-	'KDRedrawFog':                   { verdict: 'flagged', why: 'KDM-277: render dirty flag, with the above' },
-	'KDTileModes':                   { verdict: 'flagged', why: 'KDM-277: draw-time alpha oscillator (KinkyDungeonTiles.ts:392) — presentation' },
-	'KDGameData.PrisonerState':      { verdict: 'flagged', why: 'KDM-277: jail is world furniture but "is THIS player a prisoner" reads per-player' },
-	'KDGameData.PreferredJailPointTick': { verdict: 'flagged', why: 'KDM-277: same jail question' },
-	'KDGameData.PriorJailbreaksDecay':   { verdict: 'flagged', why: 'KDM-277: same jail question' },
-	'KDGameData.Journey':            { verdict: 'flagged', why: 'KDM-277: run-level journey type; confirm it is not a per-player choice' },
-	'MiniGameVictory':               { verdict: 'flagged', why: 'KDM-277: a victory ends the run for the party' },
-	'KinkyDungeonRep':               { verdict: 'flagged', why: 'KDM-277: its own decl comment points at legacy server rep plumbing' },
-	'KDRestraintsCache':             { verdict: 'flagged', why: 'KDM-277: derived cache; excluded by accident rather than decision (cf. KDM-202)' },
+	// KDM-277: reviewed and DECIDED per-player, against the initial flag. The flag read "cache over
+	// KDMapData.Grid" — inferred from the NAME. In fact it is written in exactly two places
+	// (KinkyDungeonGame.ts:72 declaring "", KDMapGen.ts:270 resetting to "") and READ NOWHERE in
+	// Game/src. Vestigial, never diverges from baseline, and blacklisting it would be speculative.
+	'KinkyDungeonGrid_Last':         { verdict: 'player', why: 'no reader anywhere in Game/src — vestigial, never diverges' },
+	// KDM-277: reviewed and DECIDED per-player, against KDM-273's initial flag. The deciding read is
+	// KinkyDungeonAggressive(enemy, player) — the PrisonerState branches sit inside its own
+	// '// Player mode' guard (KinkyDungeonFactions.ts:8-16), so it answers "is this enemy aggressive
+	// toward THE PLAYER". Under the swap model that is what you want: each turn installs the ACTING
+	// player's bundle, so enemy AI judges aggression against that player's own jail status. Making it
+	// world would force both players into one jail state — a co-op DESIGN change, not a fix.
+	'KDGameData.PrisonerState':      { verdict: 'player', why: 'KDM-277: read inside the "Player mode" branch of KinkyDungeonAggressive; jail FURNITURE stays world (JailGuard)' },
+	// KDM-277: classifies WITH KDGameData.PriorJailbreaks, which the audit never saw (no transition
+	// site writes it). Read together in one expression (KinkyDungeonJailList.ts:149); the counter is
+	// incremented when THIS player breaks out (KinkyDungeonDialogue.ts:1625). Splitting the pair is
+	// the failure KDM-228 names, so both stay per-player.
+	'KDGameData.PriorJailbreaksDecay': { verdict: 'player', why: 'KDM-277: pairs with PriorJailbreaks, the acting player\'s own jailbreak history' },
+	'MiniGameVictory':               { verdict: 'player', why: 'KDM-277: a BondageClub shim global (Scripts/Patch.ts:33), not KD state; nothing reads it standalone' },
+	'KinkyDungeonRep':               { verdict: 'player', why: 'KDM-277: mirrors the INDIVIDUAL player BC "Gaming" rep; consumers are stubs in Patch.ts:18-19' },
+	'KDRestraintsCache':             { verdict: 'player', why: 'KDM-277: declared Restraints.ts:629, reset Game.ts:940, read NOWHERE — vestigial like Grid_Last' },
 };
 
 // ── extraction ────────────────────────────────────────────────────────────────────────────────────
@@ -354,6 +357,18 @@ describe('KDM-273 — every transition-written key carries a recorded classifica
 		expect(contradictions,
 			'These keys are declared WORLD in production code AND recorded as deliberately per-player in '
 			+ 'the register. Remove the register entry — the production list is the source of truth.')
+			.toEqual([]);
+	});
+
+	it('any FLAGGED entry names the task that will decide it', () => {
+		// `flagged` means "reviewed, left per-player for now" — a legitimate verdict, but only while
+		// somebody owns finishing it. Without this, `flagged` degrades into a way to silence the guard
+		// forever. KDM-277 cleared the original backlog to zero; this keeps the next one accountable.
+		const unowned = Object.entries(PER_PLAYER_BY_DECISION)
+			.filter(([, v]) => v.verdict === 'flagged' && !/KDM-\d+/.test(v.why))
+			.map(([k]) => k);
+		expect(unowned,
+			'a flagged entry must cite the task that decides it, or it is an excuse rather than a decision')
 			.toEqual([]);
 	});
 

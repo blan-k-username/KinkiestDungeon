@@ -777,3 +777,31 @@ by decision** — `KDGameData.PersistentItems` (keyed by `RoomType + KDCurrentWo
 `KDCommanderRoles` (`Map<number,…>`, i.e. entity-keyed), `KDStageBossGenerated`, `KinkyDungeonPOI`,
 and three render dirty flags that belong in a category `GLOBAL_BLACKLIST` already has. They are
 recorded as `flagged`, and KDM-277 decides them one at a time, each with its own divergence test.
+
+### Outcome of the first audit run (KDM-277)
+
+The backlog it produced is closed: **17 flagged → 0**. Eleven keys moved, six are recorded as
+deliberately per-player. What moved, and on which criterion:
+
+| moved to | keys | why |
+|---|---|---|
+| `GLOBAL_BLACKLIST` (render) | `KinkyDungeonUpdateLightGrid`, `KDRedrawFog`, `KDTileModes` | every read is on the draw path; the server has no draw loop, so they never returned to baseline (the `KDDamageQueue` argument) |
+| `GLOBAL_BLACKLIST` (world) | `KDCommanderRoles`, `KDStageBossGenerated`, `KinkyDungeonPOI` | entity-id-keyed `Map` (a); generation state read *by* generation (b); generator-emitted map POIs (b) |
+| `KDGAMEDATA_WORLD_KEYS` | `PersistentItems`, `AlreadyOpened`, `KeyringLocations`, `Journey`, `PreferredJailPointTick` | keyed by world slot or map coordinates; `Journey` is the input that builds the already-world `JourneyMap`; the jail tick is denominated in the already-world `KinkyDungeonCurrentTick` |
+
+**Six negative decisions, each now pinned by a test** so nobody later "completes the set":
+
+- `KinkyDungeonGrid_Last` and `KDRestraintsCache` — written and reset, but **read nowhere** in
+  `Game/src`. Vestigial; blacklisting them would be speculative.
+- `MiniGameVictory` and `KinkyDungeonRep` — BondageClub integration, not KD state. Both live in
+  `Scripts/Patch.ts`, the standalone shim that stubs BC's API (`ReputationGet` returns 0,
+  `DialogSetReputation` does nothing). `KinkyDungeonRep` is each human's own account progression.
+- `KDGameData.PrisonerState` and `.PriorJailbreaksDecay` — the deciding read is
+  `KinkyDungeonAggressive(enemy, player)`, whose `PrisonerState` branches sit inside its own
+  `// Player mode` guard. Under the swap model, per-player is what you want: each turn installs the
+  acting player's bundle, so enemy AI judges aggression against *that* player's jail status. Making it
+  world would force both players into one jail state — a co-op **design** change, not a fix. The
+  jail's furniture stays world (`JailGuard`), where it already was.
+
+Three of those six **reverse the audit's own flag**, which is the register working as intended: the
+flag says "a human must look", not "this is wrong".
