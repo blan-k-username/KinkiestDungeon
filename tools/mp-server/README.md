@@ -8,6 +8,10 @@ over one shared scenario, kept consistent each turn.
 This is PoC-tier. Production hardening lives in KD-067 (host), KD-068 (serverMode),
 KD-069 (orchestrator), KD-070 (reconciler).
 
+> **Just want to play it with a friend?** [`PLAYING-COOP.md`](PLAYING-COOP.md) is the player's guide —
+> hosting, joining, the keys, and what to do when a connection drops. This file is the developer's
+> half and assumes you have read none of it.
+
 ## Files
 
 | File | Role |
