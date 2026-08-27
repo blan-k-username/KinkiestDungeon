@@ -85,6 +85,14 @@ const PARTY_GATE_RADIUS = 1;
 const PEACE_DIALOGUE = 'KDCoopPeace';
 
 /**
+ * KDM-246 — co-op chat. A MESSAGE-SIZE cap and a text colour, not gameplay rules (I6): nothing here
+ * decides anything about the dungeon. The cap is the server-side control on what a player may put
+ * into the party's log; the client's `MaxLength` attribute is a courtesy and is not trusted.
+ */
+const CHAT_MAX = 200;
+const CHAT_COLOR = '#ffe066';
+
+/**
  * KDM-251: every dialogue the GATEWAY itself owns — as opposed to the hundreds the game ships.
  *
  * Two rules need this set, and before this task each hand-rolled its own answer to "is this ours?"
@@ -852,7 +860,49 @@ class SwapSession {
 			return ui({ offered: true, notify: [peer] });
 		}
 
+		/**
+		 * KDM-246 — chat. An `mp:` action for the reason spelled out at the top of `apply`: KD has no
+		 * input type for "say something to the other human", and inventing one would put a gateway
+		 * feature into `KDInputTypes` AND route it through lockstep, so a message would wait for the
+		 * partner to move before it could be read.
+		 *
+		 * Ungated on purpose (no peace check, no floor check, no adjacency): this is two people at two
+		 * keyboards, and gating it removes coordination exactly when it is needed. It writes no game
+		 * state at all, which is what keeps it inside KDM-226's one-player test.
+		 */
+		if (action.mp === 'chat.say') {
+			const text = SwapSession.sanitizeChat(action.text);
+			if (!text) return ui({ changed: false, error: 'empty message' });
+			this._say(this.displayNameOf(clientId), text);
+			this._dbg(`CHAT ${clientId} -> party (${text.length} chars)`);
+			return ui({ chat: true, notify: [peer] });
+		}
+
 		return ui({ changed: false, error: `unknown mp action "${action.mp}"` });
+	}
+
+	/**
+	 * KDM-246 R5 — the ONLY control on what a player may put into the party's log.
+	 *
+	 * Static and pure so it can be tested without booting a session: the `KDTextField`'s `MaxLength`
+	 * attribute is a client COURTESY, and a client that does not use our client can simply not
+	 * honour it, so the cap that matters is this one and it must be cheap enough to test exhaustively.
+	 *
+	 * IT DELIBERATELY DOES NOT ESCAPE ANYTHING. `HeadlessHost.sendFeedback` already crosses the eval
+	 * boundary through `JSON.stringify` (`headless-host.js`), which is correct — but every string
+	 * that had ever crossed it before chat was written by US. Escaping here as well would
+	 * double-encode (a player's backslash would reach their partner doubled) and, worse, would hide
+	 * the real invariant behind a sanitiser that looks like it owns the problem. `mp-chat.spec.ts`
+	 * therefore fires backticks and `${...}` at the live boundary and asserts they arrive verbatim.
+	 *
+	 * Control characters collapse to spaces because a log entry is ONE line —
+	 * `KinkyDungeonSendTextMessage` has no notion of a break, so a newline would either vanish or
+	 * break the layout depending on the glyph, and neither is worth leaving to chance.
+	 */
+	static sanitizeChat(raw) {
+		if (raw === null || raw === undefined) return '';
+		// eslint-disable-next-line no-control-regex
+		return String(raw).replace(/[\u0000-\u001F\u007F]+/g, ' ').trim().slice(0, CHAT_MAX);
 	}
 
 	/**
@@ -3053,11 +3103,31 @@ class SwapSession {
 	 * lines are captured inside that player's swap window and never broadcast (KDM-165). Broadcasting
 	 * is reserved for facts about the SESSION, which the gateway alone knows.
 	 */
-	_broadcast(text, color = '#88ccff', time = 10) {
-		const fb = this.world.sendFeedback(text, color, time);
+	_broadcast(text, color = '#88ccff', time = 10, filter = 'Self') {
+		const fb = this.world.sendFeedback(text, color, time, filter);
 		const entries = (fb && fb.entries) || [];
 		for (const pid of this._joined) this._pushLog(pid, entries);
 		return entries;
+	}
+
+	/**
+	 * KDM-246 — one player's words, to the whole party, under the `Chat` log filter.
+	 *
+	 * WHY THIS REUSES `_broadcast` RATHER THAN COPYING IT. The requirements drew a sharp line —
+	 * `_broadcast` is the proxy speaking in its OWN words about the session, chat is a person
+	 * speaking — and that line is real. But mechanically the two are the same four lines ("render
+	 * through the game's own feedback, then push the entries into every joined player's log"), and
+	 * `_broadcast` exists precisely because that had been written five times over (see its comment
+	 * above). A sixth copy for chat would re-create the bug KDM-263 paid to remove.
+	 *
+	 * So the separation lives where a player can actually see it — the `Chat` filter tag, and a
+	 * method that is not called `broadcast` — instead of in a duplicated loop.
+	 *
+	 * The party is both players, which is what makes the SENDER's log their own chat history: KD's
+	 * message log is the only scrollback this feature has.
+	 */
+	_say(who, text) {
+		return this._broadcast(`${who}: ${text}`, CHAT_COLOR, 10, 'Chat');
 	}
 
 	/** Append message-log entries to a player's personal log, trimmed to maxLog (KD-098). */

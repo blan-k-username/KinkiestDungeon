@@ -828,12 +828,19 @@ class HeadlessHost {
 	 * log entry so the caller can route it to the right player's personal log. NOT a fake
 	 * string injection — the game's own messaging code runs. Used for PvP hit feedback, which
 	 * the silent `KinkyDungeonDealDamage` path never emits on its own.
+	 *
+	 * KDM-246 — `filter` is KD's own log-filter TAG (`KinkyDungeonGame.ts:2601`, 8th parameter),
+	 * which the log's draw pass honours (`KinkyDungeonDraw.ts:2819/2862`). It defaults to KD's own
+	 * `'Self'`, so every pre-existing caller is unchanged. Co-op chat passes `'Chat'`, which is what
+	 * lets a player hide chat without hiding the game.
+	 *
+	 * `noDupe` is deliberately left falsy: two identical chat lines must both appear.
 	 */
-	sendFeedback(text, color, priority) {
+	sendFeedback(text, color, priority, filter) {
 		return this.eval(`(function(){
 			var before = (typeof KinkyDungeonMessageLog!=="undefined"&&KinkyDungeonMessageLog)?KinkyDungeonMessageLog.length:0;
 			if (typeof KinkyDungeonSendTextMessage === 'function') {
-				KinkyDungeonSendTextMessage(${priority | 0} || 10, ${JSON.stringify(String(text))}, ${JSON.stringify(String(color || '#ff5555'))}, 2);
+				KinkyDungeonSendTextMessage(${priority | 0} || 10, ${JSON.stringify(String(text))}, ${JSON.stringify(String(color || '#ff5555'))}, 2, undefined, undefined, undefined, ${JSON.stringify(String(filter || 'Self'))});
 			}
 			var L = (typeof KinkyDungeonMessageLog!=="undefined"&&KinkyDungeonMessageLog)?KinkyDungeonMessageLog:[];
 			var added = L.slice(before);

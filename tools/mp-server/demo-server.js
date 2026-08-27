@@ -129,6 +129,11 @@ const INJECT = [
 	// KDGetContextActions.Game — new co-op entries go IN it. AFTER coop-bootstrap: it sends through
 	// `window.__coop.sendAction`.
 	'/tools/mp-server/client/coop-menu.js',
+	// KDM-246: co-op chat. AFTER coop-bootstrap for the same reason as the menu above — it sends
+	// through `window.__coop.sendAction` — and it needs the bundle in scope, because it wraps
+	// KinkyDungeonDrawMessages and registers itself in KD's own KDLogFilters /
+	// KDFocusableTextFields arrays.
+	'/tools/mp-server/client/coop-chat.js',
 	// KDM-233: the main-menu Multiplayer entry + host/join screens. AFTER coop-bootstrap — it drives
 	// `window.__coopConnect` / `window.__coopAnswerJoin`.
 	'/tools/mp-server/client/coop-lobby.js',

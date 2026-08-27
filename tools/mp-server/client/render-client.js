@@ -264,6 +264,26 @@
 		KinkyDungeonPlayerEntity: ['visual_stamina', 'visual_mana'],
 	};
 
+	/**
+	 * KDM-246 — KDGameData keys that belong to the PERSON AT THIS BROWSER, not to their character.
+	 *
+	 * `KDGameData` is otherwise server-authoritative: `adoptBundle` writes every key the bundle
+	 * carries, which is right for everything describing the run. `LogFilters` is not that. It is which
+	 * message-log tabs this viewer wants to see — a preference belonging to the same category as
+	 * `visual_*` above, and the server has no opinion about it because the headless host never draws a
+	 * log.
+	 *
+	 * MEASURED, not argued (assessment F4): a player toggling a filter off had it silently restored by
+	 * the next state frame, and the same-shape control key toggled in the same breath came back too —
+	 * so the finding is "the server owns LogFilters", not "one key is special". Pinned by
+	 * `tests/e2e/mp-coop-chat.spec.ts`, which toggles a real filter and a control and requires both to
+	 * survive a frame.
+	 *
+	 * Cost, stated rather than discovered: the server's copy never learns the choice, so an exported
+	 * save does not carry it. That is a UI toggle, not run state.
+	 */
+	var CLIENT_OWNED_GAMEDATA_KEYS = ['LogFilters'];
+
 	/*
 	 * "ABSENT FROM THE BUNDLE ⇒ BACK TO ITS DEFAULT" — the client half of the swap rule.
 	 *
@@ -344,6 +364,10 @@
 			for (var gk in b.gameData) {
 				if (!Object.prototype.hasOwnProperty.call(b.gameData, gk)) continue;
 				if (b.gameData[gk] === undefined) continue;
+				// KDM-246: a viewer's own UI preference is never overwritten by the server's copy of it
+				// — see CLIENT_OWNED_GAMEDATA_KEYS. Skipped on ADOPT rather than stripped on capture,
+				// because the server is entitled to hold a value here; it just is not the authority.
+				if (CLIENT_OWNED_GAMEDATA_KEYS.indexOf(gk) >= 0) continue;
 				try { KDGameData[gk] = dec(b.gameData[gk]); n++; } catch (e) { /* not assignable */ }
 			}
 		}
