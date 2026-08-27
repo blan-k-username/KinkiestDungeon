@@ -49,9 +49,6 @@
 	var open = false;
 	var lastError = null;
 	var warned = false;
-	var logError = null;
-	var logDraws = 0;
-	var ourLogDraws = 0;
 	var drawCalls = 0;
 	var fieldCalls = 0;
 	var listening = false;
@@ -115,31 +112,19 @@
 				/* options */ { hotkey: HOTKEY, hotkeyPress: HOTKEY });
 		}
 		/*
-		 * DRAW KD'S MESSAGE LOG, because in a co-op session nothing else does.
+		 * KDM-285 — CHAT DOES NOT DRAW THE GAME'S LOG. It used to, and that was a symptom fix.
 		 *
-		 * MEASURED, not assumed. `KinkyDungeonDrawMessages` is called from a block gated on
-		 * `KinkyDungeonDrawState == "Game"` and `KinkyDungeonIsPlayer()`
-		 * (`KinkyDungeonDraw.ts:1151/1153`); a render client with local simulation disabled satisfies
-		 * neither, so the log is never painted. An e2e probe counted `{drawGame: 8, drawMessages: 0}`
-		 * over three seconds, and the painted-text recorder on the partner's page came back holding
-		 * one glyph — `"+"` — with the chat line present in `KinkyDungeonMessageLog` and invisible on
-		 * screen.
+		 * The reasoning it rested on ("the block containing `KinkyDungeonDrawMessages` is gated on
+		 * `KinkyDungeonDrawState == 'Game'` and `KinkyDungeonIsPlayer()`, and a render client
+		 * satisfies neither") was disproved by measurement: a probe on both co-op pages reported
+		 * `{drawState: "Game", isPlayer: true, drawInterface: 8, afterDrawFrame: 8}` — the block runs
+		 * every frame, and `KinkyDungeonIsPlayer()` is `return true` unconditionally.
 		 *
-		 * So this calls the GAME'S OWN renderer rather than drawing chat lines ourselves: the log
-		 * stays KD's, with KD's layout, filters and toggle. It is a view of state the game already
-		 * holds, not a second renderer.
-		 *
-		 * ⚠️ SCOPE: this incidentally restores EVERY game message for co-op players, not just chat —
-		 * they were all invisible before. That is a fix chat needed in order to be visible at all, but
-		 * it is bigger than chat; see the task's Tech Debt note.
-		 *
-		 * Its own try/catch on purpose: if the log draw fails on some state a render client lacks,
-		 * chat must still work, and vice versa.
+		 * What actually suppressed the log was OUR OWN `ensureQuickBind()` leaving
+		 * `KinkyDungeonTargetingSpell` armed forever; `coop-bootstrap.js` now disarms it, and KD
+		 * paints its own log again — with its own layout, filters and toggle, which is where that
+		 * responsibility belongs. Chat owns chat.
 		 */
-		if (typeof KinkyDungeonDrawMessages === 'function') {
-			ourLogDraws++;
-			try { KinkyDungeonDrawMessages(); } catch (e) { logError = String((e && e.message) || e); }
-		}
 
 		if (!open || typeof KDTextField !== 'function') return;
 		fieldCalls++;
@@ -199,26 +184,12 @@
 		return true;
 	}
 
-	/**
-	 * COUNT EVERY invocation of the log draw, so "we are the only caller" stays a MEASUREMENT.
-	 *
-	 * The whole justification for calling `KinkyDungeonDrawMessages()` above is that in a co-op client
-	 * nobody else does. That was established by a probe installed from `page.evaluate` — and a zero
-	 * from a wrapper installed in the wrong realm is indistinguishable from a real zero (memory
-	 * `evaluate cannot wrap bundle bindings`). If the reading were wrong, or if upstream later removes
-	 * the gate, we would be drawing the log TWICE and no assertion would notice.
-	 *
-	 * This wrap lives in the injected script — the same realm and the same binding our own call uses —
-	 * and it counts total invocations. `mp-coop-chat.spec.ts` asserts `logDraws === ourLogDraws`: any
-	 * other caller makes the totals diverge, and the honest outcome is a red rather than a doubled log.
+	/*
+	 * KDM-285 — the `logDraws` / `ourLogDraws` counter that used to sit here is GONE with the call it
+	 * policed. It existed to keep "chat is the only caller of the log draw" a measurement rather than
+	 * a belief; chat is now no caller at all, so the honest place to count KD's own log draws is the
+	 * spec that asserts they happen (`mp-coop-log-visible.spec.ts`), not this module.
 	 */
-	if (typeof KinkyDungeonDrawMessages === 'function' && !KinkyDungeonDrawMessages._kdcoop_chat_counted) {
-		var _prevMsg = KinkyDungeonDrawMessages;
-		var countedMsg = function () { logDraws++; return _prevMsg.apply(this, arguments); };
-		countedMsg._kdcoop_chat_counted = 1;
-		countedMsg._kdcoop_chat_original = _prevMsg;
-		KinkyDungeonDrawMessages = countedMsg;
-	}
 
 	// The field id must be known to KD BEFORE anything can be typed into it, or the first keystroke
 	// walks the player instead.
@@ -238,7 +209,7 @@
 			isOpen: function () { return open; },
 			/** Diagnostic: what the draw wrap last failed with, or null. */
 			lastError: function () { return lastError; },
-			diag: function () { return { drawCalls: drawCalls, fieldCalls: fieldCalls, lastError: lastError, logError: logError, logDraws: logDraws, ourLogDraws: ourLogDraws }; },
+			diag: function () { return { drawCalls: drawCalls, fieldCalls: fieldCalls, lastError: lastError }; },
 		};
 	}
 })();

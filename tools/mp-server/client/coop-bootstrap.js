@@ -648,6 +648,26 @@
 	 * don't carry — so every restraint click is gated out by the quantity check and "Tie Up
 	 * does nothing". We only select when the player has no selection of their own, and only a
 	 * generic raw binding material they actually own — pure stock data/selection, no patch.
+	 *
+	 * ⚠️ KDM-285 — DISARM THE SPELL AFTERWARDS, and never take that line out.
+	 *
+	 * Stock `KinkyDungeonAttemptQuickRestraint` sets THREE things (KinkyDungeonInventory.ts:4304):
+	 * the item, the weapon, and `KinkyDungeonTargetingSpell = KDBondageSpell`. The third one is the
+	 * player saying "I am now aiming"; in stock KD the very next click or Escape clears it. This
+	 * client does not simulate, so nothing ever did — every co-op session ran from boot to exit in
+	 * permanent spell-targeting mode, and KD deliberately hides a long list of HUD while you aim:
+	 *
+	 *   - the whole message log            KinkyDungeonDraw.ts:1934   ← the symptom that got noticed
+	 *   - buff / debuff icons              KinkyDungeonHUD.ts:395
+	 *   - the quick resources readout      KinkyDungeonHUD.ts:3927 (KDDrawResourcesQuick)
+	 *   - spell key handling               KinkyDungeonHUD.ts:282 (KinkyDungeonHandleSpell)
+	 *   - the move helper highlight        KinkyDungeonDraw.ts:1429/1443 (KDToggles.Helper forced off)
+	 *   - quick-inventory mouse handling   KinkyDungeonHUD.ts:264
+	 *   - plus a targeting reticle and a force-lit mana bar painted every frame (1442-1556, 1822)
+	 *
+	 * Only the SELECTION is wanted here, so only the selection is kept. Measured, not reasoned:
+	 * `mp-coop-log-visible.spec.ts` asserts both halves — nothing armed, and KD drawing its own log —
+	 * and it goes red on either one alone.
 	 */
 	function ensureQuickBind() {
 		try {
@@ -659,6 +679,8 @@
 				var r = KDRestraint(inv[i].item);
 				if (r && r.shrine && r.shrine.indexOf('Raw') >= 0) {
 					KinkyDungeonAttemptQuickRestraint(inv[i].name);
+					// Selecting a material is not aiming. See the block comment above.
+					KinkyDungeonTargetingSpell = null;
 					return;
 				}
 			}

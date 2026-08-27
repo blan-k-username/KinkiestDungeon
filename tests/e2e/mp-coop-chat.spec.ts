@@ -148,21 +148,18 @@ test('a typed message reaches the partner, costs no turn, and does not eat WASD'
 		// The project-wide invariant, asserted while we happen to be recording.
 		expect(painted.unresolved, 'no unresolved text key may be painted').toEqual([]);
 
-		// ---- WE ARE THE ONLY CALLER OF THE LOG DRAW — kept a measurement, not a belief ----------
+		// ---- CHAT DRAWS ONLY CHAT (KDM-285) -----------------------------------------------------
 		//
-		// `coop-chat.js` calls `KinkyDungeonDrawMessages()` itself ONLY because nothing else does in a
-		// co-op client. If that reading is ever wrong — or upstream removes the
-		// `KinkyDungeonDrawState == "Game"` gate — the log would be drawn TWICE and every other
-		// assertion here would still pass. The counter lives inside the injected script, in the same
-		// realm and on the same binding our own call uses, so it sees every invocation.
+		// This used to assert `logDraws === ourLogDraws` — "chat is the only caller of the game's log
+		// draw" — because chat called `KinkyDungeonDrawMessages()` itself. That call was a symptom
+		// fix for a defect of ours (`ensureQuickBind` leaving a targeting spell armed forever, which
+		// makes KD hide the log); with the cause fixed, KD paints its own log and chat calls nothing.
+		// `mp-coop-log-visible.spec.ts` owns that assertion now. What is left to check here is that
+		// chat's per-frame hook is alive and not swallowing throws — the line above already proved
+		// the message itself was PAINTED, which is the outcome those counters existed to protect.
 		const draws = await B.evaluate(() => (window as any).KDCoopChat.diag());
-		expect(draws.ourLogDraws, 'CONTROL: we did call it, so the equality below is not 0 === 0')
-			.toBeGreaterThan(0);
-		expect(draws.logDraws,
-			`the game must not also be drawing the log (ours=${draws.ourLogDraws}, total=${draws.logDraws}) `
-			+ '— if these diverge, drop our call and let KD do it')
-			.toBe(draws.ourLogDraws);
-		expect(draws.logError, 'the log draw must not be throwing on a render client').toBe(null);
+		expect(draws.drawCalls, "chat's own per-frame hook is running").toBeGreaterThan(0);
+		expect(draws.lastError, 'chat must not be swallowing a throw every frame').toBe(null);
 
 		// R2 — the shared turn counter never moved for this.
 		expect(await A.evaluate(() => (window as any).__coop.lastTick),
