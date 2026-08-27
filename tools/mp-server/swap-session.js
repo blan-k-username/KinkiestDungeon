@@ -31,7 +31,7 @@ const { KD_PERK_CHOICE } = require('./kd-perk-choice');
 const { KD_JOURNEY_CHOICE } = require('./kd-journey-choice');
 const { KD_SHOP_BUY } = require('./kd-shop-buy');
 const { KD_COOP_CAPTURE } = require('./kd-coop-capture');
-const { KD_VARIANT_REGISTRY } = require('./kd-variant-registry');
+const { KD_VARIANT_REGISTRY, decideVariantSweep } = require('./kd-variant-registry');
 const { KD_DISCONNECT_DIALOGUE, HOST_LOST_DIALOGUE, PEER_LOST_DIALOGUE } = require('./kd-disconnect-dialogue');
 const { sanitizeName, sanitizePerks, sanitizeCharacter } = require('./join-gate');
 // KDM-239 R3/R5 — same normaliser the gate uses, so what the session stores and what the gate
@@ -3091,7 +3091,65 @@ class SwapSession {
 		 */
 		this._exportDue = 'floor';
 		this._sinceExport = 0;
+		// KDM-284 — the descent that got us here ran KD's variant prune, and the wrap withheld every
+		// deletion it proposed. Settle them now: `_reseatParty` above has just re-captured every seat,
+		// so this is the freshest the evidence will ever be.
+		this._sweepVariants();
 		this._dbg(`MAP ${this._lastMapId} -> ${mapId} (party re-landed, ${n} players)`);
+	}
+
+	/**
+	 * KDM-284 — carry out the variant deletions KD proposed during the transition, against ALL seats.
+	 *
+	 * The other half of `kd-variant-registry.js` (read its header for why the work is split here).
+	 * Stock KD's prune deletes every variant it cannot find in the LIVE player's inventory, which on a
+	 * shared table is one player collecting another's; the wrap therefore runs the stock prune, records
+	 * what it deleted, and puts it all back. This is where the record is finally judged.
+	 *
+	 * ── WHY HERE ────────────────────────────────────────────────────────────────────────────────────
+	 * `_onMapChanged` is this file's one transition detector and the prune's only trigger is a descent
+	 * (`KDGoThruTile`, `KDStairActions.ts:32`), so a sweep anywhere else would either miss transitions
+	 * or run on turns with nothing to do. Node is also in the loop here, which the wrap never is — the
+	 * whole reason the decision could not live inside the engine.
+	 *
+	 * ── EVERY SEAT, INCLUDING THE LIVE ONE ──────────────────────────────────────────────────────────
+	 * No attempt is made to work out who was swapped in. "Which seat is live?" is a question with a
+	 * wrong answer available, and getting it wrong deletes that player's gear; feeding every seat in
+	 * can only ever over-keep. The live player's own holdings were already found by stock KD anyway, so
+	 * including them changes nothing except the failure mode.
+	 *
+	 * ── NO EVIDENCE ⇒ NO DELETION ───────────────────────────────────────────────────────────────────
+	 * If a seat's state cannot be serialised, we do not have the full picture, and sweeping on a
+	 * partial one is exactly how a partner's enchanted gear disappears. Bail instead: the pending names
+	 * are dropped, nothing is deleted, and the registry keeps them for the rest of the run — KDM-245's
+	 * behaviour, which is the safe floor this design never falls below.
+	 *
+	 * @returns {number} entries actually removed from the shared registries
+	 */
+	_sweepVariants() {
+		const pending = this.world.takeVariantPending() || {};
+		const proposed = (pending.restraint || []).length
+			+ (pending.weapon || []).length + (pending.consumable || []).length;
+		if (!proposed) return 0;          // the ordinary case: nothing was withheld, nothing to settle
+
+		const seats = [];
+		for (const bundle of this.bundles.values()) {
+			if (!bundle) continue;
+			try {
+				seats.push(JSON.stringify(bundle));
+			} catch (e) {
+				this._dbg(`VARIANT SWEEP skipped: a seat would not serialise (${e && e.message})`);
+				return 0;
+			}
+		}
+
+		const { keep, sweep } = decideVariantSweep(pending, seats);
+		const removed = this.world.deleteVariants(sweep) || 0;
+		const kept = keep.restraint.length + keep.weapon.length + keep.consumable.length;
+		// Never silent, for the same reason the withhold is counted: a sweep quietly reduced to a no-op
+		// looks exactly like the debt it replaced.
+		this._dbg(`VARIANT SWEEP ${proposed} proposed, ${kept} held by a seat, ${removed} collected`);
+		return removed;
 	}
 
 	/**

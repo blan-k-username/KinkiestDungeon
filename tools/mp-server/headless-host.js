@@ -2274,6 +2274,84 @@ class HeadlessHost {
 		})()`);
 	}
 
+	/**
+	 * KDM-284 — take-once drain of the variant names a managed prune WITHHELD.
+	 *
+	 * The wrap (`kd-variant-registry.js`) runs stock KD's prune, records what it deleted here, and puts
+	 * it all back; this is how those names reach Node, which is the only side that can see the other
+	 * seats. Destructive on purpose, exactly like `takeBumpVetoes` above: a name handed over once has
+	 * been decided, and re-offering it would make every sweep re-litigate the whole run.
+	 *
+	 * Returns the three-kind shape even on an unmanaged world, so callers never branch on absence.
+	 */
+	takeVariantPending() {
+		return this.eval(`(function(){
+			var p = globalThis.__kdCoopVariantPending || {};
+			globalThis.__kdCoopVariantPending = { restraint: [], weapon: [], consumable: [] };
+			return {
+				restraint:  Array.isArray(p.restraint)  ? p.restraint  : [],
+				weapon:     Array.isArray(p.weapon)     ? p.weapon     : [],
+				consumable: Array.isArray(p.consumable) ? p.consumable : [],
+			};
+		})()`);
+	}
+
+	/**
+	 * KDM-284 — carry out the deletions Node decided were safe (`decideVariantSweep`).
+	 *
+	 * Deliberately does NOT re-check reachability: stock KD already proposed every one of these, and a
+	 * second opinion computed by us would be exactly the re-implementation of KD's inventory walk the
+	 * design refuses. This only executes a verdict.
+	 *
+	 * Counts what it took into `__kdCoopVariantSwept` so "the sweep is live" is observable — without
+	 * it, a sweep silently reduced to a no-op looks identical to the KDM-245 debt it replaced.
+	 *
+	 * @param {{restraint?:string[], weapon?:string[], consumable?:string[]}} sweep
+	 * @returns {number} how many entries were actually removed
+	 */
+	deleteVariants(sweep) {
+		const s = sweep || {};
+		const payload = {
+			restraint: (Array.isArray(s.restraint) ? s.restraint : []).map(String),
+			weapon: (Array.isArray(s.weapon) ? s.weapon : []).map(String),
+			consumable: (Array.isArray(s.consumable) ? s.consumable : []).map(String),
+		};
+		if (!payload.restraint.length && !payload.weapon.length && !payload.consumable.length) return 0;
+		// TWO payloads, the split this layer uses everywhere (see setPartyGate): the handler's source
+		// text never varies so V8's eval compilation cache serves it free, and only the tiny state
+		// assignment carries per-call data. Interpolating into the hot payload costs ~8.7x here.
+		this.eval(`globalThis.__KD_VARIANT_SWEEP = ${JSON.stringify(payload)};`);
+		return this.eval(`(function(){
+			var s = globalThis.__KD_VARIANT_SWEEP; if (!s) return 0;
+			var n = 0;
+			// Through KD's OWN removers, not a bare delete: they are the game's definition of "remove a
+			// variant", and if upstream ever gives them a second responsibility we inherit it for free.
+			var byKind = {
+				restraint:  (typeof KDRemoveInventoryVariant  === 'function') ? KDRemoveInventoryVariant  : null,
+				weapon:     (typeof KDRemoveWeaponVariant     === 'function') ? KDRemoveWeaponVariant     : null,
+				consumable: (typeof KDRemoveConsumableVariant === 'function') ? KDRemoveConsumableVariant : null,
+			};
+			var tbl = {
+				restraint:  (typeof KinkyDungeonRestraintVariants  !== 'undefined') ? KinkyDungeonRestraintVariants  : null,
+				weapon:     (typeof KinkyDungeonWeaponVariants     !== 'undefined') ? KinkyDungeonWeaponVariants     : null,
+				consumable: (typeof KinkyDungeonConsumableVariants !== 'undefined') ? KinkyDungeonConsumableVariants : null,
+			};
+			var kinds = ['restraint', 'weapon', 'consumable'];
+			for (var i = 0; i < kinds.length; i++) {
+				var k = kinds[i], names = s[k] || [], rm = byKind[k], t = tbl[k];
+				if (!rm || !t) continue;
+				for (var j = 0; j < names.length; j++) {
+					if (t[names[j]] === undefined) continue;   // already gone: not a deletion
+					rm(names[j]);
+					n++;
+				}
+			}
+			globalThis.__kdCoopVariantSwept = (globalThis.__kdCoopVariantSwept || 0) + n;
+			globalThis.__KD_VARIANT_SWEEP = null;
+			return n;
+		})()`);
+	}
+
 	/** List entities in this instance (proves injected avatars are real). */
 	listEntities() {
 		return this.eval(`KDMapData.Entities.map(function(e){
