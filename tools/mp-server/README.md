@@ -352,11 +352,25 @@ Co-op is opt-in: run the plain static server (`npm run serve`) and nothing liste
   by clientId and survives `releasePending` but not `release` — the same asymmetry that holds a seat
   across a drop (KDM-252 E4), which is what makes a reconnecting player come back as themselves.
   `sanitizeName()` (exported, char-code scan not a regex) is the single N4 enforcement point.
-  `SwapSession.displayNameOf()` is the single fallback: chosen name, else `Player <id>`.
+  `SwapSession.displayNameOf()` is the single fallback, and it answers in three tiers (KDM-282):
+  the chosen name, else the **seat** (`Player 1` for the host, `Player 2` for the guest, via the
+  `KD_SEAT_LABEL` table), else the legacy `Player <clientId>`. The third tier is reached only by a
+  session nobody told a role — every direct-constructed `SwapSession` in the unit suite — which is
+  what keeps NF2's byte-identical promise where it was ever load-bearing. Ids are opaque random
+  strings (KDM-280), so before the seat tier an unnamed player read as `Player kd-x8f2q1`.
+  ⚠️ `setSeatRole` **clears** on any role not in the table, so an unrecognised protocol token
+  degrades to the legacy label instead of being painted onto an avatar.
   ⚠️ The avatar LABEL falls back; the player's own `KDGameData.PlayerName` does **not** — an unnamed
   player keeps KD's default `'Ada'`. Stamping `'Player A'` there made a 1-player session diverge from
   a reference single-player run (`mp-parity-oracle` caught it). The two fields answer different
   questions: one is what your partner sees over your head, the other is your character's own name.
+- **`presence.seat()` must run BEFORE `_carrySeat()`, at every seating site.** `_carrySeat` reads
+  `presence.roleOf` (KDM-282), so a site that carries first hands the session a seatless player. The
+  accept path did exactly that and it cost nothing for two tasks — right up until `_carrySeat` grew a
+  second source. The symptom was asymmetric and quiet: the host read `Player 1` and the approved
+  guest read `Player <raw-id>`. ⚠️ The fix is to make the sites **agree**, never to pass the role in
+  as an argument — that would put the source-of-truth lookup back at each call site, which is the
+  duplication `_carrySeat` exists to remove.
 - **`setPlayerName` must sit BETWEEN the template restore and the capture** in `_seatPlayer`.
   `capturePlayer()` snapshots `KDGameData`, and `PlayerName` is deliberately absent from
   `KDGAMEDATA_WORLD_KEYS`, so that ordering is the entire per-player replication story. Set it after
@@ -627,6 +641,49 @@ perk pick (`'Stats'`) and the character pick (`'Diff'`).
 A unit test that calls a collaborator **directly** cannot see a caller that forgets to forward a
 field. When you add anything to the wire, add a test that crosses the dispatch — `_handle` with a
 stubbed gate is cheap (no socket, no session, no boot) and is the layer where this class of bug lives.
+
+## Asserting that a co-op player can SEE something (KDM-285 / KDM-286)
+
+A co-op client is a real KD page, so "the state is right" and "the player can see it" are different
+questions — and the gap between them hid a defect for a very long time. KDM-285's cause was ours:
+`coop-bootstrap.js` → `ensureQuickBind()` armed `KinkyDungeonTargetingSpell` and no non-simulating
+client ever clears one, so every co-op client sat in permanent spell-targeting mode from boot. Stock
+KD deliberately suppresses a long list of HUD while you aim, so **ten** things were invisible to co-op
+players on an otherwise stock build. Years of specs asserting `KinkyDungeonMessageLog` CONTENTS were
+green throughout.
+
+**The rule.** When a co-op feature is about something the player looks at, assert what was PAINTED,
+not what is in a variable — and never assert a predicate that is derived from the same gate:
+`KDDrawResourcesQuick()` is literally `return !KinkyDungeonTargetingSpell`, so asserting it and
+asserting the gate are one assertion written twice.
+
+**The two recorders**, both in `tests/e2e/helpers/coop.ts`, both wrapping the one choke point their
+kind of drawing funnels into:
+
+| what | wrap | probe (recorder-is-live control) |
+|---|---|---|
+| text | `recordDrawnText` → `DrawTextVisKD` | `paintMissingTextKey` |
+| sprites | `recordDrawnSprites` → `KDDraw` | `drawProbeSprite` |
+
+Three things to know before using the sprite one:
+
+- **`calls` is the liveness control, and absence assertions are meaningless without it.** A dead
+  wrap, a page that stopped painting and a genuinely-hidden icon all leave `sprites` empty.
+- **`match` filters what is KEPT, never what is COUNTED.** `KDDraw` runs per tile per frame, so an
+  unfiltered distinct-log truncates on map sprites before it reaches the HUD — and a silently
+  truncated log is a green for the wrong reason.
+- **`resetDrawnSprites` clears `seen` too**, because a HUD sprite is drawn in every frame of every
+  window; a reset that kept it would report the gold readout missing in window two.
+
+**And mutate the gate inside the spec.** `mp-coop-hud-visible.spec.ts` re-arms the targeting spell in
+its own last phases and requires the icons to vanish. Without that, the positive assertions would be
+green on the broken build too — which is exactly how the original defect survived.
+
+⚠️ **Not everything KD hides while aiming is a paint.** The move helper (`KDToggles.Helper`) draws
+nothing: it reaches the game as the argument of `KinkyDungeonSetTargetLocation(!KinkyDungeonTargetingSpell
+&& KDToggles.Helper)` (`KinkyDungeonHUD.ts:276`) and snaps the aim off a wall. Its oracle is the
+resulting `KinkyDungeonTargetX/Y`, driven through `KinkyDungeonHandleHUD()` — KD's own input entry
+point, because the gate expression lives at the CALL SITE and a direct call steps over it.
 
 ## Adding an OUTBOUND message or field (KDM-274)
 
