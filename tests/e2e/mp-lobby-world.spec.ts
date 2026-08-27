@@ -128,4 +128,59 @@ test.describe('KDM-239 R4 — the lobby names the host\'s world', () => {
 			await new Promise((r) => server.close(r));
 		}
 	});
+
+	/**
+	 * KDM-283 — the banner must speak KD's language, not ours.
+	 *
+	 * THE BUG. `drawWorldSummary` looked its label up as `'KinkyDungeonStat' + key`. That prefix is
+	 * wrong for EVERY key: KD does not name its `KinkyDungeonStatsChoice` entries at all — it names
+	 * the SOURCE GLOBAL and the OPTION INDEX behind them (`KinkyDungeonProgressionMode0` = "Key Hunt",
+	 * `KinkyDungeonSaveMode1` = "Roguelike", …). All 13 world keys missed, so the `|| key` fallback
+	 * fired every time and the guest was shown a developer identifier.
+	 *
+	 * It is visible to EVERY host, not an edge case: `KinkyDungeonProgressionMode` defaults to `"Key"`
+	 * and `MODE_SOURCE` maps that to `escapekey`, so a host who touched nothing was shown `escapekey`.
+	 *
+	 * ⚠️ WHY THE ORACLE IS A PAIR. "Contains 'key hunt'" alone would pass on a renderer that pasted
+	 * both — KD's word AND the raw key — so the absence of `escapekey` is asserted in the same breath.
+	 * And the raw-key check alone would pass on a banner that painted nothing at all, which is why the
+	 * positive half is there. Neither half is sufficient; the bug is only dead if both hold.
+	 */
+	test('a world mode is named in KD\'s own words, never as our internal key', async ({ browser }) => {
+		test.setTimeout(MP_TEST_TIMEOUT);
+		const { server, port } = await start(0);
+		const hostCtx = await browser.newContext();
+		const guestCtx = await browser.newContext();
+		const host = await hostCtx.newPage();
+		const guest = await guestCtx.newPage();
+		try {
+			// A host on KD's DEFAULTS on purpose — no assignment at all. This is the state every real
+			// host starts in, and the one that surfaced the bug.
+			await openLobby(host, port);
+			await press(host, 'KDMPHost');
+			await guestAsks(guest, port, 'Nyx');
+			await guest.waitForFunction(
+				() => /waiting/i.test(String((window as any).KDMPLobby.status || '')),
+				undefined, { polling: 'raf' });
+
+			const text = (await screenText(guest)).toLowerCase();
+
+			// KD's own word for the default progression rule (`KinkyDungeonProgressionMode0`), which
+			// ships translated in every language KD supports — unlike anything we could write.
+			expect(text, 'the guest is told the run\'s escape rule in the words KD uses for it')
+				.toContain('key hunt');
+			// The CATEGORY half, which is not decoration: KD's value words collide across option
+			// groups (`KinkyDungeonItemMode1` and `KinkyDungeonPerkProgressionMode0` are both the word
+			// "Disabled"), so a bullet without its heading is ambiguous the moment a host changes loot
+			// or perk settings. Asserting only the value would leave that mechanism untested.
+			expect(text, 'KD\'s own heading for the option group is painted with the value')
+				.toContain('progression mode:');
+			// …and our identifier never reaches a player's screen.
+			expect(text, 'the raw StatsChoice key is a developer string, not a label')
+				.not.toContain('escapekey');
+		} finally {
+			await hostCtx.close(); await guestCtx.close();
+			await new Promise((r) => server.close(r));
+		}
+	});
 });

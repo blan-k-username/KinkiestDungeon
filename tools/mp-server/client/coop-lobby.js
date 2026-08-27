@@ -591,6 +591,73 @@
 	var MODLIST_SHOWN = 4;
 
 	/**
+	 * KDM-283 — KD's OWN name for each world mode.
+	 *
+	 * ── WHY A TABLE AND NOT A PREFIX ────────────────────────────────────────────────────────────
+	 * This used to be `kdText('KinkyDungeonStat' + key)`. That prefix is wrong for EVERY one of the
+	 * thirteen world keys, because KD does not name its `KinkyDungeonStatsChoice` entries at all.
+	 * Those entries are DERIVED (`KDUpdatePlugSettings`, `KinkyDungeon.ts:6144`); what KD names is the
+	 * SOURCE GLOBAL and the OPTION INDEX the player actually clicked on the Diff screen:
+	 *
+	 *     escapekey  ← KinkyDungeonProgressionMode === "Key"  → `KinkyDungeonProgressionMode0`  "Key Hunt"
+	 *     saveMode   ← KinkyDungeonSaveMode === true          → `KinkyDungeonSaveMode1`         "Roguelike"
+	 *
+	 * So every lookup missed and the `|| key` fallback painted a developer identifier at the guest —
+	 * and because `KinkyDungeonProgressionMode` DEFAULTS to `"Key"`, every host on earth showed one.
+	 * The value→index step is not mechanical (`"Key"`→0, `true`→1, and `extremeMode` has no index at
+	 * all), so it is written down once here rather than derived from a rule KD does not follow.
+	 *
+	 * ── WHY THE CATEGORY IS PART OF THE LABEL ───────────────────────────────────────────────────
+	 * Not decoration: KD's value words are ambiguous on their own. `KinkyDungeonItemMode1` and
+	 * `KinkyDungeonPerkProgressionMode0` are BOTH the word "Disabled", so a bare "• Disabled" tells a
+	 * guest nothing about which rule was disabled. `cat` is KD's own heading for the option group and
+	 * already carries its trailing colon.
+	 *
+	 * `cat: null` for the two difficulty rows on purpose — `KDHardMode` is defined TWICE in KD's own
+	 * `Text_KinkyDungeon.csv` (" (HARD MODE ENABLED)" and "Difficulty:"), so which one `TextGet`
+	 * answers with is not ours to rely on. Their value words are self-describing anyway.
+	 *
+	 * `en` is OUR English, used only when KD answers nothing for the value key — the honest fallback
+	 * for our own banner, and never the raw key. A mode absent from this table is not painted at all:
+	 * see `modeLabel`.
+	 *
+	 * ⚠️ Mirrors `MODE_WORLD_KEYS` / `MODE_SOURCE` in `game-modes.js`, which is server-side and cannot
+	 * be required from a plain browser script. `tests/e2e/mp-lobby-world.spec.ts` pins the pair.
+	 */
+	var MODE_LABEL = {
+		randomMode:      { cat: 'KDRandomMode',          val: 'KinkyDungeonRandomMode1',          en: 'Spell Choice: Random Spells' },
+		hardMode:        { cat: null,                    val: 'KinkyDungeonHardMode1',            en: 'Hard Mode' },
+		extremeMode:     { cat: null,                    val: 'KinkyDungeonExtremeMode',          en: 'Extreme Mode' },
+		saveMode:        { cat: 'KDSaveMode',            val: 'KinkyDungeonSaveMode1',            en: 'Save Mode: Roguelike' },
+		itemMode:        { cat: 'KDItemMode',            val: 'KinkyDungeonItemMode1',            en: 'Loot Recovery: Disabled' },
+		itemPartialMode: { cat: 'KDItemMode',            val: 'KinkyDungeonItemMode2',            en: 'Loot Recovery: Partial' },
+		easyMode:        { cat: 'KDEasyMode',            val: 'KinkyDungeonEasyMode1',            en: 'Prison Strictness: Easy' },
+		norescueMode:    { cat: 'KDEasyMode',            val: 'KinkyDungeonEasyMode2',            en: 'Prison Strictness: Strict' },
+		noperks:         { cat: 'KDPerkProgressionMode', val: 'KinkyDungeonPerkProgressionMode0', en: 'Perk Progression: Disabled' },
+		perksmandatory:  { cat: 'KDPerkProgressionMode', val: 'KinkyDungeonPerkProgressionMode2', en: 'Perk Progression: Mandatory' },
+		perksdebuff:     { cat: 'KDPerkProgressionMode', val: 'KinkyDungeonPerkProgressionMode3', en: 'Perk Progression: Debuffs Only' },
+		escapekey:       { cat: 'KDProgressionMode',     val: 'KinkyDungeonProgressionMode0',     en: 'Progression Mode: Key Hunt' },
+		escaperandom:    { cat: 'KDProgressionMode',     val: 'KinkyDungeonProgressionMode1',     en: 'Progression Mode: Random' },
+	};
+
+	/**
+	 * One world key → the line a player reads, or `''` for "do not paint this".
+	 *
+	 * The empty answer is the point: a key we have no name for is a key the GUEST has no name for
+	 * either, and showing them our identifier is worse than showing them nothing. A host running a
+	 * newer build than ours declares modes this table has never heard of, and that is the case this
+	 * silently and correctly drops.
+	 */
+	function modeLabel(key) {
+		var m = MODE_LABEL[key];
+		if (!m) return '';
+		var val = kdText(m.val);
+		if (!val) return m.en;                       // KD has no word for it: ours, never the raw key
+		var cat = m.cat ? kdText(m.cat) : '';
+		return cat ? (cat + ' ' + val) : val;
+	}
+
+	/**
 	 * KDM-257 R1/R2/R6 — the host-only mod list, painted from ONE function for BOTH sides.
 	 *
 	 * The guest and the host are looking at the same list from opposite ends: these are the mods the
@@ -629,24 +696,29 @@
 		if (!w) return 0;
 		var modes = Array.isArray(w.modes) ? w.modes : [];
 		var seed = w.seed || '';
-		if (!modes.length && !seed) return 0;     // a host on KD's defaults: nothing worth a banner
+		// KDM-283: resolve to WORDS first, because an unnameable mode is not painted at all — so
+		// "is there anything worth a banner?" and the `…and N more` count must both be asked of the
+		// nameable list, not of the raw declaration. Asking the raw list is what put a bullet on
+		// screen with a developer string in it.
+		var named = [];
+		for (var i = 0; i < modes.length; i++) {
+			var label = modeLabel(String(modes[i]));
+			if (label) named.push(label);
+		}
+		if (!named.length && !seed) return 0;     // nothing sayable: R4's stock layout, unchanged
 		DrawTextKD(text('KDMPWorldLead', 'The host\'s game:'), W, y, '#ffd98a', '#000000', 24);
 		var line = y + 28;
 		if (seed) {
 			DrawTextKD(text('KDMPWorldSeed', '• seed: SEED').replace('SEED', seed), W, line, '#ffffff', '#000000', 22);
 			line += 26;
 		}
-		var shown = Math.min(modes.length, MODLIST_SHOWN);
-		for (var i = 0; i < shown; i++) {
-			var key = String(modes[i]);
-			// KD names its own settings; prefer its word over ours when it has one. `kdText` is what
-			// decides "has one" — see the marker note there.
-			var label = kdText('KinkyDungeonStat' + key) || key;
-			DrawTextKD('• ' + label, W, line, '#ffffff', '#000000', 22);
+		var shown = Math.min(named.length, MODLIST_SHOWN);
+		for (var j = 0; j < shown; j++) {
+			DrawTextKD('• ' + named[j], W, line, '#ffffff', '#000000', 22);
 			line += 26;
 		}
-		if (modes.length > shown) {
-			DrawTextKD(text('KDMPModMore', '…and MORE more').replace('MORE', String(modes.length - shown)),
+		if (named.length > shown) {
+			DrawTextKD(text('KDMPModMore', '…and MORE more').replace('MORE', String(named.length - shown)),
 				W, line, '#cccccc', '#000000', 22);
 			line += 26;
 		}

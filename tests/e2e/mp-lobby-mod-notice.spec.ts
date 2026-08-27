@@ -84,13 +84,23 @@ test.describe('KDM-257 — the lobby names the host\'s mods', () => {
 			await guestAsks(guest, port, 'Nyx');
 			await host.waitForFunction(() => !!(window as any).KDMPLobby.pending, undefined, { polling: 'raf' });
 
-			// `mod` catches every wording a renderer might use — "1 mod", "mods you don't have",
-			// "Mods:" — so this fails for a banner that appears with an empty list, not merely for
-			// one that names a mod that isn't there.
+			/*
+			 * `mod` as a WHOLE WORD catches every wording a renderer might use — "1 mod", "mods you
+			 * don't have", "Mods:" — so this fails for a banner that appears with an empty list, not
+			 * merely for one that names a mod that isn't there. Verified against the four lead strings
+			 * in `coop-lobby.js`: all of them say "mod" or "mods" as a word.
+			 *
+			 * ⚠️ IT WAS `.not.toContain('mod')`, AND THAT WAS OVER-BROAD. A bare substring also
+			 * matches the ordinary English word "mode", so this control failed the moment KDM-283 made
+			 * the WORLD banner (a different feature entirely) paint "Progression Mode: Key Hunt".
+			 * Nothing about mods had changed. A control that fires on an unrelated feature's wording
+			 * is not protecting this requirement, it is only reporting that the screen changed.
+			 */
+			const NO_MODS = /\bmods?\b/;
 			expect((await screenText(guest)).toLowerCase(), 'silence is the correct output')
-				.not.toContain('mod');
+				.not.toMatch(NO_MODS);
 			expect((await screenText(host)).toLowerCase(), 'and on the host\'s prompt too')
-				.not.toContain('mod');
+				.not.toMatch(NO_MODS);
 		} finally {
 			await hostCtx.close(); await guestCtx.close();
 			await new Promise((r) => server.close(r));
