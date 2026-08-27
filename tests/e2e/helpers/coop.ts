@@ -771,6 +771,157 @@ export async function paintMissingTextKey(P: Page, tag: string): Promise<string>
 	}, tag);
 }
 
+/** Every distinct SPRITE the page has drawn since `recordDrawnSprites` was armed. */
+export interface CoopDrawnSprites {
+	/** Distinct `{id, image}` pairs, in first-drawn order (capped — see `truncated`). */
+	sprites: { id: string; image: string }[];
+	/**
+	 * TOTAL `KDDraw` calls seen, INCLUDING the ones `match` filtered out.
+	 *
+	 * This is the built-in liveness control, and the reason an absence assertion on `sprites` is not
+	 * vacuous: a dead wrap, a page that stopped painting and a genuinely-missing sprite all leave
+	 * `sprites` empty, and only this number tells them apart. Assert on it whenever you assert that
+	 * something was NOT drawn.
+	 */
+	calls: number;
+	/** True when the distinct-sprite cap was hit and later NEW sprites were dropped. */
+	truncated: boolean;
+}
+
+/**
+ * KDM-286 — record every SPRITE the page actually draws. The sibling of `recordDrawnText`, and it
+ * exists for the same reason: a proxy can be green while the screen is blank.
+ *
+ * ── WHY A SECOND RECORDER AT ALL ──────────────────────────────────────────────────────────────────
+ * `recordDrawnText` only sees text (`DrawTextVisKD`). KDM-285's audit found that a permanently-armed
+ * `KinkyDungeonTargetingSpell` had been hiding TEN things from every co-op player, and most of the
+ * survivors are sprites: the buff/debuff icons (`KDDrawBuffIcons` → `Buffs/<icon>.png`) and the quick
+ * resource readout (`KinkyDungeonHUD.ts:1351` → `Items/Gold.png`). Those were covered only by
+ * asserting the shared GATE was clear (`KinkyDungeonTargetingSpell === null`,
+ * `KDDrawResourcesQuick() === true`) — and `KDDrawResourcesQuick` is literally
+ * `return !KinkyDungeonTargetingSpell`, so that assertion and the gate assertion are the same
+ * assertion written twice. A different future cause would hide the icons again with both green.
+ *
+ * ── WHY THIS ONE FUNCTION ─────────────────────────────────────────────────────────────────────────
+ * `KDDraw` (`KinkyDungeonDraw.ts:4464`) is to sprites what `DrawTextVisKD` is to text: the choke
+ * point the HUD, the map, the reticle and the buff icons all funnel into. One wrap covers sprites a
+ * test would never think to enumerate, including any KD adds later.
+ *
+ * ── `match`, AND WHY IT IS NOT A NARROWED ORACLE ──────────────────────────────────────────────────
+ * KDDraw is called for every tile of every frame, so an unfiltered distinct-log fills its cap with
+ * map sprites long before the HUD is reached — and a silently-truncated log is a green for the wrong
+ * reason. `match` is a source-serialisable regex tested against `"<id>|<image>"`; it decides what is
+ * KEPT, never what is COUNTED, so `calls` stays a complete liveness signal either way. Safe because
+ * the assertions built on it are POSITIVE ("this sprite was drawn") or are paired with `calls`.
+ *
+ * @param opts.cap    distinct sprites to keep (default 200)
+ * @param opts.match  regex SOURCE matched against `id + '|' + image`; omit to keep everything
+ */
+export async function recordDrawnSprites(
+	P: Page, opts: { cap?: number; match?: string } = {},
+): Promise<void> {
+	await P.evaluate(({ cap, match }: { cap: number; match: string }) => {
+		const w = window as any;
+		if (w.__coopSprites) return;                     // idempotent — never double-wrap
+		// @ts-ignore bare let-global: this lives in the bundle's lexical scope, not on window
+		if (typeof KDDraw !== 'function') {
+			throw new Error('[KDM-286] KDDraw is not a function on this page, so drawn sprites cannot '
+				+ 'be observed. Failing here rather than reporting "nothing was drawn" forever.');
+		}
+		const re = match ? new RegExp(match) : null;
+		// `seen` lives ON the state object, not in the closure, so `resetDrawnSprites` can clear it:
+		// a spec that measures two windows needs the SECOND window to be able to see a sprite the
+		// first one already saw (the gold readout is drawn every frame of both).
+		const state = {
+			sprites: [] as { id: string; image: string }[], calls: 0, truncated: false,
+			seen: {} as Record<string, true>,
+		};
+		w.__coopSprites = state;
+		// @ts-ignore
+		const original = KDDraw;
+		w.__coopSpritesRestore = () => {
+			// @ts-ignore — bare assignment: the bundle global is NOT a window property
+			KDDraw = original; delete w.__coopSprites; delete w.__coopSpritesRestore;
+		};
+		// @ts-ignore
+		KDDraw = function (_container: any, _map: any, id: any, image: any) {
+			try {
+				state.calls++;
+				const key = String(id) + '|' + String(image);
+				if ((!re || re.test(key)) && !state.seen[key]) {
+					if (state.sprites.length < cap) {
+						state.seen[key] = true;
+						state.sprites.push({ id: String(id), image: String(image) });
+					} else state.truncated = true;
+				}
+			} catch (e) { /* recording must never break a frame */ }
+			// eslint-disable-next-line prefer-rest-params
+			return original.apply(this, arguments as any);
+		};
+	}, { cap: opts.cap ?? 200, match: opts.match ?? '' });
+}
+
+/** Everything drawn since `recordDrawnSprites`, deduped, with the call count that proves liveness. */
+export async function readDrawnSprites(P: Page): Promise<CoopDrawnSprites> {
+	return P.evaluate(() => {
+		const s = (window as any).__coopSprites;
+		if (!s) throw new Error('[KDM-286] recordDrawnSprites() was never armed on this page.');
+		return { sprites: s.sprites.slice(), calls: s.calls, truncated: !!s.truncated };
+	});
+}
+
+/** Forget what has been drawn WITHOUT unwrapping, so a second window can be measured on its own. */
+export async function resetDrawnSprites(P: Page): Promise<void> {
+	await P.evaluate(() => {
+		const s = (window as any).__coopSprites;
+		if (!s) throw new Error('[KDM-286] recordDrawnSprites() was never armed on this page.');
+		// `seen` is cleared TOO. A HUD sprite is drawn every frame of every window, so a reset that
+		// kept it would make the second window report the gold readout missing — an absence that
+		// means nothing but reads exactly like the defect this file exists to catch.
+		s.sprites.length = 0; s.calls = 0; s.truncated = false; s.seen = {};
+	});
+}
+
+/** Put the page's own sprite renderer back. Safe when nothing was ever recorded. */
+export async function restoreDrawnSprites(P: Page): Promise<void> {
+	await P.evaluate(() => {
+		const w = window as any;
+		if (w.__coopSpritesRestore) w.__coopSpritesRestore();
+	});
+}
+
+/**
+ * Draw one sprite under a tag nothing else uses, to prove the recorder fires — the sibling of
+ * `paintMissingTextKey`, and used the same way.
+ *
+ * Goes through `KDDraw` itself because that IS the real caller's entry point (unlike text, where
+ * `DrawTextKD` sits in front of the wrapped function). Off-screen, and with an image path that does
+ * not resolve: this is a probe, not something a viewer should see, and a missing texture makes
+ * `KDDraw` bail after the recording rather than adding a sprite to a live container.
+ */
+export async function drawProbeSprite(P: Page, tag: string): Promise<{ id: string; image: string }> {
+	return P.evaluate((t: string) => {
+		const probe = { id: 'kdm286probe_' + t, image: 'KDM286_PROBE_' + t + '.png' };
+		// @ts-ignore bare let-globals
+		KDDraw(kdstatusboard, kdpixisprites, probe.id, probe.image, -9999, -9999, 1, 1);
+		return probe;
+	}, tag);
+}
+
+/**
+ * True when a sprite whose id/image matches was drawn in the recorded window.
+ *
+ * A helper rather than an inline `.some()` at each call site, because every one of those call sites
+ * wants the same two-part question — the sprite ID identifies WHICH element of the HUD it is, and
+ * the IMAGE identifies what was actually put on screen — and a check on only one half is how a
+ * placeholder or a recycled id passes for the real thing.
+ */
+export function drewSprite(
+	drawn: CoopDrawnSprites, idPattern: RegExp, imagePattern: RegExp,
+): boolean {
+	return drawn.sprites.some((s) => idPattern.test(s.id) && imagePattern.test(s.image));
+}
+
 /**
  * KDM-252 — kill a client's WebSocket from inside its own page, and SAY whether it may come back.
  *
