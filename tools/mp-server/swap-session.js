@@ -934,11 +934,31 @@ class SwapSession {
 	 * Control characters collapse to spaces because a log entry is ONE line —
 	 * `KinkyDungeonSendTextMessage` has no notion of a break, so a newline would either vanish or
 	 * break the layout depending on the glyph, and neither is worth leaving to chance.
+	 *
+	 * KDM-247 — THE CAP MUST NOT CUT A CODE POINT IN HALF. `slice` counts UTF-16 CODE UNITS, and
+	 * every string that had ever reached here was ASCII — one unit per character — so the cut was
+	 * always on a character boundary and this was never wrong. A quick reaction is the first caller
+	 * that can put a SURROGATE PAIR at the boundary, and cutting between its halves emits a lone
+	 * surrogate, which `JSON.stringify` faithfully carries to the partner, who then reads a
+	 * replacement glyph. So the cut walks back one unit when it lands mid-pair.
+	 *
+	 * Deliberately NOT `Array.from(s).slice(0, CHAT_MAX).join('')`, which is tidier and wrong for
+	 * this job: it re-denominates the cap in code POINTS, so 200 emoji would put ~400 units on the
+	 * wire and CHAT_MAX would quietly stop meaning what it means everywhere else.
+	 *
+	 * HONEST LIMIT: this guarantees no lone surrogate. It does not keep a ZWJ sequence or a regional
+	 * flag pair intact — a cut there yields well-formed code points that merely mean something
+	 * shorter. That is a cosmetic loss at the 200-character boundary, and not worth the wire cost of
+	 * the code-point cap.
 	 */
 	static sanitizeChat(raw) {
 		if (raw === null || raw === undefined) return '';
 		// eslint-disable-next-line no-control-regex
-		return String(raw).replace(/[\u0000-\u001F\u007F]+/g, ' ').trim().slice(0, CHAT_MAX);
+		const out = String(raw).replace(/[\u0000-\u001F\u007F]+/g, ' ').trim().slice(0, CHAT_MAX);
+		// A trailing HIGH surrogate (U+D800–U+DBFF) is by definition unpaired: its partner was the
+		// next code unit, and the slice dropped it. Nothing else can be broken by a cut at the end.
+		const last = out.length ? out.charCodeAt(out.length - 1) : 0;
+		return (last >= 0xd800 && last <= 0xdbff) ? out.slice(0, -1) : out;
 	}
 
 	/**

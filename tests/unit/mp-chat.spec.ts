@@ -55,6 +55,98 @@ describe('KDM-246 — sanitizeChat is the server-side control (R5, AC4)', () => 
 		expect(san('x'.repeat(199)).length).toBe(199);
 	});
 
+	/**
+	 * KDM-247 R5 — THE CAP IS A UTF-16 SLICE, AND AN EMOJI IS TWO CODE UNITS.
+	 *
+	 * `sanitizeChat` ends `.slice(0, CHAT_MAX)` (`swap-session.js:941`). Every string that had ever
+	 * crossed it was ASCII — one code unit per character — so the cut was always on a character
+	 * boundary and this was never wrong. A quick reaction is the first caller that can put a
+	 * surrogate pair there, and a cut between its halves emits a LONE SURROGATE.
+	 *
+	 * What that actually costs, stated precisely rather than dramatically: `JSON.stringify` has been
+	 * well-formed since ES2019, so it escapes a lone surrogate as `\udXXX` and the WIRE survives.
+	 * The damage is at the far end — the partner's log renders an unpaired half as a replacement
+	 * glyph. So this is a correctness bug about what a human reads, not a protocol break, and the
+	 * fix belongs in the sanitiser rather than at the boundary.
+	 *
+	 * Note the ORDER inside the function: replace -> trim -> slice. The slice is last, so it is the
+	 * only step that can split anything, and it is the only step this task touches.
+	 */
+	describe('KDM-247 R5 — the cap never splits a code point', () => {
+		/**
+		 * Unpaired halves of a surrogate pair, by index. A high surrogate must be followed by a low
+		 * one and a low must be preceded by a high; anything else is a broken code point.
+		 *
+		 * Hand-rolled rather than `Array.from(...).length`, because that answer cannot say WHERE, and
+		 * a failure here is much easier to read as "index 199 is an unpaired high surrogate".
+		 */
+		const lonely = (s: string): number[] => {
+			const out: number[] = [];
+			for (let i = 0; i < s.length; i++) {
+				const c = s.charCodeAt(i);
+				if (c >= 0xd800 && c <= 0xdbff) {
+					const next = i + 1 < s.length ? s.charCodeAt(i + 1) : -1;
+					if (next >= 0xdc00 && next <= 0xdfff) i++;   // a well-formed pair, skip both
+					else out.push(i);
+				} else if (c >= 0xdc00 && c <= 0xdfff) {
+					out.push(i);                                  // a low with no high before it
+				}
+			}
+			return out;
+		};
+
+		const SCREAM = '\u{1F631}';   // 😱 — U+1F631, exactly two UTF-16 code units
+
+		it('the helper can actually see a broken pair (else every case below is vacuous)', () => {
+			// Memory `Vacuous divergence oracle`: an oracle that cannot fail is not an oracle. This
+			// mutation-tests `lonely` against a string built to be broken, so a later refactor that
+			// neuters it reds HERE rather than silently greening the four cases that follow.
+			expect(lonely(SCREAM), 'a whole emoji is not broken').toEqual([]);
+			expect(lonely(SCREAM[0]), 'a bare high surrogate is').toEqual([0]);
+			expect(lonely(SCREAM[1]), 'and so is a bare low one').toEqual([0]);
+			expect(lonely('x'.repeat(50)), 'CONTROL: plain ASCII is never flagged').toEqual([]);
+		});
+
+		it('cuts BEFORE an emoji that straddles the cap, rather than through it', () => {
+			// 199 ASCII + 2 units = 201, so the naive slice keeps the emoji's FIRST half and drops
+			// its second. This is the exact input the shipped code gets wrong.
+			const out = san('x'.repeat(199) + SCREAM);
+			expect(lonely(out), `sanitizeChat left a broken code point in: ${JSON.stringify(out)}`).toEqual([]);
+			// It cut, and it cut in the only place it could: the whole emoji is gone, the text is not.
+			expect(out.length, 'one unit under the cap, because half an emoji is not worth a unit').toBe(199);
+			expect(out.endsWith(SCREAM), 'the emoji could not fit whole, so it is not there at all').toBe(false);
+			// CONTROL: the message itself still arrived. Without this, a sanitiser that returned ''
+			// would pass every assertion above.
+			expect(out.startsWith('xxx')).toBe(true);
+		});
+
+		it('keeps an emoji that fits exactly, and still fills the cap', () => {
+			// The boundary case one the other side: 198 + 2 = exactly 200. Nothing may be dropped.
+			const out = san('x'.repeat(198) + SCREAM);
+			expect(out.length, 'a pair that fits is not sacrificed to caution').toBe(200);
+			expect(out.endsWith(SCREAM), 'and it survives whole').toBe(true);
+			expect(lonely(out)).toEqual([]);
+		});
+
+		it('leaves a short reaction completely alone', () => {
+			// The overwhelmingly common case — a picker sends ONE emoji — must be untouched. R5 also
+			// requires it arrives verbatim, which is what `toBe` asserts here at the sanitiser and
+			// what the eval-boundary group below asserts across the wire.
+			expect(san(SCREAM)).toBe(SCREAM);
+			expect(san(`${SCREAM}${SCREAM}`)).toBe(`${SCREAM}${SCREAM}`);
+			expect(san(`  ${SCREAM}  `), 'trimming still applies to a reaction').toBe(SCREAM);
+		});
+
+		it('CONTROL: the ASCII cap is unchanged — this is an addition, not a renegotiation', () => {
+			// Assessment F3: the shipped `length === 200` assertion above must stay true. If the fix
+			// had re-denominated the cap in code POINTS, a 300-emoji message would put 400 units on
+			// the wire; this pins that it did not.
+			expect(san('x'.repeat(500)).length).toBe(200);
+			expect(san(SCREAM.repeat(300)).length,
+				'the cap stays denominated in code units, so 100 emoji is the ceiling').toBe(200);
+		});
+	});
+
 	it('collapses newlines, tabs and control characters to spaces', () => {
 		// A log entry is ONE line: `KinkyDungeonSendTextMessage` has no notion of a break, so a
 		// newline would either be swallowed by the renderer or break the layout, depending on the
