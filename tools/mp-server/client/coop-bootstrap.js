@@ -938,6 +938,34 @@
 	window.__coopLastAddress = lastAddress;
 
 	/**
+	 * KDM-272 — whether this player has already been told how co-op differs.
+	 *
+	 * Here rather than in `coop-lobby.js` for the reason `ADDR_KEY` gives just above: the lobby draws
+	 * screens and never touches storage, and one file owning every `kdcoop.` key is what stops a
+	 * second, differently-spelled copy of it appearing later.
+	 *
+	 * `localStorage`, matching the address above and deliberately unlike `stableId`'s
+	 * `sessionStorage`: "you have already read this" is a property of the PERSON, and per-tab would
+	 * mean the briefing returns every time the game is reopened, which is not "once".
+	 *
+	 * Both halves swallow their throw, so a storage-disabled browser reads `false` for ever and is
+	 * shown the briefing every time — degraded, never broken (KDM-272 AC3).
+	 */
+	var BRIEFING_KEY = 'kdcoop.briefingSeen';
+
+	/** Has this player seen the co-op briefing? `false` whenever storage cannot answer. */
+	function briefingSeen() {
+		try { return window.localStorage.getItem(BRIEFING_KEY) === '1'; } catch (e) { return false; }
+	}
+	window.__coopBriefingSeen = briefingSeen;
+
+	/** Record that they have. Called from the frame that PAINTS it — see `drawAbout`. */
+	function markBriefingSeen() {
+		try { window.localStorage.setItem(BRIEFING_KEY, '1'); } catch (e) { /* storage disabled */ }
+	}
+	window.__coopMarkBriefingSeen = markBriefingSeen;
+
+	/**
 	 * A2 — remember an address only once it has REACHED a host. Called from `ws.onopen`, which is the
 	 * only place that fact exists: a browser gives no other signal that the far end was listening.
 	 *

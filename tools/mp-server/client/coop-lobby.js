@@ -126,7 +126,39 @@
 			}
 			return pkg;
 		},
-		open: function () { KinkyDungeonState = 'Multiplayer'; lobby.view = 'menu'; lobby.error = ''; lobby.status = ''; },
+		/**
+		 * KDM-272 A1 — the first time this player ever opens the lobby they land on the briefing,
+		 * every time after that on the root.
+		 *
+		 * Here, and not on Host/Join, because the perk and character picks are buttons on the ROOT
+		 * (`KDMPPerks`, `KDMPChar`) — the host connects straight from that view, so anything riding
+		 * the handshake is declared before either choice is pressed. There is therefore no moment
+		 * after approval that is still upstream of the perk grid, and opening the lobby is the last
+		 * one that is.
+		 *
+		 * `briefingSeen()` is the bootstrap's — the lobby asks, it does not own storage, exactly as
+		 * with `__coopLastAddress`. Absent (a bundle-only test page) reads as "not seen", which shows
+		 * the briefing rather than silently swallowing it.
+		 */
+		open: function () {
+			KinkyDungeonState = 'Multiplayer';
+			lobby.view = briefingSeen() ? 'menu' : 'about';
+			lobby.error = '';
+			lobby.status = '';
+		},
+		/**
+		 * KDM-272 — back to the lobby ROOT from a KD screen we borrowed.
+		 *
+		 * Split out of `open()` the moment `open()` stopped always meaning "the root". Returning from
+		 * the perk or character screen is a RETURN, not an entry: the player has already been told how
+		 * co-op differs on the way in, and re-showing the briefing every time they close the perk grid
+		 * would be the opposite of "once".
+		 *
+		 * One function because `commitPerks` and `commitCharacter` both need it — and they had already
+		 * drifted, `commitCharacter` calling `open()` while `commitPerks` set the two fields by hand,
+		 * which is exactly how one of them would have kept the bug.
+		 */
+		toRoot: function () { KinkyDungeonState = 'Multiplayer'; lobby.view = 'menu'; return true; },
 		close: function () { lobby.leave(); KinkyDungeonState = 'Menu'; },
 		/**
 		 * KDM-236 T — the ONE way back to the lobby root.
@@ -163,6 +195,24 @@
 			lobby.status = 'No transport available.';
 		}
 		return null;
+	}
+
+	/**
+	 * KDM-272 — the two questions the briefing asks of storage, both answered by the bootstrap.
+	 *
+	 * Bridged here for the same reason `connect()` is bridged above: the lobby is a screen, and the
+	 * one file that owns `kdcoop.` keys is `coop-bootstrap.js`. Absent — a bundle-only test page that
+	 * injects the lobby script alone — degrades to "never seen, cannot remember", which shows the
+	 * briefing every time. That is the safe direction: worst case the player is told twice.
+	 */
+	function briefingSeen() {
+		if (typeof window.__coopBriefingSeen !== 'function') return false;
+		try { return !!window.__coopBriefingSeen(); } catch (e) { return false; }
+	}
+
+	function markBriefingSeen() {
+		if (typeof window.__coopMarkBriefingSeen !== 'function') return;
+		try { window.__coopMarkBriefingSeen(); } catch (e) { /* storage disabled */ }
 	}
 
 	/**
@@ -207,6 +257,56 @@
 		if (lobby.view === 'menu') return drawRoot();
 		if (lobby.view === 'host') return drawHost();
 		if (lobby.view === 'join') return drawJoin();
+		if (lobby.view === 'about') return drawAbout();
+	}
+
+	// ---- KDM-272: how co-op differs, said once ---------------------------------------------
+
+	/**
+	 * The six rules a co-op player cannot learn by dying.
+	 *
+	 * One array rather than six `DrawTextKD` calls, because the layout is a loop over it and a
+	 * seventh rule should cost one line here and nothing else. Order is the Content list's: the perk
+	 * rule first, because it is the only one that changes a decision the player cannot take back.
+	 *
+	 * ⚠️ RULES, NOT VALUES (epic AC2 / KDM-272 AC5). No perk is named, no cost, no floor count, no
+	 * threshold — nothing that would put a gameplay constant in `tools/mp-server/**` or that would
+	 * quietly go stale when the game rebalances. "Everyone's apply to everyone" stays true whatever
+	 * the perk list is.
+	 */
+	var ABOUT_LINES = [
+		['KDMPAboutPerks',   'Start perks are the party\'s — everyone\'s apply to everyone, debuffs included.'],
+		['KDMPAboutHost',    'The host\'s settings and world seed govern the run.'],
+		['KDMPAboutDescend', 'You descend together — the stairs wait for the whole party.'],
+		['KDMPAboutTrade',   'Drop an item to hand it to your partner.'],
+		['KDMPAboutPvP',     'PvP resets to co-op at the hub, and you can offer peace.'],
+		['KDMPAboutRejoin',  'A dropped connection does not end the run — they can rejoin as themselves.'],
+	];
+
+	/**
+	 * KDM-272 A2 — the briefing itself.
+	 *
+	 * A VIEW, not an overlay. It replaces the root rather than painting over it, which is the whole
+	 * point: an overlay would leave `KDMPPerks` registered in `KDButtonsCache` underneath, and a
+	 * player could press straight through the words explaining what pressing it costs their partner.
+	 *
+	 * ⚠️ MARKED SEEN HERE, IN THE DRAW, NOT ON `Back`. A player who closes the tab looking at this
+	 * screen has been shown it, and hanging "once" off a button press makes it depend on an action we
+	 * cannot require. The write is idempotent and the guard is the bootstrap's, so repeating it every
+	 * frame the screen is up costs a `setItem` of the same value.
+	 */
+	function drawAbout() {
+		markBriefingSeen();
+		DrawTextKD(text('KDMPAboutTitle', 'Playing together is a little different'),
+			W, 200, '#ffd98a', '#000000', 30);
+		for (var i = 0; i < ABOUT_LINES.length; i++) {
+			DrawTextKD(text(ABOUT_LINES[i][0], ABOUT_LINES[i][1]),
+				W, 280 + i * 62, '#ffffff', '#000000', 24);
+		}
+		// `view = 'menu'`, NOT `lobby.leave()`: reading the briefing is not cancelling anything, and
+		// `leave()` would drop a host socket that Host→Cancel→About may already have left open.
+		DrawButtonKDEx('KDMPBack', function () { lobby.view = 'menu'; return true; },
+			true, MID, 700, 350, 64, text('KDMPBack', 'Back'), '#ffffff', '');
 	}
 
 	/**
@@ -374,8 +474,18 @@
 			return true;
 		}, true, MID, saved ? 740 : 660, 350, 64, text('KDMPCharBtn', 'Character'), '#ffffff', '');
 
+		// KDM-272 A3 — the way back into the briefing, so it is not lost after the first run.
+		// Last before Back, and inside the same `saved ? … : …` ladder KDM-243 established: the
+		// Continue row is conditional, so every button under it carries the +100 at its own call site
+		// rather than the layout being re-derived.
+		DrawButtonKDEx('KDMPAbout', function () {
+			lobby.error = '';
+			lobby.view = 'about';
+			return true;
+		}, true, MID, saved ? 840 : 760, 350, 64, text('KDMPAboutBtn', 'How co-op differs'), '#ffffff', '');
+
 		DrawButtonKDEx('KDMPBack', function () { lobby.close(); return true; },
-			true, MID, saved ? 840 : 760, 350, 64, text('KDMPBack', 'Back'), '#ffffff', '');
+			true, MID, saved ? 920 : 840, 350, 64, text('KDMPBack', 'Back'), '#ffffff', '');
 	}
 
 	function drawHost() {
@@ -495,7 +605,7 @@
 		} catch (e) { pkg = {}; }
 		lobby.character = Object.keys(pkg).length ? pkg : null;
 		lobby.charPick = false;
-		lobby.open();
+		lobby.toRoot();
 		return true;
 	};
 
@@ -526,8 +636,7 @@
 		} catch (e) { chosen = []; }
 		lobby.perks = chosen;
 		lobby.perkPick = false;
-		KinkyDungeonState = 'Multiplayer';
-		lobby.view = 'menu';
+		lobby.toRoot();
 		return true;
 	};
 

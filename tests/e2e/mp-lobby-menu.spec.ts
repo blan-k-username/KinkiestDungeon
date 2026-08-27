@@ -63,7 +63,11 @@ test.describe('KDM-233 — Multiplayer entry in the main menu', () => {
 			return { screen: KinkyDungeonState, view: window.KDMPLobby && window.KDMPLobby.view };
 		});
 		expect(state.screen).toBe('Multiplayer');
-		expect(state.view).toBe('menu');
+		// KDM-272 — a player who has never been told how co-op differs lands on the BRIEFING, and the
+		// root is one Back away. This page injects the lobby script alone, with no `coop-bootstrap.js`
+		// to remember anything, so it is a first-ever open every time — which is the degraded reading
+		// the lobby is specified to take (`briefingSeen()` answers false when it cannot know).
+		expect(state.view, 'the entry opens the lobby ON the briefing, not past it').toBe('about');
 	});
 
 	test('the lobby paints its own screen, and the stock frame paints nothing underneath', async ({ isolatedPage: page }) => {
@@ -76,7 +80,8 @@ test.describe('KDM-233 — Multiplayer entry in the main menu', () => {
 		expect(names.sort(), 'exactly the lobby\'s own buttons — a stock fallthrough would add more')
 			// KDM-238 added KDMPPerks to the root view — KD's own perk screen, reached from the lobby.
 			// KDM-256 added KDMPChar beside it — KD's own class screen, and the Wardrobe beyond it.
-			.toEqual(['KDMPBack', 'KDMPChar', 'KDMPHost', 'KDMPJoin', 'KDMPPerks']);
+			// KDM-272 added KDMPAbout — the way back into the briefing after the first showing.
+			.toEqual(['KDMPAbout', 'KDMPBack', 'KDMPChar', 'KDMPHost', 'KDMPJoin', 'KDMPPerks']);
 	});
 
 	test('Back returns to the menu; Host and Join each open their own view', async ({ isolatedPage: page }) => {

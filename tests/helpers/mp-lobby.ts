@@ -63,7 +63,7 @@ async function gotoMenu(page: any, timeout = 30_000) {
 	}, undefined, { timeout, polling: 'raf' });
 }
 
-export async function openLobby(page: any, port: number, host = '127.0.0.1', opts: { preload?: boolean } = {}) {
+export async function openLobby(page: any, port: number, host = '127.0.0.1', opts: { preload?: boolean; briefing?: boolean } = {}) {
 	// KD's OWN setting for "don't play the intro" (`KDFirstRunMainmenu`, KinkyDungeon.ts:8439-8449),
 	// read out of localStorage at init (`:1003`). Without it, preload finishing schedules a 100 ms
 	// timer that drops the page on the Intro screen — which has no buttons and only advances on a
@@ -83,6 +83,15 @@ export async function openLobby(page: any, port: number, host = '127.0.0.1', opt
 	if (opts.preload) await waitAssetsPreloaded(page);
 	await gotoMenu(page);
 	await press(page, 'MultiplayerButton');
+	// KDM-272 — a player who has never seen the co-op briefing lands on it, not on the root. Every
+	// spec but `mp-lobby-about` is about something else and wants the root it has always had, so it
+	// is dismissed HERE rather than by a copy of this in each of them. `{briefing: true}` opts out,
+	// and the one spec that opts out is the one that asserts the real first-open behaviour — so this
+	// convenience cannot be what makes that spec pass.
+	if (!opts.briefing) {
+		const view = await page.evaluate(() => (window as any).KDMPLobby.view);
+		if (view === 'about') await press(page, 'KDMPBack');
+	}
 }
 
 /** The lobby's own view of itself — the fields the specs assert on. */
@@ -96,7 +105,7 @@ export const lobbyState = (page: any) => page.evaluate(() => ({
 }));
 
 /** Open the lobby, fill the join form and press Join. `address` defaults to the server's own. */
-export async function guestAsks(page: any, port: number, name: string, address?: string, opts: { preload?: boolean } = {}) {
+export async function guestAsks(page: any, port: number, name: string, address?: string, opts: { preload?: boolean; briefing?: boolean } = {}) {
 	await openLobby(page, port, '127.0.0.1', opts);
 	await press(page, 'KDMPJoin');
 	await page.locator('#KDMPAddress').fill(address ?? `127.0.0.1:${port}`);
