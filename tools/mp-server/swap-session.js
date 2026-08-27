@@ -41,6 +41,26 @@ const { sanitizeWorld } = require('./game-modes');
 const PARK = { x: 1, y: 1 };
 
 /**
+ * KDM-282 — what an UNNAMED player is called, per seat.
+ *
+ * A table rather than a conditional so "which seats have a label" and "what that label is" are the
+ * same statement: a role absent from here has no label, which is exactly how `setSeatRole` rejects
+ * one and how `displayNameOf` falls through to the legacy `Player <id>` tier.
+ *
+ * Ordinals rather than `Host`/`Guest`: the label sits on an avatar beside the other player's chosen
+ * name, where "Guest" reads as a lobby status rather than as a person. `Player 1`/`Player 2` also
+ * keeps the shape the whole codebase already reads — it is the opaque random id that was the
+ * defect, not the word in front of it.
+ *
+ * Null-prototype: this is indexed by a value that arrives over the wire, and `KD_SEAT_LABEL['constructor']`
+ * must answer nothing rather than a function.
+ */
+const KD_SEAT_LABEL = Object.freeze(Object.assign(Object.create(null), {
+	host:  'Player 1',
+	guest: 'Player 2',
+}));
+
+/**
  * KDM-227/262: KD's own room types for the between-floors hub — the room with the perk pick, the
  * merchants and the path choice. Named once because this is the ONE detector: every consumer asks it,
  * nothing re-tests the room for itself.
@@ -298,6 +318,22 @@ class SwapSession {
 		 * departing player takes it with them.
 		 */
 		this.nameOf = new Map();     // id -> chosen display name ('' / absent = unnamed)
+		/**
+		 * KDM-282 — the SEAT this player holds, `'host'` or `'guest'`, as the bridge saw it
+		 * (`ws-bridge.js` `_carrySeat`, from `presence.roleOf`). Absent means "nobody ever told this
+		 * session", which is the legacy `#coop=`-era shape and is what every direct-constructed
+		 * SwapSession in the test suite looks like.
+		 *
+		 * Stored rather than derived from `_joined`: join ORDER is not seat identity. `_joined` is
+		 * spliced by `removePlayer`, so a guest who outlives a departed host would silently become
+		 * "Player 1" — a label that renames a player mid-run is worse than the raw id it replaced.
+		 * The seat is the thing that survives a reconnect, and the gate/presence pair owns it.
+		 *
+		 * Read by `displayNameOf` and by nothing else: this is an INPUT to what a player is called,
+		 * not a second answer to it (NF2). Registered in `_perClientStores()` beside `nameOf` so a
+		 * departing player takes it with them.
+		 */
+		this.roleOf = new Map();     // id -> 'host' | 'guest' (absent = never told)
 		/**
 		 * KDM-256 / KDM-279 — id -> the character package this player built: class, outfit, style
 		 * and the perk keys they chose. Absent means "declared nothing", which `characterOf` turns
@@ -2004,9 +2040,36 @@ class SwapSession {
 	 * concatenate inline. Every consumer — the avatar label, the captured bundle — asks this one
 	 * function; nothing else builds a label. A fallback copied to a second call site is how that
 	 * guarantee rots quietly.
+	 *
+	 * KDM-282 added a MIDDLE tier, and did not weaken that rule: a player who typed no name is
+	 * called after their SEAT (`Player 1`/`Player 2`, via `KD_SEAT_LABEL`) when the bridge told this
+	 * session which seat they hold. NF2 survives because that tier is reached only when a role WAS
+	 * carried — a direct-constructed session, and anything predating `setSeatRole`, still answers the
+	 * byte-identical `Player <id>`. All three tiers are still decided here and nowhere else.
 	 */
 	displayNameOf(clientId) {
-		return this.nameOf.get(clientId) || ('Player ' + clientId);
+		return this.nameOf.get(clientId)
+			|| KD_SEAT_LABEL[this.roleOf.get(clientId)]
+			|| ('Player ' + clientId);
+	}
+
+	/**
+	 * KDM-282 — record which SEAT this player holds. Called by the bridge as it seats them, from
+	 * `presence.roleOf`; the session never infers one.
+	 *
+	 * Idempotent and order-independent, exactly like `setPlayerName` and `setCharacter`, and for the
+	 * same reason: the bridge tells the session before `join()` on the normal path.
+	 *
+	 * CLEARS rather than stores on anything that is not a seat this feature knows about — an empty
+	 * role, a `null`, or a protocol token a future handshake invents. `displayNameOf` then falls
+	 * through to the legacy tier, so an unrecognised role degrades to the label we already shipped
+	 * instead of painting a raw protocol word onto an avatar.
+	 */
+	setSeatRole(clientId, role) {
+		const r = (typeof role === 'string' && KD_SEAT_LABEL[role]) ? role : '';
+		if (r) this.roleOf.set(clientId, r);
+		else this.roleOf.delete(clientId);
+		return r;
 	}
 
 	/**
@@ -2433,6 +2496,9 @@ class SwapSession {
 	_perClientStores() {
 		return [
 			this.bundles, this.avatars, this.startOf, this.logs, this.actionMsgOf, this.nameOf,
+			// KDM-282 — the seat they held, beside the name it stands in for. A stale entry would
+			// hand a later player reusing that id the departed player's label.
+			this.roleOf,
 			// KDM-243 — the save a host declared, and the character template it produced. Per-client
 			// containers like `worldOf` beside them, so a departing player takes both with them; a
 			// stale `_templateOf` entry would seat a RECONNECTING player from a character captured

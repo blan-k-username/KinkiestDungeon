@@ -390,8 +390,8 @@ class WSBridge {
 
 	/**
 	 * KDM-237 N2 / KDM-238 R3 — hand what the SEAT knows about a player to the session, immediately
-	 * before it seats them: the name they chose, and the character they built (perks included, since
-	 * KDM-279).
+	 * before it seats them: the name they chose, the seat they hold (KDM-282), and the character
+	 * they built (perks included, since KDM-279).
 	 *
 	 * One helper rather than copies of the same gate lookup at each site, because the three seating
 	 * sites (accept, join-late, and the plain/legacy join) must not be able to disagree about where a
@@ -401,13 +401,27 @@ class WSBridge {
 	 * KDM-279 took that argument one step further: perks were a separate field travelling beside the
 	 * character, so they became part of it.
 	 *
-	 * Safe on the roleless `#coop=` path (NF2/R9): `nameOf` answers `''` and `characterOf` answers
-	 * `null` for a player who declared neither, and both setters CLEAR rather than set on an empty
-	 * value — so those sessions keep the legacy `Player <id>` label and KD's own default perk state.
+	 * Safe on the `#coop=` path (R9): `nameOf` answers `''` and `characterOf` answers `null` for a
+	 * player who declared neither, and every setter here CLEARS rather than sets on an empty value —
+	 * so those sessions keep KD's own default perk state and character.
+	 *
+	 * ⚠️ KDM-282 changed what an UNNAMED player on that path is CALLED, deliberately. `#coop=` has
+	 * been a shortcut into the gate flow since KDM-255, so it does carry a real role, and its
+	 * unnamed players now read `Player 1`/`Player 2` instead of `Player <opaque-id>`. NF2's
+	 * byte-identical guarantee moved to where it always belonged — a session nobody told a role,
+	 * which is every direct-constructed `SwapSession` in the unit suite. `mp-lobby-name.spec.ts`
+	 * pins the new answer.
 	 */
 	_carrySeat(clientId) {
 		try { this.session.setPlayerName(clientId, this.gate.nameOf(clientId)); }
 		catch (e) { /* a session that predates names, or an id the gate never seated */ }
+		// KDM-282 — and the SEAT they hold, which is what the session calls them BY when they typed
+		// no name. From `presence`, not from `msg.role`: presence is where the seat is recorded and
+		// what survives a reconnect, so the label cannot disagree with the seat every other consumer
+		// reads (`_dropped`, `_reportBack`). The session decides what a seat is CALLED; this only
+		// reports which seat it is.
+		try { this.session.setSeatRole(clientId, this.presence.roleOf(clientId)); }
+		catch (e) { /* a session that predates seat labels (KDM-282) */ }
 		// KDM-256 R1 / KDM-279 — the character they built, PERKS INCLUDED. This used to be two
 		// carries, `setPerks` then `setCharacter`, reading two gate accessors; one declaration is one
 		// carry. Unconditional: `characterOf` answers `null` for a seat that declared nothing, and
@@ -505,9 +519,17 @@ class WSBridge {
 				return clientId;
 			}
 			try {
-				this._carrySeat(res.clientId);
 				// KDM-250: seated before the session is told, so the seat exists by then.
+				//
+				// ⚠️ KDM-282 — AND BEFORE `_carrySeat`, which is the order the other seating site
+				// already used. These two lines were the other way round here, which cost nothing
+				// while `_carrySeat` read only the gate: it now reads `presence.roleOf` too, and an
+				// unseated presence answers `null`, so an approved guest was carried with no seat
+				// and fell back to `Player <raw-id>` while the host read `Player 1`. That is
+				// precisely the "two seating sites disagreeing" that `_carrySeat`'s own doc comment
+				// exists to prevent — so the fix is to make them agree, not to pass the role in.
 				this.presence.seat(res.clientId, 'guest', now());
+				this._carrySeat(res.clientId);
 				/*
 				 * KDM-255 — A GUEST APPROVED INTO A RUNNING SESSION IS A JOIN-LATE, not an error.
 				 *

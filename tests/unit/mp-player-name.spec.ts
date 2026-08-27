@@ -212,4 +212,59 @@ describe('KDM-237 — the name reaches the world (S1, S2, N3)', () => {
 		// assert it only once it does, rather than pretending the timing does not exist.
 		if (!res.deferred) expect(avatarName('C')).toBe('Cy');
 	});
+
+	// -----------------------------------------------------------------------------------------
+	// KDM-282 — and what an unnamed player is actually CALLED.
+	//
+	// Nested inside this describe on purpose: it shares the one booted session, so the new SEAT
+	// label and the legacy `Player <id>` fallback are measured against each other in the same run
+	// — the same argument the file header makes for the named/unnamed pair. Two separate sessions
+	// could each be green while disagreeing about which tier applies to whom.
+	//
+	// ⚠️ NF2 is the point of the third case. `displayNameOf` is still the ONE function that answers
+	// "what is this player called", and a session nobody told a role — every direct-constructed
+	// SwapSession in this suite, `mp-pvp-realcombat` included — must keep the byte-identical legacy
+	// string. The seat label is a MIDDLE tier under the chosen name, not a replacement for either.
+	// -----------------------------------------------------------------------------------------
+	describe('KDM-282 — an unnamed player is labelled by SEAT, not by their raw id', () => {
+		it('the host seat reads as Player 1, the guest seat as Player 2', () => {
+			// Ids deliberately id-SHAPED rather than friendly: the whole defect is that a real
+			// clientId is an opaque random string, so 'H'/'G' here would hide what is being fixed.
+			s.setSeatRole('kd-282host', 'host');
+			s.setSeatRole('kd-282guest', 'guest');
+			expect(s.displayNameOf('kd-282host')).toBe('Player 1');
+			expect(s.displayNameOf('kd-282guest')).toBe('Player 2');
+		});
+
+		it('a chosen name still wins over the seat label', () => {
+			// The tier ORDER, stated as a rule. Without this, a fallback that ran first would pass
+			// every other case here while renaming everybody who typed a name into the lobby.
+			s.setSeatRole('kd-282named', 'guest');
+			s.setPlayerName('kd-282named', 'Nyx282');
+			expect(s.displayNameOf('kd-282named')).toBe('Nyx282');
+		});
+
+		it('NF2 — a session that was never told a role keeps the EXACT legacy label', () => {
+			// B is this describe's own unnamed, roleless player, seated in the same beforeAll.
+			expect(s.displayNameOf('B')).toBe('Player B');
+			expect(s.displayNameOf('kd-282unknown')).toBe('Player kd-282unknown');
+		});
+
+		it('an unrecognised role is not a label — it falls through rather than being printed', () => {
+			// A role the bridge never sends. Printing it would put a protocol token on screen and
+			// answering '' would produce a nameless avatar; neither is a label, so the legacy tier
+			// has to catch it.
+			s.setSeatRole('kd-282bogus', 'spectator');
+			expect(s.displayNameOf('kd-282bogus')).toBe('Player kd-282bogus');
+		});
+
+		it('the seat label is forgotten with the player, like every other per-client fact', () => {
+			// `mp-solo-teardown` sweeps by SHAPE, so a Map missing from `_perClientStores` fails
+			// there too — this states the rule where a reader of `displayNameOf` will look for it.
+			s.setSeatRole('kd-282leaver', 'host');
+			expect(s.displayNameOf('kd-282leaver')).toBe('Player 1');
+			s.roleOf.delete('kd-282leaver');
+			expect(s.displayNameOf('kd-282leaver')).toBe('Player kd-282leaver');
+		});
+	});
 });
