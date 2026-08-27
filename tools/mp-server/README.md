@@ -363,7 +363,18 @@ Co-op is opt-in: run the plain static server (`npm run serve`) and nothing liste
   and the name lands on whoever is restored into the slot next.
 - **The lobby caches the name field rather than reading the DOM on demand.** `KDCullTempElements`
   destroys any field not drawn this frame, and `KDMPHost` connects from the ROOT view — so a read at
-  press time finds nothing. `lobby.name` is what lets one `drawNameField()` serve both views.
+  press time finds nothing. `lobby.name` is what lets one `drawNameField()` serve both views. The
+  seed field (KDM-259) is the same widget for the same reason — both go through `drawField()`.
+- **The host names the run's SEED in the lobby** (KDM-259), beside their own name and on the same
+  root view, because `KDMPHost` connects straight from there and the world declaration is read at ask
+  time. It rides `__coopConnect({role:'host', seed})` → `worldSeed()` → `join.world.seed`, and the
+  server prefers it over its own (`swap-session.js`: `hostWorld.seed || this.seed`). ⚠️ **Empty means
+  "the server's own seed", not "an empty seed"** — never substitute a default in the client, which
+  does not know what the server was configured with.
+- **KD answers a missing text key with `"[NotFound] <key>"`, not with nothing.** `coop-lobby.js`
+  guarded its fallback with `t !== key`, which that marker passes, so every lobby label painted the
+  marker at the player until KDM-259. One `kdText()` now owns the "does KD have a word for this?"
+  question; `tests/e2e/mp-lobby-seed.spec.ts` asserts no marker ever reaches the screen.
 
 **Not done here:** per-player character CREATION — appearance, outfit, class, pronouns (KDM-256);
 names themselves landed in KDM-237. The legacy `#coop=` path still joins directly, bypassing the

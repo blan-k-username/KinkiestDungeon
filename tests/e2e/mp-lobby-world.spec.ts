@@ -96,10 +96,33 @@ test.describe('KDM-239 R4 — the lobby names the host\'s world', () => {
 				undefined, { polling: 'raf' });
 
 			const text = (await screenText(guest)).toLowerCase();
-			// The lead line, not the mode name: this fails for a banner that appears with an empty
-			// list, which is the failure mode a "does not contain 'hard'" check would miss entirely.
-			expect(text, 'silence is the correct output for a default world')
-				.not.toContain('the host\'s game');
+			/*
+			 * ⚠️ THIS ASSERTION WAS REWRITTEN BY KDM-259, AND THE OLD ONE WAS VACUOUS.
+			 *
+			 * It used to read `.not.toContain("the host's game")` — "a default world paints no banner
+			 * at all". That was green for the wrong reason: the lead line was painting
+			 * `"[NotFound] KDMPWorldLead"`, because `coop-lobby.js`'s `text()` mistook KD's
+			 * missing-key MARKER for a translation (fixed under KDM-259, pinned in
+			 * `mp-lobby-seed.spec.ts`). With the marker gone the real lead line appears and the old
+			 * assertion fails.
+			 *
+			 * It fails because it was never reachable. `KinkyDungeonProgressionMode` defaults to
+			 * `"Key"` (`KinkyDungeon.ts:1382`) and `MODE_SOURCE` maps exactly that value to
+			 * `escapekey`, so `worldModes()` ALWAYS returns at least one key and a host on KD's
+			 * defaults always has something to declare. "Defaults ⇒ silence" is not a state this
+			 * product can be in.
+			 *
+			 * So the control is re-aimed at what it was actually protecting: the banner must name the
+			 * host's OWN choices and nothing else. The one assignment that separates this test from
+			 * its sibling is `hardMode`, and its absence here is what a banner inventing settings —
+			 * or echoing the other test's — would fail on.
+			 *
+			 * Whether naming KD's default escape rule to a guest as the raw key `escapekey` is the
+			 * right thing to SHOW is a product question this spec deliberately does not settle; it is
+			 * filed as its own task rather than decided inside a control.
+			 */
+			expect(text, 'a mode the host never chose is never named')
+				.not.toContain('hard');
 		} finally {
 			await hostCtx.close(); await guestCtx.close();
 			await new Promise((r) => server.close(r));

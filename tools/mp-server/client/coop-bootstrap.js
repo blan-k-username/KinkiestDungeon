@@ -55,6 +55,10 @@
 	// KDM-243 R1 — the single-player save this HOST is continuing, or `''` for a new game. Set only
 	// by `__coopConnect({role:'host', save})`, i.e. only by the lobby's Continue button.
 	var savePayload = '';
+	// KDM-259 — the world seed this HOST named in the lobby, or `''` for "the server's own". Set only
+	// by `__coopConnect({role:'host', seed})`, i.e. only by the lobby's host buttons; read by
+	// `worldSeed()`, which is read only when a HOST builds its `join.world`.
+	var seedChoice = '';
 
 	// KD-098 diagnostics: ON by default for the co-op demo (it's a debug harness). Logs to the
 	// browser console: every KDSendInput classification (render-client) + every submit() here.
@@ -620,13 +624,20 @@
 	}
 
 	/**
-	 * KDM-239 R5 — the seed for this run. A URL override (`#coop=A&seed=foo`) if given, else ''.
+	 * KDM-239 R5 / KDM-259 — the seed for this run: what the host TYPED in the lobby, else a URL
+	 * override (`#coop=A&seed=foo`), else ''.
 	 *
-	 * Empty means "use whatever the server was configured with", which is what every session did
-	 * before this task — so a host that names nothing changes nothing. Choosing a seed in the UI is
-	 * explicitly NOT part of R5; being able to state and reproduce one is.
+	 * Empty means "use whatever the server was configured with" (`swap-session.js`:
+	 * `hostWorld.seed || this.seed`), which is what every session did before either half existed — so
+	 * a host that names nothing still changes nothing. ⚠️ Never substitute a default here: this client
+	 * does not know what the server was configured with, and inventing one would silently replace it.
+	 *
+	 * The two sources cannot really contend — the `#coop=` shortcut road never passes through the
+	 * lobby, so `seedChoice` is '' there, and a lobby host has no `#coop=` fragment. The order is
+	 * still stated rather than left to chance: an explicit act by a player outranks a URL a developer
+	 * left in the bar.
 	 */
-	function worldSeed() { return getParam('seed') || ''; }
+	function worldSeed() { return seedChoice || getParam('seed') || ''; }
 
 	/**
 	 * KD-101: pre-select the player's binding material as the quick-bind item (stock
@@ -1766,6 +1777,10 @@
 		// KDM-243 — the save to continue, if the lobby's Continue button supplied one. Cleared on
 		// every connect, so a host who backs out and presses Host instead starts a new game.
 		savePayload = (opts.role === 'host' && typeof opts.save === 'string') ? opts.save : '';
+		// KDM-259 — and the seed, on exactly the same terms as the save: host-only, and CLEARED on
+		// every connect. The clear is the load-bearing half — a player who is refused the host seat
+		// comes back as a guest (KDM-270), and a guest must not carry the world it was going to bring.
+		seedChoice = (opts.role === 'host' && typeof opts.seed === 'string') ? opts.seed : '';
 		endpoint = opts.address ? String(opts.address).replace(/^wss?:\/\//, '').replace(/\/+$/, '') : null;
 		// Identity is ours to pick and must be stable for a reconnect to be recognised (S2). It is not
 		// a credential — there is nothing to authenticate against (KDM-226, LAN-only).

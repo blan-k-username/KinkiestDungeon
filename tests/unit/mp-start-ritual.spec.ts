@@ -173,6 +173,20 @@ describe('KDM-239 — the world declaration rides the host\'s seat (R3, R5, A5)'
 		expect(g.worldOf('H').seed.length).toBeLessThanOrEqual(64);
 	});
 
+	/**
+	 * KDM-259 R2 — a seed the host TYPED but left blank is still "the server's default".
+	 *
+	 * The lobby field always sends a string, so `''` and `'   '` are now reachable from a player
+	 * rather than only from a hand-edited URL. Both must land on the same `''` that
+	 * `swap-session.js:495` reads as "fall back to the operator's seed" — the alternative reading
+	 * ("this run's seed is three spaces") is a different world, silently.
+	 */
+	it('KDM-259 R2 — a blank or whitespace-only seed means the server default, not an empty seed', () => {
+		const g = new JoinGate({ build: BUILD });
+		g.claimHost('H', { build: BUILD, world: { seed: '   ' } });
+		expect(g.worldOf('H').seed).toBe('');
+	});
+
 	it('R4 — the pending reply tells the GUEST what world it is about to join', () => {
 		// The guest can still walk away at this point (it is waiting for approval and the session does
 		// not exist yet), which is why the world rides this message and not the admission.

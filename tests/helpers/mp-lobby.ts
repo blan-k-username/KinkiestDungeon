@@ -91,6 +91,8 @@ export const lobbyState = (page: any) => page.evaluate(() => ({
 	pending: window.KDMPLobby.pending,
 	error: window.KDMPLobby.error,
 	status: window.KDMPLobby.status,
+	// KDM-259 — the seed the host typed, cached across view changes like `name`.
+	seed: window.KDMPLobby.seed,
 }));
 
 /** Open the lobby, fill the join form and press Join. `address` defaults to the server's own. */

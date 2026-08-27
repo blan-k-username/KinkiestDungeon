@@ -72,6 +72,19 @@
 		name: '',
 		playerName: function () { return lobby.name; },
 		/**
+		 * KDM-259 — the world seed this host is naming, cached from the field on the same terms as
+		 * `name` above (and destroyed/re-created by `KDCullTempElements` for the same reason).
+		 *
+		 * ⚠️ `''` IS NOT "an empty seed" — it is "whatever the server was configured with", which is
+		 * what every session meant before there was a field at all (`swap-session.js`:
+		 * `hostWorld.seed || this.seed`). That is why nothing here ever substitutes a default of its
+		 * own: the only two states are "the host named one" and "the host named nothing".
+		 *
+		 * Host-only by construction — it is passed by `hostConnect` and by nothing else, and the gate
+		 * drops a guest's copy anyway (KDM-239 A5).
+		 */
+		seed: '',
+		/**
 		 * KDM-238 — the perk keys this player committed on KD's own perk screen, and whether a pick
 		 * is in progress right now.
 		 *
@@ -152,10 +165,32 @@
 		return null;
 	}
 
-	function text(key, fallback) {
-		try { if (typeof TextGet === 'function') { var t = TextGet(key); if (t && t !== key) return t; } } catch (e) { /* noop */ }
-		return fallback;
+	/**
+	 * KD's translation for `key`, or `''` when it has none.
+	 *
+	 * ⚠️ KD ANSWERS A MISSING KEY WITH A MARKER, NOT WITH NOTHING. `TextGet` returns the literal
+	 * string `"[NotFound] <key>"` — the failure `kd-peace-dialogue.js:46` records this epic as having
+	 * shipped twice already. The old guard here was `t !== key`, which that marker passes, so EVERY
+	 * label in this lobby was painting `"[NotFound] KDMPYourName"` at the player instead of its
+	 * English fallback. Found by KDM-259's R3 assertion, which could not see the seed because
+	 * `'• seed: SEED'.replace('SEED', …)` was never the string being interpolated.
+	 *
+	 * One function rather than a guard per call site: `drawWorldSummary` had its own copy that tested
+	 * for `'MISSING'` and let `[NotFound]` through, which is exactly how the second site drifted from
+	 * the first.
+	 */
+	function kdText(key) {
+		try {
+			if (typeof TextGet !== 'function') return '';
+			var t = String(TextGet(key) || '');
+			if (!t || t === key) return '';
+			if (t.indexOf('[NotFound]') >= 0 || t.indexOf('MISSING') >= 0) return '';
+			return t;
+		} catch (e) { return ''; }
 	}
+
+	/** KD's word for `key` where it has one, else our English source string. */
+	function text(key, fallback) { return kdText(key) || fallback; }
 
 	// ---- the entry on KD's own menu --------------------------------------------------------
 
@@ -186,11 +221,54 @@
 	 * `KDCullTempElements` destroys any field not drawn this frame — so moving between views destroys
 	 * and re-creates this input, and the cache is what carries what the player typed across.
 	 */
-	function drawNameField(y) {
-		DrawTextKD(text('KDMPYourName', 'Your name'), W, y, '#ffffff', '#000000', 28);
-		KDTextField('KDMPName', MID, y + 30, 350, 56, 'text', lobby.name, '24');
-		var el = document.getElementById('KDMPName');
-		if (el) lobby.name = String(el.value || '');
+	function drawNameField(y) { drawField('KDMPName', text('KDMPYourName', 'Your name'), 'name', y); }
+
+	/**
+	 * KDM-259 — a labelled text field whose value lives in `lobby[key]`.
+	 *
+	 * One function because the name field and the seed field are the same widget with a different
+	 * label: both are drawn on a view the player leaves and comes back to, both are therefore
+	 * destroyed by `KDCullTempElements`, and both survive only because of the cache-back on the last
+	 * line. Writing that mechanic twice is how the second copy would forget it.
+	 */
+	function drawField(id, label, key, y) {
+		DrawTextKD(label, W, y, '#ffffff', '#000000', 28);
+		KDTextField(id, MID, y + 30, 350, 56, 'text', lobby[key], '24');
+		var el = document.getElementById(id);
+		if (el) lobby[key] = String(el.value || '');
+	}
+
+	/**
+	 * KDM-259 — "World seed", on the ROOT view beside the name and for the same reason: `KDMPHost`
+	 * connects straight from here, and the world declaration is read at ask time (KDM-270). A field
+	 * on the Host view — where the task originally imagined it — would be typed into after the
+	 * declaration had already gone.
+	 *
+	 * The label says "optional" rather than the lobby inventing a placeholder value, because a
+	 * displayed default would be a claim about what the server is configured with, which this client
+	 * does not know.
+	 */
+	function drawSeedField(y) {
+		drawField('KDMPSeed', text('KDMPWorldSeedField', 'World seed (optional — the host\'s to choose)'), 'seed', y);
+	}
+
+	/**
+	 * KDM-259 — the ONE way this lobby asks for the host seat.
+	 *
+	 * Host and Continue Save differ by exactly one argument (the save) and were already two copies of
+	 * the same declaration; the seed would have been the third field to keep in step across both.
+	 * `save` is passed only when there is one, so pressing Host still starts a new game for a player
+	 * who has a save sitting right there — the e2e control that KDM-243 pinned.
+	 */
+	function hostConnect(save) {
+		var opts = {
+			role: 'host',
+			name: lobby.playerName(),
+			character: lobby.playerCharacter(),
+			seed: lobby.seed,
+		};
+		if (save) opts.save = save;
+		connect(opts);
 	}
 
 	/**
@@ -229,12 +307,16 @@
 		// Asked BEFORE either choice, because the host connects straight from this view. y=190 puts
 		// the field at ~192-248, clear of the Host button at 268-332.
 		drawNameField(190);
+		// KDM-259 — and the seed, in the row below it. Everything under this row moved down by one
+		// (+100) to make space; the offset is applied at each call rather than by re-deriving the
+		// layout, which is the same way KDM-243's Continue row was added.
+		drawSeedField(290);
 		DrawButtonKDEx('KDMPHost', function () {
 			lobby.view = 'host';
 			lobby.error = '';
-			connect({ role: 'host', name: lobby.playerName(), character: lobby.playerCharacter() });
+			hostConnect();
 			return true;
-		}, true, MID, 300, 350, 64, text('KDMPHostGame', 'Host Game'), '#ffffff', '');
+		}, true, MID, 400, 350, 64, text('KDMPHostGame', 'Host Game'), '#ffffff', '');
 
 		/*
 		 * KDM-243 A5 — hosting a run that is ALREADY IN PROGRESS.
@@ -259,16 +341,16 @@
 					return true;
 				}
 				lobby.view = 'host';
-				connect({ role: 'host', name: lobby.playerName(), character: lobby.playerCharacter(), save: str });
+				hostConnect(str);
 				return true;
-			}, true, MID, 380, 350, 64, text('KDMPContinueSave', 'Continue Save'), '#ffffff', '');
+			}, true, MID, 480, 350, 64, text('KDMPContinueSave', 'Continue Save'), '#ffffff', '');
 		}
 
 		DrawButtonKDEx('KDMPJoin', function () {
 			lobby.view = 'join';
 			lobby.error = '';
 			return true;
-		}, true, MID, saved ? 460 : 380, 350, 64, text('KDMPJoinGame', 'Join Game'), '#ffffff', '');
+		}, true, MID, saved ? 560 : 480, 350, 64, text('KDMPJoinGame', 'Join Game'), '#ffffff', '');
 
 		// KDM-238 R1 — asked BEFORE either choice, like the name above it: the host connects straight
 		// from this view, so anything that has to ride the handshake must be pickable here.
@@ -280,7 +362,7 @@
 			// KDM-243 — everything below Continue moves down by one row when it is present. The
 			// offset is applied here rather than by re-numbering, so the no-save layout (which the
 			// whole existing lobby suite asserts on) stays byte-identical.
-		}, true, MID, saved ? 540 : 460, 350, 64, text('KDMPPerksBtn', 'Perks'), '#ffffff', '');
+		}, true, MID, saved ? 640 : 560, 350, 64, text('KDMPPerksBtn', 'Perks'), '#ffffff', '');
 
 		// KDM-256 R1 — the character pick, beside the perk pick and for the same reason: the host
 		// connects straight from this view, so anything that must ride the handshake is chosen here.
@@ -290,10 +372,10 @@
 			lobby.charPick = true;
 			KinkyDungeonState = 'Diff';        // KD's OWN class/start screen — see drawCharPickOverrides
 			return true;
-		}, true, MID, saved ? 640 : 560, 350, 64, text('KDMPCharBtn', 'Character'), '#ffffff', '');
+		}, true, MID, saved ? 740 : 660, 350, 64, text('KDMPCharBtn', 'Character'), '#ffffff', '');
 
 		DrawButtonKDEx('KDMPBack', function () { lobby.close(); return true; },
-			true, MID, saved ? 740 : 660, 350, 64, text('KDMPBack', 'Back'), '#ffffff', '');
+			true, MID, saved ? 840 : 760, 350, 64, text('KDMPBack', 'Back'), '#ffffff', '');
 	}
 
 	function drawHost() {
@@ -557,12 +639,9 @@
 		var shown = Math.min(modes.length, MODLIST_SHOWN);
 		for (var i = 0; i < shown; i++) {
 			var key = String(modes[i]);
-			var label = key;
-			// KD names its own settings; prefer its word over ours when it has one.
-			try {
-				var t = (typeof TextGet === 'function') ? TextGet('KinkyDungeonStat' + key) : '';
-				if (t && t.indexOf('MISSING') < 0) label = t;
-			} catch (e) { /* fall back to the raw key */ }
+			// KD names its own settings; prefer its word over ours when it has one. `kdText` is what
+			// decides "has one" — see the marker note there.
+			var label = kdText('KinkyDungeonStat' + key) || key;
 			DrawTextKD('• ' + label, W, line, '#ffffff', '#000000', 22);
 			line += 26;
 		}
