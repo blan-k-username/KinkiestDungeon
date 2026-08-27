@@ -293,41 +293,52 @@
 	var _bundleDirty = {};
 
 	var _adoptVal;                       // transfer slot for the direct eval below
+	var _kdDec = null;                   // memoised codec decoder (window.KDCodec loads later)
+
+	/**
+	 * Assign one global from a captured value. Shared by bundle adoption, by its reset pass, and
+	 * (KDM-245) by the snapshot's `worldGlobals` — module scope so all three decode identically,
+	 * for the same reason the host has a single `assign`.
+	 * COPY, never alias: `v` belongs to the bundle (or to `_bundleDefaults`), and both outlive
+	 * this call; handing the game a reference lets it mutate our stored copy in place.
+	 */
+	function assignGlobal(name, v) {
+		// Memoised, not re-read per call: this runs once per global on every snapshot, and
+		// `window.KDCodec` is a script-load-order lookup, not a value that changes. Cached only once
+		// it is actually found, so a call made before the codec loads is retried rather than pinned.
+		if (!_kdDec) {
+			var codec = (typeof window !== 'undefined' && window.KDCodec) ? window.KDCodec : null;
+			if (codec && codec.kdDec) _kdDec = codec.kdDec;
+		}
+		var dec = _kdDec || function (x) { return x; };
+		// A __kdT tag only ever sits at the TOP level, so this O(1) test is enough.
+		_adoptVal = (v && typeof v === 'object')
+			? (v.__kdT ? dec(v) : JSON.parse(JSON.stringify(v)))
+			: v;
+		// KDM-196: carry over the client-owned animation accumulators the server has no
+		// value for, so the wholesale replace below does not restart the bar every snapshot.
+		var owned = CLIENT_OWNED_ENTITY_FIELDS[name];
+		if (owned && _adoptVal && typeof _adoptVal === 'object') {
+			// eslint-disable-next-line no-eval
+			var prev = eval(name);
+			if (prev && typeof prev === 'object') {
+				for (var oi = 0; oi < owned.length; oi++) {
+					if (_adoptVal[owned[oi]] === undefined && prev[owned[oi]] !== undefined) {
+						_adoptVal[owned[oi]] = prev[owned[oi]];
+					}
+				}
+			}
+		}
+		// eslint-disable-next-line no-eval
+		eval(name + ' = _adoptVal;');
+	}
+
 	function adoptBundle(b) {
 		if (!b) return 0;
 		var codec = (typeof window !== 'undefined' && window.KDCodec) ? window.KDCodec : null;
 		var dec = (codec && codec.kdDec) ? codec.kdDec : function (v) { return v; };
 		var ser = (codec && codec.kdSer) ? codec.kdSer : function (v) { return JSON.stringify(v); };
 		var n = 0;
-
-		/**
-		 * Assign one global from a captured value. Shared by adoption and by the reset pass below so
-		 * the two cannot decode differently — the same reason the host has a single `assign`.
-		 * COPY, never alias: `v` belongs to the bundle (or to `_bundleDefaults`), and both outlive
-		 * this call; handing the game a reference lets it mutate our stored copy in place.
-		 */
-		function assignGlobal(name, v) {
-			// A __kdT tag only ever sits at the TOP level, so this O(1) test is enough.
-			_adoptVal = (v && typeof v === 'object')
-				? (v.__kdT ? dec(v) : JSON.parse(JSON.stringify(v)))
-				: v;
-			// KDM-196: carry over the client-owned animation accumulators the server has no
-			// value for, so the wholesale replace below does not restart the bar every snapshot.
-			var owned = CLIENT_OWNED_ENTITY_FIELDS[name];
-			if (owned && _adoptVal && typeof _adoptVal === 'object') {
-				// eslint-disable-next-line no-eval
-				var prev = eval(name);
-				if (prev && typeof prev === 'object') {
-					for (var oi = 0; oi < owned.length; oi++) {
-						if (_adoptVal[owned[oi]] === undefined && prev[owned[oi]] !== undefined) {
-							_adoptVal[owned[oi]] = prev[owned[oi]];
-						}
-					}
-				}
-			}
-			// eslint-disable-next-line no-eval
-			eval(name + ' = _adoptVal;');
-		}
 
 		if (b.gameData && typeof KDGameData !== 'undefined' && KDGameData) {
 			for (var gk in b.gameData) {
@@ -668,6 +679,21 @@
 			 */
 			if (typeof KDGameData !== 'undefined' && KDGameData && s.worldGameData) {
 				for (var wk in s.worldGameData) KDGameData[wk] = s.worldGameData[wk];
+			}
+			/*
+			 * KDM-245 — the WORLD GLOBALS half, on the same terms as worldGameData directly above:
+			 * iterate what was SENT, so the declared list lives server-side only and an older
+			 * snapshot that carries none of them simply changes nothing.
+			 *
+			 * Today that is the three item-variant registries. They stopped riding the per-player
+			 * bundle when KDM-245 made them world state, and the browser resolves an enchanted item's
+			 * NAME through them — without this the item list draws entries with no definition behind
+			 * them. Runs AFTER adoptBundle for the same reason: the world's answer wins.
+			 */
+			if (s.worldGlobals) {
+				for (var wg in s.worldGlobals) {
+					try { assignGlobal(wg, s.worldGlobals[wg]); } catch (e) { /* not assignable here */ }
+				}
 			}
 			/*
 			 * KDM-219: invalidate the derived vision/light cache HERE, where the state it derives

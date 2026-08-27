@@ -186,6 +186,17 @@ const KDGAMEDATA_WORLD_KEYS = Object.freeze([
 	// It became reachable mid-run with KDM-242: a perk altar can set it (KinkyDungeonShrine.ts:965-967,
 	// and KD's own routed handler at KinkyDungeonInput.ts:1028-1030), and that grant now goes to the
 	// whole party.
+	// KDM-245 — the ITEM ID counter, `KDGameData.ItemID` (KinkyDungeonEnemies.ts:7812). It is the
+	// direct sibling of `RegimentID` two lines up and of the `KinkyDungeonEnemyID` /
+	// `KinkyDungeonSpellID` globals in GLOBAL_BLACKLIST: a monotonic counter whose only job is to
+	// make a NAME unique.
+	//
+	// It moves with the variant registries, and it is not optional. `KDGiveInventoryVariant` builds
+	// the variant's key as `template + KinkyDungeonGetItemID()`, so two per-player counters both
+	// starting at 1 hand two different players the SAME variant name — and on a now-shared registry
+	// the second write silently loses to the first (`if (!KinkyDungeonRestraintVariants[newname])`,
+	// KinkyDungeonInventory.ts:3641). One player's enchanted item would quietly become the other's.
+	'ItemID',
 	'SelectedEscapeMethod',
 ]);
 
@@ -265,6 +276,32 @@ const GLOBAL_BLACKLIST = Object.freeze([
 	// --- shared world: the dungeon and its inhabitants -----------------------
 	'KDMapData', 'KDMapExtraData', 'KDWorldMap', 'KDCurrentWorldSlot',
 	'KinkyDungeonCurrentTick', 'KinkyDungeonEnemyID', 'KinkyDungeonSpellID',
+	// KDM-245 — the three ITEM VARIANT REGISTRIES. `KinkyDungeonRestraintVariants`,
+	// `KinkyDungeonWeaponVariants` and `KinkyDungeonConsumableVariants`
+	// (KinkyDungeonInventory.ts:116-120) are name → definition tables: an enchanted item's identity
+	// is a generated NAME, and every consumer resolves it through these
+	// (`KDRest`/`KDRestraint`, KinkyDungeonRestraints.ts:256/264).
+	//
+	// They are WORLD tables because the names they define live in world containers, not only in a
+	// player's inventory: `KDMapData.GroundItems` (a dropped item records a NAME and nothing else —
+	// `KDDropItemInv`, KinkyDungeonInventory.ts:3084), `enemy.items` (the Bondage action pushes
+	// `item.inventoryVariant || item.name`, KDInventoryActions.ts:1370), `KDGameData.Containers` and
+	// `KDGameData.NPCRestraints` — and KD's own garbage collector agrees, scanning exactly those
+	// world sources for live references (`KDPruneInventoryVariants`, :3261). Leaving the table
+	// per-player while the names it defines sit in shared world state is the half-classified pair
+	// KDM-228 warns about.
+	//
+	// MEASURED, not reasoned: with these per-player, a variant item dropped by one player resolved to
+	// `undefined` for the partner who picked it up — `KDRest(name)` false for B, true for A, with a
+	// stock template name as the control. tests/unit/mp-drop-transfer.spec.ts.
+	//
+	// Two things had to move WITH them, and neither is optional:
+	//   · `KDGameData.ItemID` becomes a world key (below). It is the uniqueness counter these names
+	//     are built from; per-player counters both start at 1, so a shared table would collide.
+	//   · `KDPruneInventoryVariants` is suppressed in a managed session (kd-variant-registry.js). It
+	//     runs on every descent (KDStairActions.ts:32) against the SWAPPED-IN player's inventory, so
+	//     on a shared table it would delete every variant only the partner holds.
+	'KinkyDungeonRestraintVariants', 'KinkyDungeonWeaponVariants', 'KinkyDungeonConsumableVariants',
 	// KDM-265: WHICH FLOOR the party is on, and which checkpoint that floor belongs to. Same
 	// category as KDMapData/KDCurrentWorldSlot above — this file already says so at the `level()`
 	// accessor ("The current dungeon floor … A change is a party-wide event"), it just did not act on
@@ -396,6 +433,30 @@ const GLOBAL_BLACKLIST = Object.freeze([
 	'KDGameData',
 	// --- debug noise ---------------------------------------------------------
 	'KDRestraintDebugLog',
+]);
+
+
+/**
+ * KDM-245: world globals the BROWSER must be told about.
+ *
+ * `GLOBAL_BLACKLIST` answers "is this per-player?", and the answer "no" removes the name from the
+ * per-player bundle — which is also the only route most globals had to the client. `KDMapData` has
+ * its own snapshot field; these have none, so without this list a world global is correctly shared
+ * between server-side players and INVISIBLE to every browser.
+ *
+ * Deliberately a small SUBSET of the blacklist, not the blacklist itself: most of what is blacklisted
+ * is either enormous (KDMapData), already sent (worldGameData) or client-local by nature (the render
+ * dirty flags, the audio toasts). A name earns a place here only when the client RESOLVES something
+ * through it.
+ *
+ * Generic on purpose, in the shape KDM-263 arrived at for `worldGameData`: one list, one loop on each
+ * side. The per-field form of the same idea was four mirrored edits and a silent omission every time.
+ */
+const WORLD_GLOBALS_CLIENT = Object.freeze([
+	// The item variant registries. An enchanted item's identity is a generated NAME, and the browser
+	// resolves it through these on every draw of the item list (KDRest / KDRestraint / KDGetItemName).
+	// They arrived in the per-player bundle until KDM-245 made them world state.
+	'KinkyDungeonRestraintVariants', 'KinkyDungeonWeaponVariants', 'KinkyDungeonConsumableVariants',
 ]);
 
 /**
@@ -2600,6 +2661,20 @@ class HeadlessHost {
 				// Cheap despite the size: the state frame is delta-encoded (KDM-206), so a value that
 				// did not change costs nothing on the wire.
 				// (No backticks in this comment on purpose - it lives inside an eval template literal.)
+				// KDM-245: WORLD GLOBALS the client resolves things through. Same one-list-one-loop
+				// shape as worldGameData above, and for the same reason: a name that stops being
+				// per-player stops arriving in the bundle, and per-field plumbing made that a silent
+				// omission every time. Today this is the three item-variant registries, without which
+				// the browser draws an enchanted item with no definition behind it.
+				// (No backticks in this comment on purpose - it lives inside an eval template literal.)
+				worldGlobals: (function(){
+					var o = {}, gs = ${JSON.stringify(WORLD_GLOBALS_CLIENT)};
+					for (var i = 0; i < gs.length; i++) {
+						var v; try { v = eval(gs[i]); } catch (e) { continue; }
+						if (v !== undefined) o[gs[i]] = clone(v);
+					}
+					return o;
+				})(),
 				worldGameData: (function(){
 					var o = {}, ks = ${JSON.stringify(KDGAMEDATA_WORLD_KEYS)};
 					if (typeof KDGameData === 'undefined' || !KDGameData) return o;
@@ -2656,6 +2731,18 @@ class HeadlessHost {
 			// keeps an older snapshot working: a key it does not carry is simply left alone.
 			if (typeof KDGameData !== 'undefined' && KDGameData && s.worldGameData) {
 				for (var wk in s.worldGameData) KDGameData[wk] = s.worldGameData[wk];
+			}
+			// KDM-245 — and the WORLD GLOBALS half, on the same terms. Iterating what was SENT keeps
+			// the declared list server-side only, so an older snapshot carrying none of them is a
+			// no-op rather than a wipe. These are bundle bindings, so bare eval assignment, never
+			// globalThis. (No backticks in this comment on purpose - it lives inside an eval template.)
+			if (s.worldGlobals) {
+				for (var wg in s.worldGlobals) {
+					try {
+						globalThis.__KD_WG = s.worldGlobals[wg];
+						eval(wg + ' = globalThis.__KD_WG;');
+					} catch (e) { /* not assignable here */ }
+				}
 			}
 			return { ok: true, entities: KDMapData.Entities.length, grid: KDMapData.Grid.length };
 		})()`);
@@ -3465,6 +3552,6 @@ module.exports = {
 	WORLD_KEYS, KDGAMEDATA_WORLD_KEYS,
 	// KDM-239 A4 — re-exported so callers have ONE import for "what does the world own".
 	MODE_WORLD_KEYS, MODE_PLAYER_KEYS,
-	deriveBundleGlobals, GLOBAL_BLACKLIST, MIN_EXPECTED_GLOBALS, HOST_RESERVED,
+	deriveBundleGlobals, GLOBAL_BLACKLIST, WORLD_GLOBALS_CLIENT, MIN_EXPECTED_GLOBALS, HOST_RESERVED,
 	BASELINE_MAX_LEN, OVERSIZE_AUDIT_EVERY, OVERSIZE_AUDIT_BUDGET_MS,
 };

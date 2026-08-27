@@ -31,6 +31,7 @@ const { KD_PERK_CHOICE } = require('./kd-perk-choice');
 const { KD_JOURNEY_CHOICE } = require('./kd-journey-choice');
 const { KD_SHOP_BUY } = require('./kd-shop-buy');
 const { KD_COOP_CAPTURE } = require('./kd-coop-capture');
+const { KD_VARIANT_REGISTRY } = require('./kd-variant-registry');
 const { KD_DISCONNECT_DIALOGUE, HOST_LOST_DIALOGUE, PEER_LOST_DIALOGUE } = require('./kd-disconnect-dialogue');
 const { sanitizeName, sanitizePerks, sanitizeCharacter } = require('./join-gate');
 // KDM-239 R3/R5 — same normaliser the gate uses, so what the session stores and what the gate
@@ -534,6 +535,13 @@ class SwapSession {
 		this.world.loadMod(KD_COOP_CAPTURE);
 		this.world.eval('globalThis.__kdCoopPartnerFree = false; globalThis.__kdCoopCaptureHeld = undefined;');
 		// KDM-251: the disconnect dialogues, on the same terms and for the same reason.
+		// KDM-245: the variant registries are world state, so KD's per-player garbage collector must
+		// not run here — a descent by one player would delete every variant only the partner holds.
+		// `__kdCoopManaged` is set once, for the lifetime of the session: this world is managed the
+		// moment a SwapSession owns it, whether or not a second seat has joined yet, because the very
+		// first thing a joiner does is adopt a bundle captured from this world.
+		this.world.loadMod(KD_VARIANT_REGISTRY);
+		this.world.eval('globalThis.__kdCoopManaged = true; globalThis.__kdCoopVariantPrunesSkipped = 0;');
 		this.world.loadMod(KD_DISCONNECT_DIALOGUE);
 		this.world.eval(`(function(){
 			globalThis.KDCoopSessionQuit = function () { globalThis.__kdCoopQuit = true; };
