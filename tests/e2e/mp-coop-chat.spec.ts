@@ -227,3 +227,165 @@ async function P_installed(P: any): Promise<boolean> {
 			&& (KinkyDungeonDrawGame as any)._kdcoop_chat_wrapped && w.KDCoopChat);
 	});
 }
+
+/**
+ * E2E (KDM-247) — a quick reaction, and the digit KD gets back afterwards.
+ *
+ * The unit specs prove the picker declares its buttons correctly against a fake scope, and that the
+ * server carries the text. Two things live only in a real page:
+ *
+ *   R1/R5  a reaction sent from the picker lands in the PARTNER's log, attributed, over a real
+ *          session — the same journey a typed message makes, which is what "one pipeline" means.
+ *   F1     PRESSING `1` CASTS A SPELL AGAIN ONCE THE PICKER CLOSES. This is the whole safety
+ *          argument for using the digits, and no fake can carry it: it rests on KD wiping
+ *          `KDButtonsCache` every frame (`KinkyDungeon.ts:1668-1669`) so an undrawn entry is not
+ *          hotkeyable, and on `KDCheckCustomKeypress` running before the spell branch
+ *          (`KinkyDungeonGame.ts:2287` vs `:2315`). Both are game code we do not own.
+ *
+ * R7 BINDS THIS FILE: assert on log DATA and call counts, never on pixels. Emoji render through
+ * `PIXI.Text` via the browser's font stack, and the Docker test images may carry no colour-emoji
+ * font at all — a glyph assertion here would red on the harness's fonts rather than on this feature.
+ * A missing glyph is a UAT finding by owner decision, not a suite failure.
+ */
+test('a picked reaction reaches the partner, and the digits go back to casting spells', async ({ browser }) => {
+	test.setTimeout(MP_TEST_TIMEOUT);
+	const { server, bridge, port } = await start(0);
+
+	const ctxA = await browser.newContext();
+	const ctxB = await browser.newContext();
+	const A = await ctxA.newPage();
+	const B = await ctxB.newPage();
+	const errsA: string[] = []; const errsB: string[] = [];
+	A.on('pageerror', (e) => errsA.push(String(e && e.message ? e.message : e)));
+	B.on('pageerror', (e) => errsB.push(String(e && e.message ? e.message : e)));
+
+	try {
+		await bootCoopPair(A, B, port);
+
+		expect(await A.evaluate(() => !!(window as any).KDCoopChat),
+			'coop-chat.js (which now carries the picker) must be installed').toBe(true);
+
+		/**
+		 * Count KD's own spell entry point. This is the F1 oracle, and it is deliberately a COUNTER
+		 * on the game's function rather than any state of ours: it answers "did KD's spell branch
+		 * run for that keypress", which is exactly the question, and it stays true whether or not
+		 * the player actually has a spell in that slot (the branch calls it either way).
+		 */
+		await A.evaluate(() => {
+			const w = window as any;
+			// @ts-ignore bare let-global — bundle functions are not on window (CLAUDE.md).
+			if (typeof KinkyDungeonHandleSpell !== 'function') { w.__spellCalls = null; return; }
+			w.__spellCalls = 0;
+			// @ts-ignore
+			const prev = KinkyDungeonHandleSpell;
+			// @ts-ignore bare-name assignment, per CLAUDE.md — NOT via globalThis.
+			KinkyDungeonHandleSpell = function (...a: any[]) { w.__spellCalls++; return prev.apply(this, a); };
+		});
+		expect(await A.evaluate(() => (window as any).__spellCalls),
+			'the spell oracle must be armed, or every F1 assertion below is vacuous').toBe(0);
+
+		// ---- R1/R5 — pick slot 1, and the partner reads it -------------------------------------
+		// Read what slot 1 holds BEFORE opening, so the assertion names the emoji rather than
+		// guessing one and asserting against its own guess.
+		const slot1 = await A.evaluate(() => (window as any).KDCoopChat.recents()[0]);
+		expect(slot1, 'slot 1 must offer something even on a first run (R3)').toBeTruthy();
+
+		// A REAL `U` keypress — not `openPicker()`. This is the assertion the whole KDKeyCheckers
+		// rework exists for: the first design hung the hotkey off the drawn button's `hotkeyPress`,
+		// and a probe inside KDCheckCustomKeypress proved our buttons are absent from KDButtonsCache
+		// at match time (`oursAtMatch: []`), because our draw lands after the frame's key pump. Only
+		// a real page can tell those two designs apart, so only a real key may be pressed here.
+		//
+		// Held, not tapped: this harness renders at a few fps and KD samples the key once per frame.
+		await A.keyboard.down('u');
+		await A.waitForTimeout(600);
+		await A.keyboard.up('u');
+		await A.waitForFunction(() => (window as any).KDCoopChat.isPickerOpen(), null, { timeout: 15_000 })
+			.catch(() => { throw new Error('a real `U` keypress did not open the picker — the keyboard route is broken'); });
+
+		// A REAL held keypress. Held, not pressed: this harness renders at a few fps and KD samples
+		// key state once per frame, so a keydown+keyup can land entirely between two polls
+		// (the reason `coopRealKeyMove` holds too).
+		await A.keyboard.down('1');
+		await A.waitForTimeout(600);
+		await A.keyboard.up('1');
+
+		// @ts-ignore bare let-global: KinkyDungeonMessageLog is NOT a window property.
+		await B.waitForFunction((emoji) => ((KinkyDungeonMessageLog as any) || [])
+			.some((m: any) => m && typeof m.text === 'string' && m.text.indexOf(emoji) >= 0),
+		slot1, { timeout: 30_000 })
+			.catch(async () => {
+				const why = {
+					slot1,
+					stillOpen: await A.evaluate(() => (window as any).KDCoopChat.isPickerOpen()),
+					aTail: await A.evaluate(() => ((KinkyDungeonMessageLog as any) || []).slice(-3).map((m: any) => m && m.text)),
+					bTail: await B.evaluate(() => ((KinkyDungeonMessageLog as any) || []).slice(-3).map((m: any) => m && m.text)),
+					diag: await A.evaluate(() => (window as any).KDCoopChat.diag()),
+				};
+				throw new Error(`the reaction never reached B: ${JSON.stringify(why)}`);
+			});
+
+		const bTexts = await B.evaluate(() => ((KinkyDungeonMessageLog as any) || [])
+			.map((m: any) => (m && m.text) != null ? m.text : String(m)));
+		// Attributed, and exactly once — `_broadcast` loops every joined player, so a sender echo on
+		// top would double it and `toContain` could not tell.
+		expect(bTexts.filter((t: string) => t.indexOf(slot1) >= 0).length,
+			'the partner sees the reaction once, not twice').toBe(1);
+		expect(bTexts.find((t: string) => t.indexOf(slot1) >= 0),
+			'and it carries the sender name, like any chat line').toMatch(/\S+:\s*/);
+
+		// ---- F1 — that keypress must NOT have cast a spell -------------------------------------
+		expect(await A.evaluate(() => (window as any).__spellCalls),
+			'while the picker was open, `1` belonged to the picker alone').toBe(0);
+		expect(await A.evaluate(() => (window as any).KDCoopChat.isPickerOpen()),
+			'sending closes the picker').toBe(false);
+
+		// ---- F1, the half that only a real page can answer -------------------------------------
+		// The picker is closed, so its entries are no longer drawn, so they are no longer in
+		// KDButtonsCache, so `1` should reach the spell branch exactly as it did before this feature
+		// existed. If this stays 0, the feature has permanently stolen a game key.
+		await A.keyboard.down('1');
+		await A.waitForTimeout(600);
+		await A.keyboard.up('1');
+		await A.waitForFunction(() => (window as any).__spellCalls > 0, null, { timeout: 15_000 })
+			.catch(async () => {
+				throw new Error('after the picker closed, `1` never reached KD\'s spell branch — the '
+					+ 'picker has permanently stolen a game key. '
+					+ JSON.stringify({ spellCalls: await A.evaluate(() => (window as any).__spellCalls) }));
+			});
+
+		// CONTROL: no second reaction leaked out of that keypress.
+		const bAfter = await B.evaluate(() => ((KinkyDungeonMessageLog as any) || [])
+			.map((m: any) => (m && m.text) != null ? m.text : String(m)));
+		expect(bAfter.filter((t: string) => t.indexOf(slot1) >= 0).length,
+			'a closed picker sends nothing').toBe(1);
+
+		// ---- KDM-246 REGRESSION — chat's own `Y` hotkey, pressed for real ----------------------
+		// It shipped broken and nothing saw it: KDM-246's e2e opens the field through
+		// `KDCoopChat.open()`, so no test at any layer ever pressed the key. Same root cause, same
+		// fix (KDKeyCheckers), and the lesson is that only a real keypress can assert a hotkey — so
+		// it is asserted here, on the pair this test has already booted.
+		expect(await A.evaluate(() => (window as any).KDCoopChat.isOpen()),
+			'CONTROL: the chat field is closed to begin with').toBe(false);
+		await A.keyboard.down('y');
+		await A.waitForTimeout(600);
+		await A.keyboard.up('y');
+		await A.waitForFunction(() => (window as any).KDCoopChat.isOpen(), null, { timeout: 15_000 })
+			.catch(() => { throw new Error('a real `Y` keypress did not open the chat field (KDM-246 regression)'); });
+		await A.evaluate(() => (window as any).KDCoopChat.close());
+
+		// ---- the project-wide invariants -------------------------------------------------------
+		const diag = await A.evaluate(() => (window as any).KDCoopChat.diag());
+		expect(diag.lastError, 'the draw wrap must not be swallowing a throw every frame').toBe(null);
+		for (const [label, errs] of [['A', errsA], ['B', errsB]] as const) {
+			const { real, ignored } = reportedPageErrors(errs);
+			expect(real, `${label} page errors (ignored known noise: ${ignored.join(', ')})`).toEqual([]);
+		}
+	} finally {
+
+		await ctxA.close().catch(() => {});
+		await ctxB.close().catch(() => {});
+		await new Promise<void>((r) => server.close(() => r()));
+		if (bridge && typeof bridge.close === 'function') bridge.close();
+	}
+});

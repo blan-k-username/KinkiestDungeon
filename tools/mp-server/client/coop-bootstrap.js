@@ -966,6 +966,37 @@
 	window.__coopMarkBriefingSeen = markBriefingSeen;
 
 	/**
+	 * KDM-247 — where the quick-emoji picker's recents are kept.
+	 *
+	 * The KEY and the try/catch live here for the reason `ADDR_KEY` gives above: one file owning
+	 * every `kdcoop.` key is what stops a second, differently-spelled copy appearing later, and a
+	 * file that draws screens never touches storage directly.
+	 *
+	 * But ONLY the key and the storage call are here. The seed set, the parsing and the MRU order
+	 * live in `coop-chat.js` beside the picker that uses them, because this file is ~1900 lines and
+	 * no spec in the suite executes it — every existing test of this file reads it as SOURCE TEXT.
+	 * Logic placed here would be coverable only by an e2e; behind this two-function seam it is
+	 * covered by millisecond unit tests with real controls (`mp-chat-client.spec.ts`).
+	 *
+	 * `localStorage`, matching `briefingSeen` and deliberately unlike `stableId`'s `sessionStorage`:
+	 * "the emoji I use" is a property of the PERSON, and per-tab would mean the list resets every
+	 * time the game is reopened.
+	 *
+	 * Both halves swallow their throw, so a storage-disabled browser reads `null` for ever and the
+	 * picker falls back to its seed set every session — degraded, never broken (as KDM-272 AC3).
+	 */
+	var EMOJI_KEY = 'kdcoop.emojiRecents';
+	window.__coopEmojiStore = {
+		/** The stored list as an opaque string, or `null`. Parsing is the caller's business. */
+		read: function () {
+			try { return window.localStorage.getItem(EMOJI_KEY); } catch (e) { return null; }
+		},
+		write: function (s) {
+			try { window.localStorage.setItem(EMOJI_KEY, String(s)); } catch (e) { /* storage disabled */ }
+		},
+	};
+
+	/**
 	 * A2 — remember an address only once it has REACHED a host. Called from `ws.onopen`, which is the
 	 * only place that fact exists: a browser gives no other signal that the far end was listening.
 	 *

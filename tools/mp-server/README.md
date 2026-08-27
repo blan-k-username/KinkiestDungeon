@@ -24,6 +24,7 @@ KD-069 (orchestrator), KD-070 (reconciler).
 | `transport/` | Transport boundary (KD-081): `protocol.js` (commands + `dispatch`), `in-process.js`, `worker-thread.js` (+`worker-entry.js`), `socket.js` (+`child-entry.js`), `index.js` (registry). |
 | `mod-sync.js` | KDM-249 — reconciling two mod sets: `diffDeclarations` (pure) + an in-memory, content-addressed `ModStore` for the payloads. No socket, no world, no game globals. |
 | `client/coop-mods.js` | KDM-249 — the browser half of mod sync: latches `KDGetMods` before the first frame, declares/publishes/fetches, then drives `KDExecuteMods`. See "Mod sync" below. |
+| `client/coop-chat.js` | KDM-246/247 — **the co-op talk surface**: every way a player sends a chat message. `Y` opens a text field, `U` opens a quick-emoji picker whose digits `1`–`8` send a reaction (recents first, seeded on a first run, remembered in `localStorage`). Both build the same `{mp:'chat.say', text}`; the server renders it into every player's log under the `Chat` filter. ⚠️ Its keys come from **`KDKeyCheckers`**, not from the buttons' `hotkeyPress` — see "Client hotkeys" below. |
 | `TRANSPORTS.md` | Measured comparison of the three transports (pros/cons + game-code-change count). |
 | `demo.js` | **Capstone** (KD-075) — one scripted end-to-end run touching every pillar (lobby + shared world + reacting enemy + routed PvP + server mod + independent params), printing a human-readable report. |
 | `smoke-boot.js` / `bench-transports.js` | Manual smoke driver / transport benchmark. |
@@ -327,6 +328,55 @@ Co-op is opt-in: run the plain static server (`npm run serve`) and nothing liste
   not. Putting that wait in front of the socket makes the guest's join never leave the page.
 - **The menu entry needs no game-tree edit** — see `client/coop-lobby.js`'s header for why
   (`KDButtonsCache` is per-frame data; `_prev` must be called first).
+
+### Client hotkeys: use `KDKeyCheckers`, never a button's `hotkeyPress` (KDM-247)
+
+A drawn button carrying `{hotkey, hotkeyPress}` earns a keyboard shortcut **for KD's own buttons**.
+It does **not** work for a button one of our injected client files draws, and the reason is timing,
+not correctness of the declaration:
+
+- `KDCheckCustomKeypress` (`KinkyDungeonGame.ts:2258`) matches the pressed key against
+  **`KDButtonsCache`**, and that cache is wiped and refilled every frame
+  (`KinkyDungeon.ts:1668-1669`).
+- Our draw hangs off `KinkyDungeonDrawGame`, which runs **later in the frame than the key pump**. So
+  our buttons are reliably absent from the cache at the moment it is read.
+
+Measured on a live co-op page by probing inside `KDCheckCustomKeypress` itself, with the picker open
+and all ten of its buttons present in the cache when read between frames:
+
+```
+{ seenKeys: ["1"], customKeypress: 1, oursAtMatch: [], hotkeysAtMatch: [ …KD's own… ] }
+```
+
+**This shipped broken once already:** chat's `Y` hotkey (KDM-246) never worked, and no test saw it
+because the e2e opened the field through `KDCoopChat.open()` instead of pressing the key.
+
+Use **`KDKeyCheckers`** (`KinkyDungeonGame.ts:4183`) instead — KD's own registry of `() => boolean`
+checkers, run by `KDCheckCustomKeypress` *after* the button loop:
+
+- no draw-order dependency, so this defect cannot recur;
+- running after the button loop means we can never steal a key from one of the game's own buttons;
+- it is a plain object, so registering is an **idempotent property assignment** — safe across the
+  reconnect re-eval, with no `addOnce` needed;
+- returning falsy falls through to KD's normal handling, so a key is only ours while we want it.
+
+Gate the checker on `KinkyDungeonState`/`KinkyDungeonDrawState` being `Game` (as KD's own checkers
+do) and wrap it in its own try/catch: it runs on **every keypress in the game**, so a throw there
+takes the player's movement with it. Keep `hotkey`/`hotkeyPress` on the button — it still labels the
+key and is still the mouse route — but never rely on it for the keyboard.
+
+**And test the key by pressing it.** Asserting that a button carries the right `hotkeyPress` in the
+right positional slot is not evidence that the key does anything; only an e2e that presses it is.
+
+### One thing for the human eye: emoji glyphs (KDM-247)
+
+The quick-emoji picker's oracles read **log data and call counts, never pixels** — deliberately. KD
+renders text as `PIXI.Text` through the browser's font stack (`KinkyDungeonDraw.ts:3428-3450`), and
+the Docker test images may carry no colour-emoji font, so a glyph assertion would red on the
+harness's fonts rather than on the feature. **Whether the emoji actually render is therefore a UAT
+question, not a suite question** — check it once under `./run-kd-game.sh --mp`. If they come out as
+tofu boxes on a real player's machine, the fix is the seed set (swap to glyphs with wider coverage),
+not the pipeline.
 - **The bootstrap owns the socket and the storage; the lobby only asks.** `coop-lobby.js` draws
   screens and calls `__coopConnect` / `__coopAnswerJoin` / `__coopDisconnect` / `__coopLastAddress`;
   `lobbySay()` is the single channel back. A key string or a socket decision placed in the lobby
