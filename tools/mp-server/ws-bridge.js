@@ -78,8 +78,13 @@ const VERBATIM_CHANNELS = ['events', 'messages', 'unknownInputs', 'replacedInput
 // KDM-256 — `character` joins the SHARED half, not the host-only one, and that is the point: the
 // world has one author, but a character has one per seat. It is the field a guest most needs to
 // bring, so a shape that made it host-only would invert the whole feature.
-const HOST_JOIN_FIELDS = Object.freeze(['name', 'build', 'mods', 'perks', 'character', 'world', 'save']);
-const GUEST_JOIN_FIELDS = Object.freeze(['name', 'build', 'mods', 'perks', 'character']);
+//
+// KDM-279 — and `perks` is no longer beside it. It was a second wire field asking the same question
+// as `character`, so it became a FIELD OF the package: one declaration covers class, outfit, style
+// and perks. Nothing about the party-union rule for start perks changed — that is a read-side rule
+// and lives in `SwapSession.partyPerks()`.
+const HOST_JOIN_FIELDS = Object.freeze(['name', 'build', 'mods', 'character', 'world', 'save']);
+const GUEST_JOIN_FIELDS = Object.freeze(['name', 'build', 'mods', 'character']);
 
 /**
  * KDM-274 — what the SERVER promises to put on the wire, declared once, per message kind.
@@ -123,8 +128,10 @@ const OUTBOUND_MESSAGES = Object.freeze({
 	join_pending:      Object.freeze({ required: Object.freeze(['clientId', 'name', 'modDiff']), to: 'host' }),
 	// `hostBuild`/`guestBuild` ride the build-mismatch refusal alone (KDM-233 N1) — the client prints
 	// them in that one branch, and the other refusals must not be required to carry them.
+	// KDM-270 — `retry` names the seat this client may ask for on this same socket, and its presence
+	// is also what tells `_reject` not to hang up. Optional, because a terminal refusal carries none.
 	reject:            Object.freeze({ required: Object.freeze(['reason']),
-		optional: Object.freeze(['hostBuild', 'guestBuild']) }),
+		optional: Object.freeze(['hostBuild', 'guestBuild', 'retry']) }),
 
 	// ── play ─────────────────────────────────────────────────────────────────────────────────────
 	// `seq` comes from `_stateFrame`, not from any call site's literal: it is the client's gap
@@ -355,7 +362,25 @@ class WSBridge {
 			// question goes — the seat belongs to that clientId until they come back or the survivor
 			// dismisses them. See `join-gate.js` → `releasePending`.
 			if (this.session.started && this.gate.has(clientId)) this.gate.releasePending(clientId);
-			else this.gate.release(clientId);
+			else {
+				this.gate.release(clientId);
+				/*
+				 * KDM-280 — and the SESSION is told, which it was not.
+				 *
+				 * "Before it starts, a departure frees everything" is what this branch already says it
+				 * does; it freed the gate and left the session's pre-start roster holding the id. So a
+				 * host who reloaded in the lobby came back to `duplicate join: <id>` from
+				 * `session.join` — measured, not inferred — and, because that arrives as a bare
+				 * `error`, their screen simply sat there. Nothing else claims that seat in the
+				 * meantime, so the wedge lasted until they restarted the server.
+				 *
+				 * `removePlayer` rather than splicing the roster: it is the one place that knows
+				 * everything a player leaves behind (KDM-253), and pre-start there is simply nothing
+				 * for it to clean up.
+				 */
+				try { this.session.removePlayer(clientId); }
+				catch (e) { /* a session that predates KDM-253's teardown */ }
+			}
 			if (this.sockets.get(clientId) === socket) this.sockets.delete(clientId);
 			// KDM-250: and the SURVIVOR is told. Reported after the socket is dropped from the map so
 			// the report is not addressed to the person who just left.
@@ -365,25 +390,27 @@ class WSBridge {
 
 	/**
 	 * KDM-237 N2 / KDM-238 R3 — hand what the SEAT knows about a player to the session, immediately
-	 * before it seats them: the name they chose, and the perks they chose.
+	 * before it seats them: the name they chose, and the character they built (perks included, since
+	 * KDM-279).
 	 *
 	 * One helper rather than copies of the same gate lookup at each site, because the three seating
 	 * sites (accept, join-late, and the plain/legacy join) must not be able to disagree about where a
 	 * player's identity comes from. The gate is the source; the session is told; neither invents
-	 * anything. The two fields travel together for the same reason they are stored together — they
-	 * are answers to "who is this player", and splitting them would let one arrive without the other.
+	 * anything. The fields travel together for the same reason they are stored together — they are
+	 * answers to "who is this player", and splitting them would let one arrive without the other.
+	 * KDM-279 took that argument one step further: perks were a separate field travelling beside the
+	 * character, so they became part of it.
 	 *
-	 * Safe on the roleless `#coop=` path (NF2/R9): `nameOf` answers `''` and `perksOf` answers `[]`
-	 * for a player who declared neither, and both setters CLEAR rather than set on an empty value —
-	 * so those sessions keep the legacy `Player <id>` label and KD's own default perk state.
+	 * Safe on the roleless `#coop=` path (NF2/R9): `nameOf` answers `''` and `characterOf` answers
+	 * `null` for a player who declared neither, and both setters CLEAR rather than set on an empty
+	 * value — so those sessions keep the legacy `Player <id>` label and KD's own default perk state.
 	 */
 	_carrySeat(clientId) {
 		try { this.session.setPlayerName(clientId, this.gate.nameOf(clientId)); }
 		catch (e) { /* a session that predates names, or an id the gate never seated */ }
-		try { this.session.setPerks(clientId, this.gate.perksOf(clientId)); }
-		catch (e) { /* a session that predates perk choice (KDM-238) */ }
-		// KDM-256 R1 — and the character they built, carried on exactly the same terms as the perks
-		// above. Unconditional: `characterOf` answers `null` for a seat that declared nothing, and
+		// KDM-256 R1 / KDM-279 — the character they built, PERKS INCLUDED. This used to be two
+		// carries, `setPerks` then `setCharacter`, reading two gate accessors; one declaration is one
+		// carry. Unconditional: `characterOf` answers `null` for a seat that declared nothing, and
 		// the session turns that one value into KD's own default in one place (R4).
 		try { this.session.setCharacter(clientId, this.gate.characterOf(clientId)); }
 		catch (e) { /* a session that predates character choice (KDM-256) */ }
@@ -423,13 +450,23 @@ class WSBridge {
 	 * status, headers or body — so a pre-upgrade refusal leaves the join screen with literally nothing
 	 * to display. Accept the upgrade, send the typed reason, then close. (Lesson carried over from
 	 * `origin/feature/multiplayer`'s `tools/mp-server.js:286-293`.)
+	 *
+	 * KDM-270: AND SOME REFUSALS ARE NOT THE END OF THE CONVERSATION.
+	 *
+	 * `retry` — set by the gate, where the refusal is raised — names the seat this client may ask for
+	 * on this same socket, and the socket is closed IFF it is absent. That single condition is the
+	 * whole terminal/non-terminal rule: no call site decides for itself, and no reason string is
+	 * matched here (it could not be — `already_hosting` is raised at two places with two meanings).
+	 *
+	 * Nothing else changes for a terminal refusal: without `retry` the frame is what it always was.
 	 */
 	_reject(socket, r) {
 		const out = { type: 'reject', reason: r.reason || 'refused' };
 		if (r.hostBuild !== undefined) out.hostBuild = r.hostBuild;
 		if (r.guestBuild !== undefined) out.guestBuild = r.guestBuild;
+		if (r.retry) out.retry = r.retry;
 		try { this._send(socket, out); } catch (e) { /* socket already gone */ }
-		try { socket.end(); } catch (e) { /* noop */ }
+		if (!r.retry) { try { socket.end(); } catch (e) { /* noop */ } }
 	}
 
 	_handle(socket, msg, clientId) {
@@ -513,6 +550,29 @@ class WSBridge {
 				 */
 				if (this.presence.state(clientId) === 'gone') {
 					this._reject(socket, { reason: 'seat_gone' });
+					return clientId;
+				}
+				/*
+				 * KDM-280 — TWO CLIENTS, ONE ID: refused HERE, before anything is written.
+				 *
+				 * A reload and an impostor send the identical frame, and exactly one signal separates
+				 * them: whether the id's PREVIOUS socket is still live. Only this layer holds it — the
+				 * gate sees ids, and `claimHost` is idempotent for the same id on purpose (a host
+				 * reloading its tab must keep the session), so the gate cannot and should not decide.
+				 *
+				 * Before `sockets.set`, and before the gate is consulted at all, because the cost of
+				 * deciding late was the whole bug: the claim was accepted, the newcomer's name stored
+				 * over the sitting host's, and this map entry replaced — so the server was talking to
+				 * the wrong browser — and only THEN did `session.join` throw, into a bare
+				 * `{type:'error'}` no lobby reads.
+				 *
+				 * A reloading tab whose old socket has not finished closing lands here too, and is
+				 * told so in words. That is the safe direction to be wrong in: today the other
+				 * direction silently hands a stranger somebody else's seat.
+				 */
+				const held = this.sockets.get(clientId);
+				if (held && held !== socket && !held.destroyed) {
+					this._reject(socket, { reason: 'duplicate_id' });
 					return clientId;
 				}
 				this.sockets.set(clientId, socket);

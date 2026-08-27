@@ -130,10 +130,17 @@ test('a dropped client reconnects by itself and the survivor\'s disconnect modal
 				const first = c._stableId('guest');
 				// what a RELOAD does: the module re-runs and asks again, with storage as it left it
 				const second = c._stableId('guest');
-				return { first, second };
+				// KDM-280 — and asking for the OTHER seat must not mint a second identity. The
+				// generator used to answer the literal `'host'` here, which is both a collision
+				// between two tabs and a different id for the same tab depending on which button was
+				// pressed. Kept beside the stability check because they are one property: this tab
+				// has exactly one identity, whatever it asks for and however often.
+				const asHost = c._stableId('host');
+				return { first, second, asHost };
 			});
 			expect(ids.first, 'an identity is actually produced').toBeTruthy();
 			expect(ids.second, 'and the same one is produced on the next page load').toBe(ids.first);
+			expect(ids.asHost, 'and asking for the host seat does not change who you are').toBe(ids.first);
 		} finally {
 			await ctxA.close().catch(() => {});
 			await ctxB.close().catch(() => {});

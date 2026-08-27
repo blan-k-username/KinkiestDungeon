@@ -34,7 +34,7 @@ const { start } = require('../../tools/mp-server/demo-server');
 
 const MP_TEST_TIMEOUT = Number(process.env.KD_MP_TEST_TIMEOUT || 600_000);
 
-/** The host's context-menu entry, as `coop-peace.js` names it. */
+/** The host's context-menu entry, as `coop-menu.js` names it. */
 const SAVE_RUN = 'CoopSaveRun';
 
 /**

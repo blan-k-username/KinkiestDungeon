@@ -56,8 +56,8 @@ describe('KDM-271 — the start perk set is the party\'s (R1, R2)', () => {
 		// `Submissive` (collar + leash) and `Studious` (a spell point) both have start-effects, so the
 		// grant can be checked on the body and not only as a flag.
 		// The garbage key rides along to prove KD's own table is still what rejects it.
-		s.setPerks('A', ['Submissive', 'NoSuchPerkAtAll']);
-		s.setPerks('B', ['Studious']);
+		s.setCharacter('A', { perks: ['Submissive', 'NoSuchPerkAtAll'] });
+		s.setCharacter('B', { perks: ['Studious'] });
 		s.join('A');
 		s.join('B');
 		await s.ready();
@@ -167,7 +167,7 @@ describe('KDM-271 — the start perk set is the party\'s (R1, R2)', () => {
 		// the wrong thing rather than the implementation being wrong.
 		const aKeysBefore = inventoryCount('A', 'RedKey');
 
-		s.setPerks('C', ['Unchained']);
+		s.setCharacter('C', { perks: ['Unchained'] });
 		const res = s.joinInProgress('C');
 		expect(res.seated, 'the late join itself has to work for this to mean anything').toBe(true);
 

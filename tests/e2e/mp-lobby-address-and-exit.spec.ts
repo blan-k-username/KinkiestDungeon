@@ -217,8 +217,10 @@ test.describe('KDM-236 — the address you used, and the way back out', () => {
 			await openLobby(page, port);
 			await press(page, 'KDMPHost');
 			// The SERVER's gate, not the lobby's opinion of itself — that distinction is the bug.
+			// KDM-280: the id is generated per tab now, so this asks whether slot 0 is SEATED, which
+			// is what the sentence above always meant.
 			await expect.poll(() => bridge.gate.host,
-				{ timeout: 30_000, message: 'hosting seats slot 0' }).toBe('host');
+				{ timeout: 30_000, message: 'hosting seats slot 0' }).toBeTruthy();
 
 			await press(page, 'KDMPBack');   // the Host view's Cancel
 

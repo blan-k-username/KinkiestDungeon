@@ -99,7 +99,21 @@ function sanitizeSave(raw) {
  * KDM-256 R3 — the one place a player-supplied CHARACTER PACKAGE is made safe to seat.
  *
  * A package is what the player chose on KD's own creation screens: which class they are playing,
- * what they are wearing, and how they look. Three declarable fields, all strings.
+ * what they are wearing, how they look — and, since KDM-279, which PERKS they switched on.
+ *
+ * ⚠️ WHY PERKS ARE IN HERE AND NOT ON A WIRE FIELD OF THEIR OWN. They were, until KDM-279: a
+ * `join.perks` that ran a second, byte-for-byte parallel mechanism — its own sanitiser, its own Map
+ * on the gate, its own pending→accept promotion, its own `release` asymmetry — to answer the same
+ * question this package answers, "what character is this player playing". They are chosen on KD's
+ * perk screen right beside the class screen, declared by the same lobby on the same handshake for
+ * the same seat. Two mechanisms, one question, is the duplication the repo's DRY rule exists to
+ * prevent.
+ *
+ * ⚠️ WHAT DID **NOT** FOLD, AND MUST NOT. START perks are the PARTY's, not the seat's
+ * (KDM-271/KDM-242 F10: several perks rewrite the shared world, so a per-seat answer depends on
+ * whichever bundle happens to be swapped in). So this is where a perk declaration is STORED, and
+ * `SwapSession.partyPerks()` — a union across seats — remains where it is READ from for seating.
+ * Storing per-seat and reading as a party is the deliberate shape, not an oversight.
  *
  * ⚠️ IT DOES NOT JUDGE WHETHER A VALUE EXISTS, and must not learn to — the same rule, for the same
  * reason, as `sanitizePerks` above. A list of outfits, styles or classes in `tools/mp-server/**` is
@@ -112,10 +126,17 @@ function sanitizeSave(raw) {
  * wrong. `null` means "declared nothing", which has exactly one meaning downstream (KD's default) —
  * so a refusal degrades to the `#coop=` behaviour rather than to a corrupted seat.
  *
- * `CHAR_MAX` is a wire cap, not a gameplay constant: three short identifiers are ~100 bytes, so 4 KB
- * is far above any real package and far below anything that could wedge a session.
+ * `CHAR_MAX` is a wire cap, not a gameplay constant: far above any real package, far below anything
+ * that could wedge a session.
+ *
+ * ⚠️ IT WAS 4 KB AND HAD TO GROW WHEN PERKS MOVED IN (KDM-279) — combining "refuse rather than
+ * truncate" with a cap smaller than the contents is a trap. A perk list that is entirely legal by
+ * its own limits is `PERKS_MAX 64 × PERK_KEY_MAX 64` ≈ 4 KB of keys BEFORE the JSON quotes and
+ * commas, so at 4 KB a lawful declaration would have pushed the package over the line and had the
+ * WHOLE thing refused — class and outfit included — with no error anywhere and KD's default seated
+ * instead. 32 KB clears the worst lawful case several times over and is still nothing on a LAN.
  */
-const CHAR_MAX = 4 * 1024;
+const CHAR_MAX = 32 * 1024;
 const CHAR_FIELD_MAX = 64;
 const CHAR_FIELDS = Object.freeze(['class', 'outfit', 'style']);
 
@@ -138,6 +159,21 @@ function sanitizeCharacter(raw) {
 		// with no error anywhere.
 		const v = stripControls(raw[f]).slice(0, CHAR_FIELD_MAX);
 		if (v) out[f] = v;
+	}
+	/*
+	 * KDM-279 — the perks, through the sanitiser that has always cleaned them. `sanitizePerks` is
+	 * NOT re-implemented here: dedup, the count cap and the `MagicHands` removal are rules about
+	 * perks, not about packages, and they keep their one home. This function's job is to decide
+	 * that the field belongs in the package and to fold its answer in.
+	 *
+	 * Set only when non-empty, on the same terms as the string fields above: an empty list is what
+	 * "declared nothing" and "declared only junk" both come to, and a `perks: []` sitting in the
+	 * package would make a package out of nothing at all — turning `characterOf`'s `null` (KD's own
+	 * default, the whole of R4) into a `{}` that goes down the write path with nothing to write.
+	 */
+	if (Object.prototype.hasOwnProperty.call(raw, 'perks')) {
+		const perks = sanitizePerks(raw.perks);
+		if (perks.length) out.perks = perks;
 	}
 	// "Declared nothing" and "declared only junk" are the same answer, so they get the same value.
 	return Object.keys(out).length ? out : null;
@@ -233,19 +269,16 @@ class JoinGate {
 		 */
 		this.names = new Map();
 		/**
-		 * KDM-238 R3 — the perks each SEATED player declared, keyed by clientId.
+		 * KDM-256 R3 / KDM-279 — the CHARACTER PACKAGE each seated player declared: class, outfit,
+		 * style and perks.
 		 *
-		 * On the seat for exactly the reason the name is (see `names` above): a reconnecting player
-		 * never re-seats, so a socket-scoped declaration would bring them back as a differently-built
-		 * character. `release` drops it, `releasePending` does not — the same asymmetry.
-		 */
-		this.perks = new Map();
-		/**
-		 * KDM-256 R3 — the CHARACTER PACKAGE each seated player declared: class, outfit, style.
+		 * A Map on exactly the terms `names` is, and for the same reason: it belongs to the SEAT, so
+		 * `release` drops it and `releasePending` does not. A player who merely dropped must come
+		 * back as the character they have been playing, not as KD's default.
 		 *
-		 * A Map on exactly the terms `names` and `perks` are, and for the same reason: it belongs to
-		 * the SEAT, so `release` drops it and `releasePending` does not. A player who merely dropped
-		 * must come back as the character they have been playing, not as KD's default.
+		 * KDM-279 folded the former `this.perks` Map in here. It was this Map's twin in every
+		 * respect — same lifetime, same asymmetry, same promotion — differing only in which half of
+		 * one answer it held.
 		 */
 		this.characters = new Map();
 		/**
@@ -301,12 +334,20 @@ class JoinGate {
 	/**
 	 * KDM-238 R3 — the perks this player declared, or `[]` if they declared none.
 	 *
+	 * KDM-279: a READER over the character package now, not a store of its own. The accessor is kept
+	 * rather than inlined at its call sites precisely because start perks are read as the PARTY's
+	 * union (`SwapSession.partyPerks`) — that union iterates this, so it is the seam where "stored
+	 * per seat" becomes "read per party" and it must stay one named thing.
+	 *
 	 * A COPY, for the same reason `hostMods()` hands one back: a caller must not be able to quietly
 	 * edit what the session believes a player chose. Like `nameOf`, it answers what the player said
 	 * and applies no default of its own — a player who declared nothing is seated on KD's own terms,
 	 * and that decision lives in `SwapSession.perksOf`, in one place.
 	 */
-	perksOf(clientId) { return (this.perks.get(clientId) || []).slice(); }
+	perksOf(clientId) {
+		const c = this.characters.get(clientId);
+		return (c && c.perks) ? c.perks.slice() : [];
+	}
 
 	/**
 	 * KDM-256 — the character this player declared, or `null`.
@@ -317,10 +358,19 @@ class JoinGate {
 	 *
 	 * A fresh COPY every call, for the reason `perksOf` hands one back: a caller must not be able to
 	 * edit what the session believes a player chose.
+	 *
+	 * ⚠️ THE PERK LIST IS COPIED TOO (KDM-279). `Object.assign({}, c)` was a complete copy while a
+	 * package was three strings; the moment an ARRAY moved in, the shallow copy started handing every
+	 * caller a live reference to the seat's own list — the exact reach-back this method promises does
+	 * not happen. A `.slice()` is the whole fix, and its absence would be invisible until something
+	 * mutated the returned package.
 	 */
 	characterOf(clientId) {
 		const c = this.characters.get(clientId);
-		return c ? Object.assign({}, c) : null;
+		if (!c) return null;
+		const out = Object.assign({}, c);
+		if (out.perks) out.perks = out.perks.slice();
+		return out;
 	}
 
 	/**
@@ -351,7 +401,15 @@ class JoinGate {
 	 * can never evict the person whose machine owns the world.
 	 */
 	claimHost(clientId, info) {
-		if (this.host && this.host !== clientId) return { accept: false, reason: 'already_hosting' };
+		// KDM-270 — `retry` names THE SEAT THIS CLIENT MAY ASK FOR ON THIS SOCKET, and `_reject`
+		// closes the socket iff it is absent. Set here, where the refusal is raised, rather than
+		// looked up from the reason downstream: `already_hosting` is raised at two places with two
+		// meanings (see `requestJoin`), so the reason string alone cannot decide this.
+		//
+		// `'guest'` is honest rather than hopeful — `requestJoin` will genuinely park this id for the
+		// host to answer. A `retry` naming a seat the gate would refuse anyway would be an invitation
+		// to a closed door.
+		if (this.host && this.host !== clientId) return { accept: false, reason: 'already_hosting', retry: 'guest' };
 		/*
 		 * KDM-243 R2/R8 — an over-cap save is refused BEFORE anything is seated.
 		 *
@@ -371,11 +429,11 @@ class JoinGate {
 		// KDM-237 N1/N3 — the host names themselves too. An absent name is left absent rather than
 		// defaulted here: `SwapSession.displayNameOf` owns the one fallback (NF2).
 		if (info && info.name !== undefined) this.names.set(clientId, sanitizeName(info.name));
-		// KDM-238 R3 — the host declares their own perks with the same claim. Guarded on
-		// `!== undefined` for the same reason `mods` is below: a claim that says nothing about perks
-		// leaves what is already seated alone, while an explicit `[]` correctly means "none".
-		if (info && info.perks !== undefined) this.perks.set(clientId, sanitizePerks(info.perks));
-		// KDM-256 R3 — sanitised HERE, where it is stored, on the same terms as the perks above. A
+		// KDM-256 R3 / KDM-279 — the host declares their character with the same claim, PERKS AND
+		// ALL. This used to be two statements storing two Maps; one declaration is one statement.
+		// Guarded on `!== undefined` for the same reason `mods` is below: a claim that says nothing
+		// about the character leaves what is already seated alone. Sanitised HERE, where it is
+		// stored, on the same terms as the name above. A
 		// refused package DELETES rather than storing, so a re-declaration that fails validation
 		// cannot leave the previous character quietly seated behind it.
 		if (info && info.character !== undefined) {
@@ -445,15 +503,28 @@ class JoinGate {
 		// KDM-237 N2 — sanitised HERE, where it is stored, so the host's accept prompt shows exactly
 		// the string the world will seat. Two spellings of one name is a bug report waiting to happen.
 		const name = sanitizeName(info && info.name);
-		// KDM-238 R3 — sanitised HERE, where it is stored, exactly as the name is: what the host is
-		// shown and what the world will seat must be the same value.
-		const perks = sanitizePerks(info && info.perks);
-		// KDM-256 R3 — and the character, sanitised at the same point and for the same reason.
+		// KDM-256 R3 / KDM-279 — and the character (class, outfit, style, perks), sanitised at the
+		// same point and for the same reason: what the host is shown and what the world will seat
+		// must be the same value.
 		const character = sanitizeCharacter(info && info.character);
 		const build = (info && info.build) || '';
 
-		if (!this.host) return { accept: false, reason: 'no_host' };
-		if (clientId === this.host) return { accept: false, reason: 'already_hosting' };
+		/*
+		 * KDM-270 — both of these name a seat, so neither closes the socket (see `claimHost`).
+		 *
+		 * `no_host`: nobody is hosting HERE. On a LAN where one machine runs the gateway, whoever
+		 * claims slot 0 first hosts — so a guest who arrived a moment early can simply take it,
+		 * rather than redialling. What the client DOES about that is the client's business: the
+		 * lobby offers rather than jumps, because hosting brings the world and possibly a save.
+		 *
+		 * `already_hosting` here is NOT the refusal `claimHost` raises. This client IS the host: the
+		 * seat it may ask for is the one it already holds, and `claimHost` is idempotent for the same
+		 * id, so `'host'` is a true answer rather than a polite one. Ending this socket used to cost
+		 * the host its own seat — `_reject` closed it and the bridge's `close` handler then released
+		 * everything it held.
+		 */
+		if (!this.host) return { accept: false, reason: 'no_host', retry: 'host' };
+		if (clientId === this.host) return { accept: false, reason: 'already_hosting', retry: 'host' };
 		if (clientId === this.guest) return { accept: true, slot: GUEST_SLOT };   // already in
 		if (this.guest) return { accept: false, reason: 'session_full' };
 
@@ -486,7 +557,7 @@ class JoinGate {
 		 */
 		const world = this.worldOf(this.host);
 
-		this.pending = { clientId, name, perks, character, build, mods: normalizeDeclaration(info && info.mods), modDiff };
+		this.pending = { clientId, name, character, build, mods: normalizeDeclaration(info && info.mods), modDiff };
 		return { accept: false, pending: true, modDiff, world };
 	}
 
@@ -499,9 +570,12 @@ class JoinGate {
 		// KDM-237 N2 — the name is promoted from the QUESTION to the SEAT, in the same statement that
 		// seats them. Read before `pending` is cleared, for the obvious reason.
 		const name = this.pending.name || '';
-		// KDM-238 R3 — and so is the perk declaration, in the same breath. Asking is not being
-		// seated: until this line the guest holds no seat, so `perksOf` answers `[]` for them.
-		const perks = this.pending.perks || [];
+		// KDM-256 R3 / KDM-279 — and so is the character declaration, perks and all, in the same
+		// breath. Asking is not being seated: until `accept` runs the guest holds no seat, so
+		// `perksOf` and `characterOf` both answer "nothing" for them.
+		//
+		// ⚠️ THIS HAND-OFF IS THE ONE THAT BITES. KDM-256 lost an 11-file red to getting it wrong,
+		// and a per-spec run cannot see it because the mistake only travels the HOST road.
 		const pendingChar = this.pending.character || null;
 		// KDM-249 — read alongside the name, and for the same reason: the answer CONSUMES the
 		// question, so anything the caller will need afterwards must be taken before `pending` is
@@ -510,9 +584,8 @@ class JoinGate {
 		this.pending = null;
 		this.guest = clientId;
 		if (name) this.names.set(clientId, name);
-		if (perks.length) this.perks.set(clientId, perks);
-		// KDM-256 R3 — and the character, promoted from the QUESTION to the SEAT in the same breath,
-		// read from `pending` before it is cleared exactly as the name and the perks are.
+		// KDM-256 R3 — the character, promoted from the QUESTION to the SEAT in the same breath,
+		// read from `pending` before it is cleared exactly as the name is.
 		if (pendingChar) this.characters.set(clientId, pendingChar);
 		return { admitted: true, clientId, slot: GUEST_SLOT, modDiff };
 	}
@@ -557,11 +630,11 @@ class JoinGate {
 		// deliberately does not touch it: a player who merely dropped still owns their seat (KDM-252
 		// E4) and must come back as themselves rather than as `Player B`.
 		this.names.delete(clientId);
-		// KDM-238 R3 — the declaration goes with the SEAT, on the same terms as the name: a player
-		// who merely DROPPED keeps it (releasePending does not touch this), or a reconnect would hand
-		// them a differently-built character than the one they have been playing.
-		this.perks.delete(clientId);
-		// KDM-256 — and the character, on exactly the same terms: it belongs to the seat.
+		// KDM-256 / KDM-279 — the character declaration goes with the SEAT, on the same terms as the
+		// name: a player who merely DROPPED keeps it (releasePending does not touch this), or a
+		// reconnect would hand them a differently-built character than the one they have been
+		// playing. Their perks ride along inside it now, and so keep that guarantee by construction
+		// rather than by a second `delete` that could be forgotten.
 		this.characters.delete(clientId);
 	}
 

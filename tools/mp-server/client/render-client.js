@@ -459,7 +459,7 @@
 			// KDM-225: the co-op RELATIONSHIP state (who this player is at war with, and whether they
 			// owe an answer to a peace offer). Published as a plain field rather than adopted into a
 			// game global: it is the gateway's own state, not KD's, and the context-menu wrap in
-			// coop-peace.js reads it every frame. `undefined` is preserved as null so a client talking
+			// coop-menu.js reads it every frame. `undefined` is preserved as null so a client talking
 			// to an older server can tell "no relationship" from "not supported".
 			KDRenderClient.lastCoop = s.coop || null;
 			// KDM-163 AC3: surface what the authoritative world could not dispatch. Warned once per

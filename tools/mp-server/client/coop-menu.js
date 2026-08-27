@@ -1,10 +1,23 @@
 /**
- * tools/mp-server/client/coop-peace.js  (KDM-225)
+ * tools/mp-server/client/coop-menu.js  (KDM-225, renamed KDM-276)
  *
-* THE "OFFER PEACE" ENTRY — on the player's OWN context menu (the ANSWER is a dialogue, KDM-230).
+ * THE CO-OP CONTEXT MENU — ONE wrap of `KDGetContextActions.Game`, N co-op entries on it.
+ *
+ * Today the entries are "Offer peace" (KDM-225; the ANSWER is a dialogue, KDM-230) and the host's
+ * "Save this run for single player" (KDM-244). They share the wrap and nothing else.
+ *
+ * ⚠️ A NEW CO-OP MENU ENTRY BELONGS IN THIS FILE. `KDGetContextActions.Game` is one global and this
+ * project allows it ONE wrap — a second file wrapping the same function is the duplication KDM-229
+ * was raised for. This file was called `coop-peace.js` until its second entry landed, and that name
+ * then argued for exactly the mistake it exists to prevent (KDM-276). It is named for the menu now:
+ * add your entry to `decorate()`, not to a new wrapper.
+ *
+ * Each entry carries its OWN preconditions. Nothing here is gated on being at war except the peace
+ * entry itself — see the warning inside `decorate()`, where inheriting peace's `coopState()` guard
+ * once made the save entry unreachable.
  *
  * A classic (non-module) script sharing the bundle's global scope, loaded after render-client.js.
- * It adds one entry to KD's own context menu and sends the gateway's `mp:` actions; it decides
+ * It adds entries to KD's own context menu and sends the gateway's `mp:` actions; it decides
  * nothing. The authority for "are we at war" and "do I owe an answer" is the server, read from
  * `KDRenderClient.lastCoop` (`snap.coop`), which is re-read on every menu build.
  *
@@ -16,9 +29,9 @@
  * (`KDContextMenu.ts:293`, `entity == KDPlayer()`) has no hostility test anywhere on the path — and
  * no vision or adjacency test either, so a truce can be offered while running away.
  *
- * WRAPPING: follows WRAP_CONVENTION.md — sentinel-gated, `_prev` captured in closure and called
- * FIRST, original stored. `KDGetContextActions` is a plain object registry (`.Game`,
- * `.RestraintContext`), so this composes with any other mod that extends the same entry.
+ * WRAPPING: follows WRAP_CONVENTION.md — sentinel-gated (`_kdcoop_menu_wrapped`), `_prev` captured
+ * in closure and called FIRST, original stored. `KDGetContextActions` is a plain object registry
+ * (`.Game`, `.RestraintContext`), so this composes with any other mod that extends the same entry.
  */
 (function () {
 	'use strict';
@@ -70,12 +83,12 @@
 		 * so it must not inherit peace's preconditions. Caught by the e2e's reachability check, which
 		 * is the only layer that can see a menu entry that is never painted.
 		 *
-		 * ⚠️ WHY IT LIVES IN THE PEACE FILE AT ALL. `KDGetContextActions.Game` is ONE global and this
+		 * ⚠️ WHY IT SHARES A FILE WITH PEACE. `KDGetContextActions.Game` is ONE global and this
 		 * project allows it ONE wrap — the rule this file's header states, and the duplication KDM-229
 		 * was raised for. A `coop-export.js` adding a second wrapper of the same function is exactly
-		 * that mistake, so the entry goes where the wrap already is. This file is now the CO-OP
-		 * CONTEXT MENU rather than the peace menu; renaming it (with its INJECT entry and its specs)
-		 * is filed as tech debt rather than smuggled into this task.
+		 * that mistake, so the entry goes where the wrap already is. This entry is why the file was
+		 * renamed from `coop-peace.js` to `coop-menu.js` (KDM-276): it is the co-op menu, not the
+		 * peace menu, and the old name told the next reader to go and write that second wrapper.
 		 *
 		 * Host-only in the UI (R1); the server re-checks in `_sendExport`, because a client can lie.
 		 * This gate is a courtesy that stops a guest being shown a button that would only refuse.
@@ -145,14 +158,14 @@
 	function install() {
 		if (typeof KDGetContextActions === 'undefined' || !KDGetContextActions
 			|| typeof KDGetContextActions.Game !== 'function') return false;
-		if (KDGetContextActions.Game._kdcoop_peace_wrapped) return true;
+		if (KDGetContextActions.Game._kdcoop_menu_wrapped) return true;
 		var _prev = KDGetContextActions.Game;
 		var wrapped = function (draw, mouseX, mouseY, data) {
 			var menu = _prev.apply(this, arguments);
 			try { return decorate(menu); } catch (e) { return menu; }
 		};
-		wrapped._kdcoop_peace_wrapped = 1;
-		wrapped._kdcoop_peace_original = _prev;
+		wrapped._kdcoop_menu_wrapped = 1;
+		wrapped._kdcoop_menu_original = _prev;
 		KDGetContextActions.Game = wrapped;
 		return true;
 	}
@@ -180,6 +193,6 @@
 	install();
 
 	if (typeof window !== 'undefined') {
-		window.KDCoopPeace = { install: install, decorate: decorate };
+		window.KDCoopMenu = { install: install, decorate: decorate };
 	}
 })();

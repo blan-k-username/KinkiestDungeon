@@ -290,17 +290,20 @@ class SwapSession {
 		 */
 		this.nameOf = new Map();     // id -> chosen display name ('' / absent = unnamed)
 		/**
-		 * KDM-238 R3 — the perk keys each player chose, keyed by clientId. Absent means "declared
-		 * none", which `perksOf` turns into `defaultPerks`. Registered in `_perClientStores()` beside
-		 * `nameOf` so a departing player takes it with them.
+		 * KDM-256 / KDM-279 — id -> the character package this player built: class, outfit, style
+		 * and the perk keys they chose. Absent means "declared nothing", which `characterOf` turns
+		 * into KD's own default and `perksOf` turns into `defaultPerks` — absence is meaningful, and
+		 * differently so for each reader.
+		 *
+		 * Registered in `_perClientStores()` beside `nameOf` so a departing player takes it with them.
+		 *
+		 * KDM-279 folded the former `perkOf` Map in here; it was this Map's sibling "in every way",
+		 * as the comment on it used to say, which is the definition of the duplication to remove.
 		 */
-		this.perkOf = new Map();     // id -> string[] of chosen perk keys
-		// KDM-256 — id -> the character package this player built (class / outfit / style), or absent.
-		// A sibling of `perkOf` in every way, including that absence is meaningful (see `characterOf`).
 		this.charOf = new Map();
 		/**
 		 * KDM-239 R3/R5 — the WORLD each player declared, `{ modes, seed }`. Only the host's is ever
-		 * read (`_hostWorld()`), but it is stored per client on the same terms as `perkOf` so a
+		 * read (`_hostWorld()`), but it is stored per client on the same terms as `charOf` so a
 		 * departing player takes their declaration with them via `_perClientStores()`.
 		 */
 		this.worldOf = new Map();    // id -> { modes: string[], seed: string }
@@ -1949,26 +1952,18 @@ class SwapSession {
 	}
 
 	/**
-	 * KDM-238 R3 — record the perks a player chose. Called by the bridge as it seats them, from the
-	 * gate's seat record; the session never invents one.
+	 * KDM-256 R1 / KDM-279 — record the CHARACTER this player built, perks included. Called by the
+	 * bridge as it seats them, from the gate's seat record; the session never invents one.
 	 *
 	 * Idempotent and order-independent, exactly like `setPlayerName`: it may be called before
 	 * `join()` (the normal path, since the gate knows the declaration before the session knows the
 	 * player) or after. `_seatPlayer` reads it at seating time, the only moment it matters.
-	 */
-	setPerks(clientId, perks) {
-		const p = sanitizePerks(perks);
-		if (p.length) this.perkOf.set(clientId, p);
-		else this.perkOf.delete(clientId);
-		return p;
-	}
-
-	/**
-	 * KDM-256 R1 — record the CHARACTER this player built. Idempotent and order-independent, exactly
-	 * like `setPlayerName` and `setPerks`, and called from the same place (`_carrySeat`).
 	 *
-	 * Re-sanitised here even though the gate already did it, on the same principle `setPerks` follows:
-	 * this is a public method, and "the caller already cleaned it" is an assumption, not a guarantee.
+	 * Re-sanitised here even though the gate already did it: this is a public method, and "the caller
+	 * already cleaned it" is an assumption, not a guarantee.
+	 *
+	 * KDM-279 removed the twin `setPerks`. Its whole body was this one with a different sanitiser
+	 * and a different Map.
 	 */
 	setCharacter(clientId, character) {
 		const c = sanitizeCharacter(character);
@@ -1992,12 +1987,18 @@ class SwapSession {
 	 */
 	characterOf(clientId) {
 		const c = this.charOf.get(clientId);
-		return c ? Object.assign({}, c) : null;
+		if (!c) return null;
+		// KDM-279 — the perk list is COPIED, not aliased. See `JoinGate.characterOf`: a shallow
+		// `Object.assign` was a complete copy of three strings and stopped being one the moment an
+		// array joined the package.
+		const out = Object.assign({}, c);
+		if (out.perks) out.perks = out.perks.slice();
+		return out;
 	}
 
 	/**
 	 * KDM-239 R3/R5 — record the world a player declared. Idempotent and order-independent, exactly
-	 * like `setPlayerName` and `setPerks`, and called from the same place (`_carrySeat`).
+	 * like `setPlayerName` and `setCharacter`, and called from the same place (`_carrySeat`).
 	 *
 	 * ⚠️ ORDERING IS WHAT MAKES THIS FEATURE POSSIBLE. `_start()` is reached from `join()` only once
 	 * the required number of players have joined — i.e. on the SECOND join — so by the time the world
@@ -2057,7 +2058,11 @@ class SwapSession {
 	 * A player's own declaration is never merged with the default: they chose, so they get theirs.
 	 */
 	perksOf(clientId) {
-		const own = this.perkOf.get(clientId);
+		// KDM-279 — read out of the character package rather than a Map of its own. The FALLBACK is
+		// untouched and stays here: `defaultPerks` is an operator's blanket setting (`KD_COOP_PERKS`),
+		// not a declaration, so it has no place inside a package describing what a player chose.
+		const c = this.charOf.get(clientId);
+		const own = c && c.perks;
 		return (own && own.length) ? own.slice() : this.defaultPerks.slice();
 	}
 
@@ -2374,9 +2379,10 @@ class SwapSession {
 			// containers like `worldOf` beside them, so a departing player takes both with them; a
 			// stale `_templateOf` entry would seat a RECONNECTING player from a character captured
 			// before the run moved on.
-			// KDM-256 — `charOf` belongs with them: the character a departed player built must leave
-			// with them, or a later seat reusing that id would be dressed as somebody who has gone.
-			this.perkOf, this.charOf, this.worldOf, this.saveOf, this._templateOf,
+			// KDM-256/279 — `charOf` belongs with them: the character a departed player built, perks
+			// and all, must leave with them, or a later seat reusing that id would be dressed as
+			// somebody who has gone.
+			this.charOf, this.worldOf, this.saveOf, this._templateOf,
 			this._eventSeq, this.pendingEvents, this._sentSoundDesc, this.vitalsOf,
 			this.defeated, this.tiedOf, this._pending, this._stateFp,
 		];

@@ -142,8 +142,16 @@ test.describe('KDM-238 — perks are chosen on KD\'s own screen, from the co-op 
 		const after = await page.evaluate(() => {
 			// @ts-ignore
 			KDButtonsCache['KDPerksStart'].func({});
-			// @ts-ignore
-			return { screen: KinkyDungeonState, perks: (window.KDMPLobby.perks || []).slice(), picking: !!window.KDMPLobby.perkPick };
+			return {
+				// @ts-ignore
+				screen: KinkyDungeonState, perks: (window.KDMPLobby.perks || []).slice(),
+				// @ts-ignore
+				picking: !!window.KDMPLobby.perkPick,
+				// KDM-279 — and what this lobby would actually DECLARE, which is the only thing the
+				// server ever sees. Sampled in the same evaluate as the commit above.
+				// @ts-ignore
+				declared: window.KDMPLobby.playerCharacter(),
+			};
 		});
 
 		expect(after.screen, 'stock would have called KinkyDungeonStartNewGame and left Stats for the game')
@@ -152,5 +160,23 @@ test.describe('KDM-238 — perks are chosen on KD\'s own screen, from the co-op 
 		// Read back from KD, not asserted as a literal: whatever the game says is chosen is what the
 		// lobby must be carrying.
 		expect(after.perks.slice().sort()).toEqual(toggled.slice().sort());
+
+		/*
+		 * KDM-279 — AND IT REACHES THE DECLARATION. The lobby holding the right perks internally is
+		 * only half the job: they used to leave on a `join.perks` field of their own and now travel
+		 * inside the character package, so this asserts the thing that is actually sent.
+		 *
+		 * ⚠️ Note what would still pass without the fold: `after.perks` above. That field never
+		 * changed and never will — which is precisely why an assertion on it cannot see whether the
+		 * merge in `playerCharacter()` happened. This one can.
+		 *
+		 * The class/outfit half of the package is deliberately untouched here (this player never
+		 * opened the character screen), so a package existing AT ALL is itself the evidence that
+		 * perks alone are enough to make one.
+		 */
+		expect(after.declared, 'perks alone must make a package — a player may keep KD\'s default class')
+			.toBeTruthy();
+		expect((after.declared.perks || []).slice().sort(),
+			'the declaration carries what KD says was chosen').toEqual(toggled.slice().sort());
 	});
 });

@@ -37,7 +37,7 @@ async function ownMenu(P: any) {
 		// @ts-ignore — the peace entries are added by a cooperative wrap AROUND KDGetContextActions.Game,
 		// so `KDGetGameContextActionsVanilla` never sees them. (Measured: vanilla returned
 		// ["Wait","Inventory","Special"] with the wrap installed and working.)
-		!!(KDGetContextActions.Game as any)._kdcoop_peace_wrapped);
+		!!(KDGetContextActions.Game as any)._kdcoop_menu_wrapped);
 	return { ...menu, ok: true, wrapped };
 }
 

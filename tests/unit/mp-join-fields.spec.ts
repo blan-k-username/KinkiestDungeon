@@ -80,7 +80,7 @@ describe('KDM-260 — R4: the client cannot send a field the server ignores', ()
 		// Strip comments so PROSE mentioning a field cannot invent one.
 		const code = src.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/.*$/gm, '$1 ');
 		const out = new Set<string>();
-		// `join.perks = …`, `join.world = …`  — and the object literal's own `type`/`clientId`.
+		// `join.character = …`, `join.world = …` — and the object literal's own `type`/`clientId`.
 		for (const m of code.matchAll(/\bjoin\.([A-Za-z_][A-Za-z0-9_]*)\s*=/g)) out.add(m[1]);
 		for (const m of code.matchAll(/var join = \{([^}]*)\}/g)) {
 			for (const k of m[1].matchAll(/([A-Za-z_][A-Za-z0-9_]*)\s*:/g)) out.add(k[1]);
@@ -94,7 +94,8 @@ describe('KDM-260 — R4: the client cannot send a field the server ignores', ()
 		const found = clientJoinFields();
 		expect(found.length, 'a reader that finds nothing would make the guard below vacuous')
 			.toBeGreaterThan(3);
-		expect(found).toContain('perks');
+		// KDM-279: `character` — perks folded into it, so this is the field that used to be `perks`.
+		expect(found).toContain('character');
 		expect(found, 'the field KDM-239 added — the whole reason this task exists').toContain('world');
 		expect(found).toContain('role');   // routing, filtered below — proves the filter is exercised
 	});

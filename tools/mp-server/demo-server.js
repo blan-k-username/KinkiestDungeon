@@ -125,8 +125,10 @@ const INJECT = [
 	GAME_MODES_ROUTE,               // must precede coop-bootstrap.js — it consumes window.KDGameModes
 	'/tools/mp-server/client/render-client.js',
 	'/tools/mp-server/client/coop-bootstrap.js',
-	// KDM-225: the peace submenu. AFTER coop-bootstrap — it sends through `window.__coop.sendAction`.
-	'/tools/mp-server/client/coop-peace.js',
+	// KDM-225/244/276: the co-op context menu (peace offer + host run-save). ONE wrap of
+	// KDGetContextActions.Game — new co-op entries go IN it. AFTER coop-bootstrap: it sends through
+	// `window.__coop.sendAction`.
+	'/tools/mp-server/client/coop-menu.js',
 	// KDM-233: the main-menu Multiplayer entry + host/join screens. AFTER coop-bootstrap — it drives
 	// `window.__coopConnect` / `window.__coopAnswerJoin`.
 	'/tools/mp-server/client/coop-lobby.js',

@@ -24,6 +24,7 @@ export class MPClient {
 	private waiters: { pred: (m: any) => boolean; res: (m: any) => void; rej: (e: any) => void; timer: any }[] = [];
 	private _base: any = null;
 	private _pong = true;
+	private _closed = false;
 
 	/**
 	 * KDM-250: IT ANSWERS THE HEARTBEAT, like a live browser does.
@@ -44,6 +45,9 @@ export class MPClient {
 			c.buf.push(c._resolve(m));
 			c._pump();
 		});
+		// KDM-270: recorded from the moment the socket exists, so a close that lands before anyone
+		// asks is not missed — `closedWithin` reads state, it does not start listening.
+		c.ws.addEventListener('close', () => { c._closed = true; });
 		await new Promise<void>((res) => c.ws.addEventListener('open', () => res()));
 		return c;
 	}
@@ -73,6 +77,27 @@ export class MPClient {
 		await new Promise((r) => setTimeout(r, ms));
 		const hit = this.buf.find(pred);
 		if (hit) throw new Error(`expected no matching message within ${ms}ms, got ${JSON.stringify(hit)}`);
+	}
+
+	/**
+	 * KDM-270 — did the SERVER close this socket within `ms`?
+	 *
+	 * The client could always hang up (`close()`); it could never observe being hung up on, and
+	 * "the socket is still open" is the entire claim of a non-terminal refusal.
+	 *
+	 * It answers a BOOLEAN rather than throwing, so an assertion and its control read the same
+	 * primitive both ways round. A pair of `expectClosed` / `expectOpen` helpers would be two
+	 * oracles, and the one guarding the interesting direction would be the one nothing else
+	 * exercises — which is how a control stops controlling anything.
+	 *
+	 * Resolves as soon as a close lands, so the wait is only spent when nothing does: the slow
+	 * direction is the one asserting a socket STAYED open, which is precisely where real elapsed
+	 * time is the evidence.
+	 */
+	async closedWithin(ms = 500): Promise<boolean> {
+		const until = Date.now() + ms;
+		while (!this._closed && Date.now() < until) await new Promise((r) => setTimeout(r, 10));
+		return this._closed;
 	}
 
 	close() { try { this.ws.close(); } catch (e) { /* noop */ } }

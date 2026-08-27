@@ -66,7 +66,11 @@ describe('KDM-256 R3 — sanitizeCharacter', () => {
 	});
 
 	it('keeps the declared fields and drops everything else', () => {
-		const out = sanitizeCharacter({ ...CHAR_A, hp: 9999, perks: ['x'], __proto__: { evil: 1 }, nested: { a: 1 } });
+		// ⚠️ `perks` USED TO BE ONE OF THE REJECTED KEYS IN THIS TEST. KDM-279 folded the former
+		// `join.perks` wire field into the package, so it is now declarable and is asserted below as
+		// one of the things that SURVIVES. Left as an explicit note because the inverted assertion is
+		// exactly what a reader would otherwise take for a mistake.
+		const out = sanitizeCharacter({ ...CHAR_A, hp: 9999, __proto__: { evil: 1 }, nested: { a: 1 } });
 		expect(out).toEqual(CHAR_A);
 		// A package is a set of CHOICES, not a character sheet. Anything that would let a client
 		// declare its own stats is a gameplay decision the gateway must not carry.
@@ -75,6 +79,52 @@ describe('KDM-256 R3 — sanitizeCharacter', () => {
 		// CONTROL for the two assertions above: a same-shape key that IS declarable survives, so
 		// `not.toHaveProperty` is not passing merely because the sanitiser returned something empty.
 		expect(out).toHaveProperty('outfit', 'OutfitOne');
+	});
+
+	// KDM-279 — the perk declaration is part of the package now, and goes through the perk rules.
+	it('carries perks, through sanitizePerks and not a second copy of its rules', () => {
+		const out = sanitizeCharacter({
+			...CHAR_A,
+			// Every rule `sanitizePerks` owns, in one declaration: a duplicate (a set), the
+			// `MagicHands` sentinel KD sets and deletes itself, a non-string, and a live key.
+			perks: ['Submissive', 'Submissive', 'MagicHands', 42, 'Studious'],
+		});
+		expect(out!.perks, 'deduplicated, sentinel removed, non-strings dropped')
+			.toEqual(['Submissive', 'Studious']);
+		// The rest of the package is unaffected by having perks in it.
+		expect(out!.class).toBe(CHAR_A.class);
+	});
+
+	it('a package of perks ALONE is still a package', () => {
+		// A player may keep KD's default class and outfit and still have chosen perks on KD's own
+		// perk screen. If that came back `null` the declaration would be silently dropped and they
+		// would be seated with none.
+		const out = sanitizeCharacter({ perks: ['Studious'] });
+		expect(out).toEqual({ perks: ['Studious'] });
+	});
+
+	it('an empty or junk perk list does not manufacture a package out of nothing', () => {
+		// The mirror of the above, and the reason `perks` is only set when non-empty: `null` means
+		// "declared nothing" all the way down to KD's own default (R4), and a `{ perks: [] }` would
+		// send `applyCharacter` down its write path with nothing to write.
+		expect(sanitizeCharacter({ perks: [] })).toBeNull();
+		expect(sanitizeCharacter({ perks: ['MagicHands'] }), 'a list of only sentinels is an empty list')
+			.toBeNull();
+	});
+
+	it('a lawful maximum perk list does not get the whole package refused', () => {
+		/*
+		 * ⚠️ THE REGRESSION THIS EXISTS FOR. `sanitizeCharacter` REFUSES rather than truncates, on a
+		 * size cap. Perks are capped at 64 keys × 64 chars ≈ 4 KB of keys before JSON quoting — so
+		 * with the pre-KDM-279 cap of 4 KB, a perk list that is entirely legal by its own limits
+		 * would have pushed the package over the line and had the WHOLE thing refused, class and
+		 * outfit included, with no error anywhere and KD's default seated instead.
+		 */
+		const perks = Array.from({ length: 64 }, (_, i) => `Perk${String(i).padStart(2, '0')}`.padEnd(64, 'x'));
+		const out = sanitizeCharacter({ ...CHAR_A, perks });
+		expect(out, 'a lawful declaration must not be refused wholesale').not.toBeNull();
+		expect(out!.perks!.length, 'and the perks survive it intact').toBe(64);
+		expect(out!.class, 'as does the rest of the package').toBe(CHAR_A.class);
 	});
 
 	it('strips control characters and caps each field by the CHARACTER rule', () => {

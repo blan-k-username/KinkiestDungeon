@@ -280,5 +280,17 @@ describe('KDM-235 R3 — over the wire, the joiner gets the LIVE world in full',
 	it('and the player already there is told, without asking', async () => {
 		const hello = await A.next((m: any) => m.type === 'peer_joined', 5_000);
 		expect(hello.clientId).toBe('B');
+		/*
+		 * KDM-278 — `players` is the field the CLIENT rebuilds its roster from, so it is part of the
+		 * contract and not decoration. `coop-bootstrap.js` adopts this list wholesale rather than
+		 * appending `clientId` to what it already had, precisely so there is one source of truth for
+		 * who is seated; a payload carrying only the arrival would push it back to deriving its own.
+		 *
+		 * The roster ITSELF is browser state and is asserted where it lives — `tests/e2e/
+		 * mp-join-late.spec.ts`, across a real two-browser join. This message had a node-layer test
+		 * and no reader for exactly as long as it took someone to notice the wire is not the roster.
+		 */
+		expect(hello.players, 'carries the full seating, which is what the roster is rebuilt from')
+			.toEqual(['A', 'B']);
 	}, BOOT_TIMEOUT);
 });

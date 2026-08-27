@@ -103,6 +103,29 @@ test('a friend can join a run already in progress, and the two then play togethe
 
 			expect(bridge.session.players, 'seated into the running session').toEqual(['A', 'B']);
 
+			/*
+			 * KDM-278 — THE PLAYER WHO WAS ALREADY HERE MUST SEE THE NEWCOMER IN THEIR ROSTER.
+			 *
+			 * `_joinLate` sends `peer_joined` to everyone already seated, and for a long time NO client
+			 * code read it: `coop.peers` was set once from `joined.players` and never again, so a late
+			 * joiner was absent from every existing player's roster for the rest of the run. The
+			 * server was right and the wire was right — the unit spec asserts both — and the browser
+			 * still had it wrong, which is why this assertion lives here and not there.
+			 *
+			 * ⚠️ THE `beforeJoin` LINE IS THE CONTROL AND IS NOT OPTIONAL. Asserting only that A's
+			 * roster ends up holding 'B' passes just as well against a roster that always held every
+			 * client id, or one seeded from somewhere other than this message. So the roster is pinned
+			 * BEFORE the join as A alone, and the arrival is then a change of value, not a presence.
+			 */
+			expect(beforeJoin.peers, 'control: A\'s roster held A alone while A played solo')
+				.toEqual(['A']);
+			await A.waitForFunction(
+				() => ((window as any).__coop.peers || []).indexOf('B') >= 0,
+				undefined, { timeout: 30_000 },
+			);
+			expect((await view(A)).peers, 'A\'s roster now holds both players')
+				.toEqual(['A', 'B']);
+
 			// R3/R4 — B is in the world A was already in, not a fresh dungeon. The turn counter is the
 			// cheapest proof the session was not restarted underneath them.
 			const joined = await view(B);

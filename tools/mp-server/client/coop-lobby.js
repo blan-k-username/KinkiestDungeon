@@ -82,7 +82,9 @@
 		 */
 		perks: [],
 		perkPick: false,
-		playerPerks: function () { return lobby.perks.slice(); },
+		// KDM-279 — there is no `playerPerks()` any more. It answered the same question
+		// `playerCharacter()` now answers, and leaving a second accessor beside it is how the two
+		// declarations grew apart in the first place.
 		/**
 		 * KDM-256 R1 — the character this player built, or null, plus the same conditional flag the
 		 * perk pick uses. `null` (never `{}`) because "declared nothing" has exactly one meaning all
@@ -90,7 +92,27 @@
 		 */
 		character: null,
 		charPick: false,
-		playerCharacter: function () { return lobby.character ? JSON.parse(JSON.stringify(lobby.character)) : null; },
+		/**
+		 * KDM-256 / KDM-279 — the ONE declaration this lobby sends: class, outfit, style and perks.
+		 *
+		 * ⚠️ THE TWO SCREENS STAY TWO SCREENS. `charPick` and `perkPick` are separate KD screens with
+		 * separate commit paths, and KDM-279 is a refactor with no player-visible change — so the
+		 * merge happens HERE, at the moment of declaring, not in the UI. `lobby.character` and
+		 * `lobby.perks` remain what each screen wrote.
+		 *
+		 * Answers `null` when neither screen was used, because "declared nothing" has exactly one
+		 * meaning all the way down (`SwapSession.characterOf` → KD's own default). Note the perks
+		 * alone are enough to make a package: a player may take KD's default class in the outfit it
+		 * comes with and still have chosen perks, and that is a declaration.
+		 */
+		playerCharacter: function () {
+			var pkg = lobby.character ? JSON.parse(JSON.stringify(lobby.character)) : null;
+			if (lobby.perks && lobby.perks.length) {
+				pkg = pkg || {};
+				pkg.perks = lobby.perks.slice();
+			}
+			return pkg;
+		},
 		open: function () { KinkyDungeonState = 'Multiplayer'; lobby.view = 'menu'; lobby.error = ''; lobby.status = ''; },
 		close: function () { lobby.leave(); KinkyDungeonState = 'Menu'; },
 		/**
@@ -210,7 +232,7 @@
 		DrawButtonKDEx('KDMPHost', function () {
 			lobby.view = 'host';
 			lobby.error = '';
-			connect({ role: 'host', name: lobby.playerName(), perks: lobby.playerPerks(), character: lobby.playerCharacter() });
+			connect({ role: 'host', name: lobby.playerName(), character: lobby.playerCharacter() });
 			return true;
 		}, true, MID, 300, 350, 64, text('KDMPHostGame', 'Host Game'), '#ffffff', '');
 
@@ -237,7 +259,7 @@
 					return true;
 				}
 				lobby.view = 'host';
-				connect({ role: 'host', name: lobby.playerName(), perks: lobby.playerPerks(), character: lobby.playerCharacter(), save: str });
+				connect({ role: 'host', name: lobby.playerName(), character: lobby.playerCharacter(), save: str });
 				return true;
 			}, true, MID, 380, 350, 64, text('KDMPContinueSave', 'Continue Save'), '#ffffff', '');
 		}
@@ -473,7 +495,7 @@
 		DrawButtonKDEx('KDMPConnect', function () {
 			lobby.error = '';
 			lobby.status = text('KDMPConnecting', 'Connecting…');
-			connect({ role: 'guest', address: lobby.address(), name: lobby.playerName(), perks: lobby.playerPerks(), character: lobby.playerCharacter() });
+			connect({ role: 'guest', address: lobby.address(), name: lobby.playerName(), character: lobby.playerCharacter() });
 			return true;
 		}, true, MID, joinY, 350, 64, text('KDMPConnectBtn', 'Join'), '#ffffff', '');
 

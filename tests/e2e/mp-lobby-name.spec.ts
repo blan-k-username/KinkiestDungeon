@@ -101,8 +101,11 @@ test.describe('KDM-237 — the name you type is the name you get', () => {
 
 			await expect.poll(() => bridge.gate.host, { timeout: 30_000 }).toBeTruthy();
 			// The `#coop=` path and the whole MP e2e suite depend on this staying exactly as it was.
+			// KDM-280: the id is per-tab now, so the SHAPE of the fallback is what is pinned here —
+			// `Player <id>`, still built by the one function that owns it (NF2). Whether that is the
+			// right thing to show a player is [[KDM-282]], deliberately not this spec's business.
 			expect(bridge.gate.nameOf(bridge.gate.host)).toBe('');
-			expect(bridge.session.displayNameOf('host')).toBe('Player host');
+			expect(bridge.session.displayNameOf(bridge.gate.host)).toBe('Player ' + bridge.gate.host);
 		} finally {
 			await ctx.close().catch(() => {});
 			try { bridge.close(); } catch (e) { /* ignore */ }

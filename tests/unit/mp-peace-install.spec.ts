@@ -1,5 +1,5 @@
 /**
- * KDM-229 — `client/coop-peace.js` installs its context-menu wrap synchronously, with no timer.
+ * KDM-229 — `client/coop-menu.js` installs its context-menu wrap synchronously, with no timer.
  *
  * WHY A UNIT SPEC AND NOT JUST THE E2E. `mp-peace-menu.spec.ts:69` already asserts the wrap is
  * installed, but it lets a whole browser boot elapse first — a re-introduced `setInterval` would
@@ -21,7 +21,7 @@ import { readFileSync } from 'node:fs';
 import { createContext, runInContext } from 'node:vm';
 import { resolve } from 'node:path';
 
-const SRC = resolve(__dirname, '../../tools/mp-server/client/coop-peace.js');
+const SRC = resolve(__dirname, '../../tools/mp-server/client/coop-menu.js');
 
 /** A stand-in for KD's own builder — the `_prev` a cooperative wrap must call first. */
 function vanillaBuilder() {
@@ -57,19 +57,19 @@ function loadCoopPeace(coop: any = null, coopApi: any = null) {
 		clearTimeout: () => {},
 	};
 	createContext(ctx);
-	runInContext(readFileSync(SRC, 'utf8'), ctx, { filename: 'coop-peace.js' });
+	runInContext(readFileSync(SRC, 'utf8'), ctx, { filename: 'coop-menu.js' });
 	return { ctx, win, armed };
 }
 
 describe('KDM-229 — the peace context-menu wrap installs without a timer', () => {
 	it('AC3: evaluating the script arms no timer at all', () => {
 		const { armed } = loadCoopPeace();
-		expect(armed, `coop-peace.js armed: ${armed.join(', ')}`).toEqual([]);
+		expect(armed, `coop-menu.js armed: ${armed.join(', ')}`).toEqual([]);
 	});
 
 	it('AC1: the wrap is installed by the time the script finishes evaluating', () => {
 		const { ctx } = loadCoopPeace();
-		expect(ctx.KDGetContextActions.Game._kdcoop_peace_wrapped,
+		expect(ctx.KDGetContextActions.Game._kdcoop_menu_wrapped,
 			'nothing may have to tick for the entry to exist').toBe(1);
 	});
 
@@ -80,7 +80,7 @@ describe('KDM-229 — the peace context-menu wrap installs without a timer', () 
 	 */
 	it('the installed wrap is cooperative — it calls the previous builder and keeps its options', () => {
 		const { ctx } = loadCoopPeace({ war: ['B'], canOffer: ['B'], peaceOffer: null });
-		expect(ctx.KDGetContextActions.Game._kdcoop_peace_original,
+		expect(ctx.KDGetContextActions.Game._kdcoop_menu_original,
 			'the original must be reachable, per WRAP_CONVENTION.md').toBe(vanillaBuilder);
 
 		const menu = ctx.KDGetContextActions.Game(null, 0, 0, {});

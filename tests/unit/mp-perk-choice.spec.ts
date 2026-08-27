@@ -98,7 +98,7 @@ describe('KDM-238 — JoinGate carries the declaration on the SEAT (R3)', () => 
 	beforeEach(() => { g = new JoinGate({ build: BUILD }); });
 
 	it('a host declares their own perks with their claim', () => {
-		g.claimHost('H', { build: BUILD, perks: ['Submissive'] });
+		g.claimHost('H', { build: BUILD, character: { perks: ['Submissive'] } });
 		expect(g.perksOf('H')).toEqual(['Submissive']);
 	});
 
@@ -110,7 +110,7 @@ describe('KDM-238 — JoinGate carries the declaration on the SEAT (R3)', () => 
 
 	it('asking is not being seated — the declaration is promoted only on accept', () => {
 		g.claimHost('H', { build: BUILD });
-		g.requestJoin('G', { name: 'Bob', build: BUILD, perks: ['Studious'] });
+		g.requestJoin('G', { name: 'Bob', build: BUILD, character: { perks: ['Studious'] } });
 		expect(g.perksOf('G'), 'a pending requester holds no seat, so holds no perks').toEqual([]);
 		g.accept();
 		expect(g.perksOf('G')).toEqual(['Studious']);
@@ -118,7 +118,7 @@ describe('KDM-238 — JoinGate carries the declaration on the SEAT (R3)', () => 
 
 	it('declining leaves no declaration behind', () => {
 		g.claimHost('H', { build: BUILD });
-		g.requestJoin('G', { build: BUILD, perks: ['Studious'] });
+		g.requestJoin('G', { build: BUILD, character: { perks: ['Studious'] } });
 		g.decline();
 		expect(g.perksOf('G')).toEqual([]);
 	});
@@ -127,19 +127,19 @@ describe('KDM-238 — JoinGate carries the declaration on the SEAT (R3)', () => 
 	// player still owns their seat and must come back as themselves — including their perks, or a
 	// reconnect would hand them a differently-built character.
 	it('a DROPPED player keeps their perks: releasePending frees the question, not the seat', () => {
-		g.claimHost('H', { build: BUILD, perks: ['Submissive'] });
+		g.claimHost('H', { build: BUILD, character: { perks: ['Submissive'] } });
 		g.releasePending('H');
 		expect(g.perksOf('H')).toEqual(['Submissive']);
 	});
 
 	it('a player who gives the seat up loses the declaration with it', () => {
-		g.claimHost('H', { build: BUILD, perks: ['Submissive'] });
+		g.claimHost('H', { build: BUILD, character: { perks: ['Submissive'] } });
 		g.release('H');
 		expect(g.perksOf('H')).toEqual([]);
 	});
 
 	it('perksOf hands back a COPY — a caller cannot edit what the session believes', () => {
-		g.claimHost('H', { build: BUILD, perks: ['Submissive'] });
+		g.claimHost('H', { build: BUILD, character: { perks: ['Submissive'] } });
 		g.perksOf('H').push('Studious');
 		expect(g.perksOf('H')).toEqual(['Submissive']);
 	});
@@ -200,7 +200,7 @@ describe('KDM-238 — the choice reaches the world, and only its owner (R4, R5, 
 		// `Submissive` on purpose: its start-effect is two visible restraints, so the assertion can be
 		// about what is on the body rather than about a flag in a map.
 		// The garbage key rides along to prove KD's own table is what rejects it (R8).
-		s.setPerks('A', ['Submissive', 'NoSuchPerkAtAll']);
+		s.setCharacter('A', { perks: ['Submissive', 'NoSuchPerkAtAll'] });
 		s.join('A');
 		s.join('B');
 		await s.ready();
@@ -277,7 +277,7 @@ describe('KDM-238 — the choice reaches the world, and only its owner (R4, R5, 
 	it('P3 — a LATE arrival is perked on the same terms', () => {
 		// `_seatPlayer` is shared by `_start` and `joinInProgress` (KDM-235), so this costs nothing to
 		// support — but "costs nothing" is a claim, and an unasserted claim is how it breaks.
-		s.setPerks('C', ['Studious']);
+		s.setCharacter('C', { perks: ['Studious'] });
 		const res = s.joinInProgress('C');
 		expect(res.seated, 'the late join itself has to work for this to mean anything').toBe(true);
 		expect(perksIn('C')).toContain('Studious');

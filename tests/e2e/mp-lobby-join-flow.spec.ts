@@ -46,7 +46,8 @@ test.describe('KDM-233 — hosting and joining, end to end', () => {
 				{ timeout: 30_000, message: 'the host should be prompted' }).toBe('Ada');
 
 			// …and until they answer, the guest is in nobody's session.
-			expect(bridge.session.players, 'asking is not joining').toEqual(['host']);
+			// KDM-280: the host's id is generated per tab, so name the SEAT, not a literal.
+			expect(bridge.session.players, 'asking is not joining').toEqual([bridge.gate.host]);
 
 			await press(host, 'KDMPAccept');
 
@@ -78,7 +79,7 @@ test.describe('KDM-233 — hosting and joining, end to end', () => {
 
 			await expect.poll(async () => (await lobbyState(guest)).error,
 				{ timeout: 30_000, message: 'E3/E6 — refused in words, not silence' }).toContain('declined');
-			expect(bridge.session.players, 'the host keeps playing, alone').toEqual(['host']);
+			expect(bridge.session.players, 'the host keeps playing, alone').toEqual([bridge.gate.host]);
 			expect((await lobbyState(host)).pending).toBe(null);
 		} finally {
 			await hostCtx.close().catch(() => {});
