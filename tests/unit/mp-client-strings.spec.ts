@@ -361,3 +361,268 @@ function lobbySayCalls(src: string): string[] {
 	}
 	return out;
 }
+
+/* ══════════════════════════════════════════════════════════════════════════════════════════════════
+ * KDM-289 — THE SEEDED TRANSLATIONS
+ *
+ * KDM-281 left the co-op client shipping English and nothing else. It is not what that task broke —
+ * the lobby's `KDMP*` keys never had a translation — but it is what that task made fixable, by
+ * putting every string in one table behind one helper. This block is the guard for the six language
+ * tables that fill it.
+ *
+ * ── WHY THE SEEDS LIVE IN coop-text.js AND NOT IN KD ──────────────────────────────────────────────
+ * The repo's i18n convention is `TextProvider.instance.getTranslationService('default')
+ * .appendTranslation(lang, …)`. That is the MOD convention, and it does in fact work for keys nobody
+ * registered (`Scripts/Text.ts:515` resolves `tagTranslationMap` BEFORE falling back to a source
+ * string). It was rejected anyway: it would split the fallback chain across our `t()` and KD's
+ * `getTextFromGroupStrict`, which is the exact two-owners shape KDM-281 spent a task removing, and it
+ * would force this spec to build a fake `TextProvider` — a second implementation of the thing under
+ * test, which is how a guard goes vacuous.
+ *
+ * So `coop-text.js` owns the tables and resolves them itself, reading KD's `TranslationLanguage`.
+ *
+ * ── WHAT THE UNIT LAYER CAN AND CANNOT PROVE ──────────────────────────────────────────────────────
+ * Everything below stubs `TranslationLanguage` into a `node:vm` context. That is honest about the
+ * DATA and about the RESOLUTION ORDER, and it is silent about the one real risk of the design: that
+ * an injected `<script src>` can read a bundle `let` binding in a browser at all. Nothing here would
+ * fail if it could not. `tests/e2e/mp-lobby-language.spec.ts` is that half, and neither file is
+ * sufficient alone.
+ * ═════════════════════════════════════════════════════════════════════════════════════════════════ */
+
+/** The six the repo supports. EN is not a member: it is the source, not a translation. */
+const TARGETS = ['CN', 'DE', 'ES', 'JP', 'KR', 'RU'] as const;
+
+/**
+ * Evaluate `coop-text.js` with a chosen set of page globals.
+ *
+ * `loadText()` above is deliberately left alone — it is what the KDM-281 guards run on, and this
+ * task must not change their subject. This is the same evaluation with the globals the new branch
+ * reads. Omitting `TranslationLanguage` from `extra` is meaningful: the binding is then genuinely
+ * ABSENT, and a bare read of it throws — which is the case the resolver's `try` exists for.
+ */
+function loadTextWith(extra: Record<string, any> = {}): any {
+	const ctx: any = { window: {}, console: { warn() {}, log() {}, error() {} }, ...extra };
+	createContext(ctx);
+	runInContext(read(TEXT_SRC), ctx, { filename: 'coop-text.js' });
+	return ctx.window.KDMPText;
+}
+
+/** The same token reader the KDM-281 templating guard uses. A token is what `fill()` substitutes. */
+const TOKENS = (s: string) => [...new Set(s.match(/\b([A-Z]{4,})\b/g) || [])].sort();
+
+/**
+ * Keys a language is ALLOWED not to cover, per AC3: "every key is covered for every target, OR the
+ * gap is declared". Empty, and it should stay empty — an entry here is a screen that paints two
+ * languages at once, which is the failure the acceptance criterion names.
+ *
+ * A stale entry is itself a red (see the test): declaring a gap that is not there would let a real
+ * gap open later under cover of an out-of-date exemption.
+ */
+const DECLARED_GAPS: Record<string, string[]> = {};
+
+/**
+ * Seeds that are legitimately WORD-FOR-WORD the English.
+ *
+ * Without this list, "identical to English" is the only way to catch the failure that passes every
+ * other check here: a table of copied English covers every key, keeps every token, and paints
+ * English at a player who asked for Russian. With it, each such string is a claim someone made on
+ * purpose — a loanword that really is the word used in that language.
+ */
+const SAME_AS_ENGLISH: Record<string, string[]> = {
+	DE: ['KDMPPerksBtn'],
+	ES: [],
+	CN: [],
+	JP: [],
+	KR: [],
+	RU: [],
+};
+
+describe('KDM-289 L1 — the six language tables exist and are named the way KD names them', () => {
+	it('LANGS declares exactly the six targets', () => {
+		const T = loadTextWith();
+		expect(T.LANGS, 'coop-text.js must export the language tables').toBeTruthy();
+		expect(Object.keys(T.LANGS).sort(), 'a code we do not ship, or one we forgot')
+			.toEqual([...TARGETS].sort());
+		expect(Object.isFrozen(T.LANGS), 'the English table is frozen; these must be too').toBe(true);
+		for (const lang of TARGETS) {
+			expect(Object.isFrozen(T.LANGS[lang]), `${lang} must be frozen`).toBe(true);
+		}
+	});
+
+	it('and every code is one KD can actually produce — read from KD\'s own declaration', () => {
+		// The REAL list, not a copy. A table keyed `JA` instead of `JP` is data that can never be
+		// reached: `activeLanguage()` would answer '' forever and every assertion about resolution
+		// below would still pass, because they set the language themselves.
+		const textTs = readFileSync(resolve(__dirname, '../../Scripts/Text.ts'), 'utf8');
+		const m = /const\s+AvaliableLanguages\s*=\s*\[([^\]]*)\]/.exec(textTs);
+		expect(m, 'AvaliableLanguages has moved or been renamed in Scripts/Text.ts').toBeTruthy();
+		const available = (m as RegExpExecArray)[1].split(',').map((s) => s.trim().replace(/^["']|["']$/g, ''));
+		expect(available, 'the reader found nothing usable').toContain('EN');
+		for (const lang of TARGETS) {
+			expect(available, `${lang} is not a language KD knows about`).toContain(lang);
+		}
+	});
+});
+
+describe('KDM-289 L2 — coverage: a partial table fails a test rather than painting a mixed screen', () => {
+	it('every target covers every English key, and declares nothing it does not have', () => {
+		const T = loadTextWith();
+		const english = Object.keys(T.STRINGS);
+		for (const lang of TARGETS) {
+			const gaps = DECLARED_GAPS[lang] || [];
+			const have = Object.keys(T.LANGS[lang]);
+			const missing = english.filter((k) => !Object.prototype.hasOwnProperty.call(T.LANGS[lang], k));
+			expect(missing.filter((k) => !gaps.includes(k)),
+				`${lang} is missing these keys and has not declared them. Half a screen in one language `
+				+ 'and half in another is the failure AC3 names.').toEqual([]);
+			// The other direction: a key that no longer exists in English is dead weight that reads
+			// as coverage.
+			expect(have.filter((k) => !Object.prototype.hasOwnProperty.call(T.STRINGS, k)),
+				`${lang} translates a key the English table no longer declares`).toEqual([]);
+		}
+	});
+
+	it('SELF-CHECK: a declared gap must actually be a gap, and must name a real key', () => {
+		// A stale exemption is worse than none: it silently licenses a future gap on that key.
+		const T = loadTextWith();
+		for (const lang of Object.keys(DECLARED_GAPS)) {
+			expect(TARGETS as readonly string[], `${lang} is not a target`).toContain(lang);
+			for (const k of DECLARED_GAPS[lang]) {
+				expect(Object.prototype.hasOwnProperty.call(T.STRINGS, k),
+					`${lang} declares a gap on ${k}, which is not an English key at all`).toBe(true);
+				expect(Object.prototype.hasOwnProperty.call(T.LANGS[lang], k),
+					`${lang} declares a gap on ${k} and then translates it — delete the declaration`).toBe(false);
+			}
+		}
+	});
+
+	it('every seed is a non-empty string, and is not just the English copied across', () => {
+		const T = loadTextWith();
+		for (const lang of TARGETS) {
+			const allowed = SAME_AS_ENGLISH[lang] || [];
+			const copied: string[] = [];
+			for (const k of Object.keys(T.LANGS[lang])) {
+				const v = T.LANGS[lang][k];
+				expect(typeof v, `${lang}.${k} must be a string`).toBe('string');
+				expect(v.trim().length, `${lang}.${k} is empty — a key with no seed says nothing`).toBeGreaterThan(0);
+				if (v === T.STRINGS[k] && !allowed.includes(k)) copied.push(k);
+			}
+			expect(copied,
+				`${lang} repeats the English verbatim for these keys. That passes coverage and token `
+				+ 'parity and still paints English at a player who asked for something else — add the key '
+				+ 'to SAME_AS_ENGLISH only if the English word really is the word used in that language.')
+				.toEqual([]);
+			// …and the control for the exemption list itself: an entry that is NOT identical is stale.
+			expect(allowed.filter((k) => T.LANGS[lang][k] !== T.STRINGS[k]),
+				`${lang} lists these in SAME_AS_ENGLISH and they differ from the English — stale entry`)
+				.toEqual([]);
+		}
+	});
+});
+
+describe('KDM-289 L3 — token parity: a seed that drops a token deletes a value from a sentence', () => {
+	it('every seed carries exactly the tokens its English source carries', () => {
+		const T = loadTextWith();
+		let checked = 0;
+		for (const lang of TARGETS) {
+			for (const k of Object.keys(T.LANGS[lang])) {
+				const want = TOKENS(T.STRINGS[k]);
+				if (!want.length) continue;
+				checked++;
+				expect(TOKENS(T.LANGS[lang][k]),
+					`${lang}.${k} — tokens are substituted by NAME, so a translation may reorder them `
+					+ 'freely and may not drop one. A missing token silently deletes the seed, the name '
+					+ 'or the build number from the sentence, and the result still reads as finished.')
+					.toEqual(want);
+			}
+		}
+		// Asserted OUTSIDE the loop: a bound that never ran reads exactly like a bound that passed.
+		expect(checked, 'no tokenised keys were compared — this guard has stopped watching')
+			.toBeGreaterThan(6 * 5);
+	});
+});
+
+describe('KDM-289 L4 — resolution: the active language wins, and English is still the floor', () => {
+	it('t() answers in the active language, for every target', () => {
+		for (const lang of TARGETS) {
+			const T = loadTextWith({ TranslationLanguage: lang });
+			expect(T.t('KDMPBack'), `${lang} did not resolve`).toBe(T.LANGS[lang].KDMPBack);
+			expect(T.activeLanguage(), `${lang} is not the active language`).toBe(lang);
+		}
+	});
+
+	it('and falls back to English for English, for unset, for an unknown code, and for no KD at all', () => {
+		// Four different ways of "not a target", all of which a real page produces:
+		//   'EN' — the initial value of TranslationLanguage (out/main.js:1274)
+		//   ''   — what KD's own settings picker writes for English (KDLanguages[0], :12910)
+		//   'XX' — a language KD grows and we have no seeds for
+		//   absent — the script running on a page with no KD bundle, where a bare read THROWS
+		for (const lang of ['EN', '', 'XX', 'en-GB']) {
+			const T = loadTextWith({ TranslationLanguage: lang });
+			expect(T.activeLanguage(), `${JSON.stringify(lang)} must not select a table`).toBe('');
+			expect(T.t('KDMPBack'), `${JSON.stringify(lang)} must answer English`).toBe('Back');
+		}
+		const bare = loadTextWith();   // TranslationLanguage genuinely undeclared
+		expect(bare.activeLanguage(), 'an absent bundle must degrade, not throw').toBe('');
+		expect(bare.t('KDMPBack')).toBe('Back');
+	});
+
+	it('a lower-case code still selects its table — KD does not promise a case', () => {
+		// GetUserPreferredLanguage (Scripts/Translation.ts:22-37) works from raw Intl locale segments.
+		// Its current list makes a lower-case hit unlikely, but normalising costs one call and the
+		// alternative failure is silent English for a player who chose otherwise.
+		const T = loadTextWith({ TranslationLanguage: 'ru' });
+		expect(T.activeLanguage()).toBe('RU');
+	});
+
+	it('KD\'s own word still beats the seed — and a [NotFound] does NOT skip past it', () => {
+		// The precedence this task must not reorder. The second half is the interesting one: KD
+		// answers a key it does not have with a MARKER, and `kdText` maps that to "no word". If that
+		// mapping were read as "no translation either", every seed would be dead on a real page —
+		// because KD does not know a single KDMP* key.
+		const win = loadTextWith({ TranslationLanguage: 'RU', TextGet: (k: string) => (k === 'KDMPBack' ? 'НАЗАД-от-KD' : `[NotFound] ${k}`) });
+		expect(win.t('KDMPBack'), 'a future KD that learns our keys wins').toBe('НАЗАД-от-KD');
+		expect(win.t('KDMPCancel'), 'and a [NotFound] falls to the SEED, not past it to English')
+			.toBe(win.LANGS.RU.KDMPCancel);
+
+		const none = loadTextWith({ TranslationLanguage: 'RU', TextGet: () => 'MISSING' });
+		expect(none.t('KDMPCancel'), 'KD\'s other missing-key marker, same treatment')
+			.toBe(none.LANGS.RU.KDMPCancel);
+	});
+
+	it('an undeclared key still names itself, in every language', () => {
+		// The KDM-281 behaviour the new branch must not swallow: a blank line on the Host screen is
+		// the failure that looks like a layout bug, and `KDMPTypo` on screen names its own cause.
+		for (const lang of TARGETS) {
+			const T = loadTextWith({ TranslationLanguage: lang });
+			expect(T.t('KDMPNotAKeyAtAll')).toBe('KDMPNotAKeyAtAll');
+			expect(T.langText('KDMPNotAKeyAtAll'), 'and the seed lookup answers "no word"').toBe('');
+		}
+	});
+
+	it('templating fills in every language and leaves no token behind', () => {
+		// Ties L3's data check to behaviour: parity in the table is worth nothing if `fill` runs on
+		// the English and the translated string is discarded, or vice versa.
+		for (const lang of TARGETS) {
+			const T = loadTextWith({ TranslationLanguage: lang });
+			const out = T.t('KDMPRefusedBuild', { HOSTBUILD: '1.2.3', GUESTBUILD: '1.2.4' });
+			expect(out, `${lang} lost the host build`).toContain('1.2.3');
+			expect(out, `${lang} lost the guest build`).toContain('1.2.4');
+			expect(out, `${lang} left a token unfilled`).not.toMatch(/\b[A-Z]{4,}\b/);
+			expect(out, `${lang} answered in English`).not.toBe(T.STRINGS.KDMPRefusedBuild);
+			// A value containing `$&` must survive — `fill` is split/join, not String.replace, and
+			// that has to stay true on the translated string too.
+			expect(T.t('KDMPModDegraded', { MODS: 'a$&b' })).toContain('a$&b');
+		}
+	});
+});
+
+describe('KDM-289 L5 — the seeds are marked machine-generated and unreviewed', () => {
+	it('says so in the file, where a native reviewer will find it', () => {
+		// AC5. In the source rather than in a task file or a commit message: the reviewer is a
+		// translator reading coop-text.js, not someone with the git history open.
+		const src = read(TEXT_SRC);
+		expect(src, 'the seeds must be marked machine-generated').toMatch(/machine[- ]generated/i);
+		expect(src, 'and marked as not yet reviewed by a native speaker').toMatch(/unreviewed|not (yet )?been reviewed|awaiting (a )?native/i);
+	});
+});
