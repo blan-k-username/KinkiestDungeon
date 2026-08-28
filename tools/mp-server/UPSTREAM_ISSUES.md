@@ -211,3 +211,61 @@ so `HeadlessHost.exportSave` strips them before compressing —
 `tests/unit/mp-save-export.spec.ts` → "THE STRIP IS LOAD-BEARING" pins it. Marking such entities
 `modified` also works (measured) by carrying the def inline, but that keeps the ghosts, which is not
 what a single-player save should contain.
+
+---
+
+## `KinkyDungeonShrine.ts:521` — the shop's only cursor guard is off by one, and its body is empty
+
+**Backs no bundle patch.** Recorded here because it constrains our own code: it is why KDM-266 clamps
+a stale shop selection to a real row instead of pointing it at nothing.
+
+The shop draw dereferences the selected item unguarded, on every frame:
+
+```js
+// KinkyDungeonShrine.ts:560, :563, :566, :586, :588
+… KDMapData.ShopItems[KinkyDungeonShopIndex].name …
+```
+
+The one place that tries to protect them is:
+
+```js
+// KinkyDungeonShrine.ts:520-524
+// Wrap around shop index to prevent errors
+if (KinkyDungeonShopIndex > KDMapData.ShopItems.length) {
+    KinkyDungeonShopIndex = 0;
+} else if (KDMapData.ShopItems.length > 0 && KDMapData.ShopItems[KinkyDungeonShopIndex]) {
+    // Draw the item and cost
+}
+```
+
+Two problems in five lines:
+
+1. **`>` where it means `>=`.** An index equal to `length` — the value KD itself can leave behind
+   after the last row is spliced out — passes the guard and reaches `ShopItems[length].name`.
+2. **The `else if` branch is empty.** It computes the exact condition that would tell the caller the
+   selection is valid and then does nothing with it, so the unguarded dereferences below run either
+   way. The comment ("Draw the item and cost") suggests the body was moved out and the test left
+   behind.
+
+**Reproduction.** Open a Commerce shrine, select the last row, and remove that item from
+`KDMapData.ShopItems` by any means other than buying it (an event, a mod, or a second player in a
+shared world). The next drawn frame throws `Cannot read properties of undefined (reading 'name')` and
+keeps throwing for as long as the shop is open.
+
+**Suggested fix**
+
+```diff
+-	if (KinkyDungeonShopIndex > KDMapData.ShopItems.length) {
++	if (KinkyDungeonShopIndex >= KDMapData.ShopItems.length) {
+ 		KinkyDungeonShopIndex = 0;
+ 	}
+```
+
+…and either restore the `else if` body or delete the dead branch.
+
+**Note for this repo:** single-player never hits it, because KD's own splice
+(`KinkyDungeonShrine.ts:423-424`) decrements the cursor in the same breath as removing the item. Co-op
+does: the stock is shared world state and the cursor is per-player, so a partner's purchase can remove
+the item under a cursor that nothing decremented. Our client-side re-point (`kd-shop-buy.js` section 3)
+therefore always clamps into `[0, length-1]` rather than using an out-of-range value to mean "nothing
+selected", and `tests/e2e/mp-shop-identity.spec.ts` asserts that range directly.

@@ -31,26 +31,25 @@
  *    the whole purchase — cost, discount, inventory, splice, reward program — exactly as it always
  *    does. If the item is gone, it REFUSES with a message instead of buying the neighbour (R14).
  *
- * ── WHAT IS DELIBERATELY NOT HERE: THE CURSOR'S DISPLAY (KDM-266) ────────────────────────────────
- * R14 also asks that a selection left open while the stock changes keep DENOTING the same item — that
- * the HIGHLIGHT follow its row. It is not implemented. The purchase resolves correctly either way (a
- * buy is tagged with the row the browser was showing at click time), so what is missing is the display
- * between the other player's purchase and yours, not the goods you get.
+ * ── 3. CLIENT, BETWEEN FRAMES: THE CURSOR'S DISPLAY (KDM-266) ────────────────────────────────────
+ * R14's other half — a selection left open while the stock changes keeps DENOTING the same item.
+ * Section 3 below, and its own header explains the ordering it rests on. It took three attempts, and
+ * the two that failed were both right about the feature and wrong about WHERE to read the identity:
  *
- * Two attempts failed, and the notes are here so the third does not start from scratch:
+ *   · A wrap around `KDRenderClient.apply` alone is blind on the DELTA path. `coop-bootstrap.js`
+ *     merges each delta with `kdMerge`, which MUTATES ITS TARGET IN PLACE (`kd-delta.js:83-94`), and
+ *     that target's `.map` IS the live `KDMapData` — so the new stock is already installed before the
+ *     wrapper is entered. What that attempt missed is that this is true of the delta path ONLY: a full
+ *     snapshot never reaches the merge, so `apply` is exactly the right place for it. Hence two hooks.
+ *   · Excluding `KinkyDungeonShopIndex` from replication was NECESSARY (it is a watched per-player
+ *     global, and both the adopt and the absent-rule overwrite the viewer's own cursor) but never
+ *     sufficient on its own, because the re-point half was still blind. Neither half works alone —
+ *     which is why removing the exclusion reds `mp-shop-identity.spec.ts` and so does disabling the
+ *     hooks. The exclusion lives in `CLIENT_OWNED_GLOBALS` (render-client.js), NOT in
+ *     `GLOBAL_BLACKLIST`: that list is per-CATEGORY and this global genuinely is per-player.
  *
- *   · A wrap around `KDRenderClient.apply` that reads the selected item before `_prev` and looks it up
- *     again after is structurally blind. `coop-bootstrap.js` merges each delta with `kdMerge`, which
- *     MUTATES ITS TARGET IN PLACE (`kd-delta.js:83-94`), and that target's `.map` IS the live
- *     `KDMapData` from a previous apply — so the new stock is already installed before the wrapper is
- *     entered and there is no "before" left to read.
- *   · A variant remembering the id in its own variable did not hold either, with or without
- *     `KinkyDungeonShopIndex` excluded from replication. (It IS a watched per-player global — probed —
- *     so the server's copy overwriting the client's is a real second cause, but removing it was not
- *     sufficient, so at least one more is unaccounted for.)
- *
- * Note that the first round of that diagnosis was itself corrupted by the `__KD` prefix bug described
- * below, so treat the two bullets as leads rather than as a settled cause.
+ * The first round of that diagnosis was corrupted by the `__KD` prefix bug described below, which is
+ * why every counter here still carries the prefix.
  *
  * ── WHY THE CLIENT HOOK IS ON `KDRenderClient` AND NOT ON `KDSendInput` ───────────────────────────
  * `render-client.js` installs its routing wrapper on `KDSendInput` LATE, inside `disableLocalSim()`,
@@ -82,7 +81,7 @@ const KD_SHOP_BUY = `
 	 * a server-side counter the browser never touches had appeared. The feature worked; only the
 	 * evidence for it was being silently replaced.
 	 */
-	if (!g.__KDCoopShopStats) g.__KDCoopShopStats = { tagged: 0, repointed: 0, refused: 0 };
+	if (!g.__KDCoopShopStats) g.__KDCoopShopStats = { tagged: 0, repointed: 0, refused: 0, followed: 0, sold: 0 };
 
 	/**
 	 * WHICH item is this, as opposed to WHERE it is. Name plus shop type, because 'Rope' the loose
@@ -136,6 +135,9 @@ const KD_SHOP_BUY = `
 	// peace dialogue registers its own - a missing key prints "[NotFound] ..." straight at the player.
 	if (typeof addTextKey === 'function') {
 		addTextKey('KDCoopShopItemGone', 'That item has already been sold.');
+		// KDM-266 — the DISPLAY sibling of the refusal above. Not "your click was rejected" but "the
+		// thing you were looking at is no longer on the shelf", said to a player who never clicked.
+		addTextKey('KDCoopShopItemSold', 'The item you were looking at has been sold.');
 	}
 
 	/* ── 1. CLIENT: tag the purchase with the item this browser was showing ─────────────────────── */
@@ -150,6 +152,11 @@ const KD_SHOP_BUY = `
 					var id = idOf(KDMapData.ShopItems[action.data.shopIndex]);
 					if (id) {
 						g.__KDCoopShopStats.tagged++;
+						// KDM-266: remembered so the cursor half below can tell "the partner sold it"
+						// from "you bought it". Without this the buyer is told their OWN purchase has
+						// been sold, every time they clear the last of a line.
+						_ownBuyId = id;
+						_soldNotice = null;                   // acting on the shop spends the notice
 						var d = {};
 						for (var k in action.data) d[k] = action.data[k];
 						d.shopItemId = id;
@@ -163,7 +170,152 @@ const KD_SHOP_BUY = `
 			rc.sendInput = wrappedSend;
 		}
 
+		/* ── 3. CLIENT: the CURSOR'S DISPLAY — KDM-266 ────────────────────────────────────────────
+		 *
+		 * The half above makes sure you BUY what you were shown. This one makes sure you are still
+		 * being shown it. B points at row 2, A buys row 0, the stock shrinks, and row 2 is now a
+		 * different potion — one turn of looking at a lie.
+		 *
+		 * WHY TWO HOOKS AND NOT ONE. The obvious wrap — read the selection before
+		 * \`KDRenderClient.apply\`, look it up again after — is structurally blind on the DELTA path,
+		 * and that is what sank the first attempt at this. \`coop-bootstrap.js:1333\` merges with
+		 * \`kdMerge\`, which MUTATES ITS TARGET IN PLACE (kd-delta.js), and the target's \`.map\` IS the
+		 * live \`KDMapData\` (adopted wholesale at render-client.js:544). The new stock is therefore
+		 * already installed before \`apply\` is entered; there is no "before" left to read.
+		 *
+		 * But that is true of the delta path ONLY. A full snapshot never reaches the merge
+		 * (\`coop-bootstrap.js:1327\` returns it untouched), so at \`apply\` entry \`KDMapData\` is still
+		 * the old object. Hence: capture at \`kdMerge\` entry for deltas, at \`apply\` entry for
+		 * snapshots, and re-point after \`apply\`. Both targets are object PROPERTIES resolved at call
+		 * time — the same un-outrunnable-wrap argument this file already makes for \`sendInput\` —
+		 * and \`kdMerge\`'s own recursion calls its local declaration, not the property, so the wrap
+		 * sees the top-level call and nothing else.
+		 *
+		 * WHAT MAKES THE DOUBLE HOOK SAFE is \`note()\`'s single condition: the identity is re-derived
+		 * only when the cursor INDEX has moved, which only the player does. After a delta the index
+		 * is whatever we last wrote, so the apply-entry call is a no-op and cannot re-read the
+		 * identity off the already-mutated array. No per-frame poll, and no race between a click and
+		 * an arriving frame.
+		 *
+		 * SECOND CAUSE, fixed elsewhere: \`KinkyDungeonShopIndex\` was also being REPLICATED — adopted
+		 * from the bundle when the server carried it, and reset to 0 by the absent-rule once it had.
+		 * It is excluded client-side by \`CLIENT_OWNED_GLOBALS\` (render-client.js). Neither half works
+		 * alone: without the exclusion the cursor is overwritten right after being re-pointed.
+		 */
+		var _selIdx = -1;        // where this browser last saw the cursor…
+		var _selId = null;       // …and WHICH item was under it there
+		var _ownBuyId = null;    // an item THIS browser has just bought (so it is not "sold" news)
+		var _soldNotice = null;  // the line to keep re-asserting (see ensureNotice)
+		var _soldRepeats = 0;
 
+		function shopItems() {
+			return (typeof KDMapData !== 'undefined' && KDMapData && KDMapData.ShopItems)
+				? KDMapData.ShopItems : null;
+		}
+
+		/** Adopt the player's current selection — and ONLY when they were the one who moved it. */
+		function note() {
+			var items = shopItems();
+			if (!items) { _selIdx = -1; _selId = null; return; }
+			if (KinkyDungeonShopIndex === _selIdx) return;
+			_selIdx = KinkyDungeonShopIndex;
+			_selId = idOf(items[_selIdx]);
+			_soldNotice = null;                               // a fresh pick — the old notice is spent
+		}
+
+		/**
+		 * Keep the sold notice visible across the wholesale log replace.
+		 *
+		 * KinkyDungeonMessageLog is a SERVER-REPLICATED channel: every apply overwrites it wholesale
+		 * with the server's copy (render-client.js:641), so a line this
+		 * browser pushes on its own is gone on the next frame — measured, as an empty log in
+		 * mp-shop-identity.spec.ts. The refusal message KDM-264 sends does not have this problem
+		 * because it is emitted SERVER-side and replicated like any other line; this notice cannot be,
+		 * because only the client knows where its own cursor was pointing.
+		 *
+		 * So it is re-asserted after each adopt, in the shape KDM-196 already uses for client-owned
+		 * state carried across a wholesale replace — pushed only when it is not already the newest
+		 * line, so the log never accumulates copies of it.
+		 *
+		 * BOUNDED, and stated rather than discovered: it stops re-asserting after a fixed number of
+		 * adopted frames, and the moment the player moves the cursor or buys. Without a bound the line
+		 * would sit at the tail of that player's log for the rest of the session, jumping ahead of
+		 * every newer server line — the cost of living on a channel we do not own.
+		 */
+		function ensureNotice() {
+			if (!_soldNotice) return;
+			if (_soldRepeats <= 0) { _soldNotice = null; return; }
+			if (typeof KinkyDungeonMessageLog === 'undefined' || !KinkyDungeonMessageLog) return;
+			var last = KinkyDungeonMessageLog[KinkyDungeonMessageLog.length - 1];
+			if (last && last.text === _soldNotice) return;
+			_soldRepeats--;
+			if (typeof KinkyDungeonSendTextMessage === 'function') {
+				KinkyDungeonSendTextMessage(10, _soldNotice, '#ff5555', 3);
+			}
+		}
+
+		/** …and put it back under that item once the new stock is in. */
+		function refollow() {
+			var items = shopItems();
+			if (!items || !_selId) return;
+			if (idOf(items[_selIdx]) === _selId) return;      // nothing moved under the cursor
+
+			var i = indexOfId(items, _selId);
+			if (i >= 0) {
+				KinkyDungeonShopIndex = i;
+				_selIdx = i;
+				g.__KDCoopShopStats.followed++;
+				return;
+			}
+
+			// GONE. The cursor must still land on a REAL row: KinkyDungeonShrine.ts:560/563/566/586/588
+			// dereference ShopItems[KinkyDungeonShopIndex].name unguarded on every drawn frame, and
+			// the one guard (:521) tests "greater than" where it means "greater or equal", with an
+			// empty body besides. "Select nothing" is a
+			// crash, not a blank selection — see UPSTREAM_ISSUES.md.
+			var own = (_selId === _ownBuyId);
+			_ownBuyId = null;
+			var idx = own ? (_selIdx > 0 ? _selIdx - 1 : _selIdx) : _selIdx;  // KD's own rule, :424
+			if (idx > items.length - 1) idx = items.length - 1;
+			if (idx < 0) idx = 0;
+			KinkyDungeonShopIndex = idx;
+			_selIdx = idx;
+			// Adopting the new row's identity here is also what makes the notice fire ONCE: a shelf
+			// that keeps shrinking is then following a DIFFERENT item, not re-reporting this one.
+			_selId = idOf(items[idx]);
+
+			if (own) return;                                   // you know what you just bought
+			g.__KDCoopShopStats.sold++;
+			_soldNotice = (typeof TextGet === 'function')
+				? TextGet('KDCoopShopItemSold')
+				: 'The item you were looking at has been sold.';
+			_soldRepeats = 20;
+		}
+
+		if (typeof rc.apply === 'function' && !rc.apply._kdcoop_shop_wrapped) {
+			var _prevApply = rc.apply;
+			var wrappedApply = function () {
+				note();                                        // the SNAPSHOT path's "before"
+				var r = _prevApply.apply(this, arguments);
+				refollow();
+				ensureNotice();                                // after the log has been replaced
+				return r;
+			};
+			wrappedApply._kdcoop_shop_wrapped = true;
+			wrappedApply._kdcoop_shop_original = _prevApply;
+			rc.apply = wrappedApply;
+		}
+
+		if (g.KDDelta && typeof g.KDDelta.kdMerge === 'function' && !g.KDDelta.kdMerge._kdcoop_shop_wrapped) {
+			var _prevMerge = g.KDDelta.kdMerge;
+			var wrappedMerge = function () {
+				note();                                        // the DELTA path's "before"
+				return _prevMerge.apply(this, arguments);
+			};
+			wrappedMerge._kdcoop_shop_wrapped = true;
+			wrappedMerge._kdcoop_shop_original = _prevMerge;
+			g.KDDelta.kdMerge = wrappedMerge;
+		}
 	}
 })();
 `;

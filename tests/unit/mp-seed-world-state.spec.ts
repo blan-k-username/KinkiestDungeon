@@ -61,6 +61,12 @@ const BOOT_TIMEOUT = 240_000;
  * the globals control is a REAL declared per-player global instead: `KinkyDungeonShopIndex`
  * (`KinkyDungeonShrine.ts:36`), which nothing outside the shop code writes and which no turn driven
  * here can touch.
+ *
+ * KDM-266 note, so this control is not "fixed" by mistake: that global is now also listed in
+ * `CLIENT_OWNED_GLOBALS` (`client/render-client.js`), which stops a BROWSER adopting the server's
+ * copy over the viewer's own shop cursor. That is a client-side authority rule and changes nothing
+ * here — capture and `_restoreGlobals` still carry it per player, which is exactly what this control
+ * measures.
  */
 const CONTROL_GLOBAL = 'KinkyDungeonShopIndex';
 const CONTROL_GAMEDATA = '__kdm273GameDataProbe';

@@ -284,6 +284,34 @@
 	 */
 	var CLIENT_OWNED_GAMEDATA_KEYS = ['LogFilters'];
 
+	/**
+	 * KDM-266 — WHOLE globals that belong to the person at this browser. The third granularity of the
+	 * same idea as the two lists above: a field within a global (`CLIENT_OWNED_ENTITY_FIELDS`), a key
+	 * within `KDGameData` (`CLIENT_OWNED_GAMEDATA_KEYS`), and now the global itself.
+	 *
+	 * `KinkyDungeonShopIndex` is which row of the shared shop stock THIS player has highlighted. The
+	 * stock (`KDMapData.ShopItems`) is world state and the cursor into it is not: nothing routes a
+	 * cursor move, and every write in the game is a bare local assignment (the click at
+	 * `KinkyDungeonShrine.ts:549`, the keyboard at `KinkyDungeon.ts:4281-4286`). The server does hold
+	 * a value — its `shrineBuy` handler sets it (`KinkyDungeonInput.ts:615`) — which is exactly
+	 * KDM-246's situation: entitled to hold it, not the authority over it.
+	 *
+	 * Skipped BEFORE `_bundleDefaults` and `_bundleDirty` are written, and that placement is the whole
+	 * point. There are two clobber channels, not one: the adopt below overwrites the cursor whenever
+	 * the bundle carries it, and the absent-rule further down resets it to 0 once it has been dirty
+	 * and is then omitted (a global drops out of a bundle when it returns to its default). Skipping
+	 * only the assignment would leave the second one live. `kdAbsentResets` considers dirty names
+	 * alone, so never marking it dirty closes both at once.
+	 *
+	 * This is deliberately NOT a `GLOBAL_BLACKLIST` entry: that list is "globals that are NOT
+	 * per-player, by CATEGORY, never per feature" (headless-host.js) and this one IS per-player — it
+	 * is the *authority* that differs, not the category. Server capture is unchanged, same as KDM-246.
+	 *
+	 * Pinned by `tests/e2e/mp-shop-identity.spec.ts`, which only exercises this after the server has
+	 * had a reason to carry the value — i.e. after that player has bought something once.
+	 */
+	var CLIENT_OWNED_GLOBALS = ['KinkyDungeonShopIndex'];
+
 	/*
 	 * "ABSENT FROM THE BUNDLE ⇒ BACK TO ITS DEFAULT" — the client half of the swap rule.
 	 *
@@ -377,6 +405,9 @@
 				if (!Object.prototype.hasOwnProperty.call(g, name)) continue;
 				var v = g[name];
 				if (v === undefined) continue;
+				// KDM-266: this viewer's own state, never the server's to install — and skipped here,
+				// before the two lines below make it eligible for the absent-rule too.
+				if (CLIENT_OWNED_GLOBALS.indexOf(name) >= 0) continue;
 				try {
 					// Record this name's pristine value BEFORE the first write to it — that value is
 					// the default a later absence must restore. Unserialisable globals record nothing

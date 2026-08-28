@@ -947,14 +947,39 @@ touches had appeared, which reads exactly like "the client wrap never ran". The 
 the evidence for it was being silently replaced. Both `__KDCoopShopStats` and `__KDCoopJourneyStats`
 carry the prefix for this reason, and it is not cosmetic.
 
-### Known gap: the highlight does not follow its item (KDM-266)
+### The highlight follows its item (KDM-266) — and needed BOTH halves
 
-R14 also asks that a selection left open while the stock changes keep DENOTING the same item. It does
-not. The PURCHASE is correct either way — the tag records the row the browser was showing at click
-time — so what is missing is the display between the other player's purchase and yours.
-`tests/e2e/mp-shop-identity.spec.ts` pins the current (wrong) behaviour explicitly rather than staying
-silent, with a note to invert the expectation when it is fixed. Two failed approaches and their causes
-are recorded in the `kd-shop-buy.js` header; read them before trying a third.
+R14's other half: a selection left open while the stock changes keeps DENOTING the same item. Two
+attempts failed before it landed, and the reason is worth generalising — **each attempt fixed one of
+two independent causes and measured the result as "still broken"**:
+
+1. **Where the identity is read.** A wrap on `KDRenderClient.apply` alone is blind on the DELTA path:
+   `coop-bootstrap.js` merges with `kdMerge`, which mutates in place, and the merged target's `.map`
+   **is** the live `KDMapData`, so the new stock is installed before `apply` is entered. That is true
+   of the delta path *only* — a full snapshot never reaches the merge, so `apply` is exactly right for
+   it. The fix reads the identity at `KDDelta.kdMerge` entry **and** at `apply` entry, re-deriving
+   only when the cursor INDEX moved, which is the one thing only the player does.
+2. **Replication.** `KinkyDungeonShopIndex` is a watched per-player global, so `adoptBundle` installed
+   the server's copy over the viewer's, and the absent-rule reset it to 0 once it had been dirty and
+   then dropped out. Both are closed by one entry in `CLIENT_OWNED_GLOBALS` (`render-client.js`),
+   skipped *before* the defaults/dirty bookkeeping. Deliberately **not** a `GLOBAL_BLACKLIST` entry:
+   that list is per-CATEGORY ("is this per-player?") and this global genuinely is per-player — what
+   differs is the AUTHORITY, which is the `CLIENT_OWNED_GAMEDATA_KEYS` (KDM-246) argument.
+
+`tests/e2e/mp-shop-identity.spec.ts` covers both, and each was mutation-checked: disabling either half
+alone reds a different assertion in it. `tests/unit/mp-shop-follow.spec.ts` pins the ordering.
+
+Two things the fix ran into that generalise beyond the shop:
+
+- **KD's shop draw crashes on an out-of-range cursor.** `KinkyDungeonShrine.ts:560/563/566/586/588`
+  dereference `ShopItems[KinkyDungeonShopIndex].name` unguarded on every frame, and the one guard
+  (`:521`) compares with `>` where it means `>=` and has an empty body. So "select nothing" is not
+  available: a sold-out selection is CLAMPED to a real row and the player told. See
+  `UPSTREAM_ISSUES.md`.
+- **A client-only line cannot live in `KinkyDungeonMessageLog`.** It is a server-replicated channel
+  (`render-client.js:641` replaces it wholesale every apply), which is why KDM-264's refusal message
+  works — it is emitted server-side — and why this notice is re-asserted after each adopt, bounded, in
+  the shape KDM-196 uses for client-owned state carried across a wholesale replace.
 
 ## The transition-write audit — a standing guard over one recurring bug
 

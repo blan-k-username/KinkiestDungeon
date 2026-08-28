@@ -14,8 +14,15 @@
  * `KinkyDungeonPayShrine` are all the production ones.
  *
  * R14's other half — that a selection left open while the stock changes keeps DENOTING the same item
- * — is NOT implemented, and this spec pins the current (wrong) behaviour explicitly rather than
- * staying silent about it. See KDM-266 and the `kd-shop-buy.js` header.
+ * — landed as KDM-266, and the tail of this test is where it is pinned. Three things, because the
+ * feature has three ways to be quietly wrong:
+ *   · the highlight follows its item across a partner's purchase (the expectation that used to read
+ *     'PotionStamina' and now reads 'PotionWill');
+ *   · it survives REPLICATION — the server's copy of `KinkyDungeonShopIndex` must not overwrite the
+ *     viewer's, and its ABSENCE must not reset it, each checked against a control global that IS
+ *     clobbered on the same frame;
+ *   · and when the selected item is the one sold, the cursor is clamped to a real row and the player
+ *     is told (an out-of-range cursor is a crash on KD's own draw path, not a blank selection).
  */
 import { test, expect } from '@playwright/test';
 import { bootCoopPair, MP_TEST_TIMEOUT, reportedPageErrors } from './helpers/coop';
@@ -137,17 +144,17 @@ test('a purchase carries the item the buyer was showing, and the shared stock lo
 			.toEqual(['ManaOrb', 'PotionWill', 'PotionStamina']);
 
 		/*
-		 * KNOWN GAP, recorded rather than asserted: B's HIGHLIGHT does NOT follow its row. B was
-		 * pointing at row 2 (PotionWill) and row 2 is now PotionStamina. The other half of R14 is not
-		 * implemented — see the `kd-shop-buy.js` header for the two failed approaches, and KDM-266.
+		 * KDM-266 — R14's display half. B was pointing at row 2 (PotionWill); A's purchase shifted
+		 * every later row up by one, so row 2 is now PotionStamina and row 1 is PotionWill. The
+		 * highlight must have MOVED WITH ITS ITEM rather than staying on its row number.
 		 *
-		 * It is asserted here in its CURRENT form on purpose. A silent omission would let the gap be
-		 * "fixed" without anyone noticing this spec had been describing it; when KDM-266 lands, this
-		 * expectation flips to 'PotionWill' and the comment goes.
+		 * This expectation used to read 'PotionStamina' — the gap, pinned deliberately so it could not
+		 * be closed without someone noticing this spec had been describing it. It is the inversion of
+		 * that line, not a new assertion.
 		 */
 		expect((await pageShop(B)).showing,
-			'KDM-266: the highlight does not yet follow its item — if this is now PotionWill, the gap '
-			+ 'has been closed and this expectation should be inverted, not deleted').toBe('PotionStamina');
+			'KDM-266: B\'s highlight follows PotionWill to its new row, instead of staying on row 2')
+			.toBe('PotionWill');
 
 		// ── B buys PotionWill, from the shifted list. ─────────────────────────────────────────────
 		const clickedAt = await buyByName(B, 'PotionWill');
@@ -176,6 +183,116 @@ test('a purchase carries the item the buyer was showing, and the shared stock lo
 		expect(bridge.session.world.eval('__KDCoopShopStats.repointed'),
 			'…and the server wrap resolved both purchases by identity').toBeGreaterThanOrEqual(2);
 		expect(clickedAt, 'sanity: B clicked a real row, not a hardcoded index').toBeGreaterThanOrEqual(0);
+		expect(b1.stats.followed, 'KDM-266: …and the cursor half actually ran').toBeGreaterThanOrEqual(1);
+
+		/*
+		 * ── KDM-266 H1: the cursor also has to survive REPLICATION ────────────────────────────────
+		 *
+		 * Everything above only proves the cursor follows a SHIFTING SHELF. It says nothing about the
+		 * other half, because in the script so far the server never had a reason to carry B's
+		 * `KinkyDungeonShopIndex` (it is captured only while it differs from the post-init default of
+		 * 0). The moment it does, two channels overwrite the viewer's own cursor: `adoptBundle`
+		 * installs the server's value, and the absent-rule resets it to 0 once the name has been
+		 * dirty and then drops out. `CLIENT_OWNED_GLOBALS` (render-client.js) closes both.
+		 *
+		 * So plant a DIFFERENT value in B's bundle server-side rather than waiting for one to happen.
+		 * B points at row 0; the server says row 1. Without the exclusion B's highlight becomes the
+		 * server's row on the next frame.
+		 */
+		const shelfNow = (await pageShop(B)).shelf;
+		expect(shelfNow.length, 'two rows are enough to tell 0 from 1').toBeGreaterThanOrEqual(2);
+		expect(await highlight(B, shelfNow[0]), 'B points at the FIRST row').toBe(0);
+
+		// CONTROL, in the same breath and through the same channel: a per-player global the server
+		// genuinely owns. If the cursor survives and this does NOT, the finding is "this global is
+		// excluded"; if BOTH survive, the frame never landed and the assertion below is vacuous.
+		await B.evaluate(() => {
+			// @ts-ignore bare let-globals — not on window (CLAUDE.md)
+			KinkyDungeonGold = 1;
+		});
+		const serverGold = bridge.session.world.eval('KinkyDungeonGold');
+		bridge.session.world.restorePlayer(bridge.session.bundles.get('B'));
+		bridge.session.world.eval('(function(){ KinkyDungeonShopIndex = 1; })()');
+		bridge.session.bundles.set('B', bridge.session.world.capturePlayer());
+		expect(bridge.session.bundles.get('B').globals.KinkyDungeonShopIndex,
+			'precondition: the server now really does carry B\'s cursor').toBe(1);
+		bridge.session.world.parkGlobalPlayer(1, 1);
+
+		await A.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
+		await B.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
+		// Wait on the CONTROL being clobbered — that is the proof a bundle was adopted, and it makes
+		// the cursor assertion below impossible to pass by simply never receiving a frame.
+		await expect
+			.poll(async () => B.evaluate(() =>
+				// @ts-ignore
+				KinkyDungeonGold), { message: 'the control must be overwritten by the server\'s copy', timeout: 30_000 })
+			.not.toBe(1);
+		expect((await pageShop(B)).showing,
+			'H1: the viewer\'s own cursor is not replaced by the server\'s copy of it')
+			.toBe(shelfNow[0]);
+
+		// …and the OTHER channel: the name now drops back out of the bundle, which is what the
+		// absent-rule reads as "back to the default". It may only do that if the name was never marked
+		// dirty — i.e. if the skip sits BEFORE the bookkeeping, not after it.
+		bridge.session.world.restorePlayer(bridge.session.bundles.get('B'));
+		bridge.session.world.eval('(function(){ KinkyDungeonShopIndex = 0; })()');
+		bridge.session.bundles.set('B', bridge.session.world.capturePlayer());
+		expect(bridge.session.bundles.get('B').globals.KinkyDungeonShopIndex,
+			'precondition: back at its default ⇒ absent from the bundle').toBeUndefined();
+		bridge.session.world.parkGlobalPlayer(1, 1);
+		expect(await highlight(B, shelfNow[1]), 'B moves to the second row').toBe(1);
+		await B.evaluate(() => {
+			// @ts-ignore
+			KinkyDungeonGold = 1;
+		});
+		await A.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
+		await B.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
+		await expect
+			.poll(async () => B.evaluate(() =>
+				// @ts-ignore
+				KinkyDungeonGold), { message: 'the control must be clobbered on this frame too', timeout: 30_000 })
+			.not.toBe(1);
+		expect((await pageShop(B)).showing, 'H1: an ABSENT cursor is not reset to row 0 either')
+			.toBe(shelfNow[1]);
+
+		/*
+		 * ── KDM-266 AC2: the selected item is the one that gets sold ──────────────────────────────
+		 *
+		 * B is pointing at `shelfNow[1]`; A buys exactly that. There is nothing to follow, so the
+		 * cursor must be CLAMPED to a real row and the player TOLD — never left denoting whatever
+		 * slid into the empty slot, and never pointed at nothing: KinkyDungeonShrine.ts:560/563/566
+		 * dereference `ShopItems[KinkyDungeonShopIndex].name` unguarded on every drawn frame.
+		 */
+		const soldName = shelfNow[1];
+		await buyByName(A, soldName);
+		await B.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
+		await expect
+			.poll(async () => (await pageShop(B)).shelf, {
+				message: 'B must see the item B was pointing at leave the shelf', timeout: 30_000,
+			})
+			.not.toContain(soldName);
+
+		const after = await B.evaluate(() => ({
+			// @ts-ignore
+			idx: KinkyDungeonShopIndex,
+			// @ts-ignore
+			len: (KDMapData.ShopItems || []).length,
+			// @ts-ignore
+			sold: (window.__KDCoopShopStats || {}).sold,
+			// A BARE let-global: `window.KinkyDungeonMessageLog` is undefined (CLAUDE.md), and guarding
+			// on it silently reports an empty log for every session.
+			// @ts-ignore
+			log: (KinkyDungeonMessageLog || []).map((m: any) => (m && m.text) != null ? m.text : String(m)),
+			// @ts-ignore
+			text: TextGet('KDCoopShopItemSold'),
+		}));
+		expect(after.idx, 'AC2: the cursor still points at a REAL row (an out-of-range one crashes the draw)')
+			.toBeGreaterThanOrEqual(0);
+		expect(after.idx).toBeLessThan(after.len);
+		expect(after.sold, 'AC2: the sold-out branch is the one that ran').toBeGreaterThanOrEqual(1);
+		expect(after.text, 'the text key resolves — a missing one prints "[NotFound] …" at the player')
+			.not.toContain('NotFound');
+		expect(after.log, 'AC2: B is told, rather than silently handed the neighbour').toContain(after.text);
 
 		const { real } = reportedPageErrors(errs);
 		expect(real, 'no page errors while shopping').toEqual([]);
