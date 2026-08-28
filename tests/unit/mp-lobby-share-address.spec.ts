@@ -27,6 +27,10 @@ import { createContext, runInContext } from 'node:vm';
 import { resolve } from 'node:path';
 
 const SRC = resolve(__dirname, '../../tools/mp-server/client/coop-lobby.js');
+// KDM-281 — the lobby takes its strings from the shared table now, and holds a HARD reference to it
+// (window.KDMPText). It is injected ahead of the lobby in demo-server.js, so the rig loads it first
+// for the same reason: without it the file throws and this spec would be testing nothing.
+const TEXT_SRC = resolve(__dirname, '../../tools/mp-server/client/coop-text.js');
 
 type Painted = { text: string; y: number };
 
@@ -58,6 +62,7 @@ function drawHostFrame(locHost: string, share?: string[] | null) {
 		console: { warn: () => {}, log: () => {}, error: () => {} },
 	};
 	createContext(ctx);
+	runInContext(readFileSync(TEXT_SRC, 'utf8'), ctx, { filename: 'coop-text.js' });
 	runInContext(readFileSync(SRC, 'utf8'), ctx, { filename: 'coop-lobby.js' });
 
 	const lobby = ctx.window.KDMPLobby;

@@ -118,6 +118,11 @@ const INJECT = [
 	// `out/main.js` — it sets the bundle `let`-global `KDGetMods` by BARE assignment, which is a TDZ
 	// throw if the bundle is not yet in scope. Before coop-bootstrap.js, which sends the join.
 	'/tools/mp-server/client/coop-mods.js',
+	// KDM-281: the one table of player-facing co-op strings (`window.KDMPText`). Must precede
+	// coop-bootstrap.js AND coop-lobby.js, which both consume it and both hold a hard reference —
+	// a local fallback in either would be the second copy this task exists to remove. It touches no
+	// bundle global, so it has no ordering constraint of its own beyond that.
+	'/tools/mp-server/client/coop-text.js',
 	CODEC_ROUTE,                    // must precede render-client.js — it consumes window.KDCodec
 	ABSENT_RESET_ROUTE,             // must precede render-client.js — it consumes window.KDAbsentReset
 	WORLD_KEYS_ROUTE,               // must precede render-client.js — it consumes window.KDWorldGameDataKeys

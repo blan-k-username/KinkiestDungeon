@@ -313,6 +313,7 @@ Co-op is opt-in: run the plain static server (`npm run serve`) and nothing liste
 | `ws-bridge.js` | Carries answers between the gate and the sockets: `join{role}` → `join_pending` → `join_answer` → `joined`. |
 | `client/coop-lobby.js` | The menu entry, the host/join screens and the name field, as a wrap of `KinkyDungeonRun`. |
 | `client/coop-bootstrap.js` | The socket and the storage: `__coopConnect({role, address, name})`, `__coopAnswerJoin(accept)`, `__coopDisconnect()`, `__coopLastAddress()`. |
+| `client/coop-text.js` | KDM-281 — **every player-facing co-op string, in one table**, behind `window.KDMPText.t(key[, params])`. Injected before both files above, which hold a hard reference to it. |
 
 **Rules worth not re-deriving**
 
@@ -442,7 +443,21 @@ not the pipeline.
 - **KD answers a missing text key with `"[NotFound] <key>"`, not with nothing.** `coop-lobby.js`
   guarded its fallback with `t !== key`, which that marker passes, so every lobby label painted the
   marker at the player until KDM-259. One `kdText()` now owns the "does KD have a word for this?"
-  question; `tests/e2e/mp-lobby-seed.spec.ts` asserts no marker ever reaches the screen.
+  question; `tests/e2e/mp-lobby-seed.spec.ts` asserts no marker ever reaches the screen. That
+  `kdText()` now lives in `client/coop-text.js` — see below.
+- **Every player-facing string goes through `T(key[, params])` (KDM-281).** The English source lives
+  once, in `STRINGS` in `client/coop-text.js`; call sites name a key and never a sentence. Templating
+  is bare UPPERCASE tokens (`T('KDMPWorldSeed', { SEED: seed })`), substituted by `split`/`join` so a
+  `$&` in a value is not interpreted.
+  This replaced two conventions in neighbouring files: the lobby resolved its labels through a
+  private `text(key, fallback)` while `coop-bootstrap.js` wrote plain English into the very same
+  `lobby.status` / `lobby.error`, so one screen was half translatable. `tests/unit/mp-client-strings.spec.ts`
+  now fails on a hardcoded prose literal in either file, on an undeclared or unused key, on an
+  unfilled token, and on `coop-text.js` losing its place at the front of `INJECT`.
+  ⚠️ **Scope: the `#coop-overlay` debug box (`setStatus`) is deliberately NOT in the table** — it is
+  a fixed monospace diagnostic (`Co-op A  turn 42`), not lobby UI, and stays English. No non-English
+  strings ship for co-op yet, for the lobby's own keys either; `t()` asks `TextGet` first, so a
+  localised build that knows `KDMPBack` wins and one that does not is unchanged.
 
 **Not done here:** per-player character CREATION — appearance, outfit, class, pronouns (KDM-256);
 names themselves landed in KDM-237. The legacy `#coop=` path still joins directly, bypassing the

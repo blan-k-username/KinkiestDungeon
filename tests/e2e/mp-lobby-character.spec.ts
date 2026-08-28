@@ -28,8 +28,7 @@
  */
 import { test, expect } from '../helpers/playwright-fixtures';
 import { bootKD } from '../helpers/bundle';
-
-const LOBBY_SCRIPT = 'tools/mp-server/client/coop-lobby.js';
+import { injectLobby } from '../helpers/mp-lobby';
 
 /** The three buttons on `'Diff'` that every one of them would start a SOLO game. */
 const BORROWED = ['startQuick', 'startGameKinky', 'startGame'];
@@ -58,7 +57,7 @@ async function onClassScreen(page: any, coopPick: boolean) {
 test.describe('KDM-256 — a character is built on KD\'s own screens, from the co-op lobby', () => {
 	test('R1 — the lobby offers a Character entry that opens KD\'s class screen', async ({ isolatedPage: page }) => {
 		await bootKD(page);
-		await page.addScriptTag({ path: LOBBY_SCRIPT });
+		await injectLobby(page);
 		await page.evaluate(() => {
 			KinkyDungeonState = 'Multiplayer';
 			// @ts-ignore
@@ -80,7 +79,7 @@ test.describe('KDM-256 — a character is built on KD\'s own screens, from the c
 
 	test('R2 — the screen is KD\'s: the class grid and its stock controls are still there', async ({ isolatedPage: page }) => {
 		await bootKD(page);
-		await page.addScriptTag({ path: LOBBY_SCRIPT });
+		await injectLobby(page);
 		await onClassScreen(page, true);
 
 		const names = await buttonNames(page);
@@ -96,7 +95,7 @@ test.describe('KDM-256 — a character is built on KD\'s own screens, from the c
 
 	test('R3 — with a pick in progress, EVERY start button commits to the lobby', async ({ isolatedPage: page }) => {
 		await bootKD(page);
-		await page.addScriptTag({ path: LOBBY_SCRIPT });
+		await injectLobby(page);
 
 		for (const button of BORROWED) {
 			await onClassScreen(page, true);
@@ -125,7 +124,7 @@ test.describe('KDM-256 — a character is built on KD\'s own screens, from the c
 		// THE CONTROL, and the reason `borrowButtons` is conditional. An unconditional override would
 		// pass R3 and silently break single-player for every player of this build.
 		await bootKD(page);
-		await page.addScriptTag({ path: LOBBY_SCRIPT });
+		await injectLobby(page);
 		await onClassScreen(page, false);
 
 		const stock = await page.evaluate((names: string[]) => {
@@ -143,7 +142,7 @@ test.describe('KDM-256 — a character is built on KD\'s own screens, from the c
 
 	test('R1 — committing reads the character out of KD\'s own globals', async ({ isolatedPage: page }) => {
 		await bootKD(page);
-		await page.addScriptTag({ path: LOBBY_SCRIPT });
+		await injectLobby(page);
 		await onClassScreen(page, true);
 
 		// Change the class through KD's OWN grid button, then commit through a borrowed one — so the

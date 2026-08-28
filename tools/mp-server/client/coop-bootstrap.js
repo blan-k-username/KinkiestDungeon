@@ -15,6 +15,11 @@
 (function () {
 	'use strict';
 
+	// KDM-281 — every string this file puts on the lobby screen comes from the shared table in
+	// `client/coop-text.js`, which is injected ahead of this file. The debug overlay `setStatus`
+	// paints (a fixed monospace box, not lobby UI) is deliberately NOT in scope and stays English.
+	var T = (typeof window !== 'undefined' ? window : globalThis).KDMPText.t;
+
 	function getCoopId() {
 		var m = /(?:[#&?])coop=([A-Za-z0-9_-]+)/.exec(location.hash + '&' + location.search);
 		return m ? m[1] : null;
@@ -1037,7 +1042,7 @@
 			coop._closedForGood = true;                // do not dial a silent door forever
 			try { sock.close(); } catch (e) { /* already going */ }
 			// F4: the progress line is REPLACED, never left standing as the terminal state.
-			lobbySay({ error: 'No answer from ' + where + ' — is the game hosting there?', status: '' });
+			lobbySay({ error: T('KDMPNoAnswer', { WHERE: where }), status: '' });
 		}, ms);
 	}
 
@@ -1286,7 +1291,7 @@
 			// so this is the only place that can say anything at all — and saying nothing is what makes
 			// a mistyped address look like a hang.
 			// F4: `status` goes with it — a stale "Connecting…" under an error is its own small lie.
-			lobbySay({ error: 'Could not reach ' + where, status: '' });
+			lobbySay({ error: T('KDMPCouldNotReach', { WHERE: where }), status: '' });
 		};
 		/**
 		 * KDM-206: resolve a state frame to a FULL snapshot.
@@ -1378,7 +1383,7 @@
 				// KDM-257 R1 — the diff rides this message and used to be dropped here. The guest must be
 				// able to SEE what it is about to load before the host answers, and this is the only
 				// moment it can: the session does not exist yet.
-				lobbySay({ status: 'Waiting for the host to let you in…', error: '', modDiff: m.modDiff || null,
+				lobbySay({ status: T('KDMPWaitingApproval'), error: '', modDiff: m.modDiff || null,
 					// KDM-239 R4 — the WORLD rides the same message, for the same reason and at the same
 					// moment: this is the last point the guest can still walk away.
 					world: m.world || null });
@@ -1397,7 +1402,7 @@
 				if (shortcut) { window.__coopAnswerJoin(true); return; }
 				// Someone is asking to join OUR game. The host answers this — it is the whole gate.
 				// KDM-257 R2 — same diff, other side: the host is agreeing to SEND these, so say so.
-				lobbySay({ view: 'host', pending: { clientId: m.clientId, name: m.name || 'Someone' }, error: '', modDiff: m.modDiff || null });
+				lobbySay({ view: 'host', pending: { clientId: m.clientId, name: m.name || T('KDMPSomeone') }, error: '', modDiff: m.modDiff || null });
 				return;
 			}
 			if (m.type === 'reject') {
@@ -1443,21 +1448,25 @@
 					if (m.retry === 'guest') {
 						lobbySay({
 							view: 'join', pending: null, status: '',
-							error: 'Somebody is already hosting there — join them instead.',
+							error: T('KDMPAlreadyHosting'),
 						});
 					} else {
-						lobbySay({ status: '', error: 'Nobody is hosting there yet — you can host it yourself.' });
+						lobbySay({ status: '', error: T('KDMPNobodyHosting') });
 					}
 					return;
 				}
-				var why = m.reason === 'declined' ? 'The host declined your request.'
-					: m.reason === 'build_mismatch' ? ('Different game versions — host has ' + (m.hostBuild || '?') + ', you have ' + (m.guestBuild || '?') + '.')
-					: m.reason === 'session_full' ? 'That game is full.'
-					: m.reason === 'busy' ? 'The host is already answering someone else.'
+				// KDM-281 — the reason CODE picks a key; the sentence lives in `coop-text.js`. Note the
+				// build-mismatch line is templated rather than concatenated: which version is named
+				// first is a matter of word order, and word order is the translator's business.
+				var why = m.reason === 'declined' ? T('KDMPRefusedDeclined')
+					: m.reason === 'build_mismatch' ? T('KDMPRefusedBuild',
+						{ HOSTBUILD: m.hostBuild || '?', GUESTBUILD: m.guestBuild || '?' })
+					: m.reason === 'session_full' ? T('KDMPRefusedFull')
+					: m.reason === 'busy' ? T('KDMPRefusedBusy')
 					// KDM-270 — `no_host` was here too, and is not any more: it now carries a `retry`
 					// and is answered above, with an offer to host instead. Leaving the line would be
 					// two different sentences for one refusal, one of which nobody can reach.
-					: ('Refused: ' + m.reason);
+					: T('KDMPRefusedOther', { REASON: m.reason });
 				// KDM-252: a refusal is an ANSWER, not an outage. `seat_gone` is the one that matters
 				// here — the survivor has played on without us (KDM-250 E6) — and retrying any of
 				// these would dial forever at a door that has been shut in words.
@@ -1898,7 +1907,7 @@
 	/** Answer the pending join request. Host only — the server enforces that too. */
 	window.__coopAnswerJoin = function (accept) {
 		try { coop.ws.send(JSON.stringify({ type: 'join_answer', accept: !!accept })); } catch (e) { /* no socket */ }
-		lobbySay({ pending: null, status: accept ? 'Starting…' : '' });
+		lobbySay({ pending: null, status: accept ? T('KDMPStarting') : '' });
 	};
 
 	/*

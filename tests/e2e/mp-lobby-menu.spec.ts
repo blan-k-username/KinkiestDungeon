@@ -23,8 +23,7 @@
  */
 import { test, expect } from '../helpers/playwright-fixtures';
 import { bootKD } from '../helpers/bundle';
-
-const LOBBY_SCRIPT = 'tools/mp-server/client/coop-lobby.js';
+import { injectLobby } from '../helpers/mp-lobby';
 
 /** Run real frames — KD's own loop is live on this page, so we wait for it rather than calling in. */
 async function frames(page: any, n = 2) {
@@ -49,7 +48,7 @@ test.describe('KDM-233 — Multiplayer entry in the main menu', () => {
 		expect(await buttonNames(page), 'BEFORE: the stock menu has no Multiplayer entry')
 			.not.toContain('MultiplayerButton');
 
-		await page.addScriptTag({ path: LOBBY_SCRIPT });
+		await injectLobby(page);
 		await frames(page);
 
 		expect(await buttonNames(page), 'AFTER: the wrapper registered it')
@@ -72,7 +71,7 @@ test.describe('KDM-233 — Multiplayer entry in the main menu', () => {
 
 	test('the lobby paints its own screen, and the stock frame paints nothing underneath', async ({ isolatedPage: page }) => {
 		await bootKD(page);
-		await page.addScriptTag({ path: LOBBY_SCRIPT });
+		await injectLobby(page);
 		await page.evaluate(() => { KinkyDungeonState = 'Multiplayer'; window.KDMPLobby.view = 'menu'; });
 		await frames(page);
 
@@ -86,7 +85,7 @@ test.describe('KDM-233 — Multiplayer entry in the main menu', () => {
 
 	test('Back returns to the menu; Host and Join each open their own view', async ({ isolatedPage: page }) => {
 		await bootKD(page);
-		await page.addScriptTag({ path: LOBBY_SCRIPT });
+		await injectLobby(page);
 
 		const seen = await page.evaluate(async () => {
 			const step = async (btn: string) => {
@@ -122,7 +121,7 @@ test.describe('KDM-233 — Multiplayer entry in the main menu', () => {
 
 	test('the join view offers a real address field, prefilled and editable', async ({ isolatedPage: page }) => {
 		await bootKD(page);
-		await page.addScriptTag({ path: LOBBY_SCRIPT });
+		await injectLobby(page);
 		await page.evaluate(() => { KinkyDungeonState = 'Multiplayer'; window.KDMPLobby.view = 'join'; });
 		await frames(page);
 
@@ -136,8 +135,8 @@ test.describe('KDM-233 — Multiplayer entry in the main menu', () => {
 
 	test('injecting twice does not double-wrap (WRAP_CONVENTION sentinel)', async ({ isolatedPage: page }) => {
 		await bootKD(page);
-		await page.addScriptTag({ path: LOBBY_SCRIPT });
-		await page.addScriptTag({ path: LOBBY_SCRIPT });
+		await injectLobby(page);
+		await injectLobby(page);
 		await page.evaluate(() => { KinkyDungeonState = 'Multiplayer'; window.KDMPLobby.view = 'menu'; });
 		await frames(page);
 

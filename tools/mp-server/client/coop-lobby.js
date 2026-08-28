@@ -204,7 +204,7 @@
 		if (typeof window.__coopConnect === 'function') {
 			try { return window.__coopConnect(opts); } catch (e) { lobby.error = String(e && e.message || e); }
 		} else {
-			lobby.status = 'No transport available.';
+			lobby.status = T('KDMPNoTransport');
 		}
 		return null;
 	}
@@ -228,44 +228,39 @@
 	}
 
 	/**
-	 * KD's translation for `key`, or `''` when it has none.
+	 * KDM-281 — the one text helper, shared with `coop-bootstrap.js`.
+	 *
+	 * `T(key[, params])` is KD's translation for `key` where it has one, else the English source in
+	 * `client/coop-text.js`. `kdText(key)` is the raw ask, `''` when KD has no word — `modeLabel`
+	 * needs that distinction, because a mode KD cannot name must fall back to OUR name and never to
+	 * the raw identifier.
 	 *
 	 * ⚠️ KD ANSWERS A MISSING KEY WITH A MARKER, NOT WITH NOTHING. `TextGet` returns the literal
 	 * string `"[NotFound] <key>"` — the failure `kd-peace-dialogue.js:46` records this epic as having
-	 * shipped twice already. The old guard here was `t !== key`, which that marker passes, so EVERY
-	 * label in this lobby was painting `"[NotFound] KDMPYourName"` at the player instead of its
-	 * English fallback. Found by KDM-259's R3 assertion, which could not see the seed because
-	 * `'• seed: SEED'.replace('SEED', …)` was never the string being interpolated.
+	 * shipped twice already. The old guard was `t !== key`, which that marker passes, so EVERY label
+	 * in this lobby painted `"[NotFound] KDMPYourName"` at the player instead of its English. That
+	 * guard now lives in `coop-text.js`; this comment stays because the trap is KD's, not ours.
 	 *
-	 * One function rather than a guard per call site: `drawWorldSummary` had its own copy that tested
-	 * for `'MISSING'` and let `[NotFound]` through, which is exactly how the second site drifted from
-	 * the first.
+	 * Hard dependency, deliberately: `coop-text.js` is injected before this file (demo-server.js
+	 * `INJECT`, asserted by `mp-client-strings.spec.ts`). A local fallback here would be a second
+	 * copy of the thing this task exists to remove.
 	 */
-	function kdText(key) {
-		try {
-			if (typeof TextGet !== 'function') return '';
-			var t = String(TextGet(key) || '');
-			if (!t || t === key) return '';
-			if (t.indexOf('[NotFound]') >= 0 || t.indexOf('MISSING') >= 0) return '';
-			return t;
-		} catch (e) { return ''; }
-	}
-
-	/** KD's word for `key` where it has one, else our English source string. */
-	function text(key, fallback) { return kdText(key) || fallback; }
+	var KDMPT = (typeof window !== 'undefined' ? window : globalThis).KDMPText;
+	var T = KDMPT.t;
+	var kdText = KDMPT.kdText;
 
 	// ---- the entry on KD's own menu --------------------------------------------------------
 
 	function drawMenuEntry() {
 		DrawButtonKDEx('MultiplayerButton', function () { lobby.open(); return true; },
-			true, MID, 680, 350, 64, text('KDMPLobbyTitle', 'Multiplayer'), '#ffffff', '');
+			true, MID, 680, 350, 64, T('KDMPLobbyTitle'), '#ffffff', '');
 	}
 
 	// ---- the lobby screen ------------------------------------------------------------------
 
 	function drawLobby() {
 		lobby._drawCount++;
-		DrawTextKD(text('KDMPLobbyTitle', 'Multiplayer'), W, 120, '#ffffff', '#000000', 48);
+		DrawTextKD(T('KDMPLobbyTitle'), W, 120, '#ffffff', '#000000', 48);
 		if (lobby.view === 'menu') return drawRoot();
 		if (lobby.view === 'host') return drawHost();
 		if (lobby.view === 'join') return drawJoin();
@@ -287,12 +282,8 @@
 	 * the perk list is.
 	 */
 	var ABOUT_LINES = [
-		['KDMPAboutPerks',   'Start perks are the party\'s — everyone\'s apply to everyone, debuffs included.'],
-		['KDMPAboutHost',    'The host\'s settings and world seed govern the run.'],
-		['KDMPAboutDescend', 'You descend together — the stairs wait for the whole party.'],
-		['KDMPAboutTrade',   'Drop an item to hand it to your partner.'],
-		['KDMPAboutPvP',     'PvP resets to co-op at the hub, and you can offer peace.'],
-		['KDMPAboutRejoin',  'A dropped connection does not end the run — they can rejoin as themselves.'],
+		'KDMPAboutPerks', 'KDMPAboutHost', 'KDMPAboutDescend',
+		'KDMPAboutTrade', 'KDMPAboutPvP', 'KDMPAboutRejoin',
 	];
 
 	/**
@@ -309,16 +300,16 @@
 	 */
 	function drawAbout() {
 		markBriefingSeen();
-		DrawTextKD(text('KDMPAboutTitle', 'Playing together is a little different'),
+		DrawTextKD(T('KDMPAboutTitle'),
 			W, 200, '#ffd98a', '#000000', 30);
 		for (var i = 0; i < ABOUT_LINES.length; i++) {
-			DrawTextKD(text(ABOUT_LINES[i][0], ABOUT_LINES[i][1]),
+			DrawTextKD(T(ABOUT_LINES[i]),
 				W, 280 + i * 62, '#ffffff', '#000000', 24);
 		}
 		// `view = 'menu'`, NOT `lobby.leave()`: reading the briefing is not cancelling anything, and
 		// `leave()` would drop a host socket that Host→Cancel→About may already have left open.
 		DrawButtonKDEx('KDMPBack', function () { lobby.view = 'menu'; return true; },
-			true, MID, 700, 350, 64, text('KDMPBack', 'Back'), '#ffffff', '');
+			true, MID, 700, 350, 64, T('KDMPBack'), '#ffffff', '');
 	}
 
 	/**
@@ -333,7 +324,7 @@
 	 * `KDCullTempElements` destroys any field not drawn this frame — so moving between views destroys
 	 * and re-creates this input, and the cache is what carries what the player typed across.
 	 */
-	function drawNameField(y) { drawField('KDMPName', text('KDMPYourName', 'Your name'), 'name', y); }
+	function drawNameField(y) { drawField('KDMPName', T('KDMPYourName'), 'name', y); }
 
 	/**
 	 * KDM-259 — a labelled text field whose value lives in `lobby[key]`.
@@ -361,7 +352,7 @@
 	 * does not know.
 	 */
 	function drawSeedField(y) {
-		drawField('KDMPSeed', text('KDMPWorldSeedField', 'World seed (optional — the host\'s to choose)'), 'seed', y);
+		drawField('KDMPSeed', T('KDMPWorldSeedField'), 'seed', y);
 	}
 
 	/**
@@ -428,7 +419,7 @@
 			lobby.error = '';
 			hostConnect();
 			return true;
-		}, true, MID, 400, 350, 64, text('KDMPHostGame', 'Host Game'), '#ffffff', '');
+		}, true, MID, 400, 350, 64, T('KDMPHostGame'), '#ffffff', '');
 
 		/*
 		 * KDM-243 A5 — hosting a run that is ALREADY IN PROGRESS.
@@ -449,20 +440,20 @@
 				if (!saveIsUsable(str)) {
 					// A6 — refuse privately, in words, and do NOT connect. `error` is what the lobby
 					// already paints for every other refusal.
-					lobby.error = text('KDMPSaveUnusable', 'That save cannot be continued.');
+					lobby.error = T('KDMPSaveUnusable');
 					return true;
 				}
 				lobby.view = 'host';
 				hostConnect(str);
 				return true;
-			}, true, MID, 480, 350, 64, text('KDMPContinueSave', 'Continue Save'), '#ffffff', '');
+			}, true, MID, 480, 350, 64, T('KDMPContinueSave'), '#ffffff', '');
 		}
 
 		DrawButtonKDEx('KDMPJoin', function () {
 			lobby.view = 'join';
 			lobby.error = '';
 			return true;
-		}, true, MID, saved ? 560 : 480, 350, 64, text('KDMPJoinGame', 'Join Game'), '#ffffff', '');
+		}, true, MID, saved ? 560 : 480, 350, 64, T('KDMPJoinGame'), '#ffffff', '');
 
 		// KDM-238 R1 — asked BEFORE either choice, like the name above it: the host connects straight
 		// from this view, so anything that has to ride the handshake must be pickable here.
@@ -474,7 +465,7 @@
 			// KDM-243 — everything below Continue moves down by one row when it is present. The
 			// offset is applied here rather than by re-numbering, so the no-save layout (which the
 			// whole existing lobby suite asserts on) stays byte-identical.
-		}, true, MID, saved ? 640 : 560, 350, 64, text('KDMPPerksBtn', 'Perks'), '#ffffff', '');
+		}, true, MID, saved ? 640 : 560, 350, 64, T('KDMPPerksBtn'), '#ffffff', '');
 
 		// KDM-256 R1 — the character pick, beside the perk pick and for the same reason: the host
 		// connects straight from this view, so anything that must ride the handshake is chosen here.
@@ -484,7 +475,7 @@
 			lobby.charPick = true;
 			KinkyDungeonState = 'Diff';        // KD's OWN class/start screen — see drawCharPickOverrides
 			return true;
-		}, true, MID, saved ? 740 : 660, 350, 64, text('KDMPCharBtn', 'Character'), '#ffffff', '');
+		}, true, MID, saved ? 740 : 660, 350, 64, T('KDMPCharBtn'), '#ffffff', '');
 
 		// KDM-272 A3 — the way back into the briefing, so it is not lost after the first run.
 		// Last before Back, and inside the same `saved ? … : …` ladder KDM-243 established: the
@@ -494,10 +485,10 @@
 			lobby.error = '';
 			lobby.view = 'about';
 			return true;
-		}, true, MID, saved ? 840 : 760, 350, 64, text('KDMPAboutBtn', 'How co-op differs'), '#ffffff', '');
+		}, true, MID, saved ? 840 : 760, 350, 64, T('KDMPAboutBtn'), '#ffffff', '');
 
 		DrawButtonKDEx('KDMPBack', function () { lobby.close(); return true; },
-			true, MID, saved ? 920 : 840, 350, 64, text('KDMPBack', 'Back'), '#ffffff', '');
+			true, MID, saved ? 920 : 840, 350, 64, T('KDMPBack'), '#ffffff', '');
 	}
 
 	/** At most three addresses, so the list cannot grow down the screen into the Cancel button. */
@@ -551,8 +542,7 @@
 		if (list.length) return { addresses: list, note: '' };
 		return {
 			addresses: mine ? [mine] : [],
-			note: text('KDMPShareLocalOnly',
-				'That is this machine only — your friend needs this computer\'s address on your network.'),
+			note: T('KDMPShareLocalOnly'),
 		};
 	}
 
@@ -561,7 +551,7 @@
 		// See `shareLines` for which of the three it is; everything below moves down by `drop` so a
 		// second and third line have somewhere to go, and `drop` is 0 for the one-line case this
 		// screen has always had.
-		DrawTextKD(text('KDMPShareAddress', 'Tell your friend to join:'), W, 260, '#ffffff', '#000000', 28);
+		DrawTextKD(T('KDMPShareAddress'), W, 260, '#ffffff', '#000000', 28);
 		var share = shareLines(location.host, lobby.share);
 		for (var i = 0; i < share.addresses.length; i++) {
 			DrawTextKD(share.addresses[i], W, 320 + i * 46, '#fff6bc', '#000000', 40);
@@ -573,25 +563,25 @@
 		// THE GATE (E1-E3). With approval-only there is no code and no password — this prompt is the
 		// entire admission decision, and the name is all the host has to judge by.
 		if (lobby.pending) {
-			DrawTextKD((lobby.pending.name || 'Someone') + text('KDMPWantsToJoin', ' wants to join your game'),
+			DrawTextKD(T('KDMPWantsToJoin', { NAME: lobby.pending.name || T('KDMPSomeone') }),
 				W, 410 + drop, '#ffffff', '#000000', 30);
 			// KDM-257 R2 — what the host is agreeing to SEND. Between the question and the buttons,
 			// because it is part of the question. The buttons move down by whatever it painted, so a
 			// long list never lands on top of Accept.
-			var below = drawModDiff(455 + drop, text('KDMPModsToSend', 'They will be sent COUNT of your mods:'));
+			var below = drawModDiff(455 + drop, 'KDMPModsToSend');
 			var btnY = below ? below + 30 : 470 + drop;   // R4: nothing painted => the stock layout, unchanged
 			DrawButtonKDEx('KDMPAccept', function () { answer(true); return true; },
-				true, MID - 190, btnY, 350, 64, text('KDMPAcceptBtn', 'Accept'), '#ffffff', '');
+				true, MID - 190, btnY, 350, 64, T('KDMPAcceptBtn'), '#ffffff', '');
 			DrawButtonKDEx('KDMPDecline', function () { answer(false); return true; },
-				true, MID + 190, btnY, 350, 64, text('KDMPDeclineBtn', 'Decline'), '#ffffff', '');
+				true, MID + 190, btnY, 350, 64, T('KDMPDeclineBtn'), '#ffffff', '');
 			return;
 		}
 
-		DrawTextKD(lobby.status || text('KDMPWaitingGuest', 'Waiting for someone to join…'),
+		DrawTextKD(lobby.status || T('KDMPWaitingGuest'),
 			W, 400 + drop, '#ffffff', '#000000', 24);
 		if (lobby.error) DrawTextKD(lobby.error, W, 440 + drop, '#ff8080', '#000000', 24);
 		DrawButtonKDEx('KDMPBack', function () { lobby.leave(); return true; },
-			true, MID, 480 + drop, 350, 64, text('KDMPCancel', 'Cancel'), '#ffffff', '');
+			true, MID, 480 + drop, 350, 64, T('KDMPCancel'), '#ffffff', '');
 	}
 
 	/**
@@ -742,7 +732,7 @@
 	}
 
 	function drawJoin() {
-		DrawTextKD(text('KDMPHostAddress', 'Host address'), W, 250, '#ffffff', '#000000', 28);
+		DrawTextKD(T('KDMPHostAddress'), W, 250, '#ffffff', '#000000', 28);
 		KDTextField('KDMPAddress', MID, 280, 350, 56, 'text', addressDefault(), '64');
 		drawNameField(370);
 
@@ -752,7 +742,7 @@
 		// KDM-257 R1 — what this guest is about to load, named BEFORE it is in. The diff only exists
 		// once the host has been asked, so in practice this paints while the "waiting for the host"
 		// status is up — which is exactly the window in which the guest can still walk away.
-		var below = drawModDiff(510, text('KDMPModsToGet', 'The host is running COUNT mods you don\'t have:'));
+		var below = drawModDiff(510, 'KDMPModsToGet');
 		// KDM-239 R4 — and the WORLD, under the mods, in the same window and for the same reason.
 		// Laid out from whatever the mod list left behind so the two stack instead of overlapping,
 		// and each is independently silent when it has nothing to say.
@@ -761,13 +751,13 @@
 
 		DrawButtonKDEx('KDMPConnect', function () {
 			lobby.error = '';
-			lobby.status = text('KDMPConnecting', 'Connecting…');
+			lobby.status = T('KDMPConnecting');
 			connect({ role: 'guest', address: lobby.address(), name: lobby.playerName(), character: lobby.playerCharacter() });
 			return true;
-		}, true, MID, joinY, 350, 64, text('KDMPConnectBtn', 'Join'), '#ffffff', '');
+		}, true, MID, joinY, 350, 64, T('KDMPConnectBtn'), '#ffffff', '');
 
 		DrawButtonKDEx('KDMPBack', function () { lobby.leave(); return true; },
-			true, MID, joinY + 80, 350, 64, text('KDMPBack', 'Back'), '#ffffff', '');
+			true, MID, joinY + 80, 350, 64, T('KDMPBack'), '#ffffff', '');
 	}
 
 	// ---- KDM-257: what the two sides are about to exchange, in words -----------------------
@@ -810,19 +800,19 @@
 	 * be required from a plain browser script. `tests/e2e/mp-lobby-world.spec.ts` pins the pair.
 	 */
 	var MODE_LABEL = {
-		randomMode:      { cat: 'KDRandomMode',          val: 'KinkyDungeonRandomMode1',          en: 'Spell Choice: Random Spells' },
-		hardMode:        { cat: null,                    val: 'KinkyDungeonHardMode1',            en: 'Hard Mode' },
-		extremeMode:     { cat: null,                    val: 'KinkyDungeonExtremeMode',          en: 'Extreme Mode' },
-		saveMode:        { cat: 'KDSaveMode',            val: 'KinkyDungeonSaveMode1',            en: 'Save Mode: Roguelike' },
-		itemMode:        { cat: 'KDItemMode',            val: 'KinkyDungeonItemMode1',            en: 'Loot Recovery: Disabled' },
-		itemPartialMode: { cat: 'KDItemMode',            val: 'KinkyDungeonItemMode2',            en: 'Loot Recovery: Partial' },
-		easyMode:        { cat: 'KDEasyMode',            val: 'KinkyDungeonEasyMode1',            en: 'Prison Strictness: Easy' },
-		norescueMode:    { cat: 'KDEasyMode',            val: 'KinkyDungeonEasyMode2',            en: 'Prison Strictness: Strict' },
-		noperks:         { cat: 'KDPerkProgressionMode', val: 'KinkyDungeonPerkProgressionMode0', en: 'Perk Progression: Disabled' },
-		perksmandatory:  { cat: 'KDPerkProgressionMode', val: 'KinkyDungeonPerkProgressionMode2', en: 'Perk Progression: Mandatory' },
-		perksdebuff:     { cat: 'KDPerkProgressionMode', val: 'KinkyDungeonPerkProgressionMode3', en: 'Perk Progression: Debuffs Only' },
-		escapekey:       { cat: 'KDProgressionMode',     val: 'KinkyDungeonProgressionMode0',     en: 'Progression Mode: Key Hunt' },
-		escaperandom:    { cat: 'KDProgressionMode',     val: 'KinkyDungeonProgressionMode1',     en: 'Progression Mode: Random' },
+		randomMode:      { cat: 'KDRandomMode',          val: 'KinkyDungeonRandomMode1',          ours: 'KDMPModeRandom' },
+		hardMode:        { cat: null,                    val: 'KinkyDungeonHardMode1',            ours: 'KDMPModeHard' },
+		extremeMode:     { cat: null,                    val: 'KinkyDungeonExtremeMode',          ours: 'KDMPModeExtreme' },
+		saveMode:        { cat: 'KDSaveMode',            val: 'KinkyDungeonSaveMode1',            ours: 'KDMPModeSaveRogue' },
+		itemMode:        { cat: 'KDItemMode',            val: 'KinkyDungeonItemMode1',            ours: 'KDMPModeLootNone' },
+		itemPartialMode: { cat: 'KDItemMode',            val: 'KinkyDungeonItemMode2',            ours: 'KDMPModeLootPartial' },
+		easyMode:        { cat: 'KDEasyMode',            val: 'KinkyDungeonEasyMode1',            ours: 'KDMPModePrisonEasy' },
+		norescueMode:    { cat: 'KDEasyMode',            val: 'KinkyDungeonEasyMode2',            ours: 'KDMPModePrisonStrict' },
+		noperks:         { cat: 'KDPerkProgressionMode', val: 'KinkyDungeonPerkProgressionMode0', ours: 'KDMPModePerksOff' },
+		perksmandatory:  { cat: 'KDPerkProgressionMode', val: 'KinkyDungeonPerkProgressionMode2', ours: 'KDMPModePerksMandatory' },
+		perksdebuff:     { cat: 'KDPerkProgressionMode', val: 'KinkyDungeonPerkProgressionMode3', ours: 'KDMPModePerksDebuff' },
+		escapekey:       { cat: 'KDProgressionMode',     val: 'KinkyDungeonProgressionMode0',     ours: 'KDMPModeProgKey' },
+		escaperandom:    { cat: 'KDProgressionMode',     val: 'KinkyDungeonProgressionMode1',     ours: 'KDMPModeProgRandom' },
 	};
 
 	/**
@@ -837,7 +827,7 @@
 		var m = MODE_LABEL[key];
 		if (!m) return '';
 		var val = kdText(m.val);
-		if (!val) return m.en;                       // KD has no word for it: ours, never the raw key
+		if (!val) return T(m.ours);                  // KD has no word for it: ours, never the raw key
 		var cat = m.cat ? kdText(m.cat) : '';
 		return cat ? (cat + ' ' + val) : val;
 	}
@@ -891,10 +881,10 @@
 			if (label) named.push(label);
 		}
 		if (!named.length && !seed) return 0;     // nothing sayable: R4's stock layout, unchanged
-		DrawTextKD(text('KDMPWorldLead', 'The host\'s game:'), W, y, '#ffd98a', '#000000', 24);
+		DrawTextKD(T('KDMPWorldLead'), W, y, '#ffd98a', '#000000', 24);
 		var line = y + 28;
 		if (seed) {
-			DrawTextKD(text('KDMPWorldSeed', '• seed: SEED').replace('SEED', seed), W, line, '#ffffff', '#000000', 22);
+			DrawTextKD(T('KDMPWorldSeed', { SEED: seed }), W, line, '#ffffff', '#000000', 22);
 			line += 26;
 		}
 		var shown = Math.min(named.length, MODLIST_SHOWN);
@@ -903,14 +893,14 @@
 			line += 26;
 		}
 		if (named.length > shown) {
-			DrawTextKD(text('KDMPModMore', '…and MORE more').replace('MORE', String(named.length - shown)),
+			DrawTextKD(T('KDMPModMore', { MORE: named.length - shown }),
 				W, line, '#cccccc', '#000000', 22);
 			line += 26;
 		}
 		return line;
 	}
 
-	function drawModDiff(y, lead) {
+	function drawModDiff(y, leadKey) {
 		var diff = lobby.modDiff;
 		var rows = (diff && Array.isArray(diff.hostOnly)) ? diff.hostOnly : [];
 		if (!rows.length) return 0;                                   // R4
@@ -918,18 +908,20 @@
 		if (diff && Array.isArray(diff.conflict)) {
 			for (var c = 0; c < diff.conflict.length; c++) conflicts[diff.conflict[c].hash] = true;
 		}
-		DrawTextKD(lead.replace('COUNT', String(rows.length)), W, y, '#ffd98a', '#000000', 24);
+		// KDM-281 — the COUNT is filled HERE, where the number is known, so the key travels rather than
+		// a half-resolved sentence. A caller that resolved it first would be a second templating road.
+		DrawTextKD(T(leadKey, { COUNT: rows.length }), W, y, '#ffd98a', '#000000', 24);
 		var shown = Math.min(rows.length, MODLIST_SHOWN);
 		for (var i = 0; i < shown; i++) {
 			var r = rows[i];
 			// `modname` is what a player recognises; `name` (the file) is the fallback for a mod whose
 			// manifest gave none, so a row is never painted as an empty bullet.
 			var label = String(r.modname || r.name || '?');
-			if (conflicts[r.hash]) label += text('KDMPModConflict', ' (a different version of yours)');
+			if (conflicts[r.hash]) label += T('KDMPModConflict');
 			DrawTextKD('• ' + label, W, y + 28 + i * 26, '#ffffff', '#000000', 22);
 		}
 		if (rows.length > shown) {
-			DrawTextKD(text('KDMPModMore', '…and MORE more').replace('MORE', String(rows.length - shown)),
+			DrawTextKD(T('KDMPModMore', { MORE: rows.length - shown }),
 				W, y + 28 + shown * 26, '#cccccc', '#000000', 22);
 			shown += 1;
 		}
@@ -973,7 +965,7 @@
 			names.push(String((m && (m.modname || m.name)) || m || '?'));
 		}
 		if (missing.length > names.length) names.push('+' + (missing.length - names.length));
-		DrawTextKD(text('KDMPModDegraded', 'Co-op: some of the host\'s mods could not be loaded — ') + names.join(', '),
+		DrawTextKD(T('KDMPModDegraded', { MODS: names.join(', ') }),
 			W, 60, '#ffb060', '#000000', 22);
 	}
 

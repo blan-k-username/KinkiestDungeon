@@ -19,6 +19,28 @@
  */
 import { waitForBundleReady } from './bundle';
 
+/**
+ * KDM-281 — inject the lobby the way the demo server does: the shared string table FIRST.
+ *
+ * A spec that reaches the lobby through `openLobby()` gets the real `INJECT` order for free. Three
+ * specs do not — they `addScriptTag` the lobby onto a plain static page to prove the menu entry is
+ * installed from outside the game tree — and each of those had its own `LOBBY_SCRIPT` constant.
+ * `coop-lobby.js` now holds a HARD reference to `window.KDMPText`, so injecting it alone is a
+ * TypeError that takes the whole file with it: the button never appears and every assertion in the
+ * spec fails at once, which is how this helper was found.
+ *
+ * One helper rather than a fourth copy of the path list, for the reason at the top of this file: the
+ * ORDER is the non-obvious part, and a stale copy of it fails looking like a product bug.
+ */
+export const LOBBY_SCRIPTS = [
+	'tools/mp-server/client/coop-text.js',
+	'tools/mp-server/client/coop-lobby.js',
+];
+
+export async function injectLobby(page: any) {
+	for (const path of LOBBY_SCRIPTS) await page.addScriptTag({ path });
+}
+
 /** Two settled frames — KD's own loop is live on the page, so we wait for it rather than calling in. */
 export const settle = (page: any) => page.evaluate(
 	() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))),

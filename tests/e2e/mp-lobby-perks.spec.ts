@@ -27,8 +27,7 @@
  */
 import { test, expect } from '../helpers/playwright-fixtures';
 import { bootKD } from '../helpers/bundle';
-
-const LOBBY_SCRIPT = 'tools/mp-server/client/coop-lobby.js';
+import { injectLobby } from '../helpers/mp-lobby';
 
 /** Run real frames — KD's own loop is live on this page, so we wait for it rather than calling in. */
 async function frames(page: any, n = 2) {
@@ -54,7 +53,7 @@ async function onPerkScreen(page: any, coopPick: boolean) {
 test.describe('KDM-238 — perks are chosen on KD\'s own screen, from the co-op lobby', () => {
 	test('R1 — the lobby offers a Perks entry that opens KD\'s perk screen', async ({ isolatedPage: page }) => {
 		await bootKD(page);
-		await page.addScriptTag({ path: LOBBY_SCRIPT });
+		await injectLobby(page);
 		await page.evaluate(() => {
 			KinkyDungeonState = 'Multiplayer';
 			// @ts-ignore
@@ -76,7 +75,7 @@ test.describe('KDM-238 — perks are chosen on KD\'s own screen, from the co-op 
 
 	test('R2 — the screen is KD\'s: the perk grid and its stock controls are all still there', async ({ isolatedPage: page }) => {
 		await bootKD(page);
-		await page.addScriptTag({ path: LOBBY_SCRIPT });
+		await injectLobby(page);
 		await onPerkScreen(page, true);
 
 		const names = await buttonNames(page);
@@ -96,7 +95,7 @@ test.describe('KDM-238 — perks are chosen on KD\'s own screen, from the co-op 
 
 	test('the two overridden buttons behave one way for co-op and the stock way otherwise', async ({ isolatedPage: page }) => {
 		await bootKD(page);
-		await page.addScriptTag({ path: LOBBY_SCRIPT });
+		await injectLobby(page);
 
 		// WITH a co-op pick in progress: Back returns to the lobby.
 		await onPerkScreen(page, true);
@@ -120,7 +119,7 @@ test.describe('KDM-238 — perks are chosen on KD\'s own screen, from the co-op 
 
 	test('R1 — committing returns to the lobby with the chosen perks, and starts NO solo game', async ({ isolatedPage: page }) => {
 		await bootKD(page);
-		await page.addScriptTag({ path: LOBBY_SCRIPT });
+		await injectLobby(page);
 		await onPerkScreen(page, true);
 
 		// Toggle a perk through KD's OWN grid button, so what is committed is what a player's click
