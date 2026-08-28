@@ -196,7 +196,7 @@ describe('KDM-250 — heartbeat and the drop report', () => {
 			const t0 = live.session.turn;
 			A.send({ type: 'input', action: { kind: 'wait' } });
 			B.send({ type: 'input', action: { kind: 'wait' } });
-			const s = await A.next(isState, 30_000);
+			const s = await A.next(isState);
 			expect(s.tick).toBe(t0 + 1);
 		}, BOOT_TIMEOUT);
 	});

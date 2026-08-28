@@ -18,6 +18,20 @@
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { kdMerge } = require('../../tools/mp-server/kd-delta');
 
+/**
+ * KDM-290 — how long a wait for one frame may last.
+ *
+ * MUST stay below `testTimeout` in `vitest.config.ts`, and the reason is the whole of KDM-290: when
+ * a frame never arrives, whichever clock expires FIRST is the one that writes the error message.
+ * This helper knows what it was waiting for; the runner only knows how long the test ran. For the
+ * life of this suite the order was inverted — a 20 s default and four specs asking 30-60 s, all
+ * against a 5 s budget — so no wait here could ever fire, and every missing-frame bug was destined
+ * to report as `Test timed out in 5000ms`, naming nothing.
+ *
+ * `tests/unit/mp-test-budget.spec.ts` asserts the ordering, so it cannot invert again in silence.
+ */
+export const MAX_WAIT_MS = 15_000;
+
 export class MPClient {
 	ws: any;
 	private buf: any[] = [];
@@ -61,9 +75,14 @@ export class MPClient {
 	seen(pred: (m: any) => boolean) { return this.buf.some(pred); }
 
 	/** Wait for the next matching message, consuming it. */
-	next(pred: (m: any) => boolean, timeout = 20_000): Promise<any> {
+	next(pred: (m: any) => boolean, timeout = MAX_WAIT_MS): Promise<any> {
 		return new Promise((res, rej) => {
-			const timer = setTimeout(() => rej(new Error('timeout waiting for message')), timeout);
+			// Name the wait. "timeout waiting for message" was true and useless: with several awaits in a
+			// test, it does not say WHICH frame never came. The predicate cannot describe itself, so the
+			// buffer does — what did arrive is the evidence for what did not.
+			const timer = setTimeout(() => rej(new Error(
+				`timeout after ${timeout}ms waiting for a matching message; received: `
+				+ (this.buf.length ? this.buf.map((m) => m && m.type).join(", ") : "(nothing)"))), timeout);
 			this.waiters.push({ pred, res, rej, timer });
 			this._pump();
 		});

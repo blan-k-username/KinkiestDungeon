@@ -177,7 +177,7 @@ describe('KDM-252 — the same character comes back', () => {
 		// The resume frame proved the bundle survived the re-attach. This proves it survived being
 		// swapped through a real turn afterwards — the point at which a bad capture would surface.
 		A2.send({ type: 'input', action: { kind: 'wait' } });
-		const s = await A2.next(isState, 60_000);
+		const s = await A2.next(isState);
 		expect(s.snapshot.player.hp).toBe(FINGERPRINT.A);
 		// Control: the survivor's fingerprint is intact and DIFFERENT, so this is not one shared value.
 		bridge.session.world.restorePlayer(bridge.session.bundles.get('B'));

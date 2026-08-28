@@ -248,7 +248,7 @@ describe('KDM-235 R3 — over the wire, the joiner gets the LIVE world in full',
 		// A turn resolves before anyone else arrives, so "the live world" is distinguishable from
 		// "a freshly booted one".
 		A.send({ type: 'input', action: { kind: 'wait' } });
-		await A.next((m) => m.type === 'state' && m.kind == null, 60_000);
+		await A.next((m) => m.type === 'state' && m.kind == null);
 	}, BOOT_TIMEOUT);
 
 	afterAll(() => {
@@ -269,7 +269,7 @@ describe('KDM-235 R3 — over the wire, the joiner gets the LIVE world in full',
 		const joined = await B.next((m) => m.type === 'joined');
 		expect(joined.started, 'they join a session that is already running').toBe(true);
 
-		const first = await B.next((m) => m.type === 'state', 60_000);
+		const first = await B.next((m) => m.type === 'state');
 		// `MPClient` re-exposes a merged delta as `m.snapshot`, so `delta` is the discriminator.
 		expect(first.delta, 'a newcomer holds no base to diff against').toBeUndefined();
 		expect(first.snapshot, 'so it must be a full snapshot').toBeTruthy();

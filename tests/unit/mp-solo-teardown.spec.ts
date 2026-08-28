@@ -295,7 +295,7 @@ describe('KDM-253 S4/D1/E6 — the host is asked, and their answer is honoured',
 		// the same one the assertion has to make.
 		const before = bridge.session.turn;
 		A.send({ type: 'input', action: { kind: 'wait' } });
-		const s = await A.next((m: any) => m.type === 'state' && m.kind == null, 60_000);
+		const s = await A.next((m: any) => m.type === 'state' && m.kind == null);
 		expect(s.tick, 'a turn resolved on one player\'s submit').toBeGreaterThan(before);
 		expect(bridge.session.turn).toBe(before + 1);
 		await A.never(isWaiting, 300);
