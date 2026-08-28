@@ -32,7 +32,7 @@ That serves the game **and** the co-op connection together on port **8090**. Whe
 see:
 
 ```
-→ Co-op on http://localhost:8090/ — share your LAN address with a friend
+→ Co-op on http://localhost:8090/ — Multiplayer then Host names the address to share
 ```
 
 If you have only this game checkout and no sibling folder, this does the same job:
@@ -79,17 +79,18 @@ character and perks are **per player** — see
 
 Choose these **before** you press Host Game: they are sent when the connection is made.
 
-**5. Press Host Game.** The screen shows:
+**5. Press Host Game.** The screen names the address to send your friend:
 
 ```
 Tell your friend to join:
-        localhost:8090
+        192.168.1.24:8090
 ```
 
-**6. Find the address to actually share.** ⚠️ **What that screen shows is the address *you* used, so
-it will usually say `localhost:8090` — and `localhost` on your friend's computer means *their*
-computer, not yours.** You need your machine's address on the network. The port (`8090`) is right;
-it is the part before the colon you have to replace.
+Send them that, exactly as written. If your machine is on more than one network you may see two or
+three lines — try the first, and fall back to the others if it does not reach you.
+
+**6. If it says "this machine only".** That means the game could not work out your address on the
+network, and what it is showing is only good on this computer. Find it by hand:
 
 | Your system | Run this | Look for |
 |---|---|---|
@@ -97,7 +98,12 @@ it is the part before the colon you have to replace.
 | Linux | `hostname -I` | the first address listed |
 | Windows | `ipconfig` | *IPv4 Address* under your active adapter |
 
-Send your friend that address with `:8090` on the end — for example `192.168.1.24:8090`.
+Send your friend that address with `:8090` on the end — for example `192.168.1.24:8090`. To make the
+screen show it next time, start the game with it set:
+
+```bash
+KD_MP_PUBLIC_HOST=192.168.1.24 ./run-kd-game.sh --mp
+```
 
 **7. Wait.** The screen says *Waiting for someone to join…* until they do.
 

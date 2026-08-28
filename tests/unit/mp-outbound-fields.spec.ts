@@ -461,3 +461,64 @@ describe('KDM-274 — every declared message is exercised, and keeps its declara
 			.toBe(true);
 	});
 });
+
+/* ══════════════════════════════════════════════════════════════════════════════════════════════════
+ * KDM-287 — `joined.lan`: the address a friend can type, and who is told it
+ *
+ * The exercise above reaches `joined` through `_joinLate`, which is the RUNNING-session road. The
+ * field this task adds rides the PRE-START one, so it needs a rig whose session has not started —
+ * and the two claims worth pinning are the ones no per-feature spec would think to make: the port
+ * comes from the socket the client is actually on, and a GUEST is never told.
+ * ═════════════════════════════════════════════════════════════════════════════════════════════════ */
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { publicAddresses } = require('../../tools/mp-server/lan-address');
+
+describe('KDM-287 — the host is sent an address a friend can use', () => {
+	/** The pre-start `join` road, on a socket that has a real `localPort`. */
+	function joinOn(role: 'host' | 'guest', localPort: number) {
+		const { bridge } = rig();
+		bridge.session.started = false;
+		bridge.session.join = () => ({ started: false });
+		bridge.gate.claimHost = () => ({ accept: true });
+		bridge.gate.requestJoin = () => ({ accept: true, clientId: 'N' });
+		const sock: any = recSock('N');
+		sock.localPort = localPort;
+		bridge._handle(sock, { type: 'join', clientId: 'N', role, name: 'Nyx' }, null);
+		return sock.frames.find((f: any) => f.type === 'joined');
+	}
+
+	it('the port on the wire is the one the client actually connected to', () => {
+		// NOT an env read. `KD_MP_PORT` / `PORT` / `listen(0)` all end up here as `socket.localPort`,
+		// so this holds for every one of them — and a second reading of the env could not drift from
+		// it, because there is no second reading.
+		const joined = joinOn('host', 41337);
+		for (const a of joined.lan || []) expect(a).toMatch(/:41337$/);
+	});
+
+	it('the host is told exactly what `lan-address.js` says, or is told nothing at all', () => {
+		const joined = joinOn('host', 41337);
+		const expected = publicAddresses(41337);
+		if (expected.length) {
+			expect(joined.lan).toEqual(expected);
+			// The whole point of the task: not the one address that cannot be shared.
+			expect(joined.lan.join(' ')).not.toMatch(/localhost|127\.0\.0\.1/);
+		} else {
+			// A machine with only loopback — a CI box, a locked-down container. The honest answer is
+			// no field, which is why `lan` is declared `optional`; an empty array on the wire would be
+			// a promise of an address that does not exist.
+			expect('lan' in joined, 'nothing to offer must send nothing, not an empty list').toBe(false);
+		}
+	});
+
+	it('a GUEST is never told — it has nothing to share, and its `joined` is unchanged', () => {
+		const joined = joinOn('guest', 41337);
+		expect(joined).toBeTruthy();
+		expect('lan' in joined).toBe(false);
+	});
+
+	it('a socket with no usable port is answered with no address, not with half of one', () => {
+		// A `:undefined` on that screen would be read out and typed in good faith.
+		const joined = joinOn('host', 0 as any);
+		expect('lan' in joined).toBe(false);
+	});
+});

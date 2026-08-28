@@ -1528,7 +1528,12 @@
 				// (`boot()` calls `enterGame()` before connecting, which is the shortcut's whole
 				// character), so painting the lobby's host screen here would cover a live window with a
 				// waiting-room it never opened. The lobby host, who IS on that screen, still gets it.
-				else if (role === 'host' && !shortcut) lobbySay({ view: 'host', status: '' });
+				// KDM-287 — `m.lan` rides in with the host's own `joined`, which is the frame that
+				// opens this screen: the address to share and the screen that shows it arrive
+				// together, so there is no window in which the host is looking at a stale one. It is
+				// carried, not interpreted — what to DO with it is the lobby's decision (`shareLines`),
+				// because it is the lobby that knows where the host's own browser is.
+				else if (role === 'host' && !shortcut) lobbySay({ view: 'host', status: '', share: m.lan || [] });
 			}
 			else if (m.type === 'state' && m.kind === 'push') {
 				// KDM-252: a state frame the SERVER started — nothing of ours is being answered. Adopt

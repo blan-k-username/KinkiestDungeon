@@ -40,6 +40,7 @@ const { kdDiff } = require('./kd-delta');
 const { JoinGate } = require('./join-gate');
 const { ModStore } = require('./mod-sync');
 const { Presence, DEFAULT_HB_TIMEOUT_MS } = require('./presence');
+const { publicAddresses } = require('./lan-address');
 
 /**
  * KDM-206: top-level snapshot keys carried IN FULL by every delta, never diffed.
@@ -122,7 +123,13 @@ const GUEST_JOIN_FIELDS = Object.freeze(['name', 'build', 'mods', 'character']);
  */
 const OUTBOUND_MESSAGES = Object.freeze({
 	// ── the join handshake ───────────────────────────────────────────────────────────────────────
-	joined:            Object.freeze({ required: Object.freeze(['clientId', 'started', 'players']) }),
+	// KDM-287 — `lan` is the address a friend can actually TYPE, and only the server can know it: a
+	// browser cannot read its own machine's LAN IP, and a host that followed the launcher's own
+	// instructions is sitting on `localhost:8090`. Optional, for two separate reasons — a GUEST's
+	// `joined` carries none (it has nothing to share), and a machine with only loopback honestly has
+	// no answer, which `lanAddresses` reports as `[]` rather than inventing one.
+	joined:            Object.freeze({ required: Object.freeze(['clientId', 'started', 'players']),
+		optional: Object.freeze(['lan']) }),
 	awaiting_approval: Object.freeze({ required: Object.freeze(['modDiff', 'world']) }),
 	// HOST-ONLY: it is the host that answers the gate, so nobody else is told somebody is asking.
 	join_pending:      Object.freeze({ required: Object.freeze(['clientId', 'name', 'modDiff']), to: 'host' }),
@@ -457,6 +464,26 @@ class WSBridge {
 	}
 
 	/**
+	 * KDM-287 — what the HOST should tell a friend to type, as a `{ lan }` to merge onto `joined`.
+	 *
+	 * ⚠️ THE PORT COMES FROM THE LIVE SOCKET. `socket.localPort` is the port this very connection
+	 * arrived on, so a directly-run gateway follows `PORT` and `listen(0)` without this file knowing
+	 * either exists. Behind the docker launcher it is the CONTAINER's port and the machine's own
+	 * interfaces are the CONTAINER's too — which is why the decision lives in `publicAddresses` and
+	 * not here. A socket with no `localPort` (a fake in a spec, one already closed) yields `[]`
+	 * through its guard, not `…:undefined`.
+	 *
+	 * ⚠️ AND IT IS `{}` FOR EVERYONE ELSE. A guest has nothing to share, so its `joined` stays
+	 * byte-identical — as do the reattach and join-late sends, which do not call this at all. The
+	 * empty object is why this can be `Object.assign`ed at one call site instead of branching there.
+	 */
+	_lanHint(socket, role) {
+		if (role !== 'host') return {};
+		const lan = publicAddresses(socket && socket.localPort);
+		return lan.length ? { lan } : {};
+	}
+
+	/**
 	 * KDM-233: refuse a join IN WORDS (E6).
 	 *
 	 * The reason must travel as an application message, never as a rejected upgrade. A browser cannot
@@ -675,7 +702,9 @@ class WSBridge {
 				this._carrySeat(clientId);
 				if (this.session.started) { this._joinLate(clientId); return clientId; }
 				const r = this.session.join(clientId);
-				this._send(socket, { type: 'joined', clientId, started: r.started, players: this.session.players });
+				this._send(socket, Object.assign(
+					{ type: 'joined', clientId, started: r.started, players: this.session.players },
+					this._lanHint(socket, msg.role)));
 				if (r.started) this._broadcastState();   // both in → push initial render-state
 			} catch (e) {
 				this._send(socket, { type: 'error', error: String(e && e.message || e) });

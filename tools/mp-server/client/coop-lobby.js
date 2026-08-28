@@ -54,6 +54,14 @@
 		// KDM-239 R4 — the host's world declaration (`{ modes, seed }`), shown to a guest that is
 		// waiting for approval. null = not told / nothing declared, which paints nothing.
 		world: null,
+		/**
+		 * KDM-287 — the addresses the SERVER says a friend could type, as they arrive on the host's
+		 * own `joined` (`coop-bootstrap.js`). Empty until then, and empty forever on a machine that
+		 * has only loopback — which is a real answer, not a missing one (see `shareLines`).
+		 *
+		 * Carried, never trusted: it crossed a socket, so `shareLines` re-checks its shape.
+		 */
+		share: [],
 		/** Whatever is currently typed as the host's address. */
 		address: function () {
 			var el = document.getElementById('KDMPAddress');
@@ -180,6 +188,10 @@
 			lobby.error = '';
 			lobby.modDiff = null;
 			lobby.world = null;   // KDM-239 R4 — cleared with the diff; both describe one join attempt
+			// KDM-287 — cleared for the same reason: it describes the session we just left, and the
+			// next one may be on a different port. A stale list would be a plausible-looking address
+			// nobody is listening on, which is worse than the honest fallback.
+			lobby.share = [];
 		},
 	};
 	window.KDMPLobby = lobby;
@@ -488,22 +500,86 @@
 			true, MID, saved ? 920 : 840, 350, 64, text('KDMPBack', 'Back'), '#ffffff', '');
 	}
 
+	/** At most three addresses, so the list cannot grow down the screen into the Cancel button. */
+	var SHARE_SHOWN = 3;
+
+	/** `host:port` → `host`. IPv6 arrives bracketed (`[::1]:8090`), which a bare split would mangle. */
+	function hostOnly(hostport) {
+		return String(hostport || '').replace(/:\d+$/, '').replace(/^\[|\]$/g, '');
+	}
+
+	/** Every spelling of "this machine", which is the one answer a friend cannot use. */
+	var LOOPBACK = /^(localhost|127(\.\d{1,3}){3}|::1|0\.0\.0\.0)$/i;
+
+	/**
+	 * KDM-287 — WHAT THE HOST SHOULD BE TOLD TO SHARE. The whole decision, in one pure function.
+	 *
+	 * The screen used to paint `location.host` unconditionally, under a comment that was candid about
+	 * its assumption: "where THIS page came from … is exactly the thing to share", true only if the
+	 * host browsed by their LAN IP — which is not what the launcher tells them to do. It tells them
+	 * to open `http://localhost:8090/`, so the address they were handed to give a friend was
+	 * `localhost:8090`, which on the friend's machine names the friend's machine.
+	 *
+	 * @param {string} here   the host's own origin (`location.host`)
+	 * @param {string[]} share  what the server offered on `joined` (`lan-address.js`)
+	 * @returns {{addresses: string[], note: string}}
+	 *
+	 * Three cases, and the middle one is the bug being fixed:
+	 *   - `here` is NOT loopback ⇒ it, alone, unchanged. A host who DID browse by `192.168.1.24` is
+	 *     looking at a shareable address already, and replacing it with the server's guess would be
+	 *     this bug pointing the other way.
+	 *   - `here` is loopback and the server named addresses ⇒ those. Several rather than one: the
+	 *     server ranks them, but a multi-homed machine (VPN, docker, two NICs) can be ranked wrongly,
+	 *     and showing three beats showing the wrong one with no alternative.
+	 *   - nothing usable ⇒ `here` anyway, WITH a note saying what it is. Silence would be a screen
+	 *     that looks correct and is not; a blank one would be worse than the bug.
+	 *
+	 * ⚠️ `share` CROSSED A SOCKET, so its shape is re-checked here rather than trusted. Anything that
+	 * is not a plain `host:port` is dropped, which lands junk in the third case — a note the host can
+	 * act on — instead of painting `undefined` at them.
+	 */
+	function shareLines(here, share) {
+		var mine = String(here || '');
+		var list = [];
+		if (Object.prototype.toString.call(share) === '[object Array]') {
+			for (var i = 0; i < share.length && list.length < SHARE_SHOWN; i++) {
+				var s = (typeof share[i] === 'string') ? share[i] : '';
+				if (/^[A-Za-z0-9.\-]+:\d+$/.test(s) && !LOOPBACK.test(hostOnly(s))) list.push(s);
+			}
+		}
+		if (mine && !LOOPBACK.test(hostOnly(mine))) return { addresses: [mine], note: '' };
+		if (list.length) return { addresses: list, note: '' };
+		return {
+			addresses: mine ? [mine] : [],
+			note: text('KDMPShareLocalOnly',
+				'That is this machine only — your friend needs this computer\'s address on your network.'),
+		};
+	}
+
 	function drawHost() {
-		// The address a friend types. `location.host` is where THIS page came from, which for a host
-		// serving their own game is exactly the thing to share.
+		// KDM-287 — the address a friend types, which is NOT necessarily where this page came from.
+		// See `shareLines` for which of the three it is; everything below moves down by `drop` so a
+		// second and third line have somewhere to go, and `drop` is 0 for the one-line case this
+		// screen has always had.
 		DrawTextKD(text('KDMPShareAddress', 'Tell your friend to join:'), W, 260, '#ffffff', '#000000', 28);
-		DrawTextKD(String(location.host || ''), W, 320, '#fff6bc', '#000000', 40);
+		var share = shareLines(location.host, lobby.share);
+		for (var i = 0; i < share.addresses.length; i++) {
+			DrawTextKD(share.addresses[i], W, 320 + i * 46, '#fff6bc', '#000000', 40);
+		}
+		var y = 320 + share.addresses.length * 46;
+		if (share.note) { DrawTextKD(share.note, W, y - 6, '#ffd0a0', '#000000', 22); y += 28; }
+		var drop = Math.max(0, y - 366);          // 366 = one address, no note: today's layout exactly
 
 		// THE GATE (E1-E3). With approval-only there is no code and no password — this prompt is the
 		// entire admission decision, and the name is all the host has to judge by.
 		if (lobby.pending) {
 			DrawTextKD((lobby.pending.name || 'Someone') + text('KDMPWantsToJoin', ' wants to join your game'),
-				W, 410, '#ffffff', '#000000', 30);
+				W, 410 + drop, '#ffffff', '#000000', 30);
 			// KDM-257 R2 — what the host is agreeing to SEND. Between the question and the buttons,
 			// because it is part of the question. The buttons move down by whatever it painted, so a
 			// long list never lands on top of Accept.
-			var below = drawModDiff(455, text('KDMPModsToSend', 'They will be sent COUNT of your mods:'));
-			var btnY = below ? below + 30 : 470;   // R4: nothing painted => the stock layout, unchanged
+			var below = drawModDiff(455 + drop, text('KDMPModsToSend', 'They will be sent COUNT of your mods:'));
+			var btnY = below ? below + 30 : 470 + drop;   // R4: nothing painted => the stock layout, unchanged
 			DrawButtonKDEx('KDMPAccept', function () { answer(true); return true; },
 				true, MID - 190, btnY, 350, 64, text('KDMPAcceptBtn', 'Accept'), '#ffffff', '');
 			DrawButtonKDEx('KDMPDecline', function () { answer(false); return true; },
@@ -512,10 +588,10 @@
 		}
 
 		DrawTextKD(lobby.status || text('KDMPWaitingGuest', 'Waiting for someone to join…'),
-			W, 400, '#ffffff', '#000000', 24);
-		if (lobby.error) DrawTextKD(lobby.error, W, 440, '#ff8080', '#000000', 24);
+			W, 400 + drop, '#ffffff', '#000000', 24);
+		if (lobby.error) DrawTextKD(lobby.error, W, 440 + drop, '#ff8080', '#000000', 24);
 		DrawButtonKDEx('KDMPBack', function () { lobby.leave(); return true; },
-			true, MID, 480, 350, 64, text('KDMPCancel', 'Cancel'), '#ffffff', '');
+			true, MID, 480 + drop, 350, 64, text('KDMPCancel', 'Cancel'), '#ffffff', '');
 	}
 
 	/**
