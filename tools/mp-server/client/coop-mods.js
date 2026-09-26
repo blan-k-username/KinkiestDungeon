@@ -51,8 +51,16 @@
 (function () {
 	'use strict';
 
-	/** How long to wait for the whole prepare/fetch/execute sequence before declaring it degraded. */
-	var WATCHDOG_MS = 30000;
+	/**
+	 * How long to wait for the whole prepare/fetch/execute sequence before declaring it degraded.
+	 *
+	 * The sequence shares the main thread with rendering, so it scales with frame cost. Upstream 5.5
+	 * made 2.0x supersampling the default render scale (`KDResolutionList[0]`), and a guest's
+	 * sequence measured 18 s at 1.0x vs 55 s at the new default (headless, one host mod). 30 s used
+	 * to be ample; 120 s is ~2x the measured default, so a loaded machine still settles `executed`
+	 * while a loader that never returns still cannot hang the session.
+	 */
+	var WATCHDOG_MS = 120000;
 
 	var state = {
 		/** 'pending' then 'executed' | 'nothing-to-do' | 'degraded' | 'off' */
@@ -67,6 +75,8 @@
 		/** Host mods we could NOT get — what R9 requires be named rather than left mysterious. */
 		missing: [],
 		error: '',
+		/** ms from ensureExecuted() to the end of each phase: prepared / fetched / executed. */
+		timing: {},
 	};
 
 	var settleReady;
@@ -274,11 +284,16 @@
 			}
 		}, WATCHDOG_MS);
 
+		// Phase timings, recorded even when the watchdog settled first — "how late was it" is the
+		// question a `degraded` status raises, and it cannot be answered after the fact.
+		var t0 = Date.now();
+		var mark = function (k) { state.timing[k] = Date.now() - t0; };
 		var from = opts && opts.fetchFrom;
 		prepare()
-			.then(function () { return from ? fetchHostMods(from) : null; })
+			.then(function () { mark('prepared'); return from ? fetchHostMods(from) : null; })
 			.catch(function (e) { note('mod sync failed: ' + (e && e.message || e)); })
 			.then(function () {
+				mark('fetched');
 				try { state.count = Object.keys(KDMods || {}).length; } catch (e) { state.count = 0; }
 				if (typeof KDExecuteMods !== 'function') return null;
 				// `KDExecuteMods` no-ops on an EMPTY load order without setting `KDExecuted`
@@ -288,6 +303,7 @@
 			})
 			.catch(function (e) { note('mod execution failed: ' + (e && e.message || e)); })
 			.then(function () {
+				mark('executed');
 				if (state.error) return settle('degraded');
 				settle(state.count > 0 ? 'executed' : 'nothing-to-do');
 			});

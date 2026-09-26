@@ -4,6 +4,7 @@
 # Usage:
 #   tools/run-e2e-isolated.sh              # every tests/e2e/*.spec.ts
 #   tools/run-e2e-isolated.sh mp-pvp       # only specs whose name matches
+#   KD_CHUNK=2/4 tools/run-e2e-isolated.sh # only the 2nd of 4 round-robin chunks
 #
 # WHY. A single `playwright test tests/e2e` run walks ~20 specs in one browser
 # process tree, and each MP spec drives TWO full game bundles (~600 preloaded
@@ -39,6 +40,36 @@ done < <(ls tests/e2e/*.spec.ts | { if [ -n "$FILTER" ]; then grep -- "$FILTER";
 if [ ${#SPECS[@]} -eq 0 ]; then
 	echo "no specs matched '${FILTER}'" >&2
 	exit 64
+fi
+
+# KD_CHUNK=i/n — run only chunk i of n (1-based), so the ~3 h layer can be run as separate,
+# re-runnable pieces instead of one block (upstream's 2.0x default render scale made every spec
+# ~3x slower in headless). Round-robin, not contiguous: the specs are alphabetical, and slicing
+# would lump the long mp-pvp-*/mp-render-* families into one chunk. Every spec lands in exactly
+# one chunk, so running 1/n … n/n covers the layer once. Applied AFTER the name filter.
+if [ -n "${KD_CHUNK:-}" ]; then
+	CHUNK_I="${KD_CHUNK%/*}"; CHUNK_N="${KD_CHUNK#*/}"
+	case "$CHUNK_I$CHUNK_N" in *[!0-9]*|'') CHUNK_I=0 ;; esac
+	if [ "$CHUNK_I" -lt 1 ] || [ "$CHUNK_N" -lt 1 ] || [ "$CHUNK_I" -gt "$CHUNK_N" ]; then
+		echo "KD_CHUNK must be i/n with 1 <= i <= n (got '${KD_CHUNK}')" >&2
+		exit 64
+	fi
+	CHUNKED=()
+	for idx in "${!SPECS[@]}"; do
+		[ $(( idx % CHUNK_N )) -eq $(( CHUNK_I - 1 )) ] && CHUNKED+=("${SPECS[$idx]}")
+	done
+	if [ ${#CHUNKED[@]} -eq 0 ]; then
+		echo "chunk ${KD_CHUNK} is empty (${#SPECS[@]} specs matched)" >&2
+		exit 64
+	fi
+	SPECS=("${CHUNKED[@]}")
+	echo "══ chunk ${CHUNK_I}/${CHUNK_N}"
+fi
+
+# KD_LIST_ONLY=1 — print the selection and stop, so a chunk split can be checked without a run.
+if [ "${KD_LIST_ONLY:-0}" = "1" ]; then
+	printf '%s\n' "${SPECS[@]}"
+	exit 0
 fi
 
 echo "══ e2e, isolated: ${#SPECS[@]} specs, one container each"

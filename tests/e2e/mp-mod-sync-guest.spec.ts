@@ -75,7 +75,12 @@ test.describe('KDM-249 — the guest plays with the host\'s mods', () => {
 			await expect.poll(() => marker(guest),
 				{ timeout: 120_000, message: 'the host\'s mod should reach and run on the guest' }).toBe(1);
 
+			// The mod runs before the status settles, so wait for the terminal state (the watchdog
+			// guarantees one) rather than reading a `pending` that is merely early.
+			await expect.poll(async () => (await modsState(guest)).status,
+				{ timeout: 360_000, message: 'the guest\'s mod sequence reaches a terminal status' }).not.toBe('pending');
 			const st = await modsState(guest);
+			console.log('[mp-mod-sync-guest] guest mod timing ms ' + JSON.stringify(st.timing));
 			expect(st.fetched, 'the guest names what it pulled in').toContain('Kdm249HostMod');
 			expect(st.missing, 'and nothing was left behind').toEqual([]);
 			expect(st.status, st.error || 'status').toBe('executed');
