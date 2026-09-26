@@ -68,7 +68,7 @@ let KDInventoryAction: Record<string, KDInventoryActionDef> = {
 						if (KDDebugLink) {
 							linkable = KDCanAddRestraint(KDRestraint(newItem), true, "", false, currentItem, true, true);
 						} else {
-							if (!currentItem) return true;
+							if (!currentItem) return !KDGroupBlocked(KDRestraint(newItem).Group);
 							//linkable = KDCurrentItemLinkable(currentItem, newItem);
 							linkable = KDCanAddRestraint(KDRestraint(newItem), false, "", false, currentItem, true, true);
 
@@ -725,7 +725,7 @@ let KDInventoryAction: Record<string, KDInventoryActionDef> = {
 		/** Return true to cancel it */
 		cancel: (_player, delta) => {
 			if (delta > 0) {
-				if (!KinkyDungeonHasMana(KDGameData.InventoryActionManaCost) || !(KinkyDungeonPlayerGetRestraintsWithLocks(KDMagicLocks).length > 0)) {
+				if (!KinkyDungeonHasMana(KDGameData.InventoryActionManaCost) || !(KinkyDungeonPlayerGetRestraintsWithLocks(KDMagicLocks, true).length > 0)) {
 					return true;
 				}
 			}
@@ -751,7 +751,7 @@ let KDInventoryAction: Record<string, KDInventoryActionDef> = {
 			KDGameData.OffhandOld = item.name;
 			KinkyDungeonAdvanceTime(1, true, true);
 			//if (KDGameData.InventoryAction == "Offhand")
-			//	KinkyDungeonDrawState = "Game";
+			//	KDGoToScreen("Game");
 			KDRefreshCharacter.set(KinkyDungeonPlayer, true);
 			KinkyDungeonDressPlayer();
 		},
@@ -815,7 +815,7 @@ let KDInventoryAction: Record<string, KDInventoryActionDef> = {
 			KDGameData.AttachedWep = item.name;
 			KinkyDungeonAdvanceTime(1, true, true);
 			KDStunTurns(4, true);
-			KinkyDungeonDrawState = "Game";
+			KDGoToScreen("Game");
 			KDResetAlternateInventoryRender();
 			KDRefreshCharacter.set(KinkyDungeonPlayer, true);
 			KinkyDungeonDressPlayer();

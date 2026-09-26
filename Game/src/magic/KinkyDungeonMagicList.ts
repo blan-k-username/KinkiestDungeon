@@ -2024,6 +2024,7 @@ let KinkyDungeonSpellListEnemies: spell[] = [
 	{enemySpell: true, name: "EnemyEnchantRope", castCondition: "EnemyEnchantRope", color: KDBaseRed, tags: ["rope", "utility", "binding", "offense"], prerequisite: "ApprenticeRope", sfx: "Freeze", school: "Conjure", manacost: 5.5, components: ["Verbal"],
 		level:1, type:"inert", onhit:"aoe", evadeable: false, noblock: true, power: 1.0, range: 2.99, size: 3, lifetime: 1, aoe: 1.5, damage: "arcane", delay: 1,
 		playerEffect: {name: "EnchantRope", power: 1},
+		friendlyfire: true,
 		events: [
 			{type: "EnchantRope", trigger: "bulletHitEnemy", mult: 0.5, power: 1},
 		]},
@@ -2031,6 +2032,7 @@ let KinkyDungeonSpellListEnemies: spell[] = [
 	{enemySpell: true, name: "EnemyEnchantRope2", castCondition: "EnemyEnchantRope2", color: "#92e8c0", tags: ["rope", "utility", "binding", "offense"], prerequisite: "ApprenticeRope", sfx: "Freeze", school: "Conjure", manacost: 5.5, components: ["Verbal"],
 		level:1, type:"inert", onhit:"aoe", evadeable: false, noblock: true, power: 1.0, range: 2.99, size: 3, lifetime: 1, aoe: 1.5, damage: "arcane", delay: 1,
 		playerEffect: {name: "EnchantRope", power: 3},
+		friendlyfire: true,
 		events: [
 			{type: "EnchantRope", trigger: "bulletHitEnemy", mult: 1.0, power: 3},
 		]},
@@ -2038,6 +2040,7 @@ let KinkyDungeonSpellListEnemies: spell[] = [
 	{enemySpell: true, name: "EnemyEnchantRope3", castCondition: "EnemyEnchantRope3", color: "#92e8c0", tags: ["rope", "utility", "binding", "offense"], prerequisite: "ApprenticeRope", sfx: "Freeze", school: "Conjure", manacost: 5.5, components: ["Verbal"],
 		level:1, type:"inert", onhit:"aoe", evadeable: false, noblock: true, power: 1.0, range: 2.99, size: 3, lifetime: 1, aoe: 1.5, damage: "arcane", delay: 1,
 		playerEffect: {name: "EnchantRope", power: 4},
+		friendlyfire: true,
 		events: [
 			{type: "EnchantRope", trigger: "bulletHitEnemy", mult: 1.0, power: 4},
 		]},
@@ -2623,6 +2626,7 @@ let KinkyDungeonSpellListEnemies: spell[] = [
 		hitColor: 0xfffafa, hitLight: 7,
 		noise: 4,
 		faction: "Trap",
+		friendlyfire: true,
 		hitevents: [
 			{type: "BlindAll", trigger: "bulletHitEnemy", time: 9},
 		],
@@ -2789,6 +2793,7 @@ let KinkyDungeonSpellListEnemies: spell[] = [
 
 	{enemySpell: true, name: "Feathers", color: KDBaseWhite, sfx: "Tickle", manacost: 4, components: ["Verbal"], level:1, type:"inert", onhit:"aoe", time: 5, delay: 2, power: 5, range: 6, size: 3, aoe: 1.5, lifetime: 1, damage: "tickle", playerEffect: {name: "Damage"}},
 	{enemySpell: true, name: "Strings", color: "#f5ffe8", sfx: "Struggle", manacost: 4, components: [],
+		noFF: true,
 		level:1, type:"inert", onhit:"aoe", time: 5, delay: 1, power: 3, bind: 7, bindType: "Magic", range: 6, size: 3, aoe: 1.5, lifetime: 1, damage: "chain",
 		playerEffect: {name: "StringedUp", count: 1}},
 	{enemySpell: true, name: "NurseBola", color: "#ff2200", sfx: "Miss", manacost: 5, components: ["Arms"],
@@ -2797,6 +2802,7 @@ let KinkyDungeonSpellListEnemies: spell[] = [
 	{enemySpell: true, name: "NurseSyringe", color: "#ff00ff", minRange: 1.5, sfx: "Miss", manacost: 2, castRange: 6, components: ["Arms"], level:1, speed: 1,
 		type:"bolt", projectileTargeting:true, onhit:"", power: 4, delay: 0, range: 50, damage: "pain", playerEffect: {name: "NurseSyringe", power: 4, type: "poison", time: 8},},
 	{enemySpell: true, name: "RibbonBurst", color: "#ff00ff", sfx: "MagicSlash", manacost: 5, minRange: 0,
+		noFF: true,
 		components: ["Verbal"], level:1, type:"inert", onhit:"aoe", time: 5, delay: 2, power: 4, range: 6, size: 3, aoe: 1.5, lifetime: 1, damage: "chain", playerEffect: {name: "TrapBindings",  text: "KinkyDungeonTrapBindingsRibbons", tags: ["magicRibbons"], power: 3, damage: "chain", count: 2, noGuard: true}},
 	{enemySpell: true, name: "Spores", bulletSpin: 0.1, color: "#6733aa", sfx: "MagicSlash",
 		manacost: 4, components: ["Verbal"], level:1, type:"inert", onhit:"aoe", time: 5, delay: 2, power: 3, range: 6, size: 3, aoe: 1.5, lifetime: 1,
@@ -4058,6 +4064,16 @@ let KDSpecialBondage: Record<string, KDBondage> = {
 		enemyBondageMult: 1.1,
 	},
 	"Cloth": {
+		priority: -5,
+		color: "#c9c2cd",
+		struggleRate: 3,
+		powerStruggleBoost: 1.2,
+		healthStruggleBoost: 1.2,
+		mageStruggleBoost: 1.1,
+		enemyBondageMult: 1.8,
+	},
+	/** Fabric is DEPRECATED DO NOT USE */
+	"Fabric": {
 		priority: -5,
 		color: "#c9c2cd",
 		struggleRate: 3,

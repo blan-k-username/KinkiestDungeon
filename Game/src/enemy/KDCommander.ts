@@ -293,7 +293,7 @@ let KDCommanderOrders: Record<string, KDCommanderOrder> = {
 			return Math.max(0, 100 - 35 * KDAssaulters - (KDEnemyRank(enemy) * 20));
 		},
 		apply: (enemy, _data) => {
-			if (enemy.aware)
+			if (enemy.aware )
 				KinkyDungeonSendDialogue(enemy,
 					TextGet("KinkyDungeonRemindJailChase" + (KDGetEnemyPlayLine(enemy) ? KDGetEnemyPlayLine(enemy) : "") + "CommandAssault", KDGetGenericDialogueParams(KDPlayer(), enemy))
 						.replace("EnemyName", TextGet("Name" + enemy.Enemy.name)), KDGetColor(enemy),
@@ -327,6 +327,7 @@ let KDCommanderOrders: Record<string, KDCommanderOrder> = {
 			// AI control
 			enemy.gx = KinkyDungeonPlayerEntity.x;
 			enemy.gy = KinkyDungeonPlayerEntity.y;
+			KDUpdateMoveToEntity(enemy);
 		},
 
 		// Global role variables
@@ -374,6 +375,7 @@ let KDCommanderOrders: Record<string, KDCommanderOrder> = {
 				if (target) {
 					enemy.gx = target.x;
 					enemy.gy = target.y;
+					KDUpdateMoveToEntity(enemy);
 				}
 			}
 			KinkyDungeonSetEnemyFlag(enemy, "wander", 5 + Math.round(5 * KDRandom()));
@@ -762,6 +764,7 @@ let KDCommanderOrders: Record<string, KDCommanderOrder> = {
 						} else {
 							enemy.gx = help.x;
 							enemy.gy = help.y;
+							KDUpdateMoveToEntity(enemy);
 						}
 					}
 
@@ -891,6 +894,7 @@ let KDCommanderOrders: Record<string, KDCommanderOrder> = {
 						} else {
 							enemy.gx = help.x;
 							enemy.gy = help.y;
+							KDUpdateMoveToEntity(enemy);
 						}
 					}
 

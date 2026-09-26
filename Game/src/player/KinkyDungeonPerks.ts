@@ -307,6 +307,7 @@ let KinkyDungeonStatsPresets: Record<string, KDPerk> = {
 	//"SearchParty": {category: "Enemies", id: 51, cost: -1},
 	"NoWayOut": {category: "Restraints", id: 52, cost: -1},
 	"TightRestraints": {category: "Restraints", id: 54, cost: -0.5},
+	"StackRestraints": {category: "Restraints", id: "StackRestraints", cost: -0.5},
 	"KinkyPrison":  {category: "Restraints", id: "KinkyPrison", cost: -0.5},
 	"MagicHands": {category: "Restraints", id: "MagicHands", cost: -1.5},
 	"KeepOutfit":  {category: "Restraints", id: "KeepOutfit", cost: 0},
@@ -392,6 +393,7 @@ let KinkyDungeonStatsPresets: Record<string, KDPerk> = {
 
 	"StartCyberDollStorage": {startPriority: 1000, category: "Boss", id: "StartCyberDollStorage", cost: -0.5, locked: true, buff: true, tags: ["start"]},
 	"StartCyberDoll": {startPriority: 7, category: "Boss", id: "StartCyberDoll", cost: -2.5, locked: true, tags: ["start"]},
+	"DollShoppeStart": {startPriority: 7, category: "Boss", id: "DollShoppeStart", cost: -2.5, locked: true, tags: ["start"]},
 
 	"DollmakerVisor": {startPriority: 31, category: "Boss", id: "DollmakerVisor", cost: -1, block: ["DollmakerMask"], locked: true, tags: ["start"]},
 	"DollmakerMask": {startPriority: 31, category: "Boss", id: "DollmakerMask", cost: -1, block: ["DollmakerVisor"], locked: true, tags: ["start"]},
@@ -727,6 +729,8 @@ function KDInitPerks() {
 	}
 	if (!magicHands)
 		KinkyDungeonStatsChoice.delete("MagicHands");
+
+	KinkyDungeonUpdateStats(0);
 }
 
 let KDPerkStart = {
@@ -758,7 +762,9 @@ let KDPerkStart = {
 		if (!KDHasSpell("ZeroResistance")) KDPushSpell(KinkyDungeonFindSpell("ZeroResistance"));
 	},
 	QuakeCollar: () =>{
-		KinkyDungeonAddRestraintIfWeaker(KinkyDungeonGetRestraintByName("QuakeCollar"), 0, true, undefined, false, undefined, undefined, undefined, true);
+		if (!KDAddRestraintItem(KinkyDungeonGetRestraintByName("QuakeCollar"), 1, true, undefined, false, undefined, undefined, undefined, true)) {
+			KinkyDungeonInventoryAddLoose("QuakeCollar");
+		}
 	},
 	WardenBelt: () =>{
 		KinkyDungeonAddRestraintIfWeaker(KinkyDungeonGetRestraintByName("WardenBelt"), 0, true, undefined, false, undefined, undefined, undefined, true);
@@ -1120,13 +1126,13 @@ function KinkyDungeonDrawPerks(NonSelectable: boolean): boolean {
 							unique: true,
 						});
 					if (MouseIn(XX, YY, KDPerksButtonWidth, KDPerksButtonHeight)) {
-						let h = DrawTextFitKDgetHeight(TextGet("KinkyDungeonStatDesc" + (stat[1].id)), 1000, 150, 1500, KDTextWhite, KDTextGray1, undefined, undefined, 110, 1.0, undefined, undefined, undefined, true);
-						console.log(h);
+						let h = RetDrawTextFitKDgetHeight(TextGet("KinkyDungeonStatDesc" + (stat[1].id)), 1000, 150, 1500, KDTextWhite, KDTextGray1, undefined, undefined, 110, 1.0, undefined, undefined, undefined, true);
+						//console.log(h);
 						let bottom = 150 + h / 2
 						let top = 150 - h / 2
 						DrawTextFitKD(TextGet("KinkyDungeonStatCost").replace("AMOUNT",
 							Math.round(KDPERKCOSTMULT * KDGetPerkCost(stat[1])) + ""), 1000, h < 80 ? bottom + 10: top - 15, 1400, KDTextWhite, KDTextGray1);
-						console.log(h < 80 ? bottom + 10: top - 15);
+						//console.log(h < 80 ? bottom + 10: top - 15);
 						tooltip = true;
 					}
 				}

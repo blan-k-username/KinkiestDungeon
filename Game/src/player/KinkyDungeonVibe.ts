@@ -12,14 +12,15 @@ KinkyDungeonPlayerVibratedLocationItemButt,Rear
 KinkyDungeonPlayerVibratedLocationItemBoots,Feet*/
 
 let KDVibeSounds = {
-	"ItemVulva": {sound: "", Audio: null, update: false},
-	"ItemButt": {sound: "", Audio: null, update: false},
-	"ItemNipples": {sound: "", Audio: null, update: false, vol: 0.5},
+	"ItemVulva": {sound: "", Audio: null, update: false, height: 0.8},
+	"ItemVulvaPiercings": {sound: "", Audio: null, update: false, height: 0.7},
+	"ItemButt": {sound: "", Audio: null, update: false, height: 1},
+	"ItemNipples": {sound: "", Audio: null, update: false, vol: 0.5, height: 0.25},
 };
 
 let KDVibeSoundRedirect = {
 	"ItemVulva": "ItemVulva",
-	"ItemVulvaPiercings": "ItemNipples", // TODO add softer piercings sound
+	"ItemVulvaPiercings": "ItemVulvaPiercings", // TODO add softer piercings sound
 	"ItemButt": "ItemButt",
 	"ItemNipplesPiercings": "ItemNipples",
 	"ItemNipples": "ItemNipples",
@@ -29,19 +30,20 @@ let KDVibeSoundRedirect = {
 };
 
 let KDVibeSound = {
-	"ItemVulva": "Vibe1",
+	"ItemVulva": ["Vibe1"],
 	//"ItemVulvaPiercings": "ItemNipples", // TODO add softer piercings sound
-	"ItemButt": "Vibe2",
+	"ItemButt": ["Vibe2"],
 	//"ItemNipplesPiercings": "ItemNipples",
-	"ItemNipples": "Vibe3",
+	"ItemNipples": ["Vibe3"],
+	"ItemVulvaPiercings": ["Vibe3"],
 	//"ItemBreast": "ItemNipples", // TODO add massager sound
 	//"ItemBoots": "ItemNipples", // TODO add foot tickler sound
 };
 
 
 let KDResolutionConfirm = false;
-let KDResolution = 1;
-let KDResolutionList = [1, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0];
+let KDResolution = 2;
+let KDResolutionList = [2.0, 1, 1.2, 1.4, 1.6, 1.8];
 let KDResolutionListIndex = KDResolutionList.length-1;
 
 
@@ -84,7 +86,7 @@ let KDToggles = {
 	StackOutfitItems: false,
 	SpellBook: false,
 	ShowRestraintOnHover: false,
-	BuffSide: true,
+	BuffSide: false,
 	//HiResModel: false,
 	Fullscreen: false,
 	SkipIntro: false,
@@ -92,6 +94,7 @@ let KDToggles = {
 	VibeSounds: true,
 	Music: true,
 	Sound: true,
+	Reverb: true,
 	//HighResDisplacement: false,
 	MobileTextures: CommonIsMobile,
 	//OptRender: false,//!CommonIsMobile, // experimental, for now
@@ -116,6 +119,8 @@ let KDToggles = {
 	ChastityBraOption: false,
 	SimpleColorPicker: true,
 	PaletteColorPicker: false,
+	HSL: true,
+	ForceRGB: false,
 	TransparentUI: false,
 	Center: false,
 	TurnCounter: false,
@@ -150,7 +155,7 @@ let KDToggles = {
 	NoDmgFloaters: false,
 	NoForceGreet: false,
 	StruggleBars: true,
-	ShowJailedNPCSprites: true,
+	ShowJailedNPCSprites: false,
 	ShowPatronNPCSprites: true,
 	ShowServantNPCSprites: false,
 	ShowOtherNPCSprites: false,
@@ -196,12 +201,23 @@ let KDToggles = {
 	FlashingWarning: true,
 	HypnoOverlay: true,
 	WarningSound: true,
+	SoundAutoPathEnd: true,
+	SoundNotification: true,
 	ShowDefensiveStats: true,
+	
+	AutoSprint: true,
+	ArrowWarnings: true,
+	CenteredLog: false,
+	StruggleScroll: !CommonIsMobile,
+	Buttplug: false,
 };
 
 
 
 let KDToggleCategories = {
+	CenteredLog: "UI",
+	StruggleScroll: "UI",
+	ArrowWarnings: "UI",
 	StackOutfitItems: "Clothes",
 	OverrideConsent: "none",
 	FlashingWarning: "UI",
@@ -214,6 +230,7 @@ let KDToggleCategories = {
 	HotbarTooltips: "UI",
 	FastMovePassable: "Controls",
 	FastMoveDoors: "Controls",
+	AutoSprint: "Controls",
 	MMLabels: "UI",
 	RawDP: "UI",
 	Backgrounds: "GFX",
@@ -292,6 +309,8 @@ let KDToggleCategories = {
 	NoOutfitPalette: "none",
 
 	PaletteColorPicker: "none",
+	HSL: "none",
+	ForceRGB: "Clothes",
 
 	IgnoreApplyCharPalette: "none",
 	AlwaysApplyCharPalette: "none",
@@ -303,6 +322,8 @@ let KDToggleCategories = {
 	AutoWaitDelayed: "Controls",
 	
 	WarningSound: "UI",
+	SoundAutoPathEnd: "UI",
+	SoundNotification: "UI",
 	ShowDefensiveStats: "UI",
 };
 
@@ -312,8 +333,35 @@ function KDStopAllVibeSounds(Exceptions?: string[]) {
 		for (let e of Exceptions) {
 			EE.push(KDVibeSoundRedirect[e] ? KDVibeSoundRedirect[e] : e);
 		}
+	else if (KDButtplugEngine) {
+		KDButtplugEngine.stopAll();
+	}
 	for (let loc of Object.entries(KDVibeSounds)) {
 		if (!Exceptions || !EE.includes(loc[0])) {
+			
+			if (Exceptions && KDButtplugEngine)
+				for (let entry of Object.entries(KDButtplugDevices)) {
+					if (!Exceptions || !Exceptions.some((tag) => {
+						return entry[1]["Enabled_" + tag];
+					})) {
+						for (let device of KDButtplugClient.devices) {
+							if (entry[0] == KDGetButtplugDeviceId(device)) {
+								try {
+									if (entry[1].pattern && KDButtplugClient.devices.indexOf(device) >= 0) {
+										KDButtplugEngine.stopByDevice(KDButtplugClient.devices.indexOf(device));
+										entry[1].pattern = "";
+									}
+									break;
+								} catch (e) {
+									if (e) {
+									console.error(JSON.stringify(e.issues, null, 2));
+								}
+								throw e;
+								}
+							}
+						}
+					}
+				}
 			if (!loc[1].update) {
 				let audio = loc[1];
 				if (audio.sound) audio.sound = "";
@@ -327,7 +375,95 @@ function KDStopAllVibeSounds(Exceptions?: string[]) {
 	}
 }
 
+
+function KDStopButtplug(Location: string, Sound: string) {
+	if (!KDButtplugEngine) return;
+	for (let entry of Object.entries(KDButtplugDevices)) {
+		if (!entry[1]) continue;
+		if (!entry[1]["Enabled_" + Location]) continue;
+		for (let device of KDButtplugClient.devices) {
+			if (!entry[1]) continue;
+			if (entry[0] == KDGetButtplugDeviceId(device)) {
+				try {
+					if (entry[1].pattern == Sound && KDButtplugClient.devices.indexOf(device) >= 0) {
+						KDButtplugEngine.stopByDevice(KDButtplugClient.devices.indexOf(device));
+						entry[1].pattern = "";
+					}
+					break;
+				} catch (e) {
+					if (e) {
+					console.error(JSON.stringify(e.issues, null, 2));
+				}
+				throw e;
+				}
+			}
+		}
+	}
+}
+
+function KDButtplugEngineUpdate(Location: string, Sound: string) {
+	let pattern = KDVibeSoundsPatternMap[Sound] || KDVibeSoundsPatternMap["Default"];
+
+	let Locations = [Location];
+
+	if (KDGameData.CurrentVibration?.location) {
+		for (let loc of KDGameData.CurrentVibration?.location) {
+			if (!Locations.includes(loc)) {
+				Locations.push(loc);
+			}
+		}
+	}
+	if (KDGameData.CurrentVibration?.VibeModifiers) {
+		for (let mod of KDGameData.CurrentVibration.VibeModifiers) {
+			if (mod.location)
+				if (!Locations.includes(mod.location)) {
+					Locations.push(mod.location);
+				}
+		}
+	}
+
+	for (let Location of Locations) {
+		if (KDButtplugEngine && KDToggles.Buttplug) {
+			for (let entry of Object.entries(KDButtplugDevices)) {
+				if (entry[1]["Enabled_" + Location]) {
+					for (let device of KDButtplugClient.devices) {
+						if (!entry[1]) continue;
+						if (entry[0] == KDGetButtplugDeviceId(device)) {
+							try {
+								if (Sound) {
+									if (entry[1].pattern != Sound) {
+										let patt: ButtplugPatterns.PatternDescriptor = Object.assign({}, pattern);
+										if (device.features.outputs.length < 2) {
+											//@ts-ignore
+											patt.tracks = [patt.tracks[0]];
+										}
+										KDButtplugEngine.play(device, patt);
+										entry[1].pattern = Sound
+
+									}
+								} else if (entry[1].pattern && KDButtplugClient.devices.indexOf(device) >= 0) {
+									KDButtplugEngine.stopByDevice(KDButtplugClient.devices.indexOf(device));
+									entry[1].pattern = "";
+								}
+								break;
+							} catch (e) {
+								if (e) {
+								console.error(JSON.stringify(e.issues, null, 2));
+							}
+							throw e;
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	
+}
 function KDUpdateVibeSound(Location: string, Sound: string, Volume: number) {
+	KDButtplugEngineUpdate(Location, Sound);
+
+
 	let prev = "";
 	if (KDVibeSounds[Location]) {
 		prev = KDVibeSounds[Location].sound;
@@ -336,27 +472,32 @@ function KDUpdateVibeSound(Location: string, Sound: string, Volume: number) {
 		KDVibeSounds[Location].sound = Sound;
 	else return;
 
-	if (prev != Sound) {
+	if (prev != Sound || KDVibeSounds[Location].Audio?.ended) {
 		if (prev && KDVibeSounds[Location].Audio && !KDVibeSounds[Location].update) {
 			// Stop the previous sound
 			KDVibeSounds[Location].Audio.pause();
 			KDVibeSounds[Location].Audio.currentTime = 0;
 			//KDVibeSounds[Location].update = true;
 		}
-		if (Sound && !KDVibeSounds[Location].update) {
+		if (Sound && (!KDVibeSounds[Location].update || KDVibeSounds[Location].Audio?.ended)) {
 			// Start the new sound
-			let audio = GetNewAudio();
+			let audio = (KDVibeSounds[Location].Audio && !KDVibeSounds[Location].Audio?.ended) ? KDVibeSounds[Location].Audio : GetNewAudio();
 			let vol = (Volume != undefined ? Volume : 1.0);
 			if (KDVibeSounds[Location].vol) vol *= KDVibeSounds[Location].vol;
 			KDVibeSounds[Location].Audio = audio;
 			KDVibeSounds[Location].update = true;
-			if (KDPatched) {
-				audio.crossOrigin = "Anonymous";
-				audio.src = Sound;
-			} else
-				audio.src = KDModFiles[Sound] || Sound;
+			KDVibeSounds[Location].Audio.vibe = KDVibeSounds[Location].height * ((
+				KinkyDungeonDrawState == "Game" && KinkyDungeonState == "Game"
+			) ? 1.0 : 0.7);
+			KDVibeSounds[Location].Audio.location = {x: 0, y: 10 * KDVibeSounds[Location].height};
+			
+			audio.src = KDModFiles[Sound] || Sound;
 			audio.volume = Math.min(vol, 1);
-			audio.loop = true;
+			audio.loop = !KDToggles.Buttplug; // If buttplug is on, we need sync
+			audio.addEventListener('ended', () => {
+				KDStopButtplug(Location, Sound);
+			})
+
 			audio.play();
 		}
 	}
@@ -378,7 +519,9 @@ function KDUpdateVibeSounds() {
 	let vibe = KDGameData.CurrentVibration;
 	let sound = KDGameData.CurrentVibration?.sound || "Vibe1";
 	if (vibe && KinkyDungeonState == "Game" && KDSoundEnabled()) {
-		let globalVolume = KDToggles.VibeSounds ? KDVibeVolume * (KinkyDungeonDrawState == "Game" ? 1 : 0.5) : 0;
+		let globalVolume = KDToggles.VibeSounds ? KDVibeVolume * (
+			KDWebAudio ? 1 : (KinkyDungeonDrawState == "Game" ? 0.45 : 0.75)
+		) : 0;
 		let locations = KDSumVibeLocations();
 		KDStopAllVibeSounds(locations);
 
@@ -409,13 +552,20 @@ function KDUpdateVibeSounds() {
 			if (KinkyDungeonVibeLevel <= 0) {
 				power = "Off";
 			}
+			let Location = KDVibeSoundRedirect[location] ? KDVibeSoundRedirect[location] : "ItemVulva";
 			if (power != "Off") {
+				if (KDVibeSounds[Location]?.Audio) {
+					KDVibeSounds[Location].Audio.vibe = KDVibeSounds[Location].height * (
+						(KinkyDungeonState == "Game"
+							&& KinkyDungeonDrawState == "Game"
+						) ? 1.0 : 0.7);
+				}
 				if (vibe.location.length > 0 && vibe.location[0] == location) {
 					//let finalSound = sound;//(KDVibeSoundRedirect[location] && KDVibeSound[KDVibeSoundRedirect[location]]) ? KDVibeSound[KDVibeSoundRedirect[location]] : "Vibe1";
-					KDUpdateVibeSound(KDVibeSoundRedirect[location] ? KDVibeSoundRedirect[location] : "ItemVulva", KinkyDungeonRootDirectory + `Audio/${sound}_${power}.ogg`, globalVolume);
+					KDUpdateVibeSound(Location, KinkyDungeonRootDirectory + `Audio/${sound}_${power}.ogg`, globalVolume);
 				}
 			} else
-				KDUpdateVibeSound(KDVibeSoundRedirect[location] ? KDVibeSoundRedirect[location] : "ItemVulva", "", globalVolume);
+				KDUpdateVibeSound(Location, "", globalVolume);
 		}
 
 	} else {
@@ -459,10 +609,20 @@ function KDGetVibeLocation(item: item): string[] {
 	return groups;
 }
 
-function KDRandomizeVibeSound() {
+function KDRandomizeVibeSound(locations?: string[]) {
+	let optionSounds = locations ? [] : ["Vibe1", "Vibe2", "Vibe3"];
+	for (let entry of Object.entries(KDVibeSound)) {
+		if (locations.includes(entry[0])) {
+			optionSounds.push(...entry[1]);
+		}
+	}
+
+	if (locations.length == 0) {
+		locations.push("Vibe2");
+	}
 	let data = {
 		lastVibeSound: KDGameData.CurrentVibration?.sound || "Vibe1",
-		currentVibeSound: "Vibe" + Math.ceil(KDRandom() * 3),
+		currentVibeSound: CommonRandomItemFromList(null, optionSounds),
 	};
 	KinkyDungeonSendEvent("vibeSound", data);
 	return data.currentVibeSound;
@@ -503,7 +663,7 @@ function KinkyDungeonStartVibration (
 	denialChanceLikely?:    number,
 	tickEdgeAtMaxArousal?:  boolean,
 	vibeMods?:              VibeMod[]
-)
+): KinkyVibration
 {
 	if (KDGameData.CurrentVibration) {
 		KinkyDungeonSetFlag("VibeContinued", 3);
@@ -512,7 +672,7 @@ function KinkyDungeonStartVibration (
 		KinkyDungeonSetFlag("VibeStarted", 8);
 	}
 	KDGameData.CurrentVibration = {
-		sound: KDRandomizeVibeSound(),
+		sound: KDRandomizeVibeSound(locations),
 		source: source,
 		name: name,
 		location: locations,
@@ -533,8 +693,29 @@ function KinkyDungeonStartVibration (
 		VibeModifiers: vibeMods ? vibeMods : [],
 	};
 
+	
+	if (KDGameData.CurrentVibration && KDXtoysWebhook && KDToggles.Buttplug) {
+		KDXtoys_Send('vibestart', {
+			amount: KDGameData.CurrentVibration.intensity + "",
+			front: KDGameData.CurrentVibration.location?.some(loc => {
+				return KDVibeSoundRedirect[loc] == "ItemVulva"
+			}) ? "1" : undefined,
+			panties: KDGameData.CurrentVibration.location?.some(loc => {
+				return KDVibeSoundRedirect[loc] == "ItemVulvaPiercings"
+			}) ? "1" : undefined,
+			nipples: KDGameData.CurrentVibration.location?.some(loc => {
+				return KDVibeSoundRedirect[loc] == "ItemNipples"
+			}) ? "1" : undefined,
+			rear: KDGameData.CurrentVibration.location?.some(loc => {
+				return KDVibeSoundRedirect[loc] == "ItemButt"
+			}) ? "1" : undefined,
+		});
+	}
+
 	if (!KDGameData.TimeSinceLastVibeStart) KDGameData.TimeSinceLastVibeStart = {};
 	KDGameData.TimeSinceLastVibeStart[name] = 0;
+
+	return KDGameData.CurrentVibration;
 }
 
 /**
@@ -593,7 +774,7 @@ function KinkyDungeonAddVibeModifier (
 		}
 		KDGameData.CurrentVibration.VibeModifiers.push({
 			source: source,
-			sound: KDRandomizeVibeSound(),
+			sound: KDRandomizeVibeSound([location]),
 			name: name,
 			location: location,
 			intensityMod: intensityMod,
@@ -686,6 +867,23 @@ function KinkyDungeonCalculateVibeLevel(delta: number) {
 		if (cease) {
 			if (!KDGameData.TimeSinceLastVibeEnd) KDGameData.TimeSinceLastVibeEnd = {};
 			KDGameData.TimeSinceLastVibeEnd[KDGameData.CurrentVibration.name] = 0;
+			if (KDGameData.CurrentVibration && KDXtoysWebhook && KDToggles.Buttplug) {
+				KDXtoys_Send('vibestop', {
+					amount: KDGameData.CurrentVibration.intensity + "",
+					front: KDGameData.CurrentVibration.location?.some(loc => {
+						return KDVibeSoundRedirect[loc] == "ItemVulva"
+					}) ? "1" : undefined,
+					panties: KDGameData.CurrentVibration.location?.some(loc => {
+						return KDVibeSoundRedirect[loc] == "ItemVulvaPiercings"
+					}) ? "1" : undefined,
+					nipples: KDGameData.CurrentVibration.location?.some(loc => {
+						return KDVibeSoundRedirect[loc] == "ItemNipples"
+					}) ? "1" : undefined,
+					rear: KDGameData.CurrentVibration.location?.some(loc => {
+						return KDVibeSoundRedirect[loc] == "ItemButt"
+					}) ? "1" : undefined,
+				});
+			}
 			KDGameData.CurrentVibration = null;
 		}
 	}
@@ -773,6 +971,24 @@ function KinkyDungeonEndVibration() {
 		} else {
 			if (!KDGameData.TimeSinceLastVibeEnd) KDGameData.TimeSinceLastVibeEnd = {};
 			KDGameData.TimeSinceLastVibeEnd[KDGameData.CurrentVibration.name] = 0;
+			
+			if (KDGameData.CurrentVibration && KDXtoysWebhook && KDToggles.Buttplug) {
+				KDXtoys_Send('vibestop', {
+					amount: KDGameData.CurrentVibration.intensity + "",
+					front: KDGameData.CurrentVibration.location?.some(loc => {
+						return KDVibeSoundRedirect[loc] == "ItemVulva"
+					}) ? "1" : undefined,
+					panties: KDGameData.CurrentVibration.location?.some(loc => {
+						return KDVibeSoundRedirect[loc] == "ItemVulvaPiercings"
+					}) ? "1" : undefined,
+					nipples: KDGameData.CurrentVibration.location?.some(loc => {
+						return KDVibeSoundRedirect[loc] == "ItemNipples"
+					}) ? "1" : undefined,
+					rear: KDGameData.CurrentVibration.location?.some(loc => {
+						return KDVibeSoundRedirect[loc] == "ItemButt"
+					}) ? "1" : undefined,
+				});
+			}
 			KDGameData.CurrentVibration = null;
 		}
 	}

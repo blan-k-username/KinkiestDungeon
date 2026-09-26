@@ -1,8 +1,13 @@
 "use strict";
+
 let KinkyDungeonKilledEnemy = null;
 let KinkyDungeonAlert = 0;
 
+let KDBulletWarningThickness = 3;
+
 let KDMaxPreviousWeapon = 4;
+let KDBulletWarningGFX = new PIXI.Graphics();
+kdwarningboardOver.addChild(KDBulletWarningGFX)
 
 let KDMINDAMAGENOISE = 2;
 let KDDMGSOUNDMULT = 1.5;
@@ -73,7 +78,7 @@ let KDFightParams = {
 let KinkyDungeonOpenObjects = KinkyDungeonTransparentObjects; // Objects bullets can pass thru
 let KinkyDungeonMeleeDamageTypes = ["unarmed", "crush", "slash", "pierce", "grope", "pain", "chain", "tickle"];
 let KinkyDungeonTeaseDamageTypes = ["tickle", "charm", "grope", "pain", "plush"];
-let KinkyDungeonPacifistDamageTypes = ["tickle", "charm", "grope", "pain", "chain", "glue", "grope", "soul"];
+let KinkyDungeonPacifistDamageTypes = ["tickle", "charm", "grope", "pain", "chain", "glue", "soap", "soul", "plush"];
 let KinkyDungeonStunDamageTypes = ["fire", "electric", "stun"];
 let KinkyDungeonBindDamageTypes = ["chain", "glue", "holy"];
 let KinkyDungeonFreezeDamageTypes = ["ice"];
@@ -582,7 +587,7 @@ function KDPlayerBlockPenalty() {
 function KDRestraintBlockPenalty() {
 	if (KinkyDungeonFlags.get("ZeroResistance")) return 1000;
 	let RestraintBlockPenalty = .1 * KinkyDungeonSlowLevel;
-	if (KDGameData.KneelTurns > 0) RestraintBlockPenalty = Math.max(RestraintBlockPenalty, 0.5);
+	if (KDIsOnKnees(KDPlayer())) RestraintBlockPenalty = Math.max(RestraintBlockPenalty, 0.5);
 	if (KinkyDungeonIsArmsBound(false, true)) RestraintBlockPenalty += .25;
 	if (KinkyDungeonStatFreeze) RestraintBlockPenalty += 0.8;
 	if (KinkyDungeonStatBlind) RestraintBlockPenalty += 0.33;
@@ -1051,7 +1056,7 @@ function KDDamageEnemy(Enemy: entity, Damage: damageInfo, Ranged: boolean, NoMsg
 			else if (buffreduction && predata.dmgDealt > 0) {
 				predata.dmgDealt = Math.max(predata.dmgDealt - buffreduction, 0);
 				KinkyDungeonTickBuffTag(Enemy, "damageTaken", 1);
-				KinkyDungeonPlaySound(KinkyDungeonRootDirectory + "Audio/Shield.ogg");
+				KinkyDungeonPlaySoundLocation(KinkyDungeonRootDirectory + "Audio/Shield.ogg", KDPlayer(), Enemy);
 			}
 
 			if (!predata.blocked)
@@ -1069,8 +1074,12 @@ function KDDamageEnemy(Enemy: entity, Damage: damageInfo, Ranged: boolean, NoMsg
 
 			KinkyDungeonSendEvent("duringDamageEnemy", predata, undefined, predata.forceWeapon);
 
-			if (Spell && Spell.hitsfx) KinkyDungeonPlaySound(KinkyDungeonRootDirectory + "Audio/" + Spell.hitsfx + ".ogg");
-			else if (!(Spell && Spell.hitsfx) && predata.dmgDealt > 0 && bullet) KinkyDungeonPlaySound(KinkyDungeonRootDirectory + "Audio/DealDamage.ogg");
+			if (Spell && Spell.hitsfx) KinkyDungeonPlaySoundLocation(KinkyDungeonRootDirectory + "Audio/" + Spell.hitsfx + ".ogg",
+				KDPlayer(), Enemy
+			);
+			else if (!(Spell && Spell.hitsfx) && predata.dmgDealt > 0 && bullet)
+				KinkyDungeonPlaySoundLocation(KinkyDungeonRootDirectory + "Audio/DealDamage.ogg",
+				KDPlayer(), Enemy);
 			if (!predata.blocked && !KinkyDungeonIgnoreBlockTypes.includes(predata.type) && predata.dmgDealt >= 1 && !predata.noblock && Enemy.blocks >= 1 && KDCanBlock(Enemy)) {
 				let blockCount = 1;
 				Enemy.blocks -= 1;
@@ -1639,6 +1648,8 @@ function KinkyDungeonDisarm(Enemy: entity, suff?: string): boolean {
  * @param [forceWeapon] - for events
  */
 function KinkyDungeonAttackEnemy(Enemy: entity, Damage: damageInfo, chance?: number, bullet?: any, weapon?: weapon, forceWeapon?: item): boolean {
+
+	
 	let disarm = false;
 	if ((Damage && !Damage.nodisarm) && Enemy.Enemy && Enemy.Enemy.disarm && Enemy.disarmflag > 0) {
 		if (Enemy.stun > 0 || Enemy.freeze > 0 || Enemy.blind > 0 || Enemy.teleporting > 0 || (Enemy.playWithPlayer && !Enemy.hostile)) Enemy.disarmflag = 0;
@@ -1669,8 +1680,22 @@ function KinkyDungeonAttackEnemy(Enemy: entity, Damage: damageInfo, chance?: num
 		buffdmg: buffdmg,
 		vulnConsumed: Enemy.vulnerable > 0,
 		critical: false,
+		msg: "",
+		allowed: true,
+		allowedPri: 0,
 		vulnerable: (Enemy.vulnerable || (KDHostile(Enemy) && !Enemy.aware)) && dmg && !dmg.novulnerable && (!Enemy.Enemy.tags || !Enemy.Enemy.tags.nonvulnerable),
 	};
+
+	
+	KinkyDungeonSendEvent("canAttack", predata, undefined, predata.forceWeapon);
+
+	if (!predata.allowed) {
+		KinkyDungeonSendActionMessage(10, TextGet(predata.msg,
+			KDGetGenericDialogueParams(KDPlayer(), predata.enemy)),
+			KDBaseRed, 2);
+		return false;
+	}
+
 	KinkyDungeonSendEvent("beforePlayerAttack", predata, undefined, predata.forceWeapon);
 
 	if (predata.buffdmg) dmg.damage = Math.max(0, dmg.damage + predata.buffdmg);
@@ -1777,8 +1802,37 @@ function KinkyDungeonAttackEnemy(Enemy: entity, Damage: damageInfo, chance?: num
 	return predata.eva;
 }
 
-// TODO: Type defininition
-let KDBulletWarnings: Record<string, any>[] = [];
+function KDCanAttackEnemy(enemy: entity, player: entity, bullet?: any, weapon?: weapon, forceWeapon?: item) {
+
+
+	let buffdmg = KinkyDungeonGetBuffedStat(KinkyDungeonPlayerBuffs, "AttackDmg");
+	let channel = KinkyDungeonPlayerDamage?.channel || 0;
+	let slow = KinkyDungeonPlayerDamage?.channelslow || 0;
+
+	let predata = {
+		weapon: weapon,
+		forceWeapon: forceWeapon,
+		bullet: bullet,
+		channel: channel,
+		slow: slow,
+		targetX: enemy.x,
+		targetY: enemy.y,
+		enemy: enemy,
+		buffdmg: buffdmg,
+		vulnConsumed: enemy.vulnerable > 0,
+		critical: false,
+		msg: "",
+		allowed: true,
+		allowedPri: 0,
+		vulnerable: (enemy.vulnerable || (KDHostile(enemy) && !enemy.aware)) && (!enemy.Enemy.tags || !enemy.Enemy.tags.nonvulnerable),
+		query: true,
+	};
+	
+	KinkyDungeonSendEvent("canAttack", predata, undefined, predata.forceWeapon);
+
+	return predata.allowed;
+}
+
 let KDUniqueBulletHits = new Map();
 
 
@@ -1879,13 +1933,14 @@ function KinkyDungeonUpdateBullets(delta: number, Allied?: boolean): void {
 
 					let res = KinkyDungeonCastSpell(xx, yy, castingSpell, undefined, undefined, b);
 					if (res.data?.bulletfired) res.data.bulletfired.collisionUpdate = true;
-					if (b.bullet.cast.sfx) KinkyDungeonPlaySound(KinkyDungeonRootDirectory + "Audio/" + b.bullet.cast.sfx + ".ogg");
+					if (b.bullet.cast.sfx) KinkyDungeonPlaySoundLocation(KinkyDungeonRootDirectory + "Audio/" + b.bullet.cast.sfx + ".ogg", KDPlayer(),
+					{x: xx, y: yy});
 				}
 			}
 		}
 	}
 	if (Allied && delta > 0) {
-		KDBulletWarnings = [];
+		KDGameData.BulletWarnings = [];
 	}
 	for (let E = 0; E < KDMapData.Bullets.length; E++) {
 		let b = KDMapData.Bullets[E];
@@ -2044,11 +2099,29 @@ function KinkyDungeonUpdateBullets(delta: number, Allied?: boolean): void {
 					}
 					if ((!(outOfTime || outOfRange) || (b.bullet.spell?.alwaysWarn)) && checkCollision) {
 						let rad = b.bullet.aoe ? b.bullet.aoe : ((b.bullet.spell && b.bullet.spell.aoe && b.bullet.name == b.bullet.spell.name) ? b.bullet.spell.aoe : 0);
+						if (show) {
+							if (b.vx || b.vy) {
+								let arrowLen = KDistEuclidean(b.vx, b.vy);
+								if (arrowLen >= 0.5) {
+									KDGameData.BulletWarnings.push({
+										x_orig: b.xx,
+										y_orig: b.yy,
+										arrowLen: arrowLen,
+										vx: b.vx,
+										vy: b.vy,
+										xx: b.xx,
+										yy: b.yy,
+										color: b.bullet.spell?.color || KDBaseRed,
+									});
+									
+								}
+							}
+						}
 						for (let xx = bx - Math.floor(rad); xx <= bx + Math.ceil(rad); xx++) {
 							for (let yy = by - Math.floor(rad); yy <= by + Math.ceil(rad); yy++) {
 								if (AOECondition(bx, by, xx, yy, rad, KDBulletAoEMod(b))) {
-									if (show && !KDBulletWarnings.some((w) => {return w.x == xx && w.y == yy;}))
-										KDBulletWarnings.push({
+									if (show && !KDGameData.BulletWarnings.some((w) => {return w.x == xx && w.y == yy;}))
+										KDGameData.BulletWarnings.push({
 											x: xx,
 											y: yy,
 											x_orig: b.xx,
@@ -2171,7 +2244,7 @@ function KinkyDungeonParseExtraWarningTiles(delta: number) {
 			KinkyDungeonExtraWarningTiles[i].delay -= delta;
 		}
 		else {
-			KDBulletWarnings.push(Object.assign({}, KinkyDungeonExtraWarningTiles[i].warning));
+			KDGameData.BulletWarnings.push(Object.assign({}, KinkyDungeonExtraWarningTiles[i].warning));
 		}
 		KinkyDungeonExtraWarningTiles[i].duration -= delta;
 		if (KinkyDungeonExtraWarningTiles[i].duration <= 0) {
@@ -2317,7 +2390,7 @@ function KinkyDungeonBulletHit(b: KDBullet, born: number, outOfTime?: boolean, o
 			}
 		};
 		if (data.noise) {
-			KinkyDungeonMakeNoise(data.noise, b.x, b.y);
+			KinkyDungeonMakeNoise(data.noise, b.x, b.y, false, false, true);
 		}
 		KDMapData.Bullets.push(newB);
 		KinkyDungeonUpdateSingleBulletVisual(newB, false, d);
@@ -2353,7 +2426,7 @@ function KinkyDungeonBulletHit(b: KDBullet, born: number, outOfTime?: boolean, o
 			KinkyDungeonUpdateSingleBulletVisual(newB, false, d);
 		}
 		if (data.noise) {
-			KinkyDungeonMakeNoise(data.noise, b.x, b.y);
+			KinkyDungeonMakeNoise(data.noise, b.x, b.y, false, false, true);
 		}
 		if (b.bullet.spell) {
 			let aoe = b.bullet.spell.aoe || 0.5;
@@ -2437,7 +2510,7 @@ function KinkyDungeonBulletHit(b: KDBullet, born: number, outOfTime?: boolean, o
 		KinkyDungeonUpdateSingleBulletVisual(newB, false, d);
 
 		if (data.noise) {
-			KinkyDungeonMakeNoise(data.noise, b.x, b.y);
+			KinkyDungeonMakeNoise(data.noise, b.x, b.y, false, false, true);
 		}
 
 		if (b.bullet.effectTile) {
@@ -2448,7 +2521,7 @@ function KinkyDungeonBulletHit(b: KDBullet, born: number, outOfTime?: boolean, o
 			if (!(b.bullet.spell && (b.bullet.spell.piercing || (b.bullet.spell.pierceEnemies && KinkyDungeonTransparentObjects.includes(KinkyDungeonMapGet(b.x, b.y)))))) {
 				let ind = KDMapData.Bullets.indexOf(b);
 				if (data.noise) {
-					KinkyDungeonMakeNoise(data.noise, b.x, b.y);
+					KinkyDungeonMakeNoise(data.noise, b.x, b.y, false, false, true);
 				}
 				if (ind > -1)
 					KDMapData.Bullets.splice(ind, 1);
@@ -2555,7 +2628,7 @@ function KinkyDungeonBulletHit(b: KDBullet, born: number, outOfTime?: boolean, o
 					KDMapData.Bullets.push(newB);
 
 					if (data.noise) {
-						KinkyDungeonMakeNoise(data.noise, b.x, b.y);
+						KinkyDungeonMakeNoise(data.noise, b.x, b.y, false, false, true);
 					}
 					KinkyDungeonUpdateSingleBulletVisual(newB, false, dd);
 				}
@@ -2615,7 +2688,7 @@ function KinkyDungeonBulletHit(b: KDBullet, born: number, outOfTime?: boolean, o
 		KinkyDungeonUpdateSingleBulletVisual(newB, false);
 
 		if (data.noise) {
-			KinkyDungeonMakeNoise(data.noise, b.x, b.y);
+			KinkyDungeonMakeNoise(data.noise, b.x, b.y, false, false, true);
 		}
 
 		if (b.bullet.spell && (b.bullet.spell.playerEffect || b.bullet.playerEffect) && AOECondition(b.x, b.y, KinkyDungeonPlayerEntity.x, KinkyDungeonPlayerEntity.y, b.bullet.spell.aoe, KDBulletAoEMod(b))) {
@@ -2647,7 +2720,7 @@ function KinkyDungeonBulletHit(b: KDBullet, born: number, outOfTime?: boolean, o
 		let cast = b.bullet.spell.spellcasthit;
 		let rad = b.bullet.spell.aoe || 0;
 		if (data.noise) {
-			KinkyDungeonMakeNoise(data.noise, b.x, b.y);
+			KinkyDungeonMakeNoise(data.noise, b.x, b.y, false, false, true);
 		}
 		if (cast.countPerCast) {
 			for (let cc = 0; cc < cast.countPerCast; cc++) {
@@ -2728,7 +2801,7 @@ function KinkyDungeonBulletHit(b: KDBullet, born: number, outOfTime?: boolean, o
 			KDMapData.Bullets.push(newB);
 			KinkyDungeonUpdateSingleBulletVisual(newB, false);
 			if (data.noise) {
-				KinkyDungeonMakeNoise(data.noise, b.x, b.y);
+				KinkyDungeonMakeNoise(data.noise, b.x, b.y, false, false, true);
 			}
 
 			if (KinkyDungeonEnemyAt(b.x, b.y)) {
@@ -2788,7 +2861,7 @@ function KinkyDungeonBulletHit(b: KDBullet, born: number, outOfTime?: boolean, o
 		}
 	} else if (b.bullet.hit == "summon") {
 		if (data.noise) {
-			KinkyDungeonMakeNoise(data.noise, b.x, b.y);
+			KinkyDungeonMakeNoise(data.noise, b.x, b.y, false, false, true);
 		}
 		if (b.bullet.effectTile) {
 			KDCreateAoEEffectTiles(b.x, b.y, b.bullet.effectTile, b.bullet.effectTileDurationMod, (b.bullet.spell?.effectTileAoE || b.bullet.spell?.aoe || 0.5), undefined, b.bullet.spell?.effectTileDensity, KDBulletAoEMod(b));
@@ -3364,8 +3437,13 @@ let KDWarningFlashPerDelta = 250; // ms
 let KDWarningFlashBPerDelta = 90; // ms
 let KDWarningFlashSpeed = 1.5;
 
+let KDBulletArrowWarningStart = 0.6;
+let KDBulletArrowWarningStep = 0.25;
+let KDBulletWarningAlpha = 0.05;
+let KDBulletWarningAroowAngle = 30*180/Math.PI;
 
 function KinkyDungeonDrawFight(_canvasOffsetX: number, _canvasOffsetY: number, CamX: number, CamY: number) {
+	KDBulletWarningGFX.clear();
 	let delta = CommonTime() - KDLastFightDelta;
 	KDLastFightDelta = CommonTime();
 	for (let damage of KDDamageQueue) {
@@ -3383,7 +3461,66 @@ function KinkyDungeonDrawFight(_canvasOffsetX: number, _canvasOffsetY: number, C
 	let flashindex = 0;
 
 	if (KDToggles.ForceWarnings || KDMouseInPlayableArea() || KDMousePlayableAreaStatusFade)
-		for (let t of KDBulletWarnings) {
+		for (let t of KDGameData.BulletWarnings) {
+			if (t.arrowLen) {
+				if (!KDToggles.ArrowWarnings) continue;
+				let arrowLen = t.arrowLen;
+				let vx = t.vx;
+				let vy = t.vy;
+				let visual_x = t.xx;
+				let visual_y = t.yy;
+				KDBulletWarningGFX.lineStyle({
+					width: KDBulletWarningThickness,
+					color: t.color,
+					alpha: KDBulletWarningAlpha,
+					cap: PIXI.LINE_CAP.ROUND,
+					join: PIXI.LINE_JOIN.ROUND,
+					miterLimit: KDFastPathWidth});
+				let dd = KDBulletArrowWarningStep;
+				for (let d = KDBulletArrowWarningStart; d <= arrowLen; d += dd) {
+					if (d + dd > arrowLen) {
+						let x2 = visual_x + 0.5 + (d+dd*.8) * vx / arrowLen;
+						let y2 = visual_y + 0.5 + (d+dd*.8) * vy / arrowLen;
+						let x4 = x2;
+						let y4 = y2;
+
+						let x1 = x2;
+						let y1 = y2;
+
+						let x3 = x4;
+						let y3 = y4;
+
+						// now we angle things
+						let angle = Math.atan2(vy, vx);
+						let a1 = angle + KDBulletWarningAroowAngle;
+						let a2 = angle - KDBulletWarningAroowAngle;
+						x4 += dd * 0.1 * (Math.cos(a2))
+						y4 += dd * 0.1 * (Math.sin(a2))
+						x2 += dd * 0.1 * (Math.cos(a1))
+						y2 += dd * 0.1 * (Math.sin(a1))
+						x3 += dd * 0.5 * (Math.cos(a2))
+						y3 += dd * 0.5 * (Math.sin(a2))
+						x1 += dd * 0.5 * (Math.cos(a1))
+						y1 += dd * 0.5 * (Math.sin(a1))
+
+						KDBulletWarningGFX.moveTo((x1 - CamX)*KinkyDungeonGridSizeDisplay, (y1 - CamY)*KinkyDungeonGridSizeDisplay)
+						KDBulletWarningGFX.lineTo((x2 - CamX)*KinkyDungeonGridSizeDisplay, (y2 - CamY)*KinkyDungeonGridSizeDisplay)
+
+						KDBulletWarningGFX.moveTo((x3 - CamX)*KinkyDungeonGridSizeDisplay, (y3 - CamY)*KinkyDungeonGridSizeDisplay)
+						KDBulletWarningGFX.lineTo((x4 - CamX)*KinkyDungeonGridSizeDisplay, (y4 - CamY)*KinkyDungeonGridSizeDisplay)
+					} else {
+						let x1 = visual_x + 0.5 + d * vx / arrowLen;
+						let y1 = visual_y + 0.5 + d * vy / arrowLen;
+						KDBulletWarningGFX.moveTo((x1 - CamX)*KinkyDungeonGridSizeDisplay, (y1 - CamY)*KinkyDungeonGridSizeDisplay)
+						
+						let x2 = visual_x + 0.5 + (d+dd*0.5) * vx / arrowLen;
+						let y2 = visual_y + 0.5 + (d+dd*0.5) * vy / arrowLen;
+						KDBulletWarningGFX.lineTo((x2 - CamX)*KinkyDungeonGridSizeDisplay, (y2 - CamY)*KinkyDungeonGridSizeDisplay)
+					}
+
+				}
+				continue;
+			}
 	
 			let alphamult = KDToggles.FlashingWarning ? Math.cos(
 				2 * Math.PI * ((flashindex++*KDWarningFlashBPerDelta + KDWarningFlashSpeed * performance.now() * (KDAnimSpeed)) % 2000 / 2000)) * 0.39 + 0.6 : 1;
@@ -3887,7 +4024,7 @@ function KDBindEnemyWithTags(id: number, tags: string[],
 	allowVariants: boolean = true, maxAdded: number = 10, faction: string = "", overrideWill?: number): string[] {
 	let entity = KDGetGlobalEntity(id);
 	let addedItems: string[] = [];
-	if (entity) {
+	if (entity && KDCanBind(entity)) {
 		let maxBinding = (entity.boundLevel || 0) + amount;
 		let expected = KDGetExpectedBondageAmountTotal(id, entity);
 		let regenEligible = () => {

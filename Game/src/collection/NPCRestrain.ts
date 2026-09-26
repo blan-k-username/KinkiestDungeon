@@ -77,13 +77,12 @@ function KDDrawNPCRestrain(npcID: number, restraints: Record<string, NPCRestrain
 				let groups = slot.allowedGroups;
 				KDNPCRestraintBindingData[sgroup.id] = [];
 				let filteredInventory = KinkyDungeonFilterInventory(filter, undefined, undefined, undefined, undefined, KDInvFilter,
-				undefined, undefined, true
-				);
-
-				filteredInventory = filteredInventory.filter((inv) => {
+				undefined, undefined, true, KDBaseInventoryQuickNum, (inv) => {
 					return groups.includes(KDRestraint(inv.item)?.Group)
 						&& slot.allowedTags.some((tag) => {return KDRestraint(inv.item)?.shrine.includes(tag);});
-				});
+				}
+				);
+
 				for (let item of filteredInventory) {
 					KDNPCRestraintBindingData[sgroup.id].push(item.name);
 				}
@@ -290,7 +289,7 @@ function KDDrawNPCRestrain(npcID: number, restraints: Record<string, NPCRestrain
 					}
 				} else {
 					// Add new one
-					if (!KDLookupID(npcID) || KDCanApplyBondage(KDLookupID(npcID), KDPlayer(),
+					if (!KDLookupID(npcID) || KDCanApplyBondageMsg(KDLookupID(npcID), KDPlayer(),
 						restraint.quickBindCondition ?
 							(t, p) => (KDQuickBindConditions[restraint.quickBindCondition](
 								t, p,
@@ -349,20 +348,17 @@ function KDDrawNPCRestrain(npcID: number, restraints: Record<string, NPCRestrain
 			showAll ? KDGenericMatsPerRowShowAll : KDGenericMatsPerRow, KDGenericBindsPerRow);
 
 		} else {
+			let slotted = slot;
 			let filteredInventory = KinkyDungeonFilterInventory(filter, undefined, undefined, undefined, undefined, KDInvFilter,
-				undefined, undefined, true
+				undefined, undefined, true, KDBaseInventoryQuickNum, (inv) => {
+					if (slotted) {
+						return groups.includes(KDRestraint(inv.item)?.Group)
+							&& slot.allowedTags.some((tag) => {return KDRestraint(inv.item)?.shrine.includes(tag);});
+					} else {
+						return !KDRestraint(inv.item)?.shrine?.includes("Raw");
+					}
+				}
 			);
-
-			if (slot)
-				filteredInventory = filteredInventory.filter((inv) => {
-					return groups.includes(KDRestraint(inv.item)?.Group)
-						&& slot.allowedTags.some((tag) => {return KDRestraint(inv.item)?.shrine.includes(tag);});
-				});
-			else filteredInventory = filteredInventory.filter((inv) => {
-					return !KDRestraint(inv.item)?.shrine?.includes("Raw");
-				});
-
-
 
 			ss = KDDrawInventoryContainer(-165, 100, filteredInventory, filter, filter,
 				(inv: KDFilteredInventoryItem, x, y, w, h) => {
@@ -382,7 +378,7 @@ function KDDrawNPCRestrain(npcID: number, restraints: Record<string, NPCRestrain
 
 					let restraint = KDRestraint(inv.item);
 					// Add new one
-					if (!KDLookupID(npcID) || KDCanApplyBondage(KDLookupID(npcID), KDPlayer(),
+					if (!KDLookupID(npcID) || KDCanApplyBondageMsg(KDLookupID(npcID), KDPlayer(),
 					restraint.quickBindCondition ?
 						(t, p) => (KDQuickBindConditions[restraint.quickBindCondition](
 							t, p,
@@ -846,7 +842,11 @@ function KDNPCRestraintTieUp(id: number, restraint: NPCRestraint, mult: number =
 		KDValidateEscapeGrace(KDGameData.Collection[id + ""]);
 }
 
-function KDCanEquipItemOnNPC(r: restraint, id: number, willing: boolean, lock: string, curse: string, allowSame: boolean = false): string {
+interface KDCanEquipItemOnNPCOptions {
+	ignoreCurrentGroups?: string[],
+}
+
+function KDCanEquipItemOnNPC(r: restraint, id: number, willing: boolean, lock: string, curse: string, allowSame: boolean = false, options?: KDCanEquipItemOnNPCOptions): string {
 	if (!r) return "n/a";
 	let enemy = KDGetGlobalEntity(id);
 	// TODO make this function work on player too
@@ -876,12 +876,16 @@ function KDCanEquipItemOnNPC(r: restraint, id: number, willing: boolean, lock: s
 		if (!allowSame && KDGetNPCRestraints(id)) {
 			let slot_temp = KDGetNPCBindingSlotForItem(r, id)?.sgroup;
 			if (slot_temp && KDGetNPCRestraints(id)[slot_temp.id]?.name == r.name
-				&& !KDCanOverwriteNPCRestraint({
+				&& (!KDCanOverwriteNPCRestraint({
 					name: r.name,
 					lock: lock,
 					curse: curse,
 					id: -1,
-				}, KDGetNPCRestraints(id)[slot_temp.id])) return "Same";
+				}, KDGetNPCRestraints(id)[slot_temp.id])) && (!options?.ignoreCurrentGroups || !options.ignoreCurrentGroups.some(
+					(grp) => {
+						return KDGetNPCRestraints(id)[slot_temp.id] && KDRestraint(KDGetNPCRestraints(id)[slot_temp.id])?.Group == grp
+					}
+				))) return "Same";
 		}
 
 		return "";

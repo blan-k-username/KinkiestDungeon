@@ -245,7 +245,7 @@ function KDIsPlayerTetheredToEntity(player: entity, entity: entity) {
 function KDBreakTether(player: entity, mapData?: KDMapDataType): boolean {
 	if (player?.leash) {
 		delete player.leash;
-		if (KinkyDungeonAutoWait && (!mapData || mapData != KDMapData)) {
+		if (KinkyDungeonAutoWait && (!mapData || mapData != KDMapData) && player == KDPlayer()) {
 			KDUpdateWaitTime(KDDelayWaitTime());
 		}
 		return true;
@@ -256,6 +256,7 @@ function KDBreakTether(player: entity, mapData?: KDMapDataType): boolean {
 
 function KinkyDungeonDrawTethers(CamX: number, CamY: number) {
 	KDTetherGraphics.clear();
+	
 	if (!KDGameBoardAddedTethers) {
 		kdgameboard.addChild(KDTetherGraphics);
 		KDGameBoardAddedTethers = true;
@@ -502,7 +503,7 @@ function KinkyDungeonUpdateTether(delta: number, Msg: boolean, Entity: entity, x
 					
 					
 				}
-			}
+			} break;
 		}
 		return exceeded;
 	}

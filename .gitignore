@@ -42,8 +42,6 @@
 !/tools/mp-server/**/*.js
 !/tools/mp-server/**/*.md
 
-*.wav
-
 .DS_Store
 */.DS_Store
 *.kra

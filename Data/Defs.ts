@@ -346,7 +346,7 @@ let LAYERS_BASE = [
 	"TightPantsLeft",
 	
 	"StockingLeftKneel", "StockingLeft",
-	"FootLeft",
+	"FootLeft", // unused
 	"LegLeft",
 
 	
@@ -457,7 +457,7 @@ let LAYERS_BASE = [
 	// Lower body underwear
 	"TightPantsRight",
 	"StockingRight",
-	"FootRight",
+	"FootRight", // unused
 	"LegRight",
 
 	"CorsetUnder", // Corsets go here when wearing pants
@@ -878,7 +878,6 @@ let LayerGroups = {
 	"Heels": ToMap([
 		"OverShoes",
 		"OverSocks",
-		"FootLeft",
 		"StockingLeftKneel", "StockingLeft",
 		"FootLeft",
 		"LegLeft",
@@ -916,9 +915,8 @@ let LayerGroups = {
 		"FootLeft",
 		"FootRightKneel",
 		"StockingLeftKneel", "StockingLeft",
-		"FootLeftKneel",
+		//"FootLeftKneel",
 		"LegLeft",
-		"FootRight",
 		"StockingRight",
 		"FootRight",
 		"LegRight",
@@ -936,7 +934,6 @@ let LayerGroups = {
 		"StockingLeftKneel", "StockingLeft",
 		"FootLeft",
 		"LegLeft",
-		"FootRight",
 		"StockingRight",
 		"FootRight",
 		"LegRight",
@@ -1254,6 +1251,33 @@ let LayerGroups = {
 		"Butt",
 		"TorsoLower",
 		"Torso",
+	]),
+	
+	"CatsuitUpper": ToMap([
+		"CatsuitChest",
+		"TorsoUpper",
+	]),
+	"CatsuitLower": ToMap([
+		"FootRightKneel",
+		"FootLeftHogtie",
+		"FootLeft",
+		"LegLeft",
+		"FootRight",
+		"LegRight",
+		"TorsoLower",
+	]),
+	"CatsuitLegLeft": ToMap([
+		"FootRightKneel",
+		"FootLeft",
+		"LegLeft",
+	]),
+	"CatsuitLegRight": ToMap([
+		"FootRightKneel",
+		"FootRight",
+		"LegRight",
+	]),
+	"CatsuitChest": ToMap([
+		"CatsuitChest",
 	]),
 	"TightChastityBelt": ToMap([
 		"CorsetLiner",

@@ -1165,7 +1165,7 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 								greyoutTooltip: "KDTextGrayNeedWP",
 								clickFunction: (_gagged, _player) => {
 									KinkyDungeonStartChase(undefined, "Refusal");
-									KDAggroSpeaker();
+									KDAggroSpeaker(undefined, true);
 									KinkyDungeonSetFlag("DollTransform_Resisted", 300);
 									return false;
 								},
@@ -1693,10 +1693,8 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 
 					let nearestJail = KinkyDungeonNearestJailPoint(KinkyDungeonPlayerEntity.x, KinkyDungeonPlayerEntity.y);
 					if (nearestJail && nearestJail.x == KDGameData.InteractTargetX && nearestJail.y == KDGameData.InteractTargetY) {
-						KinkyDungeonDrawState = "Collection";
-						KDCollectionTab = "Dropoff";
-						KDCurrentFacilityTarget = "";
-						KDFacilityCollectionCallback = null;
+						KDGoToScreen("Collection");
+						KDResetCollectionScreen("Dropoff");
 						KinkyDungeonCheckClothesLoss = true;
 					}
 
@@ -1884,6 +1882,22 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 			},
 		}
 	},
+	AllyPunish: {
+		clickFunction: (gagged, player) => {
+			KDAddSpecialStat("FriendlyFire", player, 20, true);
+
+			return false;
+		},
+
+		options: {
+			"Leave": {
+				playertext: "Leave", response: "Default",
+				exitDialogue: true,
+			},
+		},
+		response: "Default",
+
+	},
 	DollShoppeVisitor: {
 		response: "Default",
 		clickFunction: (_gagged, player) => {
@@ -1946,6 +1960,7 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 					"Leave": {
 						playertext: "Pause", 
 						prerequisiteFunction: (_gagged, _player) => {
+							if (KinkyDungeonStatsChoice.get("NoForcedOwner")) return true;
 							let en = KinkyDungeonFindID(KDGameData.CurrentDialogMsgValue.OriginalSpeaker);
 							let pp = KDGetPersonality(en);
 							return !KDBuyerPersonalities.includes(pp);
@@ -1955,6 +1970,7 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 					"Continue": {
 						playertext: "Continue", response: "Default",
 						prerequisiteFunction: (_gagged, _player) => {
+							if (KinkyDungeonStatsChoice.get("NoForcedOwner")) return false;
 							let en = KinkyDungeonFindID(KDGameData.CurrentDialogMsgValue.OriginalSpeaker);
 							let pp = KDGetPersonality(en);
 							return KDBuyerPersonalities.includes(pp);
@@ -2008,7 +2024,11 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 											en, false, undefined, {npc: en.id}
 										);
 										if (added && KDAddToParty(en)) {
-											KDRemoveLeashRemovedRestraints(player);
+											KDRemoveLeashRemovedRestraints(player)
+											delete en.despawnX;
+											delete en.goToDespawn;
+											delete en.despawnY;
+											delete en.specialdialogue;
 											KinkyDungeonSetFlag("Spiritbound", 2);
 											KDGameData.PrisonerState = 'parole';
 											KinkyDungeonSetFlag("noPlay", 12);
@@ -2022,10 +2042,17 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 								},
 								options: {
 									"Accept": {
+										prerequisiteFunction: (gagged, player) => {
+											return !KinkyDungeonStatsChoice.get("NoPlayerOwner");
+										},
 										playertext: "AcceptMistress", 
 										clickFunction: (gagged, player) => {
 											if (player.player) {
 												KDGameData.MistressID = KDGameData.CurrentDialogMsgValue.OriginalSpeaker;
+												if (KDGameData.Collection[KDGameData.MistressID]) {
+													KDGameData.Collection[KDGameData.MistressID].status = "Guest";
+													KDGameData.Collection[KDGameData.MistressID].oldstatus = "Guest";
+												}
 												KDAddQuest("Mistress");
 												
 												if (!KinkyDungeonFlags.get("tut_mistress")) {
@@ -2039,6 +2066,9 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 										exitDialogue: true,
 									},
 									"Reject": {
+										prerequisiteFunction: (gagged, player) => {
+											return !KinkyDungeonStatsChoice.get("ForcedOwner");
+										},
 										playertext: "RejectMistress", 
 										clickFunction: (gagged, player) => {
 											KinkyDungeonChangeRep("Ghost", -20);
@@ -2047,6 +2077,9 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 										exitDialogue: true,
 									},
 									"Neutral": {
+										prerequisiteFunction: (gagged, player) => {
+											return !KinkyDungeonStatsChoice.get("ForcedOwner");
+										},
 										playertext: "NeutralMistress", 
 										exitDialogue: true,
 									},
@@ -2239,11 +2272,8 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 
 					let tile = KinkyDungeonTilesGet(KDGameData.InteractTargetX + ',' + KDGameData.InteractTargetY);
 					if (tile?.Furniture) {
-						KinkyDungeonDrawState = "Collection";
-						KDCollectionTab = "Imprison";
-						KDCurrentFacilityTarget = "";
-						KDFacilityCollectionCallback = null;
-						KinkyDungeonCheckClothesLoss = true;
+						KDGoToScreen("Collection");
+						KDResetCollectionScreen("Imprison");
 					}
 
 					return false;
@@ -2487,7 +2517,7 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 
 					KinkyDungeonSetFlag("storageChestOpened", -1);
 					KDUI_ContainerBackScreen = KinkyDungeonDrawState;
-					KinkyDungeonDrawState = "Container",
+					KDGoToScreen("Container"),
 					KinkyDungeonCurrentFilter = "All";
 					KDUI_CurrentContainer = "PlayerChest";
 					return false;
@@ -4338,6 +4368,24 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 			return false;
 		},
 		options: {
+			"MasterworkQuestion": {
+				gagDisabled: true,
+				playertext: "Default",
+				response: "Default",
+				clickFunction: () => {
+					return false;
+				},
+				leadsToStage: "", dontTouchText: true
+			},
+			"Wiggle": {
+				gagRequired: true,
+				playertext: "Default",
+				response: "Default",
+				clickFunction: () => {
+					return false;
+				},
+				leadsToStage: "", dontTouchText: true
+			},
 			"Masterwork": {
 				gag: true,
 				playertext: "Default",
@@ -4345,6 +4393,9 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 				clickFunction: () => {
 					KDGameData.MasterworkIntro = true;
 					return false;
+				},
+				prerequisiteFunction: (gagged, player) => {
+					return KDCountMasterworks(player, true, false) > 0;
 				},
 				leadsToStage: "", dontTouchText: true
 			},

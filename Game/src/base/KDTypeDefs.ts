@@ -18,7 +18,8 @@ interface KDOutfitMetadata {
 	customColors: Record<string, Record<string, LayerFilter>>,
 }
 
-interface FactionFilterDef {color: string, override?: boolean, desaturate?: boolean};
+interface FactionFilterDef {color: string, override?: boolean, desaturate?: boolean, overridehsl?: boolean, overridergb?: boolean};
+
 
 /** Kinky Dungeon Typedefs*/
 interface item extends NamedAndTyped {
@@ -673,6 +674,23 @@ type outfitKey = string
 type mapKey = string
 
 interface floorParams {
+	/* Open areas don't do reverb, due to squishy */
+	reverbMult?: number,
+	/* For wooden areas make this higher */
+	reverbDamp?: number,
+	/** impulse sound used */
+	reverbSound?: string,
+	/** impulse sound used at low reverb levels*/
+	reverbSoundLow?: string,
+	reverbSoundLowThresh?: number,
+	/** boosts reverb if it's above the thresh*/
+	reverbBoost?: number,
+	/** boosts reverb if it's above the thresh*/
+	reverbBoostLow?: number,
+	/** cuts off reverb below this value */
+	reverbThresh?: number,
+
+	
 	/** Weighted list of successor tileset, positive X */
 	successorPositive: Record<string, number>;
 	/** Weighted list of successor tileset, negative X */
@@ -1783,6 +1801,8 @@ interface KDBuff {
 	training?: string,
 	id: string,
 	power?: number,
+	zIndex?: number,
+	scale?: number,
 	/** when the buff expires, it instead has its duration reset and either 1 subtracted from its power, or resetDurationPower subtracted. Once power reaches 0 it disappears*/
 	
 	resetDurationPower?: number,
@@ -1791,6 +1811,10 @@ interface KDBuff {
 	type?: string,
 	duration?: number,
 	infinite?: boolean,
+	/**
+	 * indicates a buff is refreshed constantly by effect
+	 */
+	constant?: boolean,
 	aura?: HexColor,
 	range?: number,
 	currentCount?: number,
@@ -1829,6 +1853,7 @@ interface KDBuff {
 	buffSpriteSpecific?: string,
 	click?: string,
 	disableTypes?: string[],
+	showCondition?: string[],
 	sfxApply?: string,
 	onlyAlly?: boolean,
 	noAlly?: boolean,
@@ -2016,6 +2041,10 @@ interface entity {
 	path?: {x: number, y: number}[],
 	gx?: number,
 	gy?: number,
+	/** will not try to path thru this entity */
+	gx_ent?: number,
+	gy_ent?: number,
+	g_ent_id?: number,
 	despawnX?: number,
 	despawnY?: number,
 	goToDespawn?: boolean,
@@ -2026,6 +2055,8 @@ interface entity {
 	/** Indicates that an enemy has been modified and does not eliminate enemy data */
 	modified?: boolean,
 	faction?: string,
+	factionorig?: string,
+	
 	allied?: number,
 	ceasefire?: number,
 	bind?: number,
@@ -2241,6 +2272,9 @@ interface BulletTickData {
 
 interface spell {
 	nocrit?: boolean,
+
+	/** for spells with type Special, determines whether the sfx plays on the target's location or the caster (default: target) */
+	sfxOnCaster?: boolean,
 
 	/** bind tags for the spell/bullet */
 	bindTags?: string[],
@@ -2824,6 +2858,7 @@ interface KDStruggleData {
 	struggleType: string,
 	struggleGroup: string,
 	escapeChance: number,
+	blocked?: boolean,
 	cutBonus: number,
 	origEscapeChance: number,
 	/** Gets set to a low value when escapeChance would be clipped to 0, helping player understand how helpless */
@@ -3051,6 +3086,7 @@ interface KinkyDungeonSave {
 	perksmode?: number,
 	easymode?: number,
 	progressionmode?: string,
+	KDStruggleDrawMode: number,
 
 	faction: Record<string, Record<string, number>>;
 }
@@ -3395,6 +3431,8 @@ type AIType = {
 	resetguardposition: (enemy: entity, player: entity, aidata: KDAIData) => boolean,
 	/** Whether enemy attacks */
 	attack: (enemy: entity, player: entity, aidata: KDAIData) => boolean,
+	/** Whether enemy teasees */
+	tease: (enemy: entity, player: entity, aidata: KDAIData) => boolean,
 	/** whether enemy casts spells */
 	spell: (enemy: entity, player: entity, aidata: KDAIData) => boolean,
 	/** This function executes before wander location changes. Return True to override wander behavior */
@@ -3563,6 +3601,7 @@ interface KDAIData extends KDAITriggerData {
 	playerDistDirectional?: number,
 	canSensePlayer?: boolean,
 	canSeePlayer?: boolean,
+	canNoticePlayer?: boolean,
 	canSeePlayerChase?: boolean,
 	canSeePlayerMedium?: boolean,
 	canSeePlayerClose?: boolean,
@@ -3593,6 +3632,8 @@ type EnemyEvent = {
 	noplay?: boolean,
 	/** This event wont get cleared by mass resets, like when you are deposited into a cage */
 	noMassReset?: boolean,
+	/** Determines if the enemy will tease you */
+	decideTease?: (enemy: entity, target: entity, AIData: KDEventDataBoolean, allied: boolean, hostile: boolean, aggressive: boolean) => boolean,
 	/** Determines if the enemy will attack you */
 	decideAttack?: (enemy: entity, target: entity, AIData: KDEventDataBoolean, allied: boolean, hostile: boolean, aggressive: boolean) => boolean,
 	/** Determines if the enemy will cast spells */
@@ -4400,7 +4441,7 @@ type KDTeaseAttack = {
 	blockable: boolean,
 	dodgeable: boolean,
 	/** Allows this to be added to the list */
-	filter: (enemy: entity, player: entity, AIData: KDAIData) => boolean,
+	filter: (enemy: entity, player: entity, AIData: KDAIData, query?: boolean) => boolean,
 	/** Returns true if it connects, false otherwise if blocked/ignored somehow */
 	apply: (enemy: entity, player: entity, AIData: KDAIData, blocked: boolean, evaded: boolean, damageMod: number) => boolean,
 };
@@ -4436,6 +4477,8 @@ declare const PIXI: typeof import('pixi.js') & typeof import('pixi.js-legacy') &
 	// But that doesn't work, and this does.
 	filters: typeof import('pixi-filters'),
 };
+
+
 
 // We can't refer to a type as `PIXI.Container`, nor `typeof PIXI.Container`, but `import(pixi.js).Container` does work
 type PIXIContainer = import('pixi.js').Container;

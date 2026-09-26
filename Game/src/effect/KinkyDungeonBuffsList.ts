@@ -16,7 +16,9 @@ const KDAim3: KDBuff = {
 	id: "Aim3",
 	type: "AttackSlow", power: 2, duration: 1};
 
-const KDConduction: KDBuff = {id: "Conduction", type: "event", aura: "#ffff88", noAuraColor: true, auraSprite: "Conduction", power: 7.0, player: true, duration: 5, enemies: true, range: 2.99, events: [
+const KDConduction: KDBuff = {id: "Conduction", type: "event", aura: "#ffff88",
+	scale: 1,
+	noAuraColor: true, auraSprite: "Conduction", power: 7.0, player: true, duration: 5, enemies: true, range: 2.99, events: [
 	{type: "RemoveConduction", duration: 1, trigger: "tick"},
 	{type: "Conduction", power: 0.5, duration: 5, damage: "electric", aoe: 3.99, trigger: "playerTakeDamage"},
 	{type: "Conduction", power: 0.5, duration: 5, damage: "electric", aoe: 3.99, trigger: "beforeDamageEnemy"},
@@ -207,7 +209,7 @@ const KDToy: KDBuff = {
 	]
 };
 const KDPlugged: KDBuff = {
-	id: "Plugged", type: "Plug", power: 1.0, aura: "#dddddd", auraSprite: "Plugged", player: false, enemies: true, duration: 9999, infinite: true, range: 0.5, tags: ["plugged"], events: [
+	id: "Plugged", type: "Plug", power: 1.0, showCondition: ["SinglePlug"], aura: "#dddddd", auraSprite: "Plugged", player: false, enemies: true, duration: 9999, infinite: true, range: 0.5, tags: ["plugged"], events: [
 		{type: "Distract", power: 0.2, trigger: "tick"},
 		{type: "RemoveFree", trigger: "tick", prereq: "NoChastity"},
 	]
@@ -301,7 +303,7 @@ let KDCustomBuff: Record<string, (entity: entity, buff: KDBuff) => void> = {
  */
 let KDBuffClick: Record<string, (buff: KDBuff, entity: entity, data: any) => void> = {
 	"Training": (_buff, entity, data) => {
-		KinkyDungeonDrawState = "Progress";
+		KDGoToScreen("Progress");
 		if (data?.training) {
 			KDCurrentProgressMainSelection = "Training" + data.training;
 		}
@@ -333,3 +335,10 @@ let KDBuffClick: Record<string, (buff: KDBuff, entity: entity, data: any) => voi
 		}
 	},
 };
+
+
+let KDBuffShowConditions: Record<string, (enemy: entity, buff: KDBuff) => boolean> = {
+	SinglePlug: (enemy, buff) => {
+		return !KDEntityGetBuff(enemy, KDDoublePlugged.id);
+	}
+}

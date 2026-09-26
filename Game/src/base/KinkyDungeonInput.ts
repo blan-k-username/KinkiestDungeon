@@ -16,6 +16,12 @@ let KDInputTypes: Record<string, (data: any) => string> = {
 		return KinkyDungeonMove(data.dir, data.delta, data.AllowInteract,
 			 data.SuppressSprint, data.forceSprint) ? "move" : "nomove";
 	},
+	setAutoSprint: (data) => {
+		KinkyDungeonToggleAutoSprint = data.Sprint;
+		KDGameData.AutoSprintTriggered = data.AUto;
+		KinkyDungeonSuppressSprint = data.Suppress;
+		return "";
+	},
 	"setrestraintpalette": (data) => {
 		let currentItem = data.currentItem;
 		let player = data.player;
@@ -122,7 +128,7 @@ let KDInputTypes: Record<string, (data: any) => string> = {
 		KDDelayedActionPrune(["Action", "Struggle"]);
 		let item = KinkyDungeonGetRestraintItem(data.group);
 		if (data.index) {
-			let surfaceItems = KDDynamicLinkListSurface(item);
+			let surfaceItems = KDDynamicLinkList(item, true);
 			if (surfaceItems[data.index])
 				item = surfaceItems[data.index];
 			else console.log("Error! Please report the item combination and screenshot to Ada!");
@@ -138,7 +144,7 @@ let KDInputTypes: Record<string, (data: any) => string> = {
 		KDDelayedActionPrune(["Action", "Struggle"]);
 		let item = KinkyDungeonGetRestraintItem(data.group);
 		if (data.index) {
-			let surfaceItems = KDDynamicLinkListSurface(item);
+			let surfaceItems = KDDynamicLinkList(item, true);
 			if (surfaceItems[data.index])
 				item = surfaceItems[data.index];
 			else console.log("Error! Please report the item combination and screenshot to Ada!");
@@ -790,6 +796,8 @@ let KDInputTypes: Record<string, (data: any) => string> = {
 	"safeword": (data) => {
 		// todo multiple players?
 		let player = KDPlayer();
+		KinkyDungeonFlags.set("safeword", 1);
+		KinkyDungeonFlags.set("safeword_recent", 10);
 
 		let msg = TextGet("KDSafwordMsg", {
 			Playername: KDGameData.PlayerName,
@@ -818,6 +826,7 @@ let KDInputTypes: Record<string, (data: any) => string> = {
 			KinkyDungeonPlayerEntity.visual_x = KinkyDungeonPlayerEntity.x;
 			KinkyDungeonPlayerEntity.visual_y = KinkyDungeonPlayerEntity.y;
 		}
+
 		KDKickEnemies(undefined, true, MiniGameKinkyDungeonLevel)
 		
 		return "";
@@ -1260,6 +1269,7 @@ let KDInputTypes: Record<string, (data: any) => string> = {
 			if (enemy) {
 				if (enemy.buffs?.AllySelect) KinkyDungeonExpireBuff(enemy, "AllySelect")
 				KinkyDungeonSetEnemyFlag(enemy, "NoFollow", -1);
+				KinkyDungeonSetEnemyFlag(enemy, "FollowMe", 0);
 				KDRemoveFromParty(enemy, false);
 				KinkyDungeonSendTextMessage(10, TextGet("KDOrderRemove").replace("ENMY", TextGet("Name" + enemy.Enemy.name)), KDBaseWhite, 1);
 
@@ -1278,6 +1288,7 @@ let KDInputTypes: Record<string, (data: any) => string> = {
 				KinkyDungeonSendTextMessage(10, TextGet("KDOrderOnMe").replace("ENMY", TextGet("Name" + enemy.Enemy.name)), KDBaseWhite, 1);
 			} else {
 				KinkyDungeonSetEnemyFlag(enemy, "NoFollow", -1);
+				KinkyDungeonSetEnemyFlag(enemy, "FollowMe", 0);
 				KinkyDungeonSetEnemyFlag(enemy, "Defensive", 0);
 				KinkyDungeonSendTextMessage(10, TextGet("KDOrderDisperse").replace("ENMY", TextGet("Name" + enemy.Enemy.name)), KDBaseWhite, 1);
 			}
@@ -1329,7 +1340,7 @@ let KDInputTypes: Record<string, (data: any) => string> = {
 					if (KinkyDungeonIsPlayer()) {
 						KinkyDungeonPreviewSpell = undefined;
 						//if (KinkyDungeonTextMessageTime > 0)
-						//KinkyDungeonDrawState = "Game";
+						//KDGoToScreen("Game");
 					}
 				} else if (KinkyDungeonIsPlayer()) KinkyDungeonSendActionMessage(10, TextGet("KinkyDungeonSpellsNotEnoughMana"), "#b4dbfc", 1);
 			} else if (KinkyDungeonIsPlayer()) KinkyDungeonSendActionMessage(10, TextGet("KinkyDungeonSpellsNotEnoughPoints"), "#e7cf1a", 1);

@@ -264,6 +264,36 @@ let KDConsentListBasic: Record<string, ConsentListData> = {
             label: TextGet("KDConsentListDesc_" + "Petsuits"),
             tooltip: TextGet("KDConsentListDesc_" + "Petsuits"),
     },
+    ForcedOwner: {
+            name: "ForcedOwner",
+            color: KDBaseWhite,
+            bordercolor: KDBaseTeal,
+            textColor: KDBaseWhite,
+
+
+            perkRed: "",
+            perkYellow: "NoForcedOwner",
+            perkGreen: "ForcedOwner",
+
+            priority: -10,
+            label: TextGet("KDConsentListDesc_" + "ForcedOwner"),
+            tooltip: TextGet("KDConsentListDesc_" + "ForcedOwner"),
+    },
+    PlayerOwner: {
+            name: "PlayerOwner",
+            color: KDBaseWhite,
+            bordercolor: KDBaseTeal,
+            textColor: KDBaseWhite,
+
+
+            perkRed: "NoPlayerOwner",
+            perkYellow: "",
+            perkGreen: "StrongPlayerOwner",
+
+            priority: -10,
+            label: TextGet("KDConsentListDesc_" + "PlayerOwner"),
+            tooltip: TextGet("KDConsentListDesc_" + "PlayerOwner"),
+    },
     Hypnosis: {
             name: "Hypnosis",
             color: KDBaseWhite,
@@ -294,6 +324,7 @@ let KDConsentListBasic: Record<string, ConsentListData> = {
             label: TextGet("KDConsentListDesc_" + "DollTransform"),
             tooltip: TextGet("KDConsentListDesc_" + "DollTransform"),
     },
+    
     /*DollTransformArousal: {
             name: "DollTransformArousal",
             color: KDBaseWhite,
@@ -683,7 +714,7 @@ function KDDrawConsent(xOffset) {
         let list: ConsentListData[] = KDEnumerateConsentList(undefined, undefined, KDShowConsents);
         PopulateList(MainList, x, yStart, horizontal ? h : wList, 
             horizontal ? wList : h, 50, 
-            Math.round(h/spacing), 
+            Math.floor(h/spacing),
             list, false
         );
     }
@@ -706,7 +737,9 @@ function KDDrawConsent(xOffset) {
         DrawTextFitKDTo(container, TextGet("KDConsentItem_" + item.name,
             item.data), 
             list.x + 25 + (horizontal ? visualIndex * 80 : 0), list.y + listspacing/2 + (horizontal ? 0 : visualIndex * 80), 
-            w - 80, item.textColor, undefined, undefined, "left")
+            w - 80, item.textColor, undefined, undefined, "left",
+            undefined, undefined, undefined, undefined, undefined, undefined, 
+            "tx|" + item.name + "_label_scrollist")
 		   
         ii = 0;
         let hh = 64;
@@ -759,7 +792,7 @@ function KDDrawConsent(xOffset) {
     undefined, undefined, hotkeyUp, hotkeyDown,
         0.3, 1, KDUIColor);
 
-    if (DrawButtonKDEx("removeGuest", (_b) => {
+    if (DrawButtonKDEx("useSafeword", (_b) => {
 			if (!KDConfirmOverInventoryAction) {
 				KDConfirmOverInventoryAction = true;
                 if (KDSoundEnabled()) AudioPlayInstantSoundKD(KinkyDungeonRootDirectory + "Audio/ClickError.ogg");
@@ -769,7 +802,7 @@ function KDDrawConsent(xOffset) {
 				});
                 KinkyDungeonPreviousState = "";
                 KinkyDungeonState = "Game";
-                KinkyDungeonDrawState = "Game";
+                KDGoToScreen("Game");
 				KDConfirmOverInventoryAction = false;
 			}
 			if (KDSoundEnabled())

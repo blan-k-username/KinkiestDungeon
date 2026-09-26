@@ -141,7 +141,7 @@ function KDDrawProgressList(xOffset) {
     if (ShouldUpdateList(MainList)) {
         let list: ProgressListData[] = KDEnumerateProgressItems();
         PopulateList(MainList, x + xOffset, yStart, horizontal ? h : wList, horizontal ? wList : h, 50, 
-            Math.round(h/spacing), 
+            Math.floor(h/spacing),
             list, false
         );
     }
@@ -162,12 +162,16 @@ function KDDrawProgressList(xOffset) {
         DrawTextFitKDTo(container, TextGet("KDProgressItem_" + item.name,
             item.data), 
             list.x + 20 + w*0.5 + (horizontal ? visualIndex * 80 : 0), list.y + 20 + (horizontal ? 0 : visualIndex * 80), 
-            w - 80, item.textColor)
+            w - 80, item.textColor, undefined, undefined, undefined,
+            undefined, undefined, undefined, undefined, undefined, undefined, 
+            "tx|" + item.name + "_label_scrollist")
 		if (item.level != undefined)
 			DrawTextFitKDTo(container, "" + item.level, 
 				list.x + 32 + (horizontal ? visualIndex * 80 : 0), list.y + 38 + (horizontal ? 0 : visualIndex * 80),
 				w - 10, item.textColor, undefined, 48, "center", 
-				100.5, 0.4)
+				100.5, 0.4,
+                undefined, undefined, undefined, undefined, 
+                "tx|" + item.name + "_label_scrollist_level")
        
         DrawRectKD(container, kdpixisprites, "MainProgressSelect" + item.name + "pbborder", {
             Color: item.bordercolor,
@@ -214,7 +218,8 @@ function KDDrawProgressList(xOffset) {
                 : null),
             });
         return KDCurrentProgressMainSelection == item.name;
-    }, undefined, horizontal, undefined, undefined, hotkeyUp, hotkeyDown);
+    }, undefined, horizontal, undefined, undefined, 
+    hotkeyUp, hotkeyDown);
 
     if (drawn?.drawType && KDProgressDrawTypes[drawn.drawType]) {
         KDProgressDrawTypes[drawn.drawType](kdcanvas, 0, "MainProgressDraw", drawn, drawn.drawData, horizontal ? x + xOffset : (x + xOffset + wList + wpad),
@@ -352,9 +357,9 @@ let KDProgressDrawTypes: Record<string, (container: PIXIContainer, z: number, id
                     for (let tag of listt) {
                         if (yy + 18 < height - 50) {
                             yy += 8;
-                            let xx = DrawTextFitKD(TextGet("KDProgressTag_" + tag.key, tag.keyparams), 
+                            let xx = RetDrawTextFitKD(TextGet("KDProgressTag_" + tag.key, tag.keyparams), 
                                 x + 50, yy, width * 0.5, KDTextWhite, 
-                                KDTextGray0, 18, "left");
+                                KDTextGray0, 18, "left").x;
                             DrawTextFitKD((tag.value > 0 ? "+" : "") + tag.value, 
                                 x + 50 + xx + 10, yy, width * 0.1, item.color, 
                                 KDTextGray0, 18, "left");

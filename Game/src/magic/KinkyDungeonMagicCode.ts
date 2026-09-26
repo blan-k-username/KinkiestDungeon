@@ -316,7 +316,7 @@ let KinkyDungeonSpellSpecials: Record<string, KDSpellSpecialCode> = {
 				if (KDCanBind(en)) {
 					//KDGameData.InventoryAction = "Bondage";
 
-					let canApply = KDCanApplyBondage(en, entity,
+					let canApply = KDCanApplyBondageMsg(en, entity,
 						KinkyDungeonTargetingSpellItem ? (
 							KDRestraint(KinkyDungeonTargetingSpellItem)?.quickBindCondition ?
 							(t: entity, p: entity) => (KDQuickBindConditions[KDRestraint(KinkyDungeonTargetingSpellItem)?.quickBindCondition](
@@ -342,7 +342,7 @@ let KinkyDungeonSpellSpecials: Record<string, KDSpellSpecialCode> = {
 							)?.raw || null;
 
 							KDCurrentRestrainingTarget = en.id;
-							KinkyDungeonDrawState = "Bondage";
+							KDGoToScreen("Bondage");
 							// Select non wrists
 							UpdateRestraintBindingData = true;
 							KDNPCBindingSelectedSlot = null;
@@ -368,7 +368,7 @@ let KinkyDungeonSpellSpecials: Record<string, KDSpellSpecialCode> = {
 											KDBaseRed, 1, true);
 
 										KDCurrentRestrainingTarget = en.id;
-										KinkyDungeonDrawState = "Bondage";
+										KDGoToScreen("Bondage");
 										// Hover the new item
 										KDNPCBindingGeneric = false;
 										UpdateRestraintBindingData = true;
@@ -415,7 +415,7 @@ let KinkyDungeonSpellSpecials: Record<string, KDSpellSpecialCode> = {
 									KDBaseRed, 1, true);
 
 								KDCurrentRestrainingTarget = en.id;
-								KinkyDungeonDrawState = "Bondage";
+								KDGoToScreen("Bondage");
 								KinkyDungeonSetFlag("quickBind", 1);
 								// Hover the new item
 								KDNPCBindingGeneric = false;
@@ -433,7 +433,7 @@ let KinkyDungeonSpellSpecials: Record<string, KDSpellSpecialCode> = {
 					} else {
 
 						KDCurrentRestrainingTarget = en.id;
-						KinkyDungeonDrawState = "Bondage";
+						KDGoToScreen("Bondage");
 
 						// Select non wrists
 						UpdateRestraintBindingData = true;
@@ -595,20 +595,27 @@ let KinkyDungeonSpellSpecials: Record<string, KDSpellSpecialCode> = {
 			KinkyDungeonSendTextMessage(8, TextGet("KDCommandWordFail_NoEnemy", KDGetGenericDialogueParams(_entity, en)), KDBaseRed, 1, true);
 			return "Fail";
 		} else if (targetX == KinkyDungeonPlayerEntity.x && targetY == KinkyDungeonPlayerEntity.y) {
-			if (KinkyDungeonPlayerGetRestraintsWithLocks(KDMagicLocks).length > 0) {
-				if (spell.aoe > 0) {
-					for (let r of KinkyDungeonPlayerGetRestraintsWithLocks(KDMagicLocks, true)) {
-						KinkyDungeonLock(r, "", false, false, false, false);
-					}
-					KinkyDungeonSendTextMessage(4, TextGet("KinkyDungeonPurpleLockRemove"), "#e7cf1a", 2);
-					KDChangeMana(spell.name, "spell", "cast", -KinkyDungeonGetManaCost(spell));
-					if (KDSoundEnabled()) AudioPlayInstantSoundKD(KinkyDungeonRootDirectory + "Audio/Magic.ogg");
-				} else {
+			let unlocking = false;
+			if (spell.aoe > 0) {
+				for (let r of KinkyDungeonPlayerGetRestraintsWithLocks(KDMagicLocks, true)) {
+					KinkyDungeonLock(r, "", false, false, false, false);
+					unlocking = true;
+				}
+				KinkyDungeonSendTextMessage(4, TextGet("KinkyDungeonPurpleLockRemove"), "#e7cf1a", 2);
+				KDChangeMana(spell.name, "spell", "cast", -KinkyDungeonGetManaCost(spell));
+				if (KDSoundEnabled()) AudioPlayInstantSoundKD(KinkyDungeonRootDirectory + "Audio/Magic.ogg");
+			} else {
+				let items = KinkyDungeonPlayerGetRestraintsWithLocks(KDMagicLocks, true);
+				items = items.filter(i => KDIsItemAccessible(i));
+				if (items.length > 0) {
 					KDGameData.InventoryAction = "RemoveMagicLock";
 					KDShowInventory(null);
 					KinkyDungeonCurrentFilter = Restraint;
 					KDGameData.InventoryActionManaCost = KinkyDungeonGetManaCost(spell);
+					unlocking = true;
 				}
+			}
+			if (unlocking) {
 				return "Cast";
 			}
 			KinkyDungeonSendTextMessage(8, TextGet("KDCommandWordFail_NoLocks"), KDBaseRed, 1, true);

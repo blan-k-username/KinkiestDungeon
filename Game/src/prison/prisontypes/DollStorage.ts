@@ -66,6 +66,7 @@ KDPrisonTypes.DollStorage = {
 					KinkyDungeonSetEnemyFlag(gg, "overrideMove", 10);
 					gg.gx = doll.x;
 					gg.gy = doll.y;
+					KDUpdateMoveToEntity(gg);
 				}
 			}
 		}
@@ -136,6 +137,7 @@ KDPrisonTypes.DollStorage = {
 					KinkyDungeonSetEnemyFlag(gg, "overrideMove", 10);
 					gg.gx = doll.x;
 					gg.gy = doll.y;
+					KDUpdateMoveToEntity(gg);
 				}
 			}
 		}
@@ -201,6 +203,7 @@ KDPrisonTypes.DollStorage = {
 					KinkyDungeonSetEnemyFlag(gg, "overrideMove", 10);
 					gg.gx = doll.x;
 					gg.gy = doll.y;
+					KDUpdateMoveToEntity(gg);
 				}
 			}
 		}
@@ -320,7 +323,7 @@ KDPrisonTypes.DollStorage = {
 
 
 				let lostTrack = KDLostJailTrack(player);
-				if (lostTrack == "Unaware") {
+				if (KDNoInteractResults.includes(lostTrack)) {
 					return KDSetPrisonState(player, "Jail");
 				}
 
@@ -353,7 +356,7 @@ KDPrisonTypes.DollStorage = {
 
 
 				let lostTrack = KDLostJailTrack(player);
-				if (lostTrack == "Unaware") {
+				if (KDNoInteractResults.includes(lostTrack)) {
 					return KDSetPrisonState(player, "Jail");
 				}
 
@@ -372,6 +375,7 @@ KDPrisonTypes.DollStorage = {
 						// Any qualifying factors means they know where you should be
 						guard.gx = player.x;
 						guard.gy = player.y;
+						KDUpdateMoveToEntity(guard);
 						KinkyDungeonSetEnemyFlag(guard, "wander", 30)
 						KinkyDungeonSetEnemyFlag(guard, "overrideMove", 10);
 					}
@@ -602,6 +606,9 @@ KDPrisonTypes.DollStorage = {
 
 						for (let xx of [label.x + 3, label.x - 3]) {
 							let e = DialogueCreateEnemy(xx, label.y, "LatexSprayer");
+							KinkyDungeonPlaySoundLocation(KinkyDungeonRootDirectory + "HydraulicUnlock.ogg", KDPlayer(), {
+								x: xx, y: label.y
+							}, 1.0, true);
 							e.faction = "Ambush";
 							e.vp = 2;
 							e.aware = true;
@@ -655,7 +662,7 @@ KDPrisonTypes.DollStorage = {
 				let player = KinkyDungeonPlayerEntity;
 
 				let lostTrack = KDLostJailTrack(player);
-				if (lostTrack == "Unaware") {
+				if (KDNoInteractResults.includes(lostTrack)) {
 					return KDSetPrisonState(player, "Jail");
 				}
 
@@ -677,6 +684,7 @@ KDPrisonTypes.DollStorage = {
 							// Any qualifying factors means they know where you should be
 							guard.gx = player.x;
 							guard.gy = player.y;
+							KDUpdateMoveToEntity(guard);
 							KinkyDungeonSetEnemyFlag(guard, "wander", 30)
 							KinkyDungeonSetEnemyFlag(guard, "overrideMove", 10);
 						}
@@ -715,7 +723,7 @@ KDPrisonTypes.DollStorage = {
 				let rad = 3;
 
 				let lostTrack = KDLostJailTrack(player);
-				if (lostTrack == "Unaware") {
+				if (KDNoInteractResults.includes(lostTrack)) {
 					return KDSetPrisonState(player, "Jail");
 				}
 
@@ -728,6 +736,7 @@ KDPrisonTypes.DollStorage = {
 						if (guard.IntentAction != action) {
 							guard.gx = player.x;
 							guard.gy = player.y;
+							KDUpdateMoveToEntity(guard);
 							KDIntentEvents[action].trigger(guard, {point: label, radius: 1, target: player});
 						}
 
@@ -735,6 +744,7 @@ KDPrisonTypes.DollStorage = {
 							// Any qualifying factors means they know where you should be
 							guard.gx = player.x;
 							guard.gy = player.y;
+							KDUpdateMoveToEntity(guard);
 							KinkyDungeonSetEnemyFlag(guard, "wander", 30)
 							KinkyDungeonSetEnemyFlag(guard, "overrideMove", 10);
 						}

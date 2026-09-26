@@ -21,6 +21,60 @@ let KDCornerTiles = {
  * Updates local tiles such as conveyors
  */
 let KDTileUpdateFunctionsLocal: Record<string, (delta: number, X?: number, Y?: number) => void> = {
+	"L" : (delta, x, y) => { // Barrel
+
+		let entity = KinkyDungeonEntityAt(x, y);
+		if (!entity) return;
+
+		if (entity != KDPlayer()) {
+			entity.slow = Math.max(entity.slow || 0, 1);
+			return;
+		}
+
+		if (KinkyDungeonTilesGet(KinkyDungeonPlayerEntity.x + "," + KinkyDungeonPlayerEntity.y)
+			&& KinkyDungeonTilesGet(KinkyDungeonPlayerEntity.x + "," + KinkyDungeonPlayerEntity.y).Furniture) {
+			let furn = KDFurniture[KinkyDungeonTilesGet(KinkyDungeonPlayerEntity.x + "," + KinkyDungeonPlayerEntity.y).Furniture];
+			if (furn) {
+				furn.tickFunction(delta);
+			}
+		} else {
+			KinkyDungeonApplyBuffToEntity(KinkyDungeonPlayerEntity, {
+				id: "barrel",
+				type: "SlowDetection",
+				duration: 1,
+				power: 9.0,
+				player: true,
+				enemies: true,
+				endSleep: true,
+				maxCount: 1,
+				tags: ["SlowDetection", "move", "cast"],
+			});
+			KinkyDungeonApplyBuffToEntity(KinkyDungeonPlayerEntity, {
+				id: "barrel3",
+				type: "Sneak",
+				duration: 1,
+				power: 1.95,
+				player: true,
+				enemies: true,
+				endSleep: true,
+				maxCount: 1,
+				tags: ["Sneak", "darkness", "move", "cast"],
+			});
+			KinkyDungeonApplyBuffToEntity(KinkyDungeonPlayerEntity, {
+				id: "barrel2",
+				type: "SlowLevel",
+				duration: 1,
+				power: 1,
+				player: true,
+				enemies: true,
+				endSleep: true,
+				maxCount: 1,
+				tags: ["Slow", "move", "cast"],
+			});
+			KinkyDungeonSendTextMessage(3, TextGet("KinkyDungeonBarrel"), KDBaseLightGreen, 1, true);
+		}
+		return true;
+	},
 	"]": (delta, X, Y) => {// Happy Gas!
 		
 		if (delta > 0)
@@ -383,51 +437,7 @@ let KDTileUpdateFunctions: Record<string, (delta: number) => boolean> = {
 		KinkyDungeonSendTextMessage(5, TextGet("KinkyDungeonSporeGas"), "pink", 1);
 		return true;
 	},
-	"L" : (delta) => { // Barrel
-		if (KinkyDungeonTilesGet(KinkyDungeonPlayerEntity.x + "," + KinkyDungeonPlayerEntity.y)
-			&& KinkyDungeonTilesGet(KinkyDungeonPlayerEntity.x + "," + KinkyDungeonPlayerEntity.y).Furniture) {
-			let furn = KDFurniture[KinkyDungeonTilesGet(KinkyDungeonPlayerEntity.x + "," + KinkyDungeonPlayerEntity.y).Furniture];
-			if (furn) {
-				furn.tickFunction(delta);
-			}
-		} else {
-			KinkyDungeonApplyBuffToEntity(KinkyDungeonPlayerEntity, {
-				id: "barrel",
-				type: "SlowDetection",
-				duration: 1,
-				power: 9.0,
-				player: true,
-				enemies: true,
-				endSleep: true,
-				maxCount: 1,
-				tags: ["SlowDetection", "move", "cast"],
-			});
-			KinkyDungeonApplyBuffToEntity(KinkyDungeonPlayerEntity, {
-				id: "barrel3",
-				type: "Sneak",
-				duration: 1,
-				power: 1.95,
-				player: true,
-				enemies: true,
-				endSleep: true,
-				maxCount: 1,
-				tags: ["Sneak", "darkness", "move", "cast"],
-			});
-			KinkyDungeonApplyBuffToEntity(KinkyDungeonPlayerEntity, {
-				id: "barrel2",
-				type: "SlowLevel",
-				duration: 1,
-				power: 1,
-				player: true,
-				enemies: true,
-				endSleep: true,
-				maxCount: 1,
-				tags: ["Slow", "move", "cast"],
-			});
-			KinkyDungeonSendTextMessage(3, TextGet("KinkyDungeonBarrel"), KDBaseLightGreen, 1, true);
-		}
-		return true;
-	},
+	
 	"c" : (delta) => { // Unopened chest
 		if (KinkyDungeonTilesGet(KinkyDungeonPlayerEntity.x + "," + KinkyDungeonPlayerEntity.y)
 			&& KinkyDungeonTilesGet(KinkyDungeonPlayerEntity.x + "," + KinkyDungeonPlayerEntity.y).Furniture) {
@@ -457,17 +467,6 @@ let KDTileUpdateFunctions: Record<string, (delta: number) => boolean> = {
 				endSleep: true,
 				maxCount: 1,
 				tags: ["Sneak", "darkness", "move", "cast"],
-			});
-			KinkyDungeonApplyBuffToEntity(KinkyDungeonPlayerEntity, {
-				id: "barrel2",
-				type: "SlowLevel",
-				duration: 1,
-				power: 1,
-				player: true,
-				enemies: true,
-				endSleep: true,
-				maxCount: 1,
-				tags: ["Slow", "move", "cast"],
 			});
 			KinkyDungeonSendTextMessage(3, TextGet("KinkyDungeonBarrelChest"), KDBaseLightGreen, 1, true);
 		}
@@ -628,7 +627,7 @@ let KDMoveObjectFunctions: Record<string, (moveX: number, moveY: number) => bool
 						}
 					} else {
 						KDUI_ContainerBackScreen = KinkyDungeonDrawState;
-						KinkyDungeonDrawState = "Container";
+						KDGoToScreen("Container");
 						KinkyDungeonCurrentFilter = "All";
 						KDUI_Container_LastSelected = "Chest";
 					}
@@ -1859,7 +1858,9 @@ function KDAttemptDoor(moveX: number, moveY: number) {
 			open = true;
 		} else {
 			let grace = 0;
-			if (KinkyDungeonFlags.get("failUnfairFirst") && !KinkyDungeonFlags.get("failUnfair")) grace = 0.4;
+			if (KinkyDungeonFlags.get("failUnfairFirst") && (!KinkyDungeonFlags.get("failUnfair") || 
+				(KinkyDungeonStatsChoice.get("Psychic") && !KinkyDungeonFlags.get("failUnfairPsychic")))) grace = 0.4;
+			if (KinkyDungeonFlags.get("failUnfair") && KinkyDungeonStatsChoice.get("Psychic")) grace += 0.1;
 			let armsbound = KinkyDungeonIsArmsBound(true, true);
 			if (KDRandom() - grace < (armsbound ? KDDoorKnobChance : KDDoorKnobChanceArms)) {
 				KinkyDungeonSendActionMessage(10, TextGet("KDDoorknobSuccess" + ((armsbound) ? "" : "Arms")), KDBaseMint, 2);
@@ -1872,10 +1873,12 @@ function KDAttemptDoor(moveX: number, moveY: number) {
 				KinkyDungeonSendActionMessage(10, TextGet("KDDoorknobFail" + (armsbound ? "" : "Arms")), KDBaseRed, 2);
 				KinkyDungeonMakeNoise(armsbound ? 6 : 3, moveX, moveY);
 				if (!KinkyDungeonFlags.get("failUnfairFirst")) {
+					if (KinkyDungeonStatsChoice.get("Psychic"))
+						KinkyDungeonSetFlag("failUnfairPsychic", 2);
 					KinkyDungeonSetFlag("failUnfair", 5);
 					KinkyDungeonSetFlag("failUnfairFirst", 10);
 				}
-				if (KDSoundEnabled()) AudioPlayInstantSoundKD(KinkyDungeonRootDirectory + "Audio/Locked.ogg");
+				if (KDSoundEnabled()) KinkyDungeonPlaySound(KinkyDungeonRootDirectory + "Audio/Locked.ogg", KDPlayer());
 			}
 		}
 	}

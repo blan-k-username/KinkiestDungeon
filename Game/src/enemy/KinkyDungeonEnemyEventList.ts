@@ -12,6 +12,8 @@ let KDIntentEvents: Record<string, EnemyEvent> = {
 		// This will make the enemy want to leash you
 		weight: (enemy, _aiData, allied, hostile, _aggressive) => {
 			if (allied) return 0;
+			if (enemy.faction == "Player") return 0;
+			if (enemy.factionorig == "Player") return 0;
 			if (!enemy.Enemy.tags.leashing) return 0;
 			if (KinkyDungeonFlags.get("Released")) return 0;
 			if (KDGameData.PrisonerState == 'jail') return 0;
@@ -87,6 +89,7 @@ let KDIntentEvents: Record<string, EnemyEvent> = {
 				if (enemy.aware) {
 					enemy.gx = player.x;
 					enemy.gy = player.y;
+					KDUpdateMoveToEntity(enemy);
 					KinkyDungeonSetEnemyFlag(enemy, "overrideMove", 12);
 					KinkyDungeonSetEnemyFlag(enemy, "noResetIntent", 2);
 					KDTryToLeash(enemy, player, delta, false,
@@ -115,6 +118,8 @@ let KDIntentEvents: Record<string, EnemyEvent> = {
 					} else
 					if (KDistChebyshev(enemy.IntentLeashPoint.x - enemy.x, enemy.IntentLeashPoint.y - enemy.y) < 1.5 && !(aiData as KDAIData).aggressive) {
 						KDIntentEvents.leashFurniture.arrive(enemy, aiData);
+					} else if ((aiData as KDAIData).aggressive) {
+						KDResetIntent(enemy);
 					}
 				}
 
@@ -180,6 +185,7 @@ let KDIntentEvents: Record<string, EnemyEvent> = {
 			}
 			enemy.gx = KinkyDungeonPlayerEntity.x;
 			enemy.gy = KinkyDungeonPlayerEntity.y;
+			KDUpdateMoveToEntity(enemy);
 			return true;
 		},
 		maintain: (enemy, delta, aiData) => {
@@ -204,6 +210,7 @@ let KDIntentEvents: Record<string, EnemyEvent> = {
 				if (enemy.aware) {
 					enemy.gx = KinkyDungeonPlayerEntity.x;
 					enemy.gy = KinkyDungeonPlayerEntity.y;
+					KDUpdateMoveToEntity(enemy);
 					KinkyDungeonSetEnemyFlag(enemy, "overrideMove", 12);
 					KinkyDungeonSetEnemyFlag(enemy, "noResetIntent", 2);
 					KDTryToLeash(enemy, player, delta, false,
@@ -285,6 +292,7 @@ let KDIntentEvents: Record<string, EnemyEvent> = {
 			}
 			enemy.gx = KinkyDungeonPlayerEntity.x;
 			enemy.gy = KinkyDungeonPlayerEntity.y;
+			KDUpdateMoveToEntity(enemy);
 			return res;
 		},
 		maintain: (enemy, delta, aiData) => {
@@ -308,6 +316,7 @@ let KDIntentEvents: Record<string, EnemyEvent> = {
 				if (enemy.aware) {
 					enemy.gx = KinkyDungeonPlayerEntity.x;
 					enemy.gy = KinkyDungeonPlayerEntity.y;
+					KDUpdateMoveToEntity(enemy);
 					KinkyDungeonSetEnemyFlag(enemy, "overrideMove", 12);
 					KinkyDungeonSetEnemyFlag(enemy, "noResetIntent", 2);
 					KDTryToLeash(enemy, player, delta, false,
@@ -325,7 +334,7 @@ let KDIntentEvents: Record<string, EnemyEvent> = {
 					enemy.gy = enemy.IntentLeashPoint?.y;
 					KinkyDungeonSetEnemyFlag(enemy, "noResetIntent", 12);
 				} else {
-					if (KDistChebyshev(enemy.IntentLeashPoint.x - enemy.x, enemy.IntentLeashPoint.y - enemy.y) < 1.5 && !(aiData as KDAIData).aggressive) {
+					if (KDistChebyshev(enemy.IntentLeashPoint.x - enemy.x, enemy.IntentLeashPoint.y - enemy.y) < 1.5) {
 						KDIntentEvents.leashToPoint_Furn.arrive(enemy, aiData);
 					}
 				}
@@ -397,6 +406,7 @@ let KDIntentEvents: Record<string, EnemyEvent> = {
 				if (enemy.aware) {
 					enemy.gx = KinkyDungeonPlayerEntity.x;
 					enemy.gy = KinkyDungeonPlayerEntity.y;
+					KDUpdateMoveToEntity(enemy);
 					KinkyDungeonSetEnemyFlag(enemy, "overrideMove", 12);
 					KinkyDungeonSetEnemyFlag(enemy, "noResetIntent", 2);
 					KDTryToLeash(enemy, player, delta, false,
@@ -413,7 +423,7 @@ let KDIntentEvents: Record<string, EnemyEvent> = {
 					enemy.gy = enemy.IntentLeashPoint?.y || KDMapData.StartPosition.x;
 					KinkyDungeonSetEnemyFlag(enemy, "noResetIntent", 12);
 
-					if (KDistChebyshev(enemy.IntentLeashPoint.x - enemy.x, enemy.IntentLeashPoint.y - enemy.y) < 1.5 && !(aiData as KDAIData).aggressive) {
+					if (KDistChebyshev(enemy.IntentLeashPoint.x - enemy.x, enemy.IntentLeashPoint.y - enemy.y) < 1.5) {
 						KDIntentEvents.leashStorage.arrive(enemy, aiData);
 					}
 				}
@@ -459,7 +469,7 @@ let KDIntentEvents: Record<string, EnemyEvent> = {
 			// When the enemy arrives at the leash point we move the player to it
 			let dialogue = enemy.intentDialogue;
 			if (dialogue) {
-				KDStartDialog(enemy.intentDialogue, enemy.Enemy?.name, true, KDGetPersonality(enemy), enemy);
+				KDStartDialog(dialogue, enemy.Enemy?.name, true, KDGetPersonality(enemy), enemy);
 			}
 			enemy.IntentAction = '';
 			enemy.IntentLeashPoint = null;
@@ -477,10 +487,94 @@ let KDIntentEvents: Record<string, EnemyEvent> = {
 
 			enemy.gx = KDPlayer().x;
 			enemy.gy = KDPlayer().y;
+			KDUpdateMoveToEntity(enemy);
 			KinkyDungeonSetEnemyFlag(enemy, "noResetIntent", 12);
 
 			if (KDistChebyshev(KDPlayer().x - enemy.x, KDPlayer().y - enemy.y) < 1.5 && !(aiData as KDAIData).aggressive) {
 				KDIntentEvents.initiateDialogue.arrive(enemy, aiData);
+			}
+			if (enemy.playWithPlayer < 10) {
+				enemy.playWithPlayer = 10;
+			}
+			return false;
+		},
+	},
+	
+	"allyPunishPlayer": {
+		aggressive: true,
+		nonaggressive: true,
+		noMassReset: true,
+		// This will make the enemy want to leash you
+		weight: (enemy, _aiData, _allied, _hostile, _aggressive) => {
+			return enemy.hostile && (enemy.faction == "Player" || enemy.factionorig == "Player") ? 10000 : 0;
+		},
+		trigger: (enemy, aiData) => {
+			KDResetIntent(enemy, aiData);
+			enemy.IntentAction = 'allyPunishPlayer';
+			KinkyDungeonSetEnemyFlag(enemy, "noResetIntent", 140);
+			//let nearestfurniture = KDRandomJailPoint(enemy.x, enemy.y, ["storage"]);
+			//enemy.IntentLeashPoint = nearestfurniture;
+			enemy.playWithPlayer = 22;
+			KDSetPlayCD(enemy, 3);
+
+			KinkyDungeonSetEnemyFlag(enemy, "playstart", 3);
+			KinkyDungeonSetEnemyFlag(enemy, "motivated", 50);
+
+			//KDAddThought(enemy.id, "Jail", 5, enemy.playWithPlayer);
+
+			/*let suff = (KDGetEnemyPlayLine(enemy) ? KDGetEnemyPlayLine(enemy) : "");
+			KinkyDungeonSendDialogue(enemy, TextGet("KinkyDungeonRemindJailPlay" + suff + "Leash",
+									KDGetGenericDialogueParams(KDPlayer(), enemy)).replace("EnemyName", TextGet("Name" + enemy.Enemy.name)), KDGetColor(enemy), 4, 3);*/
+		},
+		arrive: (enemy, aiData) => {
+			// When the enemy arrives at the leash point we move the player to it
+			let dialogue = "AllyPunish";
+			if (dialogue) {
+				for (let en of KDMapData.Entities) {
+					if (en.faction == "Player") delete en.hostile;
+					KDUpdatePersistentNPC(en.id);
+					if (en.IntentAction == 'allyPunishPlayer') KDResetIntent(en);
+				}
+				if (KDGameData.Party)
+					for (let en of KDGameData.Party) {
+						if (en.faction == "Player") delete en.hostile;
+						KDUpdatePersistentNPC(en.id);
+						if (en.IntentAction == 'allyPunishPlayer') KDResetIntent(en);
+					}
+				KDStartDialog(dialogue, enemy.Enemy?.name, true, KDGetPersonality(enemy), enemy);
+			}
+			enemy.IntentAction = '';
+			enemy.IntentLeashPoint = null;
+			KinkyDungeonSetEnemyFlag(enemy, "noResetIntent", -1);
+			enemy.playWithPlayer = 0;
+			enemy.playWithPlayerCD = 50;
+			KDResetAllAggro(KinkyDungeonPlayerEntity);
+			KinkyDungeonSetEnemyFlag(enemy, "playstart", 0);
+			KDResetAllIntents(true);
+			return !!dialogue;
+		},
+		maintain: (enemy, delta, aiData) => {
+			let player = KDPlayer();
+			enemy.aware = true;
+			if (!enemy.hostile) {
+				enemy.playWithPlayer = 0;
+				enemy.playWithPlayerCD = 20;
+				enemy.IntentAction = '';
+				enemy.IntentLeashPoint = null;
+				KDResetIntent(enemy);
+			}
+
+			enemy.gx = KDPlayer().x;
+			enemy.gy = KDPlayer().y;
+			KDUpdateMoveToEntity(enemy);
+			KinkyDungeonSetEnemyFlag(enemy, "noResetIntent", 12);
+
+			if (KDistChebyshev(KDPlayer().x - enemy.x, KDPlayer().y - enemy.y) < 1.5 && !KinkyDungeonHasWill(0.5)) {
+				KDIntentEvents.allyPunishPlayer.arrive(enemy, aiData);
+			} else {
+				KinkyDungeonSetEnemyFlag(enemy, "forceattack", 2);
+				KinkyDungeonSetEnemyFlag(enemy, "forcetease", 2);
+				KinkyDungeonSetEnemyFlag(enemy, "dontfocusleash", 2);
 			}
 			if (enemy.playWithPlayer < 10) {
 				enemy.playWithPlayer = 10;
@@ -552,6 +646,7 @@ let KDIntentEvents: Record<string, EnemyEvent> = {
 				if (enemy.aware) {
 					enemy.gx = KinkyDungeonPlayerEntity.x;
 					enemy.gy = KinkyDungeonPlayerEntity.y;
+					KDUpdateMoveToEntity(enemy);
 					KinkyDungeonSetEnemyFlag(enemy, "overrideMove", 12);
 					KinkyDungeonSetEnemyFlag(enemy, "noResetIntent", 2);
 					KDTryToLeash(enemy, player, delta, false,
@@ -568,7 +663,7 @@ let KDIntentEvents: Record<string, EnemyEvent> = {
 					enemy.gy = enemy.IntentLeashPoint?.y || KDMapData.StartPosition.x;
 					KinkyDungeonSetEnemyFlag(enemy, "noResetIntent", 12);
 
-					if (KDistChebyshev(enemy.IntentLeashPoint.x - enemy.x, enemy.IntentLeashPoint.y - enemy.y) < 1.5 && !(aiData as KDAIData).aggressive) {
+					if (KDistChebyshev(enemy.IntentLeashPoint.x - enemy.x, enemy.IntentLeashPoint.y - enemy.y) < 1.5) {
 						KDIntentEvents.leashCell.arrive(enemy, aiData);
 					}
 				}
@@ -643,6 +738,7 @@ let KDIntentEvents: Record<string, EnemyEvent> = {
 				} else {
 					enemy.gx = KinkyDungeonPlayerEntity.x;
 					enemy.gy = KinkyDungeonPlayerEntity.y;
+					KDUpdateMoveToEntity(enemy);
 					KinkyDungeonSetEnemyFlag(enemy, "noResetIntent", 12);
 				}
 				if (enemy.playWithPlayer > 0)
@@ -658,7 +754,7 @@ let KDIntentEvents: Record<string, EnemyEvent> = {
 		noplay: true,
 		// This is the basic leash to jail mechanic
 		weight: (_enemy, _aiData, _allied, _hostile, _aggressive) => {
-			return 100;
+			return KDCanDoBasicCapture(_enemy, _aiData, _allied, _hostile, _aggressive) ? 100 : 0;
 		},
 		trigger: (enemy, _aiData) => {
 			enemy.playWithPlayer = 0;
@@ -673,6 +769,9 @@ let KDIntentEvents: Record<string, EnemyEvent> = {
 		overrideIgnore: true,
 		// This is the basic leash to jail mechanic
 		weight: (enemy, aiData, _allied, hostile, _aggressive) => {
+			if (enemy.faction == "Player") return 0;
+			if (enemy.factionorig == "Player") return 0;
+			
 			//if (KinkyDungeonAltFloor(KDGameData.RoomType)?.isPrison) return 0;
 			if (enemy.Enemy?.Behavior?.leashCondition) {
 				if (!KDLeashConditions[enemy.Enemy.Behavior.leashCondition].check(enemy, (aiData as KDAIData).player))
@@ -692,7 +791,13 @@ let KDIntentEvents: Record<string, EnemyEvent> = {
 		)
 				&& !KDEnemyHasFlag(enemy, "dontChase")) ?
 				((KinkyDungeonNearestJailPoint(enemy.x, enemy.y, ["dropoff"])
-					&& !KinkyDungeonNearestJailPoint(enemy.x, enemy.y, ["jail"])) ? 0 : 100)
+					&& !KinkyDungeonNearestJailPoint(enemy.x, enemy.y, ["jail"])) ? 0 : (
+
+						KDCanDoBasicCapture(enemy, aiData, 
+							_allied, hostile, _aggressive) ? 100 : 0
+
+
+					))
 			: 0;
 		},
 		trigger: (enemy, _aiData) => {
@@ -718,6 +823,7 @@ let KDIntentEvents: Record<string, EnemyEvent> = {
 		maintain: (enemy, delta, aiData) => {
 			let player = KDPlayer();
 			let tethered = KDIsPlayerTethered(KinkyDungeonPlayerEntity);
+			KinkyDungeonSetFlag("TeaseOnLeash", 2);
 			if (KDistChebyshev(enemy.x - KinkyDungeonPlayerEntity.x, enemy.y - KinkyDungeonPlayerEntity.y) < 1.5 && !tethered && KDPlayerLeashed(KinkyDungeonPlayerEntity)) {
 				if (KDIsInNonLeashableFurniture(player)) {
 					KDAddThought(enemy.id, "Confused", 4, 1);
@@ -736,6 +842,7 @@ let KDIntentEvents: Record<string, EnemyEvent> = {
 				if (enemy.aware) {
 					enemy.gx = KinkyDungeonPlayerEntity.x;
 					enemy.gy = KinkyDungeonPlayerEntity.y;
+					KDUpdateMoveToEntity(enemy);
 					KinkyDungeonSetEnemyFlag(enemy, "noResetIntent", 2);
 					KDTryToLeash(enemy, player, delta, false,
 						(KDBoundPowerLevel < 0.5 || !KinkyDungeonHasWill(0.1)) && (aiData as KDAIData).canAttack);
@@ -762,7 +869,7 @@ let KDIntentEvents: Record<string, EnemyEvent> = {
 				KinkyDungeonSetEnemyFlag(enemy, "noResetIntent", 12);
 
 				// If they are not attacking player
-				if (KDistChebyshev(enemy.gx - enemy.x, enemy.gy - enemy.y) < 1.5 && !(aiData as KDAIData).aggressive) {
+				if (KDistChebyshev(enemy.gx - enemy.x, enemy.gy - enemy.y) < 1.5) {
 					KDIntentEvents.CaptureJail.arrive(enemy, aiData);
 				}
 				// TODO add release case based on alliance
@@ -822,7 +929,7 @@ let KDIntentEvents: Record<string, EnemyEvent> = {
 			if (!KDEnemyCanTalk(enemy) || !enemy.Enemy?.bound) return 0;
 			if (KinkyDungeonFlags.get("PlayerCombat") || KinkyDungeonFlags.get("ToyedWith")) return 0;
 			return (hostile && (enemy.Enemy.tags.jailer || enemy.Enemy.tags.jail || enemy.Enemy.tags.leashing) && !KDEnemyHasFlag(enemy, "dontChase")) ?
-				KDBoundPowerLevel * 10 + (KinkyDungeonFlags.get("CallForHelp") ? 40 : 0)
+				KDBoundPowerLevel * 100 + (KinkyDungeonFlags.get("CallForHelp") ? 40 : 0)
 			: 0;
 		},
 		trigger: (enemy, _aiData) => {
@@ -847,15 +954,34 @@ let KDIntentEvents: Record<string, EnemyEvent> = {
 				KinkyDungeonAggroAction('attack', {enemy: enemy});
 				return false;
 			}
+			KinkyDungeonSetFlag("TeaseOnLeash", 2);
 			if (KDistChebyshev(enemy.x - KinkyDungeonPlayerEntity.x, enemy.y - KinkyDungeonPlayerEntity.y) < 5.5) {
 
 				KinkyDungeonSetEnemyFlag(enemy, "nobind", 2);
 				KinkyDungeonSetEnemyFlag(enemy, "noleash", 2);
 				KinkyDungeonSetEnemyFlag(enemy, "nosteal", 2);
 				KinkyDungeonSetEnemyFlag(enemy, "alwayswill", 2);
+				KinkyDungeonSetEnemyFlag(enemy, "nocast", 2);
+				KinkyDungeonSetEnemyFlag(enemy, "nospecial", 2);
 
 				enemy.gx = KinkyDungeonPlayerEntity.x;
 				enemy.gy = KinkyDungeonPlayerEntity.y;
+				KDUpdateMoveToEntity(enemy);
+				KinkyDungeonSetEnemyFlag(enemy, "alwaystease", 2);
+				KinkyDungeonSetEnemyFlag(enemy, "forcetease", 2);
+				KinkyDungeonSetEnemyFlag(enemy, "noglobaltease", 2);
+				KinkyDungeonSetEnemyFlag(enemy, "teaseAtkCD", 0);
+
+				if (!KDEnemyHasFlag(enemy, "toyWithDialogue")) {
+					KinkyDungeonSetEnemyFlag(enemy, "toyWithDialogue", 3);
+					
+					KinkyDungeonSendDialogue(enemy,
+						TextProvider.applyTemplate(KDGetToyWithDialogue(enemy, KDPlayer()),
+											KDGetGenericDialogueParams(KDPlayer(), enemy)).replace(
+												"EnemyName", TextGet("Name" + enemy.Enemy.name)),
+						KDGetColor(enemy), 3, 9);
+
+				}
 				return true;
 			}
 			return false;
@@ -916,7 +1042,18 @@ let KDIntentEvents: Record<string, EnemyEvent> = {
 			if (!KDHostile(enemy)) {
 				KinkyDungeonSetEnemyFlag(enemy, "noHarshPlay", 12);
 				KinkyDungeonSetEnemyFlag(enemy, "notouchie", 2);
+				KinkyDungeonSetEnemyFlag(enemy, "forcetease", 2);
 			}
+
+			if ((aiData as KDAIData).aggressive) {
+				KDAddThought(enemy.id, "Angry", 4, 1);
+				enemy.IntentAction = '';
+				enemy.IntentLeashPoint = null;
+				enemy.playWithPlayer = 0;
+				enemy.playWithPlayerCD = 3;
+				KDResetAllIntents();
+			}
+			KinkyDungeonSetFlag("TeaseOnLeash", 2);
 
 			if (!KinkyDungeonFlags.has("TempLeash")
 				|| !(KinkyDungeonPlayerTags.get("Collars")
@@ -965,6 +1102,7 @@ let KDIntentEvents: Record<string, EnemyEvent> = {
 					if (!KDIsPlayerTethered(KinkyDungeonPlayerEntity)) {
 						enemy.gx = KinkyDungeonPlayerEntity.x;
 						enemy.gy = KinkyDungeonPlayerEntity.y;
+						KDUpdateMoveToEntity(enemy);
 						if (KDistChebyshev(enemy.x - KinkyDungeonPlayerEntity.x, enemy.y - KinkyDungeonPlayerEntity.y) < 1.5 && !KDEntityHasFlag(enemy, "templeashpause")) {
 							let player = KDPlayer();
 							// Leash the player if they are close
@@ -1084,6 +1222,7 @@ let KDIntentEvents: Record<string, EnemyEvent> = {
 				if (!KDIsPlayerTethered(KinkyDungeonPlayerEntity)) {
 					enemy.gx = KinkyDungeonPlayerEntity.x;
 					enemy.gy = KinkyDungeonPlayerEntity.y;
+					KDUpdateMoveToEntity(enemy);
 					if (KDistChebyshev(enemy.x - KinkyDungeonPlayerEntity.x, enemy.y - KinkyDungeonPlayerEntity.y) < 1.5) {
 						let player = KDPlayer();
 						// Leash the player if they are close
@@ -1181,6 +1320,7 @@ let KDIntentEvents: Record<string, EnemyEvent> = {
 			if (!KDHostile(enemy))
 				KinkyDungeonSetEnemyFlag(enemy, "noHarshPlay", 12);
 
+			KinkyDungeonSetFlag("TeaseOnLeash", 2);
 			if (!KinkyDungeonFlags.has("TempLeash") || !(KinkyDungeonPlayerTags.get("Collars") && KinkyDungeonGetRestraintItem("ItemNeckRestraints"))) {
 				if (!(KinkyDungeonPlayerTags.get("Collars") && KinkyDungeonGetRestraintItem("ItemNeckRestraints")) || KDGameData.PrisonerState != 'jail') {
 					enemy.IntentAction = '';
@@ -1223,6 +1363,7 @@ let KDIntentEvents: Record<string, EnemyEvent> = {
 					if (!KDIsPlayerTethered(KinkyDungeonPlayerEntity)) {
 						enemy.gx = KinkyDungeonPlayerEntity.x;
 						enemy.gy = KinkyDungeonPlayerEntity.y;
+						KDUpdateMoveToEntity(enemy);
 						if (KDistChebyshev(enemy.x - KinkyDungeonPlayerEntity.x, enemy.y - KinkyDungeonPlayerEntity.y) < 1.5 && !KDEntityHasFlag(enemy, "templeashpause")) {
 							let player = KDPlayer();
 							// Leash the player if they are close
@@ -1337,6 +1478,7 @@ let KDIntentEvents: Record<string, EnemyEvent> = {
 				if (!KDIsPlayerTethered(KinkyDungeonPlayerEntity)) {
 					enemy.gx = KinkyDungeonPlayerEntity.x;
 					enemy.gy = KinkyDungeonPlayerEntity.y;
+					KDUpdateMoveToEntity(enemy);
 					if (KDistChebyshev(enemy.x - KinkyDungeonPlayerEntity.x, enemy.y - KinkyDungeonPlayerEntity.y) < 1.5) {
 						let player = KDPlayer();
 						// Leash the player if they are close
@@ -1396,6 +1538,8 @@ let KDIntentEvents: Record<string, EnemyEvent> = {
 		forceattack: true,
 		// This is the basic leash to jail mechanic
 		weight: (enemy, aiData, _allied, hostile, _aggressive) => {
+			if (enemy.faction == "Player") return 0;
+			if (enemy.factionorig == "Player") return 0;
 			if (enemy.Enemy?.Behavior?.leashCondition) {
 				if (!KDLeashConditions[enemy.Enemy.Behavior.leashCondition].check(enemy, (aiData as KDAIData).player))
 					return 0;
@@ -1412,6 +1556,7 @@ let KDIntentEvents: Record<string, EnemyEvent> = {
 			enemy.IntentLeashPoint = KinkyDungeonNearestJailPoint(enemy.x, enemy.y, ["dropoff"]);
 		},
 		arrive: (enemy, aiData) => {
+			KinkyDungeonSetFlag("TeaseOnLeash", 2);
 			if (KDGameData.PrisonerState == 'parole' && !KDSelfishLeash(enemy)) {
 				KinkyDungeonSendDialogue(enemy, TextGet("KinkyDungeonJailer" + KDJailPersonality(enemy) + "Mistake",
 									KDGetGenericDialogueParams(KDPlayer(), enemy)).replace("EnemyName", TextGet("Name" + enemy.Enemy.name)), KDGetColor(enemy), 6, 8);
@@ -1454,6 +1599,7 @@ let KDIntentEvents: Record<string, EnemyEvent> = {
 			if ((enemy.aware || KDEnemyHasFlag(enemy, "sent")) && KDistChebyshev(enemy.x - player.x, enemy.y - player.y) > 1.5) {
 				enemy.gx = player.x;
 				enemy.gy = player.y;
+				KDUpdateMoveToEntity(enemy);
 				KinkyDungeonSetEnemyFlag(enemy, "overrideMove", 12);
 				KinkyDungeonSetEnemyFlag(enemy, "noResetIntent", 2);
 			}
@@ -1470,7 +1616,9 @@ let KDIntentEvents: Record<string, EnemyEvent> = {
 		forceattack: true,
 		// This is the basic leash to jail mechanic
 		weight: (enemy, _aiData, _allied, hostile, _aggressive) => {
-			return hostile && (enemy.Enemy.tags.leashing && enemy.Enemy.tags.demon) && KDPlayerLeashed(KinkyDungeonPlayerEntity) ? 2000 : 0;
+			if (enemy.faction == "Player") return 0;
+			if (enemy.factionorig == "Player") return 0;
+			return KDCanCaptureDemon(enemy, _aiData, _allied, hostile, _aggressive) ? 200000 : 0;
 		},
 		trigger: (enemy, _aiData) => {
 			let point = KinkyDungeonGetRandomEnemyPointCriteria((x,y) => {
@@ -1504,6 +1652,7 @@ let KDIntentEvents: Record<string, EnemyEvent> = {
 			if (!enemy.IntentLeashPoint || !KDEffectTileTags(enemy.IntentLeashPoint.x, enemy.IntentLeashPoint.y).demonportal || !KDPlayerLeashed(KinkyDungeonPlayerEntity)) {
 				return false;
 			}
+			KinkyDungeonSetFlag("TeaseOnLeash", 2);
 			KDResetIntent(enemy, aiData);
 			KDBreakTether(KinkyDungeonPlayerEntity);
 			if (KinkyDungeonAutoWait) {
@@ -1520,6 +1669,8 @@ let KDIntentEvents: Record<string, EnemyEvent> = {
 		aggressive: true,
 		// This will make the enemy want to leash you
 		weight: (enemy, aiData, _allied, hostile, _aggressive) => {
+			if (enemy.faction == "Player") return 0;
+			if (enemy.factionorig == "Player") return 0;
 			if (!enemy.Enemy.tags.leashing) return 0;
 			if (KinkyDungeonLeashingEnemy() && KinkyDungeonLeashingEnemy() != enemy) return 0;
 			if (KinkyDungeonFlags.get("Released")) return 0;
@@ -1580,6 +1731,7 @@ let KDIntentEvents: Record<string, EnemyEvent> = {
 				}// else enemy.playWithPlayer += delta;
 			}
 			let player = KDPlayer();
+			KinkyDungeonSetFlag("TeaseOnLeash", 2);
 			
 			if (!enemy.IntentLeashPoint) {
 					if (!KDEntityHasFlag(enemy, "intent_startChecking")) {
@@ -1596,7 +1748,8 @@ let KDIntentEvents: Record<string, EnemyEvent> = {
 					enemy.IntentAction = '';
 					enemy.IntentLeashPoint = null;
 				} else {
-					if (KDistChebyshev(enemy.x - nearestfurniture.x, enemy.y - nearestfurniture.y) < 3.5) {
+					if (KDistChebyshev(enemy.x - nearestfurniture.x, enemy.y - nearestfurniture.y) < 3.5
+					&& KDistChebyshev(player.x - nearestfurniture.x, player.y - nearestfurniture.y) < 3.5) {
 						KinkyDungeonSetEnemyFlag(enemy, "forceattack", 2);
 						KinkyDungeonSetEnemyFlag(enemy, "forcetease", 2);
 						KinkyDungeonSetEnemyFlag(enemy, "dontfocusleash", 2);
@@ -1657,7 +1810,7 @@ function KDSettlePlayerInFurniture(enemy: entity, _aiData: KDAIData, tags?: stri
 			if (!res) {
 				return false;
 			}
-			KinkyDungeonMakeNoise(10, nearestfurniture.x, nearestfurniture.y);
+			KinkyDungeonMakeNoise(10, nearestfurniture.x, nearestfurniture.y, true);
 		}
 
 		KDResetAllAggro();
@@ -1792,4 +1945,14 @@ function KDIsInNonLeashableFurniture(player: entity) {
 		});
 	}
 	return false;
+}
+
+function KDCanCaptureDemon(enemy: entity, aiData: KDEventDataBoolean, allied: boolean, hostile: boolean, aggressive: boolean) {
+	return hostile && (enemy.Enemy.tags.leashing && enemy.Enemy.tags.demon) && KDPlayerLeashed(KinkyDungeonPlayerEntity);
+}
+
+/** Filters off if an enemy can do a special capture type, like demons, and prevents regular capture */
+function KDCanDoBasicCapture(enemy: entity, aiData: KDEventDataBoolean, allied: boolean, hostile: boolean, aggressive: boolean) {
+	if (KDCanCaptureDemon(enemy, aiData, allied, hostile, aggressive)) return false;
+	return true;
 }

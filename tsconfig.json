@@ -41,7 +41,10 @@
         "Game/src/map/KinkyDungeonEditor.ts",
         "Game/src/map/KinkyDungeonEditorGen.ts",
         "Game/src/base/KinkyDungeonErrors.ts",
+        "Game/src/base/KDAudioDrivers.ts",
+        "Game/src/base/KDWebAudio.ts",
         "Game/src/base/KinkyDungeon.ts",
+        "Game/src/base/KDButtplug.ts",
         "Game/src/base/KDRender.ts",
         "Game/src/map/KDMapGen.ts",
         "Game/src/base/game/KinkyDungeonGame.ts",
@@ -183,6 +186,7 @@
         "Data/ModelList_Panties.ts",
         "Data/ModelList_Cosplay.ts",
         "Data/ModelList_Pants.ts",
+        "Data/ModelList_Catsuit.ts",
         "Data/ModelList.ts",
         "Data/ModelList_Kigu.ts",
         "Data/ModelList_Leotards.ts",
@@ -264,7 +268,7 @@
         "Game/src/player/KDPlayerTitles.ts"
     ],
     "compilerOptions": {
-        "target": "es2020",
+        "target": "es2022",
         "sourceMap": true,
         "inlineSources": true,
         "outFile": "./out/main.js",
@@ -278,12 +282,17 @@
 
         "moduleResolution": "node",
         "allowSyntheticDefaultImports": true,
-        "lib": ["DOM", "ES2020"],
-        //"ignoreDeprecations": "6.0",
+        "lib": ["DOM", "ESNext.Disposable", "ES2022"],
         "strictNullChecks": false,
         "noImplicitAny": false,
+        "paths": {
+            "@zendrex/buttplug.js/patterns": ["./node_modules/@zendrex/buttplug.js/dist/patterns/index.d.mts"]
+        }
     },
     "watchOptions": {
         "excludeDirectories": ["**/node_modules", "_build"],
-    }
+    },
+    "include": [
+        "Scripts/lib/buttplug.d.ts"
+    ]
 }

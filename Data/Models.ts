@@ -608,14 +608,14 @@ function DrawCharacter(C: Character, X: number, Y: number, Zoom: number,
 
 	if (!MC.Update.has(containerID)) {
 		let flippedPoses = DrawModelProcessPoses(MC, extraPoses, flip);
-
+		let oldBlend = PIXI.BaseTexture.defaultOptions.scaleMode;
 		if (PIXI.BaseTexture.defaultOptions.scaleMode != Blend) PIXI.BaseTexture.defaultOptions.scaleMode = Blend;
 		let modified = DrawCharacterModels(containerID,
 			MC, X + Zoom * MODEL_SCALE * MODELHEIGHT * 0.25,
 			Y + Zoom * MODEL_SCALE * MODELHEIGHT/2,
 			(Zoom * MODEL_SCALE) || MODEL_SCALE, StartMods,
 			MC.Containers.get(containerID), refreshfilters, flip, EndMods);
-		let oldBlend = PIXI.BaseTexture.defaultOptions.scaleMode;
+		
 		MC.Mods.set(containerID, StartMods);
 		MC.EndMods.set(containerID, EndMods);
 		MC.Update.add(containerID);
@@ -624,6 +624,7 @@ function DrawCharacter(C: Character, X: number, Y: number, Zoom: number,
 		// Cull sprites that weren't drawn yet
 
 		modified = KDCullModelContainerContainer(MC, containerID) || modified;
+
 
 		// We only refresh if it actually needs to be updated
 		if (!MC.ForceUpdate.has(containerID)) modified = true; // Force refresh if we are forced to
@@ -1051,6 +1052,11 @@ function DrawCharacterModels(containerID: string, MC: ModelContainer, X, Y, Zoom
 				}
 				if (l.HideOverrideLayer)
 					MC.HighestPriority[l.HideOverrideLayer] = Math.max(MC.HighestPriority[l.HideOverrideLayer] || -500, pri || -500);
+			}
+			if (l.ExtraOverrideLayers) {
+				for (let hideLayer of l.ExtraOverrideLayers) {
+					MC.HighestPriority[hideLayer] = Math.max(MC.HighestPriority[hideLayer] || -500, pri || -500);
+				}
 			}
 		}
 	}
@@ -1844,7 +1850,7 @@ function DrawCharacterModels(containerID: string, MC: ModelContainer, X, Y, Zoom
 				let fh = containerID + fhash;
 
 				let filter = m.Filters ? (m.Filters[l.InheritColor || l.Name] ?
-					((KDAdjustmentFilterCache.get(fh)) || [adjustFilter(m.Filters[l.InheritColor || l.Name])])
+					((KDAdjustmentFilterCache.get(fh)) || [KDGetFilter(m.Filters[l.InheritColor || l.Name])])
 					: undefined) : undefined;
 				if (filter && !KDAdjustmentFilterCache.get(fh)) {
 					KDAdjustmentFilterCache.set(containerID + FilterHash(m.Filters[l.InheritColor || l.Name]), filter);
@@ -1859,7 +1865,7 @@ function DrawCharacterModels(containerID: string, MC: ModelContainer, X, Y, Zoom
 						if (refreshfilters) {
 							KDAdjustmentFilterCache.delete(containerID + FilterHash(ef));
 						}
-						f = new PIXI.filters.AdjustmentFilter(ef);
+						f = KDGetFilter(ef);
 						f.multisample = 0;
 						let efilter = (KDAdjustmentFilterCache.get(efh) || [f]);
 						if (efilter && !KDAdjustmentFilterCache.get(efh)) {
@@ -2060,13 +2066,11 @@ function DrawCharacterModels(containerID: string, MC: ModelContainer, X, Y, Zoom
 						// note: zoom is multiplied by MODEL_SCALE so here it cancels
 						let RT = ContainerContainer.Submeshes.get(sg)?.rt
 							|| PIXI.RenderTexture.create({ width: MODELWIDTH * 2 * Zoom, height: MODELHEIGHT * 2 * Zoom,
-								resolution: resolution});
+								resolution: resolution, scaleMode: PIXI.SCALE_MODES.LINEAR});
 						let Mesh = ModelGetMaxMeshWarp(MC.Poses, sg, "pri_basic", "BasicMesh") ?
 							new PIXI.SimplePlane(RT, 30, 30)
 							: new PIXI.SimplePlane(RT, 2, 2);
-						
-						
-						
+												
 						Mesh.zIndex = -ModelLayers[metaLayerForward[sg][metaLayerForward[sg].length - 1]] - LAYER_INCREMENT;
 						ContainerContainer.Mesh.addChild(Mesh);
 						ContainerContainer.Submeshes.set(sg, {mesh: Mesh, rt: RT, container: cc,
@@ -2652,17 +2656,21 @@ function UpdateModels(C: Character, Xray?: string[], customFaction?: string) {
 			let filters = A.Filters;
 
 			if (customFaction && clothes.factionFilters && GetPalette(C, customFaction)) {
-				filters = structuredClone(A.Filters) || {}; // clone to avoid poisoning original Appearance array
+				filters = structuredClone(A.Model.Filters || A.Filters) || {}; // clone to avoid poisoning original Appearance array
 				for (let f of Object.entries(clothes.factionFilters)) {
 					let faction = customFaction;
 					if (GetPalette(C, faction)[f[1].color]) {
-						if (f[1].override) {
+						if (f[1].override
+							|| (f[1].overridehsl && GetPalette(C, faction)[f[1].color].hue >= -1)
+							|| (f[1].overridergb && !(GetPalette(C, faction)[f[1].color].hue >= -1))
+						) {
 							filters[f[0]] = GetPalette(C, faction)[f[1].color];
 						} else {
 							let origFilters = filters[f[0]];
 							//@ts-ignore
 							if (!filters[f[0]]) filters[f[0]] = {};
-							filters[f[0]].saturation = 0;
+							filters[f[0]].saturation = GetPalette(C, faction)[f[1].color].hue >= 0 ? 
+								GetPalette(C, faction)[f[1].color].saturation : 0;
 							filters[f[0]].contrast = (origFilters)
 								? origFilters.contrast : 1;
 							filters[f[0]].gamma = (origFilters)
@@ -2672,8 +2680,10 @@ function UpdateModels(C: Character, Xray?: string[], customFaction?: string) {
 							filters[f[0]].red = GetPalette(C, faction)[f[1].color].red;
 							filters[f[0]].blue = GetPalette(C, faction)[f[1].color].blue;
 							filters[f[0]].green = GetPalette(C, faction)[f[1].color].green;
+							filters[f[0]].hue = GetPalette(C, faction)[f[1].color].hue;
+							filters[f[0]].colorize = GetPalette(C, faction)[f[1].color].colorize;
 						}
-						if (f[1].desaturate) {
+						if (f[1].desaturate && (filters[f[0]].hue < 0 || isNaN(filters[f[0]].hue))) {
 							filters[f[0]].saturation = 0;
 						}
 					}
@@ -3222,7 +3232,7 @@ function KDCullModelContainerContainer(MC: ModelContainer, containerID: string) 
 	for (let sprite of Container.SpriteList.entries()) {
 		if ((!Container.SpritesDrawn.has(sprite[0]) && sprite[1])) {
 			if (cull) {
-				sprite[1].parent.removeChild(sprite[1]);
+				sprite[1].removeFromParent();
 				Container.SpriteList.delete(sprite[0]);
 				KDSpritesToCull.push(sprite[1]);
 			} else sprite[1].visible = false;
@@ -3233,11 +3243,6 @@ function KDCullModelContainerContainer(MC: ModelContainer, containerID: string) 
 	return modified;
 }
 
-function adjustFilter(filter) {
-	let f = new PIXI.filters.AdjustmentFilter(filter);
-
-	return f;
-}
 
 
 class Transform {
@@ -3391,8 +3396,8 @@ function KDGetSpriteGroup(pri: number): string {
 
 function KDGetStringHash(str: string): number {
 	let sum = 0;
-	for (let c of str) {
-		sum += c.charCodeAt(0);
+	for (let i = 0; i < str.length; ++i) {
+		sum += str.charCodeAt(i);
 	}
 	return sum;
 }

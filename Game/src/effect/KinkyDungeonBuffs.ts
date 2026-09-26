@@ -290,8 +290,9 @@ function KDDamagePlayerShield(Amount: number, Player: entity): void {
 	KDUpdatePlayerShield(PlayerBuffs);
 }
 
-function KDBuffEnabled(list: Record<string, KDBuff>, buff: KDBuff, onlyPositiveDuration: boolean): boolean {
+function KDBuffEnabled(list: Record<string, KDBuff>, buff: KDBuff, onlyPositiveDuration: boolean, temporary?: boolean): boolean {
 	return (!onlyPositiveDuration || buff.duration > 0)
+		&& (!temporary || (buff.duration < 9000 && !buff.infinite && !buff.constant))
 		&& (!buff.disableTypes || !buff.disableTypes.some((tag: string) => {
 			return list[tag] != undefined;
 		}));
@@ -326,7 +327,7 @@ function KDUpdateBuffedStatTypeMemo(list: Record<string, KDBuff>): void {
 	KDBuffedStatTypeMemoUpdate.delete(list);
 }
 
-function KinkyDungeonGetBuffedStat(list: Record<string, KDBuff>, Stat: string, onlyPositiveDuration?: boolean): number {
+function KinkyDungeonGetBuffedStat(list: Record<string, KDBuff>, Stat: string, onlyPositiveDuration?: boolean, temporary?: boolean): number {
 	let stat = 0;
 	if (list) {
 		if (KDBuffedStatTypeMemoUpdate.get(list)?.length > 0
@@ -337,14 +338,14 @@ function KinkyDungeonGetBuffedStat(list: Record<string, KDBuff>, Stat: string, o
 			if (KDBuffedStatTypeMemo.get(list) && KDBuffedStatTypeMemo.get(list)[Stat])
 				for (let buff of KDBuffedStatTypeMemo.get(list)[Stat]) {
 					if (buff && buff.type == Stat
-						&& KDBuffEnabled(list, buff, onlyPositiveDuration)) {
+						&& KDBuffEnabled(list, buff, onlyPositiveDuration, temporary)) {
 						stat += buff.power;
 					}
 				}
 		} else {
 			for (let buff of Object.values(list)) {
 				if (buff && buff.type == Stat
-					&& KDBuffEnabled(list, buff, onlyPositiveDuration)) {
+					&& KDBuffEnabled(list, buff, onlyPositiveDuration, temporary)) {
 					stat += buff.power;
 				}
 			}
@@ -353,11 +354,11 @@ function KinkyDungeonGetBuffedStat(list: Record<string, KDBuff>, Stat: string, o
 	}
 	return stat;
 }
-function KinkyDungeonGetMaxBuffedStat(list: Record<string, KDBuff>, Stat: string, onlyPositiveDuration: boolean): number {
+function KinkyDungeonGetMaxBuffedStat(list: Record<string, KDBuff>, Stat: string, onlyPositiveDuration: boolean, temporary?: boolean): number {
 	let stat = 0;
 	if (list)
 		for (let buff of Object.values(list)) {
-			if (buff && buff.type == Stat && KDBuffEnabled(list, buff, onlyPositiveDuration)) {
+			if (buff && buff.type == Stat && KDBuffEnabled(list, buff, onlyPositiveDuration, temporary)) {
 				stat = Math.max(stat, buff.power);
 			}
 		}
@@ -436,7 +437,7 @@ function KDApplyBuff(list: Record<string, KDBuff>, origbuff: KDBuff, changes: Re
 		KinkyDungeonExpireBuff(entity, id);
 		return null;
 	} else {
-		if (!list[id] && buff.sfxApply) KinkyDungeonPlaySound(KinkyDungeonRootDirectory + "Audio/" + buff.sfxApply + ".ogg");
+		if (!list[id] && buff.sfxApply) KinkyDungeonPlaySoundLocation(KinkyDungeonRootDirectory + "Audio/" + buff.sfxApply + ".ogg", KDPlayer(), entity);
 		if (!list[id]
 			|| (list[id].power >= 0 && buff.power >= list[id].power)
 			|| (list[id].power < 0
@@ -510,3 +511,4 @@ function KDEntityGetBuff(entity: entity, buffId: string): KDBuff {
 		return KinkyDungeonGetbuff(KinkyDungeonPlayerBuffs, buffId);
 	} else return KinkyDungeonGetbuff(entity.buffs, buffId);
 }
+

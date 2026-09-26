@@ -231,7 +231,7 @@ KDPrisonTypes.HighSec = {
 			
 
 				let lostTrack = KDLostJailTrackCell(player);
-				if (lostTrack == "Unaware") {
+				if (KDNoInteractResults.includes(lostTrack)) {
 					return KDSetPrisonState(player, "Jail");
 				}
 
@@ -379,7 +379,7 @@ KDPrisonTypes.HighSec = {
 
 
 				let lostTrack = KDLostJailTrack(player);
-				if (lostTrack == "Unaware") {
+				if (KDNoInteractResults.includes(lostTrack)) {
 					return KDSetPrisonState(player, "Jail");
 				}
 
@@ -398,6 +398,7 @@ KDPrisonTypes.HighSec = {
 						// Any qualifying factors means they know where you should be
 						guard.gx = player.x;
 						guard.gy = player.y;
+						KDUpdateMoveToEntity(guard);
 						KinkyDungeonSetEnemyFlag(guard, "wander", 30)
 						KinkyDungeonSetEnemyFlag(guard, "overrideMove", 10);
 					}
@@ -461,6 +462,7 @@ KDPrisonTypes.HighSec = {
 				if (guard && (!nearestfurniture || KDPrisonIsInFurniture(player))) {
 					guard.gx = player.x;
 					guard.gy = player.y;
+					KDUpdateMoveToEntity(guard);
 					KinkyDungeonSetEnemyFlag(guard, "overrideMove", 2);
 					if (KDistChebyshev(guard.x - player.x, guard.y - player.y) < 1.5) {
 						if (!nearestfurniture || KDPrisonIsInFurniture(player)) {
@@ -485,7 +487,7 @@ KDPrisonTypes.HighSec = {
 				KinkyDungeonSetFlag("noWeaponStop", 10);
 
 				let lostTrack = KDLostJailTrack(player);
-				if (lostTrack == "Unaware") {
+				if (KDNoInteractResults.includes(lostTrack)) {
 					return KDSetPrisonState(player, "Jail");
 				}
 				let guard = KDPrisonCommonGuard(player);
@@ -513,6 +515,7 @@ KDPrisonTypes.HighSec = {
 						// Any qualifying factors means they know where you should be
 						guard.gx = player.x;
 						guard.gy = player.y;
+						KDUpdateMoveToEntity(guard);
 						KinkyDungeonSetEnemyFlag(guard, "wander", 30)
 						KinkyDungeonSetEnemyFlag(guard, "overrideMove", 10);
 					}
@@ -571,7 +574,7 @@ KDPrisonTypes.HighSec = {
 				let player = KinkyDungeonPlayerEntity;
 
 				let lostTrack = KDLostJailTrack(player);
-				if (lostTrack == "Unaware") {
+				if (KDNoInteractResults.includes(lostTrack)) {
 					return KDSetPrisonState(player, "Jail");
 				}
 
@@ -590,6 +593,7 @@ KDPrisonTypes.HighSec = {
 							// Any qualifying factors means they know where you should be
 							guard.gx = player.x;
 							guard.gy = player.y;
+							KDUpdateMoveToEntity(guard);
 							KinkyDungeonSetEnemyFlag(guard, "wander", 30)
 							KinkyDungeonSetEnemyFlag(guard, "overrideMove", 10);
 						}
@@ -620,3 +624,5 @@ KDPrisonTypes.HighSec = {
 		},
 	},
 };
+
+let KDNoInteractResults = ["Unaware", "NotJailed"];

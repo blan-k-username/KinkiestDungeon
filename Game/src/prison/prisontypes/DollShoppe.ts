@@ -1,3 +1,5 @@
+let KDDollShoppeVisitorTags = ["adventurer", "maid", "witch", "dragonheart", "nevermere", "librarian", "puppetmaster"];
+
 KDPrisonTypes.DollShoppe = {
 	name: "DollShoppe",
 	default_state: "Jail",
@@ -29,7 +31,7 @@ KDPrisonTypes.DollShoppe = {
 				&& (en.idle || KDEnemyHasFlag(en, "idleg"))) {
 				idleGuard.push(en);
 				KinkyDungeonSetEnemyFlag(en, "idleg", 2);
-			} else if (en.faction == "Adventurer" && en != KinkyDungeonJailGuard() && en != KinkyDungeonLeashingEnemy() && !KDEnemyHasFlag(en, "despawn")) {
+			} else if (en.specialdialogue == "DollShoppeVisitor" && en != KinkyDungeonJailGuard() && en != KinkyDungeonLeashingEnemy() && !KDEnemyHasFlag(en, "despawn")) {
 				admirers.push(en);
 				if (!KDEnemyHasFlag(en, "admiring"))
 					idleadmirers.push(en);
@@ -56,12 +58,13 @@ KDPrisonTypes.DollShoppe = {
 				}
 			}
 			if (gg) {
+				KinkyDungeonSetEnemyFlag(gg, "leashPrisoner", 3);
 				if (dist < 1.5) {
 					// Set the doll as a punishment doll or delete it if there are too many
 					
 					if (punishDoll.length < 20 && !KDEnemyHasFlag(doll, "punished")) {
 						KinkyDungeonSetEnemyFlag(doll, "punishdoll", 9999);
-						KinkyDungeonSetEnemyFlag(doll, "punished", Math.floor(KDRandom() *500) + 200);
+						//KinkyDungeonSetEnemyFlag(doll, "punished", Math.floor(KDRandom() *500) + 200);
 						KinkyDungeonSetEnemyFlag(doll, "tryNotToSwap", 9999);
 						punishDoll.push(doll);
 					} else {
@@ -75,6 +78,7 @@ KDPrisonTypes.DollShoppe = {
 					KinkyDungeonSetEnemyFlag(gg, "overrideMove", 10);
 					gg.gx = doll.x;
 					gg.gy = doll.y;
+					KDUpdateMoveToEntity(gg);
 				}
 			}
 		}
@@ -140,6 +144,7 @@ KDPrisonTypes.DollShoppe = {
 					KinkyDungeonSetEnemyFlag(gg, "overrideMove", 10);
 					gg.gx = doll.x;
 					gg.gy = doll.y;
+					KDUpdateMoveToEntity(gg);
 				}
 			}
 		}
@@ -147,7 +152,7 @@ KDPrisonTypes.DollShoppe = {
 		// For each punishment doll, pick a guard to pull
 		for (let doll of punishDoll) {
 			let gg: entity = null;
-			let storage = KinkyDungeonNearestJailPoint(doll.x, doll.y, ["display"], undefined, undefined);
+			let storage = KinkyDungeonNearestJailPoint(doll.preferredX || doll.x, doll.preferredY || doll.y, ["display"], undefined, undefined);
 			if (doll.x == storage?.x && doll.y == storage?.y) {
 				KinkyDungeonSetEnemyFlag(doll, "punished", Math.floor(KDRandom() *500) + 200);
 				continue;
@@ -214,6 +219,7 @@ KDPrisonTypes.DollShoppe = {
 					KinkyDungeonSetEnemyFlag(gg, "overrideMove", 10);
 					gg.gx = doll.x;
 					gg.gy = doll.y;
+					KDUpdateMoveToEntity(gg);
 				}
 			}
 		}
@@ -313,6 +319,7 @@ KDPrisonTypes.DollShoppe = {
 					admirer.gx = doll.x;
 					admirer.gy = doll.y + 1;
 					admirer.AI = "looseguard";
+					KDUpdateMoveToEntity(admirer);
 
 				} else if (KDMapData.Labels.Display) {
 					if (!KDEnemyHasFlag(admirer, "newdisplay")) {
@@ -362,8 +369,13 @@ KDPrisonTypes.DollShoppe = {
 
 			if (KDMapData.Labels && KDMapData.Labels.Entrance?.length > 0) {
 				let l = KDMapData.Labels.Entrance[Math.floor(KDRandom() * KDMapData.Labels.Entrance.length)];
-				let Enemy = KinkyDungeonGetEnemy(["adventurer"], MiniGameKinkyDungeonLevel + 4, 'lib', '0', ["adventurer"],
-					undefined, {["adventurer"]: {mult: 4, bonus: 10}}, ["boss"]);
+				let bonusTags = {};
+				for (let tag of KDDollShoppeVisitorTags) {
+					bonusTags[tag] = {mult: 4, bonus: 10};
+				}
+				let Enemy = KinkyDungeonGetEnemy(
+					[...KDDollShoppeVisitorTags], MiniGameKinkyDungeonLevel + 4, 'lib', '0', ["jail"],
+					undefined, bonusTags, ["boss", "minor", "submissive"], ["elite", "miniboss", "adventurer", "jailer"]);
 				if (Enemy && !KinkyDungeonEnemyAt(l.x, l.y)
 					&& KDistChebyshev(KDPlayer().x - l.x, KDPlayer().y - l.y)
 					> 7) {
@@ -459,7 +471,7 @@ KDPrisonTypes.DollShoppe = {
 
 
 				let lostTrack = KDLostJailTrack(player);
-				if (lostTrack == "Unaware") {
+				if (KDNoInteractResults.includes(lostTrack)) {
 					return KDSetPrisonState(player, "Jail");
 				}
 				if (KDGameData.PrisonerState == 'parole') 
@@ -473,7 +485,7 @@ KDPrisonTypes.DollShoppe = {
 					}
 
 					if (!KinkyDungeonFlags.get("transformCD") && !KinkyDungeonStatsChoice.get("NoDollTransform") && !KinkyDungeonFlags.get("Transformed")
-						&& (KinkyDungeonFlags.get("annoy_puppet") || KDEntityBuffedStat(player, "Hypno_Doll") > 25)) {
+						&& (KDCanBeDolled(player))) {
 						return "Transform";
 					}
 					
@@ -500,7 +512,7 @@ KDPrisonTypes.DollShoppe = {
 
 
 				let lostTrack = KDLostJailTrack(player);
-				if (lostTrack == "Unaware") {
+				if (KDNoInteractResults.includes(lostTrack)) {
 					return KDSetPrisonState(player, "Jail");
 				}
 
@@ -519,6 +531,7 @@ KDPrisonTypes.DollShoppe = {
 						// Any qualifying factors means they know where you should be
 						guard.gx = player.x;
 						guard.gy = player.y;
+						KDUpdateMoveToEntity(guard);
 						KinkyDungeonSetEnemyFlag(guard, "wander", 30)
 						KinkyDungeonSetEnemyFlag(guard, "overrideMove", 10);
 					}
@@ -678,7 +691,7 @@ KDPrisonTypes.DollShoppe = {
 				let player = KinkyDungeonPlayerEntity;
 
 				let lostTrack = KDLostJailTrack(player);
-				if (lostTrack == "Unaware") {
+				if (KDNoInteractResults.includes(lostTrack)) {
 					return KDSetPrisonState(player, "Jail");
 				}
 
@@ -700,6 +713,7 @@ KDPrisonTypes.DollShoppe = {
 							// Any qualifying factors means they know where you should be
 							guard.gx = player.x;
 							guard.gy = player.y;
+							KDUpdateMoveToEntity(guard);
 							KinkyDungeonSetEnemyFlag(guard, "wander", 30)
 							KinkyDungeonSetEnemyFlag(guard, "overrideMove", 10);
 						}
@@ -775,7 +789,7 @@ KDPrisonTypes.DollShoppe = {
 				let rad = 3;
 
 				let lostTrack = KDLostJailTrack(player);
-				if (lostTrack == "Unaware") {
+				if (KDNoInteractResults.includes(lostTrack)) {
 					return KDSetPrisonState(player, "Jail");
 				}
 
@@ -789,6 +803,7 @@ KDPrisonTypes.DollShoppe = {
 						if (guard.IntentAction != action) {
 							guard.gx = player.x;
 							guard.gy = player.y;
+							KDUpdateMoveToEntity(guard);
 							KDIntentEvents[action].trigger(guard, {point: label, radius: 1, target: player});
 							guard.IntentLeashPointType = "display";
 						}
@@ -797,6 +812,7 @@ KDPrisonTypes.DollShoppe = {
 							// Any qualifying factors means they know where you should be
 							guard.gx = player.x;
 							guard.gy = player.y;
+							KDUpdateMoveToEntity(guard);
 							KinkyDungeonSetEnemyFlag(guard, "wander", 30)
 							KinkyDungeonSetEnemyFlag(guard, "overrideMove", 10);
 						}
@@ -886,6 +902,7 @@ KDPrisonTypes.DollShoppe = {
 					en.gyy = KDPlayer().y;
 					en.gx = KDPlayer().x;
 					en.gy = KDPlayer().y;
+					KDUpdateMoveToEntity(en);
 
 					KDPrisonPuppetmasterGuard(player);
 				}
@@ -898,6 +915,7 @@ KDPrisonTypes.DollShoppe = {
 					if (guard.IntentAction != action && !KDGameData.CurrentDialog) {
 						guard.gx = player.x;
 						guard.gy = player.y;
+						KDUpdateMoveToEntity(guard);
 						KDIntentEvents[action].trigger(guard, {});
 						guard.intentDialogue = "DollTransform";
 					}
@@ -925,7 +943,7 @@ KDPrisonTypes.DollShoppe = {
 				let rad = 3;
 
 				let lostTrack = KDLostJailTrack(player);
-				if (lostTrack == "Unaware") {
+				if (KDNoInteractResults.includes(lostTrack)) {
 					return KDSetPrisonState(player, "Jail");
 				}
 
@@ -939,6 +957,7 @@ KDPrisonTypes.DollShoppe = {
 						if (guard.IntentAction != action) {
 							guard.gx = player.x;
 							guard.gy = player.y;
+							KDUpdateMoveToEntity(guard);
 							KDIntentEvents[action].trigger(guard, {point: label, radius: 1, target: player});
 						}
 
@@ -946,6 +965,7 @@ KDPrisonTypes.DollShoppe = {
 							// Any qualifying factors means they know where you should be
 							guard.gx = player.x;
 							guard.gy = player.y;
+							KDUpdateMoveToEntity(guard);
 							KinkyDungeonSetEnemyFlag(guard, "wander", 30)
 							KinkyDungeonSetEnemyFlag(guard, "overrideMove", 10);
 						}
@@ -1030,4 +1050,10 @@ function KDSelectLabel(entity: entity, label: KDLabel) {
 function KDGetLabel(entity: entity) {
 	if (!KDGameData.selectedLabel) KDGameData.selectedLabel = {};
 	return KDGameData.selectedLabel[entity.id];
+}
+
+function KDCanBeDolled(player: entity) {
+	return KinkyDungeonFlags.get("annoy_puppet")
+		|| KDFactionRelation("Player", "Dressmaker") <= KDREPHOSTILE 
+		|| KDEntityBuffedStat(player, "Hypno_Doll") > 10;
 }

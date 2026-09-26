@@ -239,6 +239,8 @@ interface ModelLayer extends Namable {
 	ForceSingleOverride?: boolean,
 	/** This makes it so HideOverrideLayer is the layer for overriding purposes. Pair with NoOverride to complete the effect */
 	CrossHideOverride?: boolean,
+	/** This model adds some override to the following groups, good for hiding other layers if needed */
+	ExtraOverrideLayers?: string[],
 	/** Only overrides if the layer is not hidden.*/
 	DontAlwaysOverride?: boolean,
 	/** This layer does not affect the max priority level */
@@ -281,6 +283,8 @@ type LayerFilter = {
     green: number;
     blue: number;
     alpha: number;
+	hue?: number,
+	colorize?: number,
 }
 
 type LayerPropertiesType = {

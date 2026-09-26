@@ -321,6 +321,7 @@ let KDQuests: Record<string, KDQuest> = {
 									else ee.AI = KDGetAIOverride(ee, 'patrol');
 									ee.gx = KinkyDungeonPlayerEntity.x;
 									ee.gy = KinkyDungeonPlayerEntity.y;
+									KDUpdateMoveToEntity(ee);
 									KDRunCreationScript(ee, KDGetCurrentLocation());
 								}
 							}
@@ -338,6 +339,7 @@ let KDQuests: Record<string, KDQuest> = {
 									else ee.AI = KDGetAIOverride(ee, 'patrol');
 									ee.gx = KinkyDungeonPlayerEntity.x;
 									ee.gy = KinkyDungeonPlayerEntity.y;
+									KDUpdateMoveToEntity(ee);
 									KDRunCreationScript(ee, KDGetCurrentLocation());
 								}
 							}
@@ -485,14 +487,25 @@ let KDQuests: Record<string, KDQuest> = {
 		},
 		text: (player) => {
 			let npc = KDPersistentNPCs[KDGameData.MistressID];
-			if (npc)
+			if (npc) {
+				if (KinkyDungeonFlags.get("triedToRemoveOnwer")) {
+					return [TextGet("KDQuest_MistressTry", KDGetGenericDialogueParams(player, npc.entity))];
+				}
 				return [TextGet("KDQuest_Mistress", KDGetGenericDialogueParams(player, npc.entity))];
+			}
 			else return [TextGet("KDQuest_MistressFail")];
 		},
 		visible: true,
-		oncancel: (player) => {
-			// Currently this does not allow CNC scenarios. 
-			// TODO consent option that requires the mistress to be your prisoner, or gone, to cancel
+		oncancel: (player, force) => {
+			if (!force && KinkyDungeonStatsChoice.get("StrongPlayerOwner") && !KinkyDungeonFlags.get("safeword_recent")) {
+				let NPC = KDGetPersistentNPC(KDGameData.MistressID);
+				if (NPC) {
+					if (!KDGameData.Collection[NPC.id] || NPC.captured || !NPC.collect || !!KDGameData.Collection[NPC.id].status) {
+						KinkyDungeonSetFlag("triedToRemoveOnwer", 2);
+						return false;
+					}
+				}
+			}
 			delete KDGameData.MistressID;
 			return true;
 		},
@@ -1290,13 +1303,13 @@ function KDGenQuestTemplate(Name: string, Icon: string, Goddess: string, spawnFu
 				QuestRoom: KDMapData.RoomType,
 			});
 			KDMapData.QuestsAccepted++;
-			KinkyDungeonSetFlag(Name, -1, -1);
+			KinkyDungeonSetFlag(Name, -1, 1);
 			spawnFunction(Goddess, Name);
 		},
 		worldgenstart: () => {
 		},
 		tick: (delta) => {
-			if (KDMapData.RoomType == "PerkRoom") {
+			if (!KinkyDungeonFlags.get(Name)) {
 				KDRemoveQuest(Name, false, false, false);
 				KinkyDungeonChangeRep(Goddess, -KDDefaultGoddessQuestRep);
 				KinkyDungeonSendTextMessage(10, TextGet("KDQuestFail_" + Name), KDBaseWhite, 1);

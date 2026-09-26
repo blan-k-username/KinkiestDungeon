@@ -503,6 +503,7 @@ function KinkyDungeonInterruptSleep() {
 }
 
 let KDBaseDamageTypes = {
+	shockTypes: ["estim", "electric"],
 	knockbackTypes: ["fire", "electric", "shock", "tickle", "cold", "slash", "grope", "pierce", "soul", "plush", "charm"],
 	knockbackTypesStrong: ["blast", "stun", "crush", "soap", "poison", "pain", "arcane"],
 	arouseTypes: ["grope", "plush", "charm", "happygas"],
@@ -512,11 +513,11 @@ let KDBaseDamageTypes = {
 	distractionTypesStrong:["tickle", "grope", "charm", "souldrain", "happygas", "estim"],
 	teaseTypes: ["grope", "charm", "plush"],
 	staminaTypesWeak:["drain", "stun", "fire", "glue", "chain", "tickle", "electric", "shock"],
-	staminaTypesStrong:["ice", "frost", "poison", "crush", "souldrain"],
+	staminaTypesStrong:["ice", "frost", "poison", "poisongas", "crush", "souldrain"],
 	manaTypesWeak:["electric", "estim", "drain"],
 	manaTypesStrong:[],
 	willTypesVeryWeak:["tickle", "souldrain"],
-	willTypesWeak:["ice", "frost", "poison", "stun", "electric", "estim", "acid", "soap", "grope", "pierce", "slash", "crush", "unarmed", "glue", "chain"],
+	willTypesWeak:["ice", "frost", "poison", "poisongas", "stun", "electric", "estim", "acid", "soap", "grope", "pierce", "slash", "crush", "unarmed", "glue", "chain"],
 	willTypesStrong:["cold", "fire", "charm", "soul", "pain", "shock", "plush", "arcane"],
 };
 
@@ -670,6 +671,7 @@ function KinkyDungeonDealDamage(Damage: damageInfoMinor, bullet?: KDBullet, noAl
 		dmgShield: 0,
 		noInterrupt: noInterrupt || Damage.noInterrupt,
 	};
+	
 
 	KDDoPerkDamageTypeChanges(data);
 	let types = ["pain", "electric", "slash", "pierce", "crush", "fire", "ice", "frost", "acid", "arcane", "stun", "blast"];
@@ -804,6 +806,13 @@ function KinkyDungeonDealDamage(Damage: damageInfoMinor, bullet?: KDBullet, noAl
 			}
 		}
 
+		if (KDBaseDamageTypes.shockTypes.includes(data.type)) {
+			KDXtoys_Send("shock", {
+				amount: data.dmg + "",
+				data: {},
+			})
+		}
+
 		if (data.distractionTypesWeak.includes(data.type)) {
 			let amt = data.dmg/2 * data.arouseMod + data.distract;
 			if (str) str = str + ", ";
@@ -906,7 +915,7 @@ function KinkyDungeonDealDamage(Damage: damageInfoMinor, bullet?: KDBullet, noAl
 
 function KinkyDungeonUpdateDialogue(entity: entity, delta: number) {
 	if (KDGameData.SlowMoveTurns < 1 && !KinkyDungeonStatFreeze && !KDGameData.PlaySelfTurns)
-		if (entity.dialogue) {
+		if (entity.dialogueDuration) {
 			if (entity.dialogueDuration > delta) {
 				entity.dialogueDuration = Math.max(0, entity.dialogueDuration - delta);
 			} else {
@@ -924,18 +933,40 @@ function KinkyDungeonUpdateDialogue(entity: entity, delta: number) {
  * @param [force]
  * @param [nooverride]
  */
-function KinkyDungeonSendDialogue(entity: entity, dialogue: string, color: string, duration: number, priority: number, force?: boolean, nooverride?: boolean): void {
+function KinkyDungeonSendDialogue(entity: entity, dialogue: string, color: string, duration: number, priority: number,
+	force?: boolean, nooverride?: boolean, forceConstant?: boolean, forceImportant?: boolean, forceFloater?: boolean) {
+	let important = forceImportant || (priority && priority > 7);
+	if (forceImportant != undefined && !forceImportant) important = false;
+	let constant = forceConstant || !KDCanHearEnemy(KDPlayer(), entity);
+	if (forceConstant != undefined && !forceConstant) constant = false;
+	if (!color) color = KDGetColor(entity);
+
+	if (entity?.dialogue == dialogue && entity?.dialogueDuration) return;
+
+	
 	if (!force && !KDEnemyCanTalk(entity) && !entity.player) {
-		if (!entity.Enemy.nonHumanoid && entity.Enemy.bound) {
+		if (!entity.Enemy.nonHumanoid && entity.Enemy.bound
+				&& (forceFloater || !entity.dialogueDuration || !entity.dialoguePriority || entity.dialoguePriority < priority + (nooverride ? 0 : .1))
+		) {
 			let suff = "";
 			if (KDIsBrattyPersonality(entity)) suff = "Brat";
 			else if (KDIsSubbyPersonality(entity)) suff = "Sub";
-			entity.dialogue = TextGet("KinkyDungeonRemindJailPlay" + suff + "Gagged" + Math.floor(KDRandom() * 3));
-			entity.dialogueColor = color;
-			entity.dialogueDuration = 4;
-			entity.dialoguePriority = 1;
+			if (constant && !forceFloater) {
+				entity.dialogue = TextGet("KinkyDungeonRemindJailPlay" + suff + "Gagged" + Math.floor(KDRandom() * 3));
+				entity.dialogueColor = color;
+				entity.dialogueDuration = 4;
+				entity.dialoguePriority = 1;
+			} else {
+				entity.dialogue = "";
+				entity.dialogueColor = color;
+				entity.dialogueDuration = duration;
+				entity.dialoguePriority = 10;
+				KinkyDungeonSendFloater(entity, TextGet("KinkyDungeonRemindJailPlay" + suff + "Gagged" + Math.floor(KDRandom() * 3)), 
+					color, 1.5 + 0.5*duration);
+			}
 			if (dialogue && KDCanHearEnemy(KDPlayer(), entity) || KDCanSeeEnemy(entity)) {
-				KinkyDungeonSendTextMessage(0, `${TextGet("Name" + entity.Enemy.name)}: ${entity.dialogue}`, color, 0, false, false, entity, "Dialogue");
+				KinkyDungeonSendTextMessage(0, `${TextGet("Name" + entity.Enemy.name)}: ${dialogue}`, 
+				color, 0, false, false, entity, important ? undefined : "Dialogue");
 			}
 			KDEnemyAddSound(entity, 7);
 			if (KDRandom() < 0.5)
@@ -943,15 +974,24 @@ function KinkyDungeonSendDialogue(entity: entity, dialogue: string, color: strin
 		}
 		return;
 	}
-	if (!entity.dialogue || !entity.dialoguePriority || entity.dialoguePriority <= priority + (nooverride ? 1 : 0)) {
-		entity.dialogue = dialogue;
-		entity.dialogueColor = color;
-		entity.dialogueDuration = duration;
-		entity.dialoguePriority = priority;
-		if (!entity.player) {
+	if (forceFloater || !entity.dialogueDuration || !entity.dialoguePriority || entity.dialoguePriority < priority + (nooverride ? 0 : .1)) {
+		if (constant && !forceFloater) {
+			entity.dialogue = dialogue;
+			entity.dialogueColor = color;
+			entity.dialogueDuration = duration;
+			entity.dialoguePriority = priority;
+		} else {
+			entity.dialogue = "";
+			entity.dialogueColor = color;
+			entity.dialogueDuration = duration;
+			entity.dialoguePriority = priority;
+			KinkyDungeonSendFloater(entity, dialogue, 
+				color, 3 + 0.7*duration);
+		}
+		if (!entity.player && dialogue) {
 			KDEnemyAddSound(entity, 12);
 			if (dialogue && KDCanHearEnemy(KDPlayer(), entity) || KDCanSeeEnemy(entity)) {
-				KinkyDungeonSendTextMessage(0, `${TextGet("Name" + entity.Enemy.name)}: ${entity.dialogue}`, color, 0, false, false, entity, "Dialogue");
+				KinkyDungeonSendTextMessage(0, `${TextGet("Name" + entity.Enemy.name)}: ${dialogue}`, color, 0, false, false, entity, "Dialogue");
 			}
 			KDAllowDialogue = false;
 		}
@@ -1035,7 +1075,9 @@ function KDChangeDistraction(src: string, type: string, trig: string, Amount: nu
 		amount = Math.max(amount, amount * 0.5 + 0.5 * KinkyDungeonStatDistraction/KinkyDungeonStatDistractionMax * KinkyDungeonStatDistraction/KinkyDungeonStatDistractionMax);
 		amount = Math.round(10 * amount);
 
-		KinkyDungeonSendDialogue(KinkyDungeonPlayerEntity, TextGet("KinkyDungeonChangeDistraction" + (KinkyDungeonCanTalk() ? "" : "Gag") + amount), "#ff00ff", 2, 1);
+		KinkyDungeonSendDialogue(KinkyDungeonPlayerEntity, 
+			TextGet("KinkyDungeonChangeDistraction" + (KinkyDungeonCanTalk() ? "" : "Gag") + amount),
+			 "#ff00ff", 2, 1, undefined, true);
 		KDOrigDistraction = Math.max(0, Math.floor(KinkyDungeonStatDistraction/KinkyDungeonStatDistractionMax * 100));
 	}
 
@@ -1106,7 +1148,9 @@ function KDChangeDesire(src: string, type: string, trig: string, Amount: number,
 		amount = Math.max(amount, amount * 0.5 + 0.5 * KinkyDungeonStatDistractionLower/KinkyDungeonStatDistractionMax * KinkyDungeonStatDistractionLower/KinkyDungeonStatDistractionMax);
 		amount = Math.round(10 * amount);
 
-		KinkyDungeonSendDialogue(KinkyDungeonPlayerEntity, TextGet("KinkyDungeonChangeDistraction" + (KinkyDungeonCanTalk() ? "" : "Gag") + amount), "#ff00ff", 2, 1);
+		KinkyDungeonSendDialogue(KinkyDungeonPlayerEntity, 
+			TextGet("KinkyDungeonChangeDistraction" + (KinkyDungeonCanTalk() ? "" : "Gag") + amount),
+			"#ff00ff", 2, 1, undefined, true);
 
 		KDOrigDesire = Math.max(0, Math.floor(KinkyDungeonStatDistractionLower/KinkyDungeonStatDistractionMax * 100));
 	}
@@ -1138,7 +1182,7 @@ function KDChangeDesire(src: string, type: string, trig: string, Amount: number,
 	return amountChanged;
 }
 
-function KDChangeStamina(src: string, type: string, trig: string, Amount: number, NoFloater?: boolean, Pause?: number, NoSlow?: boolean, minimum: number = 0, slowFloor: number = 5, Regen: boolean = false) {
+function KDChangeStamina(src: string, type: string, trig: string, Amount: number, NoFloater?: boolean, Pause?: number, NoSlow?: boolean, minimum: number = 0, slowFloor: number = 5, Regen: boolean = false): number {
 
 	if (isNaN(Amount)) {
 		console.trace();
@@ -1182,6 +1226,7 @@ function KDChangeStamina(src: string, type: string, trig: string, Amount: number
 	KinkyDungeonStatStamina = Math.min(
 		Math.max(minLevel, KinkyDungeonStatStamina),
 		Amount > 0 ? Math.max(stamPre, data.Cap) : KinkyDungeonStatStamina);
+	if (KinkyDungeonStatStamina < 0) KinkyDungeonStatStamina = 0;
 	if (!NoFloater && Math.abs(KDOrigStamina - Math.floor(KinkyDungeonStatStamina * 10)) >= 0.99) {
 		KinkyDungeonSendFloater(KinkyDungeonPlayerEntity, Math.floor(KinkyDungeonStatStamina * 10) - KDOrigStamina,
 		"#44ff66", undefined, undefined, " sp", undefined, Amount > 0 ? "+" : undefined);
@@ -1198,6 +1243,7 @@ function KDChangeStamina(src: string, type: string, trig: string, Amount: number
 		console.trace();
 		KinkyDungeonStatStamina = 0;
 	}
+	return KinkyDungeonStatStamina - stamPre;
 }
 /**
  * @param Amount
@@ -1207,7 +1253,7 @@ function KDChangeStamina(src: string, type: string, trig: string, Amount: number
  * @param [spill]
  */
 function KDChangeMana(src: string, type: string, trig: string, Amount: number,
-	NoFloater?: boolean, PoolAmount?: number, Pause?: boolean, spill?: boolean, minimum: number = 0) {
+	NoFloater?: boolean, PoolAmount?: number, Pause?: boolean, spill?: boolean, minimum: number = 0): number {
 
 	if (isNaN(Amount)) {
 		console.trace();
@@ -1267,6 +1313,10 @@ function KDChangeMana(src: string, type: string, trig: string, Amount: number,
 		console.trace();
 		KinkyDungeonStatMana = 0;
 	}
+
+	KinkyDungeonCapStats();
+	return manaAmt;
+
 }
 function KDChangeWill(src: string, type: string, trig: string, Amount: number, NoFloater?: boolean, minimum: number = 0): number {
 
@@ -1610,7 +1660,7 @@ function KinkyDungeonUpdateStats(delta: number): void {
 	if (KinkyDungeonIsHandsBound(false, false, 0.99)) KDBoundPowerLevel += 0.075;
 	KDBoundPowerLevel += 0.1 * KinkyDungeonChastityMult();
 	KDBoundPowerLevel += 0.2 * KinkyDungeonGagTotal();
-	if (KDGameData.KneelTurns > 0) {
+	if (KDIsOnKnees(KDPlayer())) {
 		if (KinkyDungeonSlowLevel > 2) KDBoundPowerLevel += 0.15;
 	} else KDBoundPowerLevel += 0.15 * Math.max(0, Math.min(1, KinkyDungeonSlowLevel / 2));
 	KDBoundPowerLevel += 0.1 * Math.max(0, Math.min(1, KDGameData.HeelPowerEffective / 4));
@@ -1619,7 +1669,8 @@ function KinkyDungeonUpdateStats(delta: number): void {
 		KinkyDungeonApplyBuffToEntity(KinkyDungeonPlayerEntity, {
 			id:"BoundPower",
 			type: "Evasion",
-			duration: 1,
+			constant: true, duration: 1,
+			
 			power: KDBoundPowerLevel * KDBoundPowerMult,
 		});
 	}
@@ -1882,10 +1933,10 @@ function KinkyDungeonUpdateStats(delta: number): void {
 			KDGameData.BalancePause = 1;
 		}
 		if (!KDGameData.BalancePause && !KDGameData.BalancePauseImm)
-			KDChangeBalanceSrc("player", "balance", "tick", (KDGameData.KneelTurns > 0 ? 1.5 : 1.0) * KDGetBalanceRate()*delta, true);
+			KDChangeBalanceSrc("player", "balance", "tick", (KDIsOnKnees(KDPlayer()) ? 1.5 : 1.0) * KDGetBalanceRate()*delta, true);
 		else {
 			KDChangeBalanceSrc("player", "balance", "tick", (KDGameData.BalancePauseImm ? 0.01 : (5 / (10 + KDGameData.BalancePause)))
-				* (KDGameData.KneelTurns > 0 ? 1.5 : 1.0) * KDGetBalanceRate()*delta, true);
+				* (KDIsOnKnees(KDPlayer()) ? 1.5 : 1.0) * KDGetBalanceRate()*delta, true);
 		}
 		if (KDGameData.BalancePauseImm) KDGameData.BalancePauseImm = false;
 		else KDGameData.BalancePause = Math.max(0, KDGameData.BalancePause-delta);
@@ -2032,8 +2083,20 @@ function KinkyDungeonLegsBlocked() {
 	return KinkyDungeonFlags.get("BoundFeet");
 }
 
-function KinkyDungeonCanStand() {
-	return !KDIsKneeling() && !KDIsHogtied() && !(KDGameData.KneelTurns > 0);
+
+function KDIsOnKnees(player: entity) {
+	if (player?.player) {
+		return KDGameData.KneelTurns > 0;
+	} else if (player?.bind || KDHelpless(player)) {
+		return true;
+	}
+	return false;
+}
+
+function KinkyDungeonCanStand(player?: entity) {
+	if (player?.player || !player) {
+		return !KDIsKneeling() && !KDIsHogtied() && !KDIsOnKnees(KDPlayer());
+	} else return !KDIsOnKnees(player)
 }
 function KinkyDungeonCanKneel() {
 	return true;
@@ -2232,13 +2295,14 @@ function KinkyDungeonDoPlayWithSelf(tease?: number): number {
 	if (data.playMsg) {
 		if (KinkyDungeonPlayerDamage && KinkyDungeonPlayerDamage.playSelfMsg) {
 			KinkyDungeonSendActionMessage(10, TextGet(KinkyDungeonPlayerDamage.playSelfMsg), "#FF5BE9", 4);
-		} else if (KinkyDungeonIsArmsBound()) {
-			KinkyDungeonSendActionMessage(10, TextGet("KinkyDungeonPlaySelfBound"), "#FF5BE9", 4);
 		} else if (KinkyDungeonChastityMult() > 0.9) {
-			KinkyDungeonSendActionMessage(10, TextGet("KinkyDungeonChastityDeny"), "#FF5BE9", 4);
-		} else KinkyDungeonSendActionMessage(10, TextGet("KinkyDungeonPlaySelf"), "#FF5BE9", 4);
-		if (affinity)
-			KinkyDungeonSendTextMessage(8, TextGet("KinkyDungeonPlayCorner"), "#9bd45d", 4);
+			 if (KinkyDungeonIsArmsBound()) {
+				KinkyDungeonSendActionMessage(10, TextGet("KinkyDungeonPlaySelfBoundChastity" + (affinity ? "Corner" : "")), "#FF5BE9", 4);
+			}
+			else KinkyDungeonSendActionMessage(10, TextGet("KinkyDungeonChastityDeny" + (affinity ? "Corner" : "")), "#FF5BE9", 4);
+		} else if (KinkyDungeonIsArmsBound()) {
+			KinkyDungeonSendActionMessage(10, TextGet("KinkyDungeonPlaySelfBound" + (affinity ? "Corner" : "")), "#FF5BE9", 4);
+		} else  KinkyDungeonSendActionMessage(10, TextGet("KinkyDungeonPlaySelf" + (affinity ? "Corner" : "")), "#FF5BE9", 4);
 	}
 	KDGameData.PlaySelfTurns = data.playTime;
 	KinkyDungeonSetFlag("PlayWithSelf", KDGameData.PlaySelfTurns + 3);
