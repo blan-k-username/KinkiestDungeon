@@ -161,12 +161,17 @@ function classifyInputs(bundleSource) {
 	const lit = blockAt(bundleSource, anchor);
 	if (lit == null) return { kinds, confidence, report };
 
-	const re = /"([A-Za-z0-9_]+)"\s*:\s*\([^)]*\)\s*=>\s*\{/g;
+	// Keys may be double-quoted, single-quoted or bare — upstream mixes them (`setAutoSprint:` arrived
+	// unquoted among `"move":` and friends, and went unseeded). A bare key could also match an
+	// arrow-valued property INSIDE a handler, so each handler's body is skipped once parsed.
+	const re = /(?:"([A-Za-z0-9_]+)"|'([A-Za-z0-9_]+)'|\b([A-Za-z_$][\w$]*))\s*:\s*\([^)]*\)\s*=>\s*\{/g;
 	let m;
 	while ((m = re.exec(lit))) {
-		const name = m[1];
-		const body = blockAt(lit, m.index + m[0].length - 1);
+		const name = m[1] || m[2] || m[3];
+		const open = m.index + m[0].length - 1;
+		const body = blockAt(lit, open);
 		if (body == null) continue;
+		re.lastIndex = open + body.length + 2;
 		report.handlers++;
 		const { may, proven } = analyse(body);
 		const v = verdict(may, proven);

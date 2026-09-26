@@ -116,7 +116,7 @@ describe('KDM-239 — world vs player game-mode keys (R3, A4)', () => {
 	it('leaves the per-character modes on KDM-238\'s per-player channel', () => {
 		expect([...HH.MODE_PLAYER_KEYS].sort()).toEqual([
 			'arousalMode', 'classMode', 'hardperksMode', 'hideperkbondage', 'partialhideperkbondage',
-			'perkBondage', 'perkNoBondage', 'perksMode', 'vhardperksMode',
+			'perkBondage', 'perkBondageOnly', 'perkNoBondage', 'perksMode', 'vhardperksMode',
 		].sort());
 	});
 

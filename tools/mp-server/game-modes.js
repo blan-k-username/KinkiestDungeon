@@ -69,6 +69,9 @@ const MODE_PLAYER_KEYS = Object.freeze([
 	// Whether this character's perks manifest as bondage, and whether that is shown — one is about
 	// their body, the other is pure presentation. Neither is the party's business.
 	'perkBondage', 'perkNoBondage', 'hideperkbondage', 'partialhideperkbondage',
+	// Third value of the same `KinkyDungeonPerkBondageMode` dial as `perkBondage`/`perkNoBondage`
+	// (`== 3`: shrines may offer bondage with no perk). Keys derived from one dial classify together.
+	'perkBondageOnly',
 	// The character's class. KDM-256 owns choosing it; it is listed here so the drift guard is
 	// satisfied and so nobody later mistakes it for a world property.
 	'classMode',
