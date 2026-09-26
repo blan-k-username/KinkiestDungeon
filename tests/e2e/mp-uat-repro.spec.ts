@@ -178,7 +178,8 @@ test('floating combat text does not accumulate across PvP attacks', async ({ bro
 
 	try {
 		await bootCoopPair(A, B, port);
-		const before = (await coopFloaters(B)).queue;
+		const start0 = await coopFloaters(B);
+		const before = start0.queue;
 		let peak = before;
 
 		// B attacks A for real, several times — the exact drive the UAT screenshots came from.
@@ -194,8 +195,14 @@ test('floating combat text does not accumulate across PvP attacks', async ({ bro
 			peak = Math.max(peak, (await coopFloaters(B)).queue);
 		}
 
-		// PRECONDITION — if no floater ever appeared, this test is measuring nothing (v1's mistake).
-		expect(peak, 'no floating text was ever produced — the drive does not exercise the reported ' +
+		// PRECONDITION — if no floater was ever CREATED, this test is measuring nothing (v1's mistake).
+		// Judged on the cumulative creation counter, not the queue peak: the queue decays, and at
+		// upstream 5.5's 2.0x default render scale a floater can be born and expire between two samples
+		// (KDM-220's rule, which this precondition had missed). `peak` stays the accumulation baseline.
+		const after = await coopFloaters(B);
+		const created = after.created - start0.created;
+		console.log(`[mp-uat-repro] floaters created=${created} peakQueue=${peak} texts=${JSON.stringify(after.texts)}`);
+		expect(created, 'no floating text was ever created — the drive does not exercise the reported ' +
 			'path, so any pass below would be vacuous').toBeGreaterThan(0);
 
 		// Now the real question: do they DRAIN? Transient visuals must expire, not pile up.
@@ -525,11 +532,32 @@ test('a presentation input round-trips quickly', async ({ browser }) => {
 	const { server, port } = await start(0);
 	const ctxA = await browser.newContext();
 	const ctxB = await browser.newContext();
+	/*
+	 * RENDER SCALE PINNED TO 1.0x — this test only. Every other spec runs at the player's default.
+	 *
+	 * The budget below is denominated in client frame periods, which assumes a round-trip is a small
+	 * multiple of the frame. Upstream 5.5 made 2.0x supersampling the default (`KDResolutionList[0]`),
+	 * and in headless software GL that saturates the main thread: MEASURED on the same merged code,
+	 * the reply staircase stepped ~240 ms at a ~220 ms frame at 1.0x (4.5 / 5.7 frames, green), but
+	 * ~820 ms against a 333–600 ms frame measured from only 5–6 frames at 2.0x (6.1 / 9.8 / 5.0, and
+	 * 14–16 on retries). The unit stops meaning anything, and no budget would be both stable and
+	 * meaningful. This test is about OUR transaction cost, not rendering, so it runs where its unit
+	 * holds. Index 1 of the new list is the old 1.0x scale.
+	 */
+	for (const c of [ctxA, ctxB]) {
+		await c.addInitScript(() => { try { localStorage.setItem('KDResolution', '1'); } catch (e) { /* ignore */ } });
+	}
 	const A = await ctxA.newPage();
 	const B = await ctxB.newPage();
 
 	try {
 		await bootCoopPair(A, B, port);
+		// The pin must have TAKEN — asserted on the renderer, not on the storage key, so an upstream
+		// rename of the setting reds here instead of silently measuring at 2.0x again.
+		for (const P of [A, B]) {
+			// @ts-ignore — PIXIapp is a bundle let-global
+			expect(await P.evaluate(() => PIXIapp.renderer.resolution), 'render scale pinned to 1.0x').toBe(1);
+		}
 		await A.evaluate(() => (window as any).__coopDiag.reset());
 
 		// A handful of DISTINCT direction updates, spaced so each is answered before the next —
