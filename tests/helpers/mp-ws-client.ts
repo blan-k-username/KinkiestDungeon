@@ -121,6 +121,15 @@ export class MPClient {
 
 	close() { try { this.ws.close(); } catch (e) { /* noop */ } }
 
+	/**
+	 * KDM-297 — the LATEST resolved snapshot, whatever frames are still buffered.
+	 *
+	 * `next(pred)` scans the buffer oldest-first, so asking it "is the dialogue closed now?" can be
+	 * answered by a frame from BEFORE the dialogue ever opened — a green that proves nothing. The merged
+	 * base is always the newest state this client holds, which is what "now" means.
+	 */
+	get snapshot(): any { return this._base; }
+
 	private _resolve(m: any) {
 		if (m && m.type === 'state') {
 			if (m.snapshot) this._base = m.snapshot;

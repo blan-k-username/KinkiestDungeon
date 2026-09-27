@@ -364,6 +364,9 @@ class WSBridge {
 		// the membership bookkeeping.)
 		socket.on('close', () => {
 			if (!clientId) return;
+			// KDM-297: read BEFORE the release below forgets it — was this the guest the host is being
+			// asked about? If so the question has withdrawn itself and must leave the host's screen.
+			const wasAsking = !!(this.gate.pending && this.gate.pending.clientId === clientId);
 			// KDM-252 E4: a RUNNING session holds the seat. Before it starts, a departure frees
 			// everything (that is the lobby's whole job); after it starts, only the unanswered
 			// question goes — the seat belongs to that clientId until they come back or the survivor
@@ -389,6 +392,12 @@ class WSBridge {
 				catch (e) { /* a session that predates KDM-253's teardown */ }
 			}
 			if (this.sockets.get(clientId) === socket) this.sockets.delete(clientId);
+			if (wasAsking && this.session.started && this.gate.host) {
+				try {
+					this.session.closeJoinAskDialogue(this.gate.host);
+					this._pushState(this.gate.host);
+				} catch (e) { /* world may be mid-teardown */ }
+			}
 			// KDM-250: and the SURVIVOR is told. Reported after the socket is dropped from the map so
 			// the report is not addressed to the person who just left.
 			this._dropped(clientId);
@@ -536,50 +545,10 @@ class WSBridge {
 			return clientId;
 		}
 		// KDM-233: the host's answer to the one pending question (E2/E3). Only the host may answer —
-		// otherwise a guest could admit itself, which is the whole gate.
+		// otherwise a guest could admit itself, which is the whole gate. KDM-297: the body is
+		// `_answerJoin`, shared with the in-game dialogue — one road for the answer, whichever screen asked.
 		if (msg.type === 'join_answer' && clientId && clientId === this.gate.host) {
-			const pendingId = this.gate.pending && this.gate.pending.clientId;
-			const res = msg.accept ? this.gate.accept() : this.gate.decline();
-			const guestSock = pendingId ? this.sockets.get(pendingId) : null;
-			if (!res.admitted) {
-				if (guestSock) this._reject(guestSock, res);
-				return clientId;
-			}
-			try {
-				// KDM-250: seated before the session is told, so the seat exists by then.
-				//
-				// ⚠️ KDM-282 — AND BEFORE `_carrySeat`, which is the order the other seating site
-				// already used. These two lines were the other way round here, which cost nothing
-				// while `_carrySeat` read only the gate: it now reads `presence.roleOf` too, and an
-				// unseated presence answers `null`, so an approved guest was carried with no seat
-				// and fell back to `Player <raw-id>` while the host read `Player 1`. That is
-				// precisely the "two seating sites disagreeing" that `_carrySeat`'s own doc comment
-				// exists to prevent — so the fix is to make them agree, not to pass the role in.
-				this.presence.seat(res.clientId, 'guest', now());
-				this._carrySeat(res.clientId);
-				/*
-				 * KDM-255 — A GUEST APPROVED INTO A RUNNING SESSION IS A JOIN-LATE, not an error.
-				 *
-				 * This branch used to call `session.join()` unconditionally, and that method is the
-				 * PRE-START collector: it throws once the session has started (KDM-235). So approving
-				 * a friend who turned up mid-run answered them `{type:'error'}` and seated nobody.
-				 *
-				 * It went unnoticed because the roleless join road had the very same two-way split a
-				 * few lines below and the whole join-late suite went that way. With that road gone
-				 * (R1/R2) this is the only way in, so the split has to exist here too — the same
-				 * `_joinLate` call, not a second implementation of it.
-				 */
-				if (this.session.started) { this._joinLate(res.clientId); return clientId; }
-				const r = this.session.join(res.clientId);
-				if (guestSock) {
-					this._send(guestSock, {
-						type: 'joined', clientId: res.clientId, started: r.started, players: this.session.players,
-					});
-				}
-				if (r.started) this._broadcastState();
-			} catch (e) {
-				if (guestSock) this._send(guestSock, { type: 'error', error: String(e && e.message || e) });
-			}
+			this._answerJoin(clientId, !!msg.accept);
 			return clientId;
 		}
 		if (msg.type === 'join') {
@@ -632,6 +601,10 @@ class WSBridge {
 				if (this.session.started && this.session.players.includes(clientId)) {
 					// KDM-252 U1: the seat is live again. A `gone` seat cannot reach this line — it is
 					// refused at the top of the join branch, which is the only place that rule lives.
+					// KDM-298: only a seat that was actually MISSING is "back". The same tab re-asking on the socket
+					// it never lost (a second press of Join) must not tell the host "your partner is back — the
+					// game has resumed" about somebody who never left.
+					const wasMissing = this.presence.state(clientId) === 'missing';
 					this.presence.back(clientId, now());
 					this._send(socket, { type: 'joined', clientId, started: true, players: this.session.players });
 					// KDM-206/KDM-252 N4: a rejoining client holds nothing we can diff against — force a
@@ -639,7 +612,7 @@ class WSBridge {
 					// instead of inheriting a number from a socket that no longer exists.
 					this._resetDelta(clientId);
 					try { this._send(socket, Object.assign({ type: 'state', tick: this.session.turn }, this._stateFrame(clientId))); } catch (e) { /* ignore */ }
-					this._reportBack(clientId);
+					if (wasMissing) this._reportBack(clientId);
 					return clientId;
 				}
 				/*
@@ -674,6 +647,19 @@ class WSBridge {
 						this._send(socket, { type: 'awaiting_approval', modDiff: q.modDiff, world: q.world });
 						const hostSock = this.sockets.get(this.gate.host);
 						if (hostSock) this._send(hostSock, { type: 'join_pending', clientId, name: this.gate.pending.name, modDiff: q.modDiff });
+					/*
+					 * KDM-297 — AND A HOST WHO IS PLAYING IS ASKED IN THE GAME. `join_pending` only ever
+					 * reached the lobby, which is painted on the Multiplayer screen alone, so a host
+					 * already in the dungeon was never asked and the guest waited for ever. Before the
+					 * session starts there is no bundle to open it on — and the host IS on the lobby
+					 * screen — so the message above stays the whole story there.
+					 */
+					if (this.session.started && this.gate.host) {
+						try {
+							this.session.openJoinAskDialogue(this.gate.host, this.gate.pending.name);
+							this._pushState(this.gate.host);
+						} catch (e) { /* world may be mid-teardown; the lobby message still went */ }
+					}
 						return clientId;
 					}
 					if (!q.accept) { this._reject(socket, q); return clientId; }
@@ -755,6 +741,8 @@ class WSBridge {
 				// decision produced.
 				if (res.solo === true) this._goSolo(clientId);
 				else if (res.quit === true) this._acceptQuit(clientId);
+				// KDM-297: the in-game join question, answered — the same road as the lobby's buttons.
+				if (res.joinAnswer === true || res.joinAnswer === false) this._answerJoin(clientId, res.joinAnswer);
 				if (res.kind === 'ui') {
 					// A menu/UI input: applied to this player's own state, no turn consumed. Push their
 					// updated snapshot straight back so the UI responds without waiting for the partner
@@ -965,8 +953,7 @@ class WSBridge {
 				// frame replies to nothing — the survivor pressed nothing; their peer's socket came
 				// back — so tagging it `ui` would free a slot that no reply ever filled and leave the
 				// queue permanently out of step with the wire (the KDM-186 Rule-1 failure).
-				this._send(sock, Object.assign({ type: 'state', kind: 'push', tick: this.session.turn },
-					this._stateFrame(cid)));
+				this._pushState(cid, sock);
 			} catch (e) { /* that one is gone too */ }
 		}
 	}
@@ -1049,6 +1036,84 @@ class WSBridge {
 	}
 
 	/**
+	 * KDM-297 — push one player a fresh state frame they did not ask for.
+	 *
+	 * `kind:'push'`, NOT `'ui'`: the client answers a `ui` frame by unwinding one slot of its in-flight
+	 * bookkeeping, because a `ui` frame is the REPLY to an input it sent. A push replies to nothing, so
+	 * tagging it `ui` would free a slot no reply ever filled (the KDM-186 Rule-1 failure, KDM-252).
+	 * Four call sites built this frame by hand; this is the one copy.
+	 */
+	_pushState(cid, sock = this.sockets.get(cid)) {
+		if (!sock) return;
+		this._send(sock, Object.assign({ type: 'state', kind: 'push', tick: this.session.turn },
+			this._stateFrame(cid)));
+	}
+
+	/**
+	 * KDM-233 / KDM-297 — the host's answer to the one pending join question.
+	 *
+	 * Reached from TWO screens, and it is one method so they cannot drift: the lobby's Accept/Decline
+	 * (a `join_answer` message) and the in-game dialogue (a routed `dialogue` input whose answer
+	 * `session.apply()` reports as `joinAnswer`). Host-only, checked HERE as well as at the message —
+	 * a guest must never be able to admit itself, whichever road its answer took.
+	 *
+	 * The host's in-game question is closed FIRST, whatever the outcome: once answered it is settled,
+	 * and a dialogue left open would invite a second answer to a question that no longer exists.
+	 */
+	_answerJoin(hostId, accept) {
+		if (!hostId || hostId !== this.gate.host) return false;
+		if (this.session.started) {
+			try { this.session.closeJoinAskDialogue(hostId); } catch (e) { /* world may be mid-teardown */ }
+		}
+		const pendingId = this.gate.pending && this.gate.pending.clientId;
+		const res = accept ? this.gate.accept() : this.gate.decline();
+		const guestSock = pendingId ? this.sockets.get(pendingId) : null;
+		if (!res.admitted) {
+			if (guestSock) this._reject(guestSock, res);
+			// The closed dialogue has to reach the host's screen; nobody else's world changed.
+			if (this.session.started) { try { this._pushState(hostId); } catch (e) { /* socket gone */ } }
+			return false;
+		}
+		try {
+			// KDM-250: seated before the session is told, so the seat exists by then.
+			//
+			// ⚠️ KDM-282 — AND BEFORE `_carrySeat`, which is the order the other seating site
+			// already used. These two lines were the other way round here, which cost nothing
+			// while `_carrySeat` read only the gate: it now reads `presence.roleOf` too, and an
+			// unseated presence answers `null`, so an approved guest was carried with no seat
+			// and fell back to `Player <raw-id>` while the host read `Player 1`. That is
+			// precisely the "two seating sites disagreeing" that `_carrySeat`'s own doc comment
+			// exists to prevent — so the fix is to make them agree, not to pass the role in.
+			this.presence.seat(res.clientId, 'guest', now());
+			this._carrySeat(res.clientId);
+			/*
+			 * KDM-255 — A GUEST APPROVED INTO A RUNNING SESSION IS A JOIN-LATE, not an error.
+			 *
+			 * This branch used to call `session.join()` unconditionally, and that method is the
+			 * PRE-START collector: it throws once the session has started (KDM-235). So approving
+			 * a friend who turned up mid-run answered them `{type:'error'}` and seated nobody.
+			 *
+			 * It went unnoticed because the roleless join road had the very same two-way split a
+			 * few lines below and the whole join-late suite went that way. With that road gone
+			 * (R1/R2) this is the only way in, so the split has to exist here too — the same
+			 * `_joinLate` call, not a second implementation of it. (`_joinLate` pushes the host a
+			 * fresh frame too, which is what takes the closed dialogue off their screen.)
+			 */
+			if (this.session.started) { this._joinLate(res.clientId); return true; }
+			const r = this.session.join(res.clientId);
+			if (guestSock) {
+				this._send(guestSock, {
+					type: 'joined', clientId: res.clientId, started: r.started, players: this.session.players,
+				});
+			}
+			if (r.started) this._broadcastState();
+		} catch (e) {
+			if (guestSock) this._send(guestSock, { type: 'error', error: String(e && e.message || e) });
+		}
+		return true;
+	}
+
+	/**
 	 * KDM-235 A5 — admit a newcomer to a run in progress and get everyone looking at the same world.
 	 *
 	 * The session decides WHETHER and WHEN (it may defer the seat to the turn boundary); the bridge
@@ -1084,8 +1149,7 @@ class WSBridge {
 			if (cid === clientId) continue;
 			try {
 				this._send(s, { type: 'peer_joined', clientId, players: this.session.players });
-				this._send(s, Object.assign({ type: 'state', kind: 'push', tick: this.session.turn },
-					this._stateFrame(cid)));
+				this._pushState(cid, s);
 			} catch (e) { /* that one is gone too */ }
 		}
 		return true;
@@ -1132,8 +1196,7 @@ class WSBridge {
 				for (const id of gone) this._send(sock, { type: 'peer_gone', clientId: id, reason });
 				// Their world changed — an avatar left it. `push`, not `ui`: nobody asked for this
 				// frame, so it must not unwind anyone's in-flight bookkeeping (KDM-252).
-				this._send(sock, Object.assign({ type: 'state', kind: 'push', tick: this.session.turn },
-					this._stateFrame(cid)));
+				this._pushState(cid, sock);
 			} catch (e) { /* that one is gone too */ }
 		}
 		return true;

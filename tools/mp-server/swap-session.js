@@ -32,7 +32,7 @@ const { KD_JOURNEY_CHOICE } = require('./kd-journey-choice');
 const { KD_SHOP_BUY } = require('./kd-shop-buy');
 const { KD_COOP_CAPTURE } = require('./kd-coop-capture');
 const { KD_VARIANT_REGISTRY, decideVariantSweep } = require('./kd-variant-registry');
-const { KD_DISCONNECT_DIALOGUE, HOST_LOST_DIALOGUE, PEER_LOST_DIALOGUE } = require('./kd-disconnect-dialogue');
+const { KD_DISCONNECT_DIALOGUE, HOST_LOST_DIALOGUE, PEER_LOST_DIALOGUE, JOIN_ASK_DIALOGUE } = require('./kd-disconnect-dialogue');
 const { sanitizeName, sanitizePerks, sanitizeCharacter } = require('./join-gate');
 // KDM-239 R3/R5 — same normaliser the gate uses, so what the session stores and what the gate
 // accepted cannot drift apart.
@@ -124,7 +124,7 @@ const CHAT_COLOR = '#ffe066';
  * holding the only key to their own cell — the trap KDM-230 documents against the peace offer, and
  * the same trap the disconnect dialogues walk into.
  */
-const OWN_DIALOGUES = new Set([PEACE_DIALOGUE, HOST_LOST_DIALOGUE, PEER_LOST_DIALOGUE]);
+const OWN_DIALOGUES = new Set([PEACE_DIALOGUE, HOST_LOST_DIALOGUE, PEER_LOST_DIALOGUE, JOIN_ASK_DIALOGUE]);
 
 /**
  * KDM-162: KDGameData fields the CLIENT owns, because only the client can compute them.
@@ -593,6 +593,41 @@ class SwapSession {
 			// KDM-253 S4: the host's wait/solo answer, on the same take-once terms as the other two.
 			globalThis.KDCoopPeerLostDecide = function (solo) { globalThis.__kdCoopSolo = !!solo; };
 			globalThis.__kdCoopSolo = undefined;
+			// KDM-297: the host's answer to a mid-run join request, on the same take-once terms.
+			globalThis.KDCoopJoinAnswer = function (accept) { globalThis.__kdCoopJoinAnswer = !!accept; };
+			globalThis.__kdCoopJoinAnswer = undefined;
+			/*
+			 * KDM-300 — our dialogues set the player's own one ASIDE instead of destroying it.
+			 *
+			 * KDStartDialog overwrites these fields, so a host in a shop or a conversation lost it for
+			 * good once our question was answered. The stack lives IN KDGameData so it is per-player and
+			 * rides the same bundle capture/restore as the dialogue itself. Re-opening the dialogue that
+			 * is already on top stacks nothing, or one answer would not be enough to get back.
+			 */
+			var KDCOOP_DIALOG_FIELDS = ['CurrentDialog', 'CurrentDialogStage', 'CurrentDialogMsg',
+				'CurrentDialogMsgSpeaker', 'CurrentDialogMsgPersonality', 'CurrentDialogMsgID',
+				'CurrentDialogMsgData', 'CurrentDialogMsgValue', 'CurrentDialogEntity'];
+			globalThis.KDCoopSetAside = function (incoming) {
+				var cur = KDGameData.CurrentDialog;
+				if (!cur || cur === incoming) return;
+				var saved = {};
+				for (var i = 0; i < KDCOOP_DIALOG_FIELDS.length; i++) saved[KDCOOP_DIALOG_FIELDS[i]] = KDGameData[KDCOOP_DIALOG_FIELDS[i]];
+				(KDGameData.KDCoopDialogStack = KDGameData.KDCoopDialogStack || []).push(saved);
+			};
+			globalThis.KDCoopGiveBack = function () {
+				var st = KDGameData.KDCoopDialogStack;
+				if (KDGameData.CurrentDialog || !st || !st.length) return;
+				var saved = st.pop();
+				for (var i = 0; i < KDCOOP_DIALOG_FIELDS.length; i++) KDGameData[KDCOOP_DIALOG_FIELDS[i]] = saved[KDCOOP_DIALOG_FIELDS[i]];
+				if (!st.length) delete KDGameData.KDCoopDialogStack;
+			};
+			/** A question withdrawn while something else was on top of it must not come back later. */
+			globalThis.KDCoopForgetAside = function (name) {
+				var st = KDGameData.KDCoopDialogStack;
+				if (!st) return;
+				KDGameData.KDCoopDialogStack = st.filter(function (s) { return s.CurrentDialog !== name; });
+				if (!KDGameData.KDCoopDialogStack.length) delete KDGameData.KDCoopDialogStack;
+			};
 		})()`);
 		/*
 		 * KDM-263 A3/A4 — the routed journey choice, and the hook its input type calls.
@@ -1002,6 +1037,26 @@ class SwapSession {
 	}
 
 	/**
+	 * KDM-297 — ask the HOST, in the game, whether to let `guestName` into the running run.
+	 *
+	 * No speaker: the guest has no avatar yet — that is what is being asked. The name reaches the text
+	 * through KD's own `CurrentDialogMsgData` token substitution, which uses `String.replace`, so `$`
+	 * is doubled: a guest called `a$&b` must be painted as that, not as the token it would otherwise
+	 * expand to. A blank name picks the `Anon` body rather than a sentence with a hole in it.
+	 */
+	openJoinAskDialogue(target, guestName) {
+		const name = String(guestName || '');
+		return this._openOwnDialogue(target, JOIN_ASK_DIALOGUE, null, name
+			? { msg: JOIN_ASK_DIALOGUE, data: { GUESTNAME: name.replace(/\$/g, '$$$$') } }
+			: { msg: JOIN_ASK_DIALOGUE + 'Anon', data: {} });
+	}
+
+	/** KDM-297 — the question is settled or withdrawn: take it off the host's screen. */
+	closeJoinAskDialogue(target) {
+		return this._closeOwnDialogue(target, JOIN_ASK_DIALOGUE);
+	}
+
+	/**
 	 * KDM-251: open one of OUR dialogues on a specific player's bundle.
 	 *
 	 * Generalised from `_openPeaceDialogue` when the disconnect dialogue needed the identical
@@ -1012,17 +1067,25 @@ class SwapSession {
 	 * @param {string} target      whose bundle the dialogue opens on
 	 * @param {string} name        a member of OWN_DIALOGUES
 	 * @param {number|null} speakerEntityId  avatar to attribute it to, or null for plain narration
+	 * @param {{msg?: string, data?: object}} [text]  KDM-297 — a body key other than the dialogue's
+	 *   own `response`, and the `CurrentDialogMsgData` tokens to fill into it. Applied AFTER
+	 *   `KDStartDialog` (which sets `CurrentDialogMsg` from `response` and leaves stale data alone) and
+	 *   inside the same restore → capture, so it can never land on the wrong player's bundle.
 	 */
-	_openOwnDialogue(target, name, speakerEntityId) {
+	_openOwnDialogue(target, name, speakerEntityId, text) {
 		const bundle = this.bundles.get(target);
 		if (!bundle) return false;
 		this._restorePlayer(target, bundle);
 		const res = this.world.eval(`(function(){
 			var speaker = ${speakerEntityId == null ? 'null'
 		: `KDMapData.Entities.find(function(e){ return e.id === ${speakerEntityId | 0}; })`};
+			var text = ${JSON.stringify(text || null)};
 			try {
+				if (typeof KDCoopSetAside === 'function') KDCoopSetAside('${name}');   // KDM-300
 				KDStartDialog('${name}', speaker ? speaker.Enemy.name : 'RemotePlayer', false,
 					'', speaker || undefined);
+				if (text && text.msg) KDGameData.CurrentDialogMsg = text.msg;
+				if (text && text.data) KDGameData.CurrentDialogMsgData = text.data;
 			} catch (e) { return { err: String(e && e.message || e) }; }
 			return { open: KDGameData.CurrentDialog };
 		})()`);
@@ -1072,7 +1135,8 @@ class SwapSession {
 				&& KDGameData.CurrentDialog === '${name}') {
 				if (typeof KDResetDialogue === 'function') KDResetDialogue();
 				else { KDGameData.CurrentDialog = ''; KDGameData.CurrentDialogStage = ''; }
-			}
+				if (typeof KDCoopGiveBack === 'function') KDCoopGiveBack();          // KDM-300
+			} else if (typeof KDCoopForgetAside === 'function') KDCoopForgetAside('${name}');
 		})()`);
 		this.bundles.set(target, this.world.capturePlayer());
 		this.world.parkGlobalPlayer(PARK.x, PARK.y);
@@ -1092,6 +1156,9 @@ class SwapSession {
 
 	/** KDM-253 — did a guest just press Quit on the host-lost dialogue? */
 	_takeQuitAnswer() { return this._takeCoopFlag('__kdCoopQuit'); }
+
+	/** KDM-297 — did the host just answer a mid-run join request? `true` = let them in. */
+	_takeJoinAnswer() { return this._takeCoopFlag('__kdCoopJoinAnswer'); }
 
 	/**
 	 * Read-and-clear one boolean a dialogue's `clickFunction` set in the world.
@@ -1450,6 +1517,8 @@ class SwapSession {
 			// A forced-immediate action must not teach the classifier anything: we bypassed its verdict,
 			// so an observation from this path is not evidence about `dialogue` in general.
 			if (!ourDialogue) this._learnInputKind(kdType, res, false);
+			// KDM-300: answering ours closed it — give back whatever it had set aside, in the same capture.
+			if (ourDialogue) this.world.eval(`(function(){ if (typeof KDCoopGiveBack === 'function') KDCoopGiveBack(); })()`);
 			const newBundle = this.world.capturePlayer();
 			this.bundles.set(clientId, newBundle);
 			/*
@@ -1486,6 +1555,8 @@ class SwapSession {
 			 */
 			const solo = this._takeSoloAnswer();
 			const quit = this._takeQuitAnswer();
+			// KDM-297: and the join question, on the same terms — seats are the bridge's business.
+			const joinAnswer = this._takeJoinAnswer();
 			// KDM-186: did this player's own state actually move? The caller uses this to decide between
 			// a full state reply and a bare ack — a diff, never a judgement about which inputs matter.
 			const changed = this._stateChanged(clientId, newBundle);
@@ -1505,6 +1576,8 @@ class SwapSession {
 				// states are distinct on purpose — "Wait" is an ANSWER (the host has seen the
 				// question and chosen), not the absence of one, and the bridge treats them differently.
 				solo, quit: quit === true,
+				// KDM-297: `null` = not answered, else the host's Accept (true) / Decline (false).
+				joinAnswer,
 				notify: answered ? this._joined.filter(function(i){ return i !== clientId; }) : undefined };
 		}
 

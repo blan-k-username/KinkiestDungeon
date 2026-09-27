@@ -979,3 +979,20 @@ export function reportedPageErrors(errs: string[]): { real: string[]; ignored: s
 		ignored: errs.filter((e) => PAGE_ERROR_NOISE.test(e)),
 	};
 }
+
+/**
+ * Answer one of the GATEWAY's own dialogues the way its button does — KD's own routed input.
+ *
+ * `KinkyDungeonDialogue.ts:187` makes exactly this call on a click, so the server applies it through
+ * the normal input path and KD's own `KDDoDialogue` runs the option's `clickFunction` server-side.
+ * The in-game draw loop is dead in this harness (see `coop-lobby.js` `drawModWarning`), so there is
+ * no button to press — this IS the press.
+ *
+ * KDM-297: hoisted here from `mp-disconnect-solo.spec.ts` when a second spec needed it.
+ */
+export async function answerCoopDialogue(P: Page, dialogue: string, option: string): Promise<void> {
+	await P.evaluate(({ d, o }: any) => {
+		// @ts-ignore bare let-global
+		KDSendInput('dialogue', { dialogue: d, dialogueStage: o, click: true });
+	}, { d: dialogue, o: option });
+}

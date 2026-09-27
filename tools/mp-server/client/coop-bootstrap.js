@@ -501,6 +501,20 @@
 	 * once the session actually starts. Idempotent — `joined` can arrive more than once (a reattach
 	 * re-sends it), and forcing the game screen twice would stamp over a live session.
 	 */
+	/**
+	 * KDM-299 — say WHY the lobby is still up while `enterGame()` waits.
+	 *
+	 * The session has already started when this runs (the player is seated), but the page stays on the
+	 * lobby until assets load and — for a guest — the host's mods arrive, which can take up to the mod
+	 * watchdog. `joined.started` clears the "Waiting for the host…" line, so without this the player sat
+	 * on a blank Join screen that looked exactly like nothing had happened, and pressed Join again.
+	 * Guests on the lobby road only: a `#coop=` window has no lobby to write into, and a host already
+	 * reads "Starting…" (`__coopAnswerJoin`), which is true for them — "You are in!" would not be.
+	 */
+	function sayEntering(key) {
+		if (!shortcut && role === 'guest') lobbySay({ status: T(key), error: '' });
+	}
+
 	function enterGame() {
 		if (coop._entered) return;
 		// Assets, not the socket: the bundle preloads character assets and starting a game before that
@@ -509,6 +523,7 @@
 		// of `connect()`, which is where it was first (wrongly) put: the guest's join then never left
 		// the page, and the host was never prompted.
 		if (!loaded()) {
+			sayEntering('KDMPEnteringLoad');
 			if (!coop._enterQueued) { coop._enterQueued = true; setTimeout(function () { coop._enterQueued = false; enterGame(); }, 200); }
 			return;
 		}
@@ -526,6 +541,7 @@
 			// bundle, so there is nothing to reconcile; a shortcut guest fetching from itself would
 			// be work done to reach the state it is already in.
 			var pullsMods = role === 'guest' && !shortcut;
+			sayEntering(pullsMods ? 'KDMPEnteringMods' : 'KDMPEnteringLoad');
 			window.__coopMods.ensureExecuted(pullsMods ? { fetchFrom: httpBase() } : {});
 			if (!coop._modsQueued) {
 				coop._modsQueued = true;
@@ -1400,6 +1416,10 @@
 				 * simply always says yes, because that is what a two-window UAT session means.
 				 */
 				if (shortcut) { window.__coopAnswerJoin(true); return; }
+				// KDM-297/KDM-300 — a host already IN THE GAME is asked by the server-opened in-game
+				// dialogue instead. Writing the question into the hidden lobby too would leave a stale
+				// Accept/Decline there for a guest the dialogue has long since answered.
+				if (coop._entered) return;
 				// Someone is asking to join OUR game. The host answers this — it is the whole gate.
 				// KDM-257 R2 — same diff, other side: the host is agreeing to SEND these, so say so.
 				lobbySay({ view: 'host', pending: { clientId: m.clientId, name: m.name || T('KDMPSomeone') }, error: '', modDiff: m.modDiff || null });
@@ -1900,6 +1920,37 @@
 		 * `endpoint` — which the line above has already replaced with the address being asked for.
 		 */
 		if (canAsk(role, opts.address)) { ask(role); return coop; }
+		/*
+		 * KDM-298 — ONE SOCKET PER TAB. A second press of Join must not dial a second socket.
+		 *
+		 * It used to: `connect()` below opened a fresh WebSocket and left the previous one open. The
+		 * server's KDM-280 guard then saw this id's earlier socket still live and refused the new one
+		 * `duplicate_id` — the tab refusing ITSELF — and the abandoned socket, whose handlers all bail
+		 * on `ws !== myWs` before answering a ping, went silent without closing, so the id stayed held
+		 * and every later press was refused too. A player whose screen seemed stuck pressed Join again
+		 * and locked themselves out until they reloaded.
+		 *
+		 * So, for the SAME address:
+		 *   - open socket   → ask again on it. The server treats a repeated `join` on the socket that
+		 *     already holds the id as that same player: a pending question stays pending, and a seated
+		 *     player is re-sent `joined`. Nothing is refused, nothing is duplicated.
+		 *   - still opening → nothing to do; its `onopen` asks, with the declaration just re-read.
+		 * A DIFFERENT address is a different server, and the old socket is let go of properly first:
+		 * dropped from `ws` so its own `onclose` stands down (T3), then closed, never left dangling.
+		 *
+		 * The impostor refusal (a different TAB presenting a held id) is untouched — that is a server
+		 * decision, and it was right; this only stops the client from impersonating itself.
+		 */
+		if (ws && normAddr(opts.address) === coop._at) {
+			if (ws.readyState === 1) { ask(role); return coop; }
+			if (ws.readyState === 0) return coop;
+		}
+		if (ws && ws.readyState <= 1) {
+			var old = ws;
+			ws = null;
+			coop.ws = null;
+			try { old.close(); } catch (e) { /* already going */ }
+		}
 		connect();
 		return coop;
 	};

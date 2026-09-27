@@ -2,6 +2,8 @@
  * tools/mp-server/kd-disconnect-dialogue.js  (KDM-251)
  *
  * WHAT THE SURVIVOR IS TOLD WHEN THE OTHER PLAYER GOES AWAY — one definition, both runtimes.
+ * (KDM-297: and what the host is ASKED when somebody wants to come in mid-run — the same presence
+ * change in the other direction, with the same two consumers. See `JOIN_ASK_DIALOGUE`.)
  *
  * Exported as SOURCE TEXT for the same reason as `kd-codec.js`, `kd-delta.js` and
  * `kd-peace-dialogue.js`: it has TWO consumers and they must not drift. The SERVER evals it into the
@@ -38,6 +40,21 @@ const HOST_LOST_DIALOGUE = 'KDCoopHostLost';
 /** The HOST's dialogue when a guest has gone. The other half of the asymmetry — see the header. */
 const PEER_LOST_DIALOGUE = 'KDCoopPeerLost';
 
+/**
+ * KDM-297 — the HOST's dialogue when somebody ASKS TO JOIN a game that is already running.
+ *
+ * The mirror image of the two above: presence changing in the other direction. It lives in this
+ * module because it has the same two consumers and the same reason to be opened server-side — a host
+ * who is playing is not on the lobby screen, so the lobby's Accept/Decline (KDM-233) never reaches
+ * them, and a guest waited on "Waiting for the host…" for ever.
+ *
+ * Who is asking is not known until run time, so the body carries a `GUESTNAME` token that KD fills
+ * from `KDGameData.CurrentDialogMsgData` (`KinkyDungeonDialogue.ts:134`). A guest with no name gets
+ * the `Anon` body instead of a sentence with a hole in it — chosen server-side by setting
+ * `CurrentDialogMsg`, so no English word is hard-coded outside the text keys.
+ */
+const JOIN_ASK_DIALOGUE = 'KDCoopJoinAsk';
+
 const KD_DISCONNECT_DIALOGUE = `
 (function(){
 	if (typeof KDDialogue === 'undefined' || !KDDialogue) return;
@@ -69,6 +86,24 @@ const KD_DISCONNECT_DIALOGUE = `
 		},
 	};
 
+	/*
+	 * KDM-297 — let a friend into the run, or not. Two options, both ANSWERS: the question stays open
+	 * until the host picks one or the guest withdraws (the server closes it then).
+	 */
+	KDDialogue.${JOIN_ASK_DIALOGUE} = {
+		response: '${JOIN_ASK_DIALOGUE}',
+		options: {
+			Accept: { exitDialogue: true, clickFunction: function () {
+				if (typeof KDCoopJoinAnswer === 'function') KDCoopJoinAnswer(true);
+				return false;
+			} },
+			Decline: { exitDialogue: true, clickFunction: function () {
+				if (typeof KDCoopJoinAnswer === 'function') KDCoopJoinAnswer(false);
+				return false;
+			} },
+		},
+	};
+
 	KDDialogue.${HOST_LOST_DIALOGUE} = {
 		response: '${HOST_LOST_DIALOGUE}',
 		options: {
@@ -92,6 +127,13 @@ const KD_DISCONNECT_DIALOGUE = `
 			'Your partner has lost contact.|You can wait for them — the game stays paused, for as long as you like, and if they return you carry on where you stopped.|Or you can go on without them: their character leaves the dungeon, and the run becomes yours alone. That cannot be undone.');
 		addTextKey('d${PEER_LOST_DIALOGUE}_Wait', 'Wait for them.');
 		addTextKey('d${PEER_LOST_DIALOGUE}_Solo', 'Go on alone.');
+
+		addTextKey('r${JOIN_ASK_DIALOGUE}',
+			'GUESTNAME is asking to join your game.|If you let them in, they arrive beside you in this dungeon and the two of you play on together.');
+		addTextKey('r${JOIN_ASK_DIALOGUE}Anon',
+			'Somebody is asking to join your game.|If you let them in, they arrive beside you in this dungeon and the two of you play on together.');
+		addTextKey('d${JOIN_ASK_DIALOGUE}_Accept', 'Let them in.');
+		addTextKey('d${JOIN_ASK_DIALOGUE}_Decline', 'Not now.');
 	}
 })();
 `;
@@ -101,4 +143,5 @@ const KD_DISCONNECT_DIALOGUE_BROWSER = KD_DISCONNECT_DIALOGUE;
 
 module.exports = {
 	KD_DISCONNECT_DIALOGUE, KD_DISCONNECT_DIALOGUE_BROWSER, HOST_LOST_DIALOGUE, PEER_LOST_DIALOGUE,
+	JOIN_ASK_DIALOGUE,
 };

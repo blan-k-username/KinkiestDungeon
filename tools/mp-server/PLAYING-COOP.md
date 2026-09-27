@@ -123,6 +123,11 @@ Only one person can be asking at a time. If someone else tries while a prompt is
 turned away rather than queued, so you can never accidentally answer a question about one person and
 admit another.
 
+**Already playing?** A friend can still ask to join a game that is under way. You are asked in the
+game itself — a dialogue reading *"Ada is asking to join your game"* with **Let them in.** / **Not
+now.** — and if you let them in they arrive beside you in the dungeon you are already in. If they
+give up and close their window before you answer, the question goes away on its own.
+
 ---
 
 ## Joining a game

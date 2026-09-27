@@ -17,7 +17,7 @@
  * are silent in a spec that only asserts state.
  */
 import { test, expect } from '@playwright/test';
-import { bootCoopPair, killCoopSocket, MP_TEST_TIMEOUT, PAGE_ERROR_NOISE } from './helpers/coop';
+import { answerCoopDialogue, bootCoopPair, killCoopSocket, MP_TEST_TIMEOUT, PAGE_ERROR_NOISE } from './helpers/coop';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -37,14 +37,6 @@ async function hostView(P: any) {
 			dialogue: (typeof KDGameData !== 'undefined' && KDGameData) ? (KDGameData.CurrentDialog || '') : '',
 		};
 	});
-}
-
-/** Answer the open dialogue the way its button does — KD's own routed input. */
-async function clickOption(P: any, dialogue: string, option: string) {
-	await P.evaluate(({ d, o }: any) => {
-		// @ts-ignore bare let-global — the same call KinkyDungeonDialogue.ts:187 makes on a click
-		KDSendInput('dialogue', { dialogue: d, dialogueStage: o, click: true });
-	}, { d: dialogue, o: option });
 }
 
 test('a host whose partner drops can choose to go on alone, and the run keeps working',
@@ -122,7 +114,7 @@ test('a host whose partner drops can choose to go on alone, and the run keeps wo
 
 			// ---- S4/E5: the host clicks "go on alone" ------------------------------------------------
 			const tickBefore = (await hostView(A)).lastTick;
-			await clickOption(A, PEER_LOST_DIALOGUE, 'Solo');
+			await answerCoopDialogue(A, PEER_LOST_DIALOGUE, 'Solo');
 
 			await A.waitForFunction(
 				() => {
