@@ -728,6 +728,7 @@
 				? KinkyDungeonFastMovePath.slice() : [];
 			KinkyDungeonFastMovePath = [];               // stop KD's own per-frame drainer
 			coop.route = path.length ? path : null;
+			coop.routeFresh = !!coop.route;              // a NEW click — see stepRoute's danger rule
 			stepRoute();                                 // submit the first step this turn
 			return r;
 		};
@@ -743,12 +744,23 @@
 	function stepRoute() {
 		if (coop.submitted) return;   // already acted this turn — don't consume a route step
 		if (!coop.route || !coop.route.length) { coop.route = null; return; }
-		if (typeof KinkyDungeonInDanger === 'function' && KinkyDungeonInDanger()) { coop.route = null; return; }
+		/*
+		 * In danger, KD's OWN fast-move keeps the FIRST step of a path the player has just clicked and
+		 * drops the rest (`KinkyDungeonEnemies.ts`, the `startPath` rule) — so a click always moves at
+		 * least one tile, and only the auto-walk beyond it stops. This used to drop the whole route,
+		 * first step included, so with any enemy in sight the mouse did NOTHING while the keyboard still
+		 * worked (owner UAT 2026-09-27; `tests/e2e/mp-click-move-danger.spec.ts`).
+		 */
+		if (typeof KinkyDungeonInDanger === 'function' && KinkyDungeonInDanger()) {
+			if (!coop.routeFresh) { coop.route = null; return; }
+			coop.route = [coop.route[0]];
+		}
 		var p = KinkyDungeonPlayerEntity;
 		var next = coop.route[0];
 		var dx = next.x - p.x, dy = next.y - p.y;
 		if (Math.max(Math.abs(dx), Math.abs(dy)) > 1.5) { coop.route = null; return; }  // displaced/blocked
 		coop.route.shift();
+		coop.routeFresh = false;                          // the clicked step is taken; the rest is auto-walk
 		submit({ kdType: 'move', data: { dir: { x: dx, y: dy }, delta: 1, AllowInteract: true } }, true);
 	}
 
