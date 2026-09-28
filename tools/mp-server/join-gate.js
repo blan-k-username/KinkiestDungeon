@@ -260,6 +260,13 @@ class JoinGate {
 		/** `{ clientId, name, build }` awaiting the host's answer, or null. */
 		this.pending = null;
 		/**
+		 * KDM-303 — true while a RUNNING game has no host because its host timed out (`vacate`), until
+		 * someone takes the seat (`promote` / `claimHost`). `heldWorld` is that game's world
+		 * declaration, kept for the guests it is shown to in the meantime.
+		 */
+		this.vacated = false;
+		this.heldWorld = undefined;
+		/**
 		 * KDM-237 — the display name of each SEATED player, keyed by clientId.
 		 *
 		 * On the seat rather than on the socket, because the seat is what survives a drop: a
@@ -443,6 +450,13 @@ class JoinGate {
 		// KDM-239 R3/R5 — and the world it is hosting, on the same terms. Only here: `requestJoin`
 		// deliberately does not read `info.world`, so a guest cannot declare one at all (A5).
 		if (info && info.world !== undefined) this.world.set(clientId, sanitizeWorld(info.world));
+		// KDM-303 R4 — taking over a VACATED running game: the world being joined is the held one, not
+		// whatever this player would have set up for a new game, so it wins over their declaration.
+		if (this.vacated) {
+			if (this.heldWorld !== undefined) this.world.set(clientId, this.heldWorld);
+			this.heldWorld = undefined;
+			this.vacated = false;
+		}
 		// KDM-249 R2 — the host's declaration IS the session's. Unlike `build` above (where an
 		// explicit value wins and a claim may only supply a missing one), a later claim REPLACES:
 		// the host is the source of truth including when what they are running changes. Guarded on
@@ -523,7 +537,10 @@ class JoinGate {
 		 * the host its own seat — `_reject` closed it and the bridge's `close` handler then released
 		 * everything it held.
 		 */
-		if (!this.host) return { accept: false, reason: 'no_host', retry: 'host' };
+		// KDM-303 R6 — a VACATED seat (the host of a running game timed out) is not "nobody is
+		// hosting": the run is alive and a host is coming — a promoted guest or the next Host press.
+		// So the request is parked below exactly as usual, and put to whoever takes the seat.
+		if (!this.host && !this.vacated) return { accept: false, reason: 'no_host', retry: 'host' };
 		if (clientId === this.host) return { accept: false, reason: 'already_hosting', retry: 'host' };
 		if (clientId === this.guest) return { accept: true, slot: GUEST_SLOT };   // already in
 		if (this.guest) return { accept: false, reason: 'session_full' };
@@ -555,9 +572,9 @@ class JoinGate {
 		 * Note `info.world` is NOT read here — a guest does not declare a world (A5). This is the
 		 * HOST's, being shown to the guest.
 		 */
-		const world = this.worldOf(this.host);
+		const world = this.host ? this.worldOf(this.host) : this.heldWorld;
 
-		this.pending = { clientId, name, character, build, mods: normalizeDeclaration(info && info.mods), modDiff };
+		this.pending ={ clientId, name, character, build, mods: normalizeDeclaration(info && info.mods), modDiff };
 		return { accept: false, pending: true, modDiff, world };
 	}
 
@@ -609,9 +626,10 @@ class JoinGate {
 	 * longer asking, so their pending request goes with them; otherwise the host is left staring at a
 	 * dialogue about someone who has gone.
 	 *
-	 * The host leaving does NOT promote the guest. The authoritative world lives in the host's
-	 * process, so there is nothing for a promoted guest to own (KDM-244 C1/C3) — the guest waits, and
-	 * that is all (KDM-234 D5/D7).
+	 * `release` does not promote anyone. KDM-303 changed the policy but not this method: a host who
+	 * TIMES OUT of a running game goes through `vacate` (the session and its declaration stay) and the
+	 * bridge then hands the seat on with `promote`. The world lives in the gateway process, not in the
+	 * host's browser, which is why a promoted guest has something to own.
 	 */
 	release(clientId) {
 		this.releasePending(clientId);
@@ -636,6 +654,42 @@ class JoinGate {
 		// playing. Their perks ride along inside it now, and so keep that guarantee by construction
 		// rather than by a second `delete` that could be forgotten.
 		this.characters.delete(clientId);
+	}
+
+	/**
+	 * KDM-303 — the host of a RUNNING game timed out: free the host seat, keep the session.
+	 *
+	 * Not `release`: that treats the host leaving as the end of the hosted session and drops the mod
+	 * set and the world declaration with them (KDM-249 R2 / KDM-239 R3). Here the world is still
+	 * running, its mods are still loaded and the guests still have them, so the session's declaration
+	 * stays; only the PERSON goes. `vacated` tells `requestJoin` to park rather than answer `no_host`,
+	 * and the world description is held for the guests it shows it to until someone takes the seat.
+	 */
+	vacate(clientId) {
+		if (!clientId || clientId !== this.host) return false;
+		this.releasePending(clientId);
+		this.heldWorld = this.worldOf(clientId);
+		this.world.delete(clientId);
+		this.names.delete(clientId);
+		this.characters.delete(clientId);
+		this.host = null;
+		this.vacated = true;
+		return true;
+	}
+
+	/**
+	 * KDM-303 — seat `clientId` as the host of the running game (a promoted guest). Their name and
+	 * character stay theirs; the held world declaration moves to them, since it describes the world
+	 * they now host.
+	 */
+	promote(clientId) {
+		if (!clientId || this.host) return false;
+		if (this.guest === clientId) this.guest = null;
+		this.host = clientId;
+		if (this.heldWorld !== undefined) this.world.set(clientId, this.heldWorld);
+		this.heldWorld = undefined;
+		this.vacated = false;
+		return true;
 	}
 
 	/**

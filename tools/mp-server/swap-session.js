@@ -32,7 +32,7 @@ const { KD_JOURNEY_CHOICE } = require('./kd-journey-choice');
 const { KD_SHOP_BUY } = require('./kd-shop-buy');
 const { KD_COOP_CAPTURE } = require('./kd-coop-capture');
 const { KD_VARIANT_REGISTRY, decideVariantSweep } = require('./kd-variant-registry');
-const { KD_DISCONNECT_DIALOGUE, HOST_LOST_DIALOGUE, PEER_LOST_DIALOGUE, JOIN_ASK_DIALOGUE } = require('./kd-disconnect-dialogue');
+const { KD_DISCONNECT_DIALOGUE, HOST_LOST_DIALOGUE, PEER_LOST_DIALOGUE, JOIN_ASK_DIALOGUE, NOW_HOST_DIALOGUE } = require('./kd-disconnect-dialogue');
 const { sanitizeName, sanitizePerks, sanitizeCharacter } = require('./join-gate');
 // KDM-239 R3/R5 — same normaliser the gate uses, so what the session stores and what the gate
 // accepted cannot drift apart.
@@ -124,7 +124,7 @@ const CHAT_COLOR = '#ffe066';
  * holding the only key to their own cell — the trap KDM-230 documents against the peace offer, and
  * the same trap the disconnect dialogues walk into.
  */
-const OWN_DIALOGUES = new Set([PEACE_DIALOGUE, HOST_LOST_DIALOGUE, PEER_LOST_DIALOGUE, JOIN_ASK_DIALOGUE]);
+const OWN_DIALOGUES = new Set([PEACE_DIALOGUE, HOST_LOST_DIALOGUE, PEER_LOST_DIALOGUE, JOIN_ASK_DIALOGUE, NOW_HOST_DIALOGUE]);
 
 /**
  * KDM-162: KDGameData fields the CLIENT owns, because only the client can compute them.
@@ -1019,8 +1019,24 @@ class SwapSession {
 	 * No speaker: there is no avatar to attribute it to (that is the entire message), so it opens as
 	 * a plain narration rather than as somebody talking.
 	 */
-	openHostLostDialogue(target) {
-		return this._openOwnDialogue(target, HOST_LOST_DIALOGUE, null);
+	openHostLostDialogue(target, timeText) {
+		// KDM-303 — the body's TIME token (remaining grace, m:ss) is filled from the first moment.
+		return this._openOwnDialogue(target, HOST_LOST_DIALOGUE, null,
+			timeText ? { data: { TIME: String(timeText) } } : undefined);
+	}
+
+	/**
+	 * KDM-303 — tick the host-lost countdown on one guest's bundle. Only the token changes, and only if
+	 * that dialogue is the one open: a guest who pressed Leave, or has something else on screen, is not
+	 * pulled back into it.
+	 */
+	setHostLostTime(target, timeText) {
+		return this._setOwnDialogueData(target, HOST_LOST_DIALOGUE, { TIME: String(timeText) });
+	}
+
+	/** KDM-303 — tell a promoted guest they are the host now. */
+	openNowHostDialogue(target) {
+		return this._openOwnDialogue(target, NOW_HOST_DIALOGUE, null);
 	}
 
 	/**
@@ -1109,6 +1125,27 @@ class SwapSession {
 	 */
 	closeHostLostDialogue(target) {
 		return this._closeOwnDialogue(target, HOST_LOST_DIALOGUE);
+	}
+
+	/**
+	 * KDM-303 — replace the `CurrentDialogMsgData` tokens of one of OUR dialogues, in place, if it is
+	 * the one open on `target`'s bundle. The third member of the open/close pair, with the same
+	 * restore → write → capture → re-park sequence (it touches per-player state, so it must never land
+	 * on the wrong bundle), and the same name guard.
+	 */
+	_setOwnDialogueData(target, name, data) {
+		const bundle = this.bundles.get(target);
+		if (!bundle) return false;
+		this._restorePlayer(target, bundle);
+		const changed = this.world.eval(`(function(){
+			var data = ${JSON.stringify(data || {})};
+			if (typeof KDGameData === 'undefined' || !KDGameData || KDGameData.CurrentDialog !== '${name}') return false;
+			KDGameData.CurrentDialogMsgData = data;
+			return true;
+		})()`);
+		this.bundles.set(target, this.world.capturePlayer());
+		this.world.parkGlobalPlayer(PARK.x, PARK.y);
+		return !!changed;
 	}
 
 	/**

@@ -269,10 +269,21 @@ responding.
 > **Wait for them.** — hold the run open until they come back.
 > **Go on alone.** — continue by yourself; the run carries on as a single-player game.
 
-**If the host disappears**, the guest is offered **Give up waiting and leave.**
+**If the host disappears**, the run pauses and the guest sees a **countdown — two minutes**. If the
+host comes back in that time, you both carry on exactly where you were. If they do not, **the guest
+becomes the host**: the old host's character leaves the dungeon, the run goes on, and the new host
+answers anyone who asks to join. You can also **Leave the game** instead of waiting.
+
+If nobody is left at all when the two minutes run out, the run stays alive on the server: the next
+person to open the game and press **Host Game** carries on **that same run**, with the character they
+built.
 
 **Coming back:** someone who reconnects **resumes their own character** — same gear, same inventory,
-same state. They do not come back as a copy or a fresh start.
+same state. They do not come back as a copy or a fresh start. The one exception is a host who returns
+**after** the two minutes: the host role has moved on, so they rejoin as a guest — asking the new host,
+with a fresh character.
+
+(For testing, `KD_HOST_GRACE_MS` changes the two minutes — e.g. `KD_HOST_GRACE_MS=20000` for 20 s.)
 
 ---
 

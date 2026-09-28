@@ -385,6 +385,23 @@ describe('KDM-274 — every declared message is exercised, and keeps its declara
 		await sleep(40);
 		clearInterval(bridge._hbTimer); bridge._hbTimer = null;
 
+		// ── KDM-303: the host seat, vacated by a timed-out host, is handed to a connected player. The
+		//    connected one is pinned to A (the rig's host) so the host-only `join_pending` that the
+		//    hand-over re-offers still lands on the host seat R4 below checks against.
+		const realState = bridge.presence.state;
+		bridge.gate.vacated = true;
+		bridge.gate.host = null;
+		bridge.gate.promote = (id: string) => { bridge.gate.host = id; bridge.gate.vacated = false; return true; };
+		bridge.presence.state = (id: string) => (id === 'A' ? 'connected' : 'missing');
+		bridge.presence.setRole = () => true;
+		bridge.session.openNowHostDialogue = () => {};
+		bridge.session.openJoinAskDialogue = () => {};
+		// A real parked request carries all of `join_pending`'s fields (`JoinGate.requestJoin`); the
+		// rig's default `{name}` does not, and the re-offer would be judged on a shape no gate produces.
+		bridge.gate.pending = { clientId: 'G', name: 'Ada', modDiff: { add: ['m'] } };
+		bridge._fillHostSeat();
+		bridge.presence.state = realState;
+
 		// LAST: this one removes B's socket from the map, so nothing after it could reach B.
 		bridge._seatGone(['B'], 'dismissed');
 	});

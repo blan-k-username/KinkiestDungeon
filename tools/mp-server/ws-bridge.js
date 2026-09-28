@@ -160,6 +160,9 @@ const OUTBOUND_MESSAGES = Object.freeze({
 	peer_missing:      Object.freeze({ required: Object.freeze(['clientId', 'role']) }),
 	peer_back:         Object.freeze({ required: Object.freeze(['clientId', 'role']) }),
 	peer_gone:         Object.freeze({ required: Object.freeze(['clientId', 'reason']) }),
+	// KDM-303 — the host timed out and the seat was handed on. Sent to everyone: the new host learns
+	// it is the host, the others that the wait is over.
+	host_changed:      Object.freeze({ required: Object.freeze(['host']) }),
 
 	// ── the run itself (KDM-244/275) ─────────────────────────────────────────────────────────────
 	// `reason` is what tells an automatic export ('floor'/'timer') from one the host asked for
@@ -183,6 +186,12 @@ function pickFields(msg, fields) {
 
 /** Monotonic milliseconds. Never Date.now(): a wall-clock jump would corrupt every latency below. */
 function now() { return Number(process.hrtime.bigint()) / 1e6; }
+
+/** KDM-303 — remaining host grace as `m:ss` for the guests' countdown (rounded UP: never shows 0:00 early). */
+function graceText(ms) {
+	const s = Math.max(0, Math.ceil(ms / 1000));
+	return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+}
 
 const WS_MAGIC = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 
@@ -287,6 +296,12 @@ class WSBridge {
 		// operator (or a spec) needs, and the ONLY way to turn it off. It is on by default on
 		// purpose: a safety mechanism that ships off is the exact mistake `idleGraceMs` made.
 		this.hbIntervalMs = (opts.hbIntervalMs != null) ? opts.hbIntervalMs : 5000;
+		// KDM-303 — how long a RUNNING game waits for a missing host before a guest becomes the host
+		// (owner: 2 minutes). Counted from the moment presence marks the host missing. A spec passes a
+		// short one; there is no "off" — a seat nobody can ever reclaim is the bug this replaces.
+		this.hostGraceMs = (opts.hostGraceMs != null) ? opts.hostGraceMs : 120000;
+		/** `{ host, deadline, timer, ticker }` while a missing host is being waited for, else null. */
+		this._hostGrace = null;
 		this.presence = new Presence({
 			hbTimeoutMs: (opts.hbTimeoutMs != null) ? opts.hbTimeoutMs : DEFAULT_HB_TIMEOUT_MS,
 			// KDM-251: presence needs the INTENDED cadence so it can tell a sweep that was late
@@ -685,7 +700,13 @@ class WSBridge {
 				// top of this branch.) `join()` is the pre-start collector and throws once started, so
 				// the two cases get the two different methods they always needed.
 				this._carrySeat(clientId);
-				if (this.session.started) { this._joinLate(clientId); return clientId; }
+				if (this.session.started) {
+					this._joinLate(clientId);
+					// KDM-303 R4/R6 — a player who took over a VACATED running game as its host is now
+					// the one to answer anybody who asked while the seat was empty.
+					if (msg.role === 'host') this._offerPendingTo(clientId);
+					return clientId;
+				}
 				const r = this.session.join(clientId);
 				this._send(socket, Object.assign(
 					{ type: 'joined', clientId, started: r.started, players: this.session.players },
@@ -900,7 +921,7 @@ class WSBridge {
 			// because it is the host's process that owns the world. The host's own wait/solo choice on
 			// a GUEST drop is KDM-253 — deliberately not opened here.
 			if (role === 'host' && this.session.started) {
-				try { this.session.openHostLostDialogue(cid); } catch (e) { /* world may be mid-teardown */ }
+				try { this.session.openHostLostDialogue(cid, graceText(this.hostGraceMs)); } catch (e) { /* world may be mid-teardown */ }
 			}
 			// KDM-253 S4/D1 — and the mirror: a HOST who has lost a guest is given the choice the
 			// guest is never offered. Two options, no timeout; until they answer, the pause stands.
@@ -908,6 +929,109 @@ class WSBridge {
 				try { this.session.openPeerLostDialogue(cid); } catch (e) { /* world may be mid-teardown */ }
 			}
 		}
+		// KDM-303 R1 — a missing HOST is waited for only so long; then a guest takes the seat.
+		if (role === 'host' && this.session.started) this._startHostGrace(clientId);
+	}
+
+	/**
+	 * KDM-303 R1/R8 — start waiting for a missing host, on the SERVER's clock.
+	 *
+	 * One timeout decides; a 1 s ticker only keeps the guests' countdown text current (the `TIME`
+	 * token of their host-lost dialogue) and pushes it, so every guest sees the same moment and no
+	 * client clock is involved. The first tick runs at once — the dialogue was opened a moment ago
+	 * and nothing else would put it on the guest's screen until they pressed something.
+	 */
+	_startHostGrace(hostId) {
+		this._clearHostGrace();
+		const deadline = now() + this.hostGraceMs;
+		const tick = () => {
+			const left = Math.max(0, deadline - now());
+			for (const [cid, sock] of this.sockets) {
+				if (cid === hostId) continue;
+				try {
+					this.session.setHostLostTime(cid, graceText(left));
+					this._pushState(cid, sock);
+				} catch (e) { /* world may be mid-teardown */ }
+			}
+		};
+		this._hostGrace = {
+			host: hostId,
+			deadline,
+			timer: setTimeout(() => this._hostTimedOut(), this.hostGraceMs),
+			ticker: setInterval(tick, 1000),
+		};
+		tick();
+	}
+
+	_clearHostGrace() {
+		const g = this._hostGrace;
+		if (!g) return;
+		clearTimeout(g.timer);
+		clearInterval(g.ticker);
+		this._hostGrace = null;
+	}
+
+	/**
+	 * KDM-303 R3/R4/R5 — the host did not come back. Their character leaves, the seat is vacated (the
+	 * run and its declaration stay), and the seat goes to a connected guest if there is one.
+	 *
+	 * The old host's id is FORGOTTEN rather than tombstoned (`presence.forget` after `_seatGone`), so
+	 * their tab can come back as an ordinary guest (R5); and they are not sent `seat_gone`, which would
+	 * make their client stop reconnecting for good.
+	 */
+	_hostTimedOut() {
+		const g = this._hostGrace;
+		this._clearHostGrace();
+		if (!g || !this.session.started) return;
+		if (this.presence.state(g.host) !== 'missing' || this.gate.host !== g.host) return;   // back, or already resolved
+		this._seatGone([g.host], 'host_timeout', { vacateHost: true });
+		this.presence.forget(g.host);
+		this._fillHostSeat();
+	}
+
+	/**
+	 * KDM-303 R3 — give a vacated host seat to a CONNECTED seated player, chosen at random.
+	 *
+	 * Called when the grace runs out and again whenever a seated guest comes back while the seat is
+	 * still vacated. With nobody connected it does nothing: the seat waits for the next Host press
+	 * (R4), which `claimHost` already treats as a join into the running game.
+	 */
+	_fillHostSeat() {
+		if (!this.gate.vacated || this.gate.host || !this.session.started) return false;
+		const candidates = this.session.players.filter((id) =>
+			this.presence.state(id) === 'connected' && this.sockets.has(id));
+		if (!candidates.length) return false;
+		const next = candidates[Math.floor(Math.random() * candidates.length)];
+		this.gate.promote(next);
+		this.presence.setRole(next, 'host');
+		this.session._dbg(`HOST — ${next} promoted after the host timed out`);
+		try { this.session.openNowHostDialogue(next); } catch (e) { /* world may be mid-teardown */ }
+		for (const [cid, sock] of this.sockets) {
+			try {
+				this._send(sock, { type: 'host_changed', host: next });
+				this._pushState(cid, sock);
+			} catch (e) { /* that one is gone too */ }
+		}
+		this._offerPendingTo(next);
+		return true;
+	}
+
+	/**
+	 * KDM-303 R6 — a join request that waited while nobody was host is put to the new one, on the
+	 * same terms as a fresh request: the lobby message, and the in-game question once the run is live.
+	 */
+	_offerPendingTo(hostId) {
+		const p = this.gate.pending;
+		const hostSock = this.sockets.get(hostId);
+		if (!p || !hostSock) return false;
+		this._send(hostSock, { type: 'join_pending', clientId: p.clientId, name: p.name, modDiff: p.modDiff });
+		if (this.session.started) {
+			try {
+				this.session.openJoinAskDialogue(hostId, p.name);
+				this._pushState(hostId, hostSock);
+			} catch (e) { /* world may be mid-teardown */ }
+		}
+		return true;
 	}
 
 	/**
@@ -927,6 +1051,8 @@ class WSBridge {
 	 */
 	_reportBack(clientId) {
 		const role = this.presence.roleOf(clientId);
+		// KDM-303 R2 — the host is back in time: stop the countdown, nobody is promoted.
+		if (this._hostGrace && this._hostGrace.host === clientId) this._clearHostGrace();
 		// Closed on every SEAT, not on every open socket. A survivor who is themselves offline right
 		// now still holds that modal in their bundle, and would be handed it back — stale — inside the
 		// full snapshot they get when they in turn reconnect. Harmless where it was never open: the
@@ -955,6 +1081,9 @@ class WSBridge {
 				this._pushState(cid, sock);
 			} catch (e) { /* that one is gone too */ }
 		}
+		// KDM-303 R3 — a guest who comes back to a run whose host seat was vacated while they were
+		// away is the only one who can take it.
+		if (this.gate.vacated) this._fillHostSeat();
 	}
 
 	/**
@@ -1173,17 +1302,25 @@ class WSBridge {
 	 * what it says, and leaving the second `missing` would re-pause the session the instant it
 	 * resumed.
 	 */
-	_seatGone(ids, reason) {
+	_seatGone(ids, reason, opts = {}) {
 		const gone = [];
 		for (const id of ids) {
 			if (!this.presence.remove(id)) continue;   // already terminal — do not report it twice
-			this.gate.release(id);
+			// KDM-303 — a host who TIMED OUT vacates the seat of a game that goes on: the session's
+			// mods and world declaration stay (`vacate`), where an ending host takes them (`release`).
+			if (opts.vacateHost && id === this.gate.host) this.gate.vacate(id);
+			else this.gate.release(id);
 			this.session.removePlayer(id);             // everything the world knew about them
 			const sock = this.sockets.get(id);
 			// If they are still connected (a quit, or a peer whose socket outlived the decision), say
 			// why in words before closing — the same typed refusal a later reconnect would get.
+			// KDM-303 R5 — except a timed-out host: `seat_gone` makes their client stop reconnecting for
+			// good, and they are allowed back as a guest. Their socket is only closed.
 			if (sock) {
-				try { this._send(sock, { type: 'reject', reason: 'seat_gone' }); sock.end(); } catch (e) { /* already gone */ }
+				try {
+					if (!opts.vacateHost) this._send(sock, { type: 'reject', reason: 'seat_gone' });
+					sock.end();
+				} catch (e) { /* already gone */ }
 			}
 			this.sockets.delete(id);
 			gone.push(id);
@@ -1519,6 +1656,7 @@ class WSBridge {
 
 	close() {
 		this._clearGrace();
+		this._clearHostGrace();
 		if (this._hbTimer) { clearInterval(this._hbTimer); this._hbTimer = null; }
 		if (this._lagTimer) { clearInterval(this._lagTimer); this._lagTimer = null; }
 		if (this._statsTimer) { clearInterval(this._statsTimer); this._statsTimer = null; }

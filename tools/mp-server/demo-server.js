@@ -438,12 +438,14 @@ function start(port = PORT, overrides = null) {
 	// that is wedged, and a tight window would declare a live player dead for a slow frame.
 	const hbIntervalMs = parseInt(process.env.KD_HB_INTERVAL_MS || '5000', 10);
 	const hbTimeoutMs = parseInt(process.env.KD_HB_TIMEOUT_MS || '30000', 10);
+	// KDM-303 — how long a running game waits for a missing host before a guest takes the seat.
+	const hostGraceMs = parseInt(process.env.KD_HOST_GRACE_MS || '120000', 10);
 	// KDM-235: `overrides` lets a caller (a spec) change a session knob without an env var. The
 	// default is unchanged — two players, as every existing caller expects — and the one this exists
 	// for is `requiredPlayers: 1`, a host who starts playing ALONE and is joined later.
 	const bridge = new WSBridge(Object.assign({
 		requiredPlayers: 2, seed: 'coop-demo-seed', idleGraceMs: graceMs,
-		hbIntervalMs, hbTimeoutMs,
+		hbIntervalMs, hbTimeoutMs, hostGraceMs,
 		pvp, startRestraint, wearRestraint, defaultPerks,
 	}, overrides || {}));
 	// KDM-249: the mod routes read the session's declaration and payload store off the bridge.

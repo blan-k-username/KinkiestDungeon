@@ -55,6 +55,12 @@ const PEER_LOST_DIALOGUE = 'KDCoopPeerLost';
  */
 const JOIN_ASK_DIALOGUE = 'KDCoopJoinAsk';
 
+/**
+ * KDM-303 — told to the guest who has just been made the host, because the old host did not come back
+ * within the grace period. One option: it is news, not a question.
+ */
+const NOW_HOST_DIALOGUE = 'KDCoopNowHost';
+
 const KD_DISCONNECT_DIALOGUE = `
 (function(){
 	if (typeof KDDialogue === 'undefined' || !KDDialogue) return;
@@ -104,10 +110,21 @@ const KD_DISCONNECT_DIALOGUE = `
 		},
 	};
 
+	/*
+	 * KDM-303 — the new host is TOLD. One option: nothing is being asked.
+	 */
+	KDDialogue.${NOW_HOST_DIALOGUE} = {
+		response: '${NOW_HOST_DIALOGUE}',
+		options: {
+			Ok: { exitDialogue: true },
+		},
+	};
+
 	KDDialogue.${HOST_LOST_DIALOGUE} = {
 		response: '${HOST_LOST_DIALOGUE}',
 		options: {
-			// ONE option. See the header: no continue, no timeout.
+			// ONE option: leave. KDM-303 — the countdown in the body is what replaced "wait for ever";
+			// when it runs out a guest becomes the host, so there is still no "continue" to offer here.
 			Quit: { exitDialogue: true, clickFunction: function () {
 				if (typeof KDCoopSessionQuit === 'function') KDCoopSessionQuit();
 				return false;                                  // false = do not abort the dialogue exit
@@ -119,9 +136,15 @@ const KD_DISCONNECT_DIALOGUE = `
 	// (KinkyDungeonDialogue.ts:132/176). A missing entry prints "[NotFound] …" straight at the
 	// player — the failure this epic has already shipped twice.
 	if (typeof addTextKey === 'function') {
+		// KDM-303 — TIME is the remaining grace as m:ss, written by the SERVER every second
+		// (CurrentDialogMsgData), so every guest counts down to the same moment.
 		addTextKey('r${HOST_LOST_DIALOGUE}',
-			'You have lost contact with the host.|The game cannot go on without them — it is their world you are both in.|You can wait here as long as you like; if they come back, you carry on where you stopped.');
-		addTextKey('d${HOST_LOST_DIALOGUE}_Quit', 'Give up waiting and leave.');
+			'You have lost contact with the host.|The game is paused. If they come back, you carry on where you stopped.|If they are not back in TIME, you become the host and the run goes on.');
+		addTextKey('d${HOST_LOST_DIALOGUE}_Quit', 'Leave the game.');
+
+		addTextKey('r${NOW_HOST_DIALOGUE}',
+			'The host did not come back.|You are the host now: the run goes on, and you answer anyone who asks to join.');
+		addTextKey('d${NOW_HOST_DIALOGUE}_Ok', 'Carry on.');
 
 		addTextKey('r${PEER_LOST_DIALOGUE}',
 			'Your partner has lost contact.|You can wait for them — the game stays paused, for as long as you like, and if they return you carry on where you stopped.|Or you can go on without them: their character leaves the dungeon, and the run becomes yours alone. That cannot be undone.');
@@ -143,5 +166,6 @@ const KD_DISCONNECT_DIALOGUE_BROWSER = KD_DISCONNECT_DIALOGUE;
 
 module.exports = {
 	KD_DISCONNECT_DIALOGUE, KD_DISCONNECT_DIALOGUE_BROWSER, HOST_LOST_DIALOGUE, PEER_LOST_DIALOGUE,
+	NOW_HOST_DIALOGUE,
 	JOIN_ASK_DIALOGUE,
 };

@@ -1406,6 +1406,17 @@
 				 * `__coopConnect` consults `_mayAsk` to re-ask instead of dialling again.
 				 */
 				coop._mayAsk = m.retry || null;
+				/*
+				 * KDM-303 R5 — a page that is already IN THE GAME and is told "ask as a guest" is a host
+				 * whose seat was handed on while they were away (their tab reconnected claiming it).
+				 * There is no lobby on screen to offer anything in, and the player's intent — keep
+				 * playing — is unambiguous, so it asks as a guest at once; the current host answers.
+				 */
+				if (m.retry === 'guest' && coop._entered) {
+					setStatus('Co-op ' + id + ': someone else is the host now — asking to rejoin…');
+					ask('guest');
+					return;
+				}
 				if (m.retry) {
 					/*
 					 * A HUMAN is at the lobby, and what to do about a free seat is a UI decision the
@@ -1448,6 +1459,22 @@
 				// these would dial forever at a door that has been shut in words.
 				coop._closedForGood = true;
 				lobbySay({ error: why, status: '', pending: null });
+				return;
+			}
+			if (m.type === 'host_changed') {
+				/*
+				 * KDM-303 R3 — the host timed out and the seat was handed on. For the page that got it,
+				 * `role` is what every host-only thing reads (`coop.isHost()` → the save-run menu entry,
+				 * the seat a reconnect claims, mod publishing), so setting it is the whole promotion on
+				 * this side; the "you are the host now" dialogue arrives in the state frame. Everyone
+				 * else only needs the wait to be over.
+				 */
+				if (m.host === id) role = 'host';
+				coop.peerMissing = null;
+				coop.blocked = null;
+				setStatus('Co-op ' + id + ': ' + (m.host === id
+					? 'the host did not come back — you are the host now.'
+					: m.host + ' is the host now.'));
 				return;
 			}
 			if (m.type === 'peer_gone') {

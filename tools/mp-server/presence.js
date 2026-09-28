@@ -100,6 +100,27 @@ class Presence {
 		return s ? s.role : null;
 	}
 
+	/** KDM-303 — a promoted guest now holds the HOST role. The seat keeps its liveness state. */
+	setRole(clientId, role) {
+		const s = this._seats.get(clientId);
+		if (!s || s.state === 'gone') return false;
+		s.role = role;
+		return true;
+	}
+
+	/**
+	 * KDM-303 R5 — drop every record of a seat, so the id counts as a stranger again.
+	 *
+	 * Deliberately NOT `remove`: `gone` is terminal (E6) because a guest the survivor dismissed must
+	 * not walk back into their old seat. A host who TIMED OUT is different — the owner's rule is that
+	 * they may come back as an ordinary guest, asking like anyone else — so their record is forgotten
+	 * instead of tombstoned. Call it only after the seat has been resolved (`remove`), never to cancel
+	 * a wait.
+	 */
+	forget(clientId) {
+		return this._seats.delete(clientId);
+	}
+
 	/** Seats being waited for, with the role each held — the survivor needs both (E3). */
 	missing() {
 		const out = [];
