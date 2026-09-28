@@ -49,7 +49,7 @@ test.describe('KDM-249 — the guest plays with the host\'s mods', () => {
 			await installModZip(host, 'Kdm249HostMod', MARKER);
 
 			await press(host, 'KDMPHost');
-			expect((await lobbyState(host)).view).toBe('host');
+			expect((await lobbyState(host)).phase).toBe('waiting');
 
 			// The host's declaration reaches the session. This is R2 — the session mod set IS the
 			// host's — and it must survive the publish/re-declare round trip.

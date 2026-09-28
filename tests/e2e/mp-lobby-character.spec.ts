@@ -1,30 +1,16 @@
 /**
- * E2E (KDM-256 R1) — a co-op player builds a character on KD's OWN screens, not on ones we built.
+ * E2E (KDM-256) — KD's OWN class screen is left exactly as KD's, and the declaration is read from it.
  *
- * ── THE SAME MECHANIC AS THE PERK PICK, AIMED AT A HARDER SCREEN ──────────────────────────────────
- * `DrawButtonKDEx` paints a button AND registers it as `KDButtonsCache[name]` (`KinkyDungeon.ts:3720`);
- * the cache is wiped per frame (`:1670`) and clicks are dispatched by iterating it (`:4321`).
- * Registration is keyed by NAME, so last write wins, and the lobby wrapper already runs after the
- * stock frame. `mp-lobby-perks.spec.ts` establishes all of that for `'Stats'`; this file is about
- * `'Diff'`, KD's class/start screen (`KinkyDungeon.ts:2546`), which differs in one dangerous way:
+ * ⚠️ TRIMMED BY KDM-293. Two tests here covered the BORROW of `startQuick` / `startGameKinky` /
+ * `startGame` — the mechanic that got a player back to a lobby menu of ours after KDM-256 had sent
+ * them to `'Diff'`. KDM-293 reversed the direction of travel: the player arrives at `'Diff'` by KD's
+ * own road and presses a co-op entry there, so those three buttons keep starting solo games, which is
+ * the right answer for someone who changed their mind. Nothing is borrowed, so there is nothing to
+ * test about borrowing. `mp-entry-diff.spec.ts` covers the entry.
  *
- *   **THREE buttons start a solo game, not one.** `startQuick`, `startGameKinky` and `startGame`.
- *   Miss any of them and a co-op player who presses it is dropped into single-player with their
- *   lobby still open — which is why `borrowButtons` is all-or-nothing and why R3 below names each.
- *
- * The Wardrobe (the outfit and appearance surface) is reached by KD's own button from `'Diff'` and
- * returns there by its own back button, so it needs no override at all and gets none.
- *
- * ── WHY IT IS NOT A VACUOUS GREEN ─────────────────────────────────────────────────────────────────
- *  1. Every borrowed button is exercised in BOTH modes on the same page (R3 / R4). With a co-op pick
- *     in progress it must reach the lobby; WITHOUT one it must still do KD's own thing. One
- *     assertion says the override works, the other says it did not eat the stock button — an
- *     unconditional override passes the first and fails the second. This is the pair that matters:
- *     the stock behaviour here is "start the game", so eating it breaks single-player.
- *  2. The class grid is asserted PRESENT while the override is active, so "we took the screen over
- *     and painted our own" cannot be how R3 passes.
- *  3. What is committed is read back from KD's own `KinkyDungeonClassMode` / `KinkyDungeonCurrentDress`
- *     after being changed through KD's own class button — never injected into a field of ours.
+ * What survives is the pair that matters more now than it did then: the screen is still KD's, its
+ * start buttons still do KD's own thing, and what we declare is read out of KD's own globals rather
+ * than out of fields of ours.
  */
 import { test, expect } from '../helpers/playwright-fixtures';
 import { bootKD } from '../helpers/bundle';
@@ -55,27 +41,6 @@ async function onClassScreen(page: any, coopPick: boolean) {
 }
 
 test.describe('KDM-256 — a character is built on KD\'s own screens, from the co-op lobby', () => {
-	test('R1 — the lobby offers a Character entry that opens KD\'s class screen', async ({ isolatedPage: page }) => {
-		await bootKD(page);
-		await injectLobby(page);
-		await page.evaluate(() => {
-			KinkyDungeonState = 'Multiplayer';
-			// @ts-ignore
-			window.KDMPLobby.view = 'menu';
-		});
-		await frames(page);
-
-		expect(await buttonNames(page), 'the lobby root offers it').toContain('KDMPChar');
-
-		const after = await page.evaluate(() => {
-			// @ts-ignore
-			KDButtonsCache['KDMPChar'].func({});
-			// @ts-ignore
-			return { screen: KinkyDungeonState, picking: !!window.KDMPLobby.charPick };
-		});
-		expect(after.screen, 'KD\'s own screen, by its own state name').toBe('Diff');
-		expect(after.picking).toBe(true);
-	});
 
 	test('R2 — the screen is KD\'s: the class grid and its stock controls are still there', async ({ isolatedPage: page }) => {
 		await bootKD(page);
@@ -93,32 +58,6 @@ test.describe('KDM-256 — a character is built on KD\'s own screens, from the c
 		}
 	});
 
-	test('R3 — with a pick in progress, EVERY start button commits to the lobby', async ({ isolatedPage: page }) => {
-		await bootKD(page);
-		await injectLobby(page);
-
-		for (const button of BORROWED) {
-			await onClassScreen(page, true);
-			const after = await page.evaluate((name: string) => {
-				// @ts-ignore
-				KDButtonsCache[name].func({});
-				return {
-					screen: KinkyDungeonState,
-					// @ts-ignore
-					picking: !!window.KDMPLobby.charPick,
-					// @ts-ignore
-					view: window.KDMPLobby.view,
-					running: !!KinkyDungeonGameRunning,
-				};
-			}, button);
-			// The failure this pins: a solo game started under an open lobby. `running` is the loud
-			// half — the screen alone would not say whether a run had begun behind it.
-			expect(after.screen, `${button} must return to the lobby, not start a game`).toBe('Multiplayer');
-			expect(after.view, `${button} must land on the lobby ROOT`).toBe('menu');
-			expect(after.picking, `${button} must end the pick`).toBe(false);
-			expect(after.running, `${button} must NOT have started a solo run`).toBe(false);
-		}
-	});
 
 	test('R4 — WITHOUT a pick, the same buttons still do KD\'s own thing', async ({ isolatedPage: page }) => {
 		// THE CONTROL, and the reason `borrowButtons` is conditional. An unconditional override would

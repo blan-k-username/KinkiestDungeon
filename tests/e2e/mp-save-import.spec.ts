@@ -114,7 +114,13 @@ test.describe('KDM-243 — continue a single-player save in co-op', () => {
 			 */
 			await settle(host);
 			await press(host, 'KDMPContinue');
-			expect((await lobbyState(host)).view).toBe('host');
+			// KDM-293 — 'waiting' alone is not proof it PROCEEDED: the phase is entered before the
+			// save is judged, so a refused save also lands here, just with an error beside it. Assert
+			// both, or a refusal reads as a successful host and the failure surfaces two minutes later
+			// as "the host should be prompted".
+			const contd = await lobbyState(host);
+			expect(contd.error, 'Continue must not refuse the save it was drawn for').toBe('');
+			expect(contd.phase).toBe('waiting');
 
 			await guestJoinsAndIsAccepted(host, guest, port, bridge);
 

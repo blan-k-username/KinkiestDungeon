@@ -1390,7 +1390,7 @@
 				if (coop._entered) return;
 				// Someone is asking to join OUR game. The host answers this — it is the whole gate.
 				// KDM-257 R2 — same diff, other side: the host is agreeing to SEND these, so say so.
-				lobbySay({ view: 'host', pending: { clientId: m.clientId, name: m.name || T('KDMPSomeone') }, error: '', modDiff: m.modDiff || null });
+				lobbySay({ phase: 'waiting', pending: { clientId: m.clientId, name: m.name || T('KDMPSomeone') }, error: '', modDiff: m.modDiff || null });
 				return;
 			}
 			if (m.type === 'reject') {
@@ -1423,7 +1423,7 @@
 					 */
 					if (m.retry === 'guest') {
 						lobbySay({
-							view: 'join', pending: null, status: '',
+							phase: 'connect', pending: null, status: '',
 							error: T('KDMPAlreadyHosting'),
 						});
 					} else {
@@ -1514,7 +1514,7 @@
 				// together, so there is no window in which the host is looking at a stale one. It is
 				// carried, not interpreted — what to DO with it is the lobby's decision (`shareLines`),
 				// because it is the lobby that knows where the host's own browser is.
-				else if (role === 'host') lobbySay({ view: 'host', status: '', share: m.lan || [] });
+				else if (role === 'host') lobbySay({ phase: 'waiting', status: '', share: m.lan || [] });
 			}
 			else if (m.type === 'state' && m.kind === 'push') {
 				// KDM-252: a state frame the SERVER started — nothing of ours is being answered. Adopt

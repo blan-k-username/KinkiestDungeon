@@ -66,18 +66,31 @@ function assertBriefingPainted(seen: string[]) {
 	}
 }
 
+/**
+ * KDM-293 — the briefing is shown on the first co-op ENTRY, not on arriving at a menu.
+ *
+ * There is no Multiplayer menu any more: `openLobby` now parks on KD's own class screen, and the
+ * briefing is what a first-ever player sees when they press Host or Join. So every test here that
+ * used to say "open the lobby" now has to say "open it AND press an entry" — which is the same
+ * player action it always described, one screen earlier.
+ */
+async function openAndEnter(page: any, port: number) {
+	await openLobby(page, port, '127.0.0.1', { briefing: true });
+	await press(page, 'KDMPJoin');
+}
+
 test.describe('KDM-272 — how co-op differs, said once, before the run', () => {
 
-	test('a first-ever lobby open lands on the briefing, upstream of every declaration (AC1)',
+	test('a first-ever co-op entry lands on the briefing, before anything is declared (AC1)',
 		async ({ browser }) => {
 			test.setTimeout(MP_TEST_TIMEOUT);
 			const { server, bridge, port } = await start(0);
 			const ctx = await browser.newContext();
 			const page = await ctx.newPage();
 			try {
-				await openLobby(page, port, '127.0.0.1', { briefing: true });
+				await openAndEnter(page, port);
 
-				expect((await lobbyState(page)).view, 'a player who has never seen it starts on it')
+				expect((await lobbyState(page)).phase, 'a player who has never seen it starts on it')
 					.toBe('about');
 
 				const seen = await paintedText(page);
@@ -87,9 +100,9 @@ test.describe('KDM-272 — how co-op differs, said once, before the run', () => 
 				// player press straight through to the perk grid.
 				const names = await buttonNames(page);
 				expect(names, 'the briefing REPLACES the root — it is not painted over it')
-					.not.toContain('KDMPPerks');
-				expect(names, 'and neither is the character pick reachable through it')
-					.not.toContain('KDMPChar');
+					.not.toContain('KDMPConnect');
+				expect(names, 'and neither is the entry we came from')
+					.not.toContain('KDMPJoin');
 
 				// AC5 — rules, not values. A gameplay constant would show up as a digit.
 				const briefingLines = seen.filter((s) => BRIEFING.some(
@@ -102,9 +115,9 @@ test.describe('KDM-272 — how co-op differs, said once, before the run', () => 
 
 				// Back returns to the root, where the declarations live.
 				await press(page, 'KDMPBack');
-				expect((await lobbyState(page)).view).toBe('menu');
-				expect(await buttonNames(page), 'and the root is intact behind it')
-					.toContain('KDMPPerks');
+				expect((await lobbyState(page)).phase).toBe('connect');
+				expect(await buttonNames(page), 'and the connect form is there behind it')
+					.toContain('KDMPConnect');
 			} finally {
 				await ctx.close().catch(() => {});
 				try { bridge.close(); } catch (e) { /* ignore */ }
@@ -121,17 +134,17 @@ test.describe('KDM-272 — how co-op differs, said once, before the run', () => 
 			const other = await browser.newContext();
 			const otherPage = await other.newPage();
 			try {
-				await openLobby(page, port, '127.0.0.1', { briefing: true });
-				expect((await lobbyState(page)).view, 'first open').toBe('about');
+				await openAndEnter(page, port);
+				expect((await lobbyState(page)).phase, 'first open').toBe('about');
 
 				// A full page load, not a view change: the flag has to outlive the tab's memory.
-				await openLobby(page, port, '127.0.0.1', { briefing: true });
-				expect((await lobbyState(page)).view, 'second open, same browser ⇒ straight to the root')
-					.toBe('menu');
+				await openAndEnter(page, port);
+				expect((await lobbyState(page)).phase, 'second open, same browser ⇒ straight past it')
+					.toBe('connect');
 
 				// THE CONTROL — a different browser is a different player, and has been told nothing.
-				await openLobby(otherPage, port, '127.0.0.1', { briefing: true });
-				expect((await lobbyState(otherPage)).view,
+				await openAndEnter(otherPage, port);
+				expect((await lobbyState(otherPage)).phase,
 					'"once" is per-player, not once per server or once per process')
 					.toBe('about');
 			} finally {
@@ -142,25 +155,25 @@ test.describe('KDM-272 — how co-op differs, said once, before the run', () => 
 			}
 		});
 
-	test('it is reachable again on demand from the lobby root (AC2)', async ({ browser }) => {
+	test('it is reachable again on demand from the connect phase (AC2)', async ({ browser }) => {
 		test.setTimeout(MP_TEST_TIMEOUT);
 		const { server, bridge, port } = await start(0);
 		const ctx = await browser.newContext();
 		const page = await ctx.newPage();
 		try {
-			await openLobby(page, port, '127.0.0.1', { briefing: true });
+			await openAndEnter(page, port);
 			await press(page, 'KDMPBack');            // dismiss the automatic showing
-			expect((await lobbyState(page)).view).toBe('menu');
+			expect((await lobbyState(page)).phase).toBe('connect');
 
-			expect(await buttonNames(page), 'the root offers the way back in')
+			expect(await buttonNames(page), 'the connect phase offers the way back in')
 				.toContain('KDMPAbout');
 			await press(page, 'KDMPAbout');
 
-			expect((await lobbyState(page)).view).toBe('about');
+			expect((await lobbyState(page)).phase).toBe('about');
 			assertBriefingPainted(await paintedText(page));
 
 			await press(page, 'KDMPBack');
-			expect((await lobbyState(page)).view, 'and out again').toBe('menu');
+			expect((await lobbyState(page)).phase, 'and out again').toBe('connect');
 		} finally {
 			await ctx.close().catch(() => {});
 			try { bridge.close(); } catch (e) { /* ignore */ }
@@ -190,11 +203,11 @@ test.describe('KDM-272 — how co-op differs, said once, before the run', () => 
 					s.setItem = (k: string, v: string) => (String(k).indexOf('kdcoop.') === 0 ? boom(k) : set(k, v));
 				});
 
-				await openLobby(page, port, '127.0.0.1', { briefing: true });
-				expect((await lobbyState(page)).view,
+				await openAndEnter(page, port);
+				expect((await lobbyState(page)).phase,
 					'no storage ⇒ nothing was remembered ⇒ show it again').toBe('about');
-				await openLobby(page, port, '127.0.0.1', { briefing: true });
-				expect((await lobbyState(page)).view, 'and again, rather than crashing').toBe('about');
+				await openAndEnter(page, port);
+				expect((await lobbyState(page)).phase, 'and again, rather than crashing').toBe('about');
 
 				assertBriefingPainted(await paintedText(page));
 				expect(crashes.filter((m) => /storage disabled/.test(m)),

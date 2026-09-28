@@ -65,7 +65,7 @@ test.describe('KDM-289 — the lobby speaks the player\'s language', () => {
 		await page.evaluate(() => {
 			// @ts-ignore — bundle `let` global.
 			KinkyDungeonState = 'Multiplayer';
-			(window as any).KDMPLobby.view = 'about';
+			(window as any).KDMPLobby.phase = 'about';
 		});
 
 		const ru = await expected(page, 'RU', ABOUT_KEYS);
@@ -105,7 +105,7 @@ test.describe('KDM-289 — the lobby speaks the player\'s language', () => {
 		await page.evaluate(() => {
 			// @ts-ignore
 			KinkyDungeonState = 'Multiplayer';
-			(window as any).KDMPLobby.view = 'menu';
+			(window as any).KDMPLobby.phase = 'connect';
 		});
 
 		const [title] = await expected(page, 'ES', ['KDMPLobbyTitle']);
@@ -127,7 +127,7 @@ test.describe('KDM-289 — the lobby speaks the player\'s language', () => {
 		await page.evaluate(() => {
 			// @ts-ignore
 			KinkyDungeonState = 'Multiplayer';
-			(window as any).KDMPLobby.view = 'about';
+			(window as any).KDMPLobby.phase = 'about';
 		});
 		const [title] = await expected(page, 'RU', ['KDMPAboutTitle']);
 		for (const lang of ['', 'EN', 'XX']) {

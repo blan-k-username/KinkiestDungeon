@@ -32,7 +32,7 @@ That serves the game **and** the co-op connection together on port **8090**. Whe
 see:
 
 ```
-→ Co-op on http://localhost:8090/ — Multiplayer then Host names the address to share
+→ Co-op on http://localhost:8090/ — start a new game, then Host Game names the address to share
 ```
 
 If you have only this game checkout and no sibling folder, this does the same job:
@@ -56,19 +56,22 @@ Co-op is opt-in. Start the server the normal way and nothing is listening for a 
 
 **1. Open the game.** Go to `http://localhost:8090/` in your browser.
 
-**2. Choose Multiplayer** from the main menu.
+**2. Start a new game** from the main menu, exactly as for a solo run. You land on the game's own
+class screen, which now has a **co-op column**: *Your name*, *World seed*, and the buttons **Host
+Game**, **Continue Save** (only if you have a save) and **Join Game**.
 
-The first time you ever open it you are shown **"Playing together is a little different"** — the
-short version of [How co-op differs](#how-co-op-differs) below. You can come back to it any time
+The first time you press one of them you are shown **"Playing together is a little different"** —
+the short version of [How co-op differs](#how-co-op-differs) below. You can come back to it any time
 with **How co-op differs**.
 
 **3. Type your name** in *Your name*. Your friend sees this when you ask to join, and it labels your
 messages in the log.
 
-**4. Set up your run.** On the Multiplayer menu, before you host:
+**4. Set up your run** on the same screens you would use alone, before you host:
 
-- **Character** — build the character *you* will play. (Your friend builds their own.)
-- **Perks** — pick *your* starting perks. Note that they apply to both of you — see
+- your **class** and **outfit** (the Wardrobe) — the character *you* will play. (Your friend builds
+  their own.)
+- your starting **perks**, on the game's own perk screen. Note that they apply to both of you — see
   [Start perks are the party's](#start-perks-are-the-partys--everyones-apply-to-everyone-debuffs-included).
 - **Continue Save** — carry on an existing single-player run in co-op instead of starting fresh.
 - a **world seed**, if you want a specific dungeon rather than a random one.
@@ -135,11 +138,11 @@ give up and close their window before you answer, the question goes away on its 
 **1. Open the host's address** in your browser — the one they sent you, like
 `http://192.168.1.24:8090/`.
 
-**2. Choose Multiplayer.**
+**2. Start a new game**, as the host did — you land on the class screen with the co-op column.
 
-**3. Build your character and pick your perks** — **Character** and **Perks** are on this menu for
-you too, not just for the host. You play your own character, and your perks apply to both of you, so
-choose them **before** you join: they are sent along with your request.
+**3. Build your character and pick your perks** on those same screens — your class, your outfit and
+your perks, just as for a solo run. You play your own character, and your perks apply to both of you,
+so choose them **before** you join: they are sent along with your request.
 
 You do not choose the seed, the game mode or the difficulty — those are the host's.
 

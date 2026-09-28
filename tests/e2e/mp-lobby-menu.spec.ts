@@ -39,85 +39,55 @@ const buttonNames = (page: any) => page.evaluate(() => {
 	return Object.keys(KDButtonsCache);
 });
 
-test.describe('KDM-233 — Multiplayer entry in the main menu', () => {
-	test('the entry is absent until injected, then live — and opens the lobby (E1 entry point)', async ({ isolatedPage: page }) => {
+test.describe('KDM-233/293 — the co-op entries, installed from outside the game tree', () => {
+	test('the entries are absent until injected, then live (E1 entry point)', async ({ isolatedPage: page }) => {
 		await bootKD(page);
 
-		await page.evaluate(() => { KinkyDungeonState = 'Menu'; });
+		// KDM-293 — the entries moved from KD's main menu to its class/start screen, and the claim
+		// this test makes moved with them: they are installed from OUTSIDE the game tree, so a stock
+		// page must not have them. `mp-entry-diff` asserts they are present and behave; only this one
+		// asserts they are ABSENT beforehand, which is what proves the wrapper put them there.
+		await page.evaluate(() => { KinkyDungeonState = 'Diff'; });
 		await frames(page);
-		expect(await buttonNames(page), 'BEFORE: the stock menu has no Multiplayer entry')
-			.not.toContain('MultiplayerButton');
+		const before = await buttonNames(page);
+		expect(before, 'BEFORE: the stock class screen has no co-op entry').not.toContain('KDMPHost');
+		expect(before, 'and none of ours at all').not.toContain('KDMPJoin');
 
 		await injectLobby(page);
 		await frames(page);
 
-		expect(await buttonNames(page), 'AFTER: the wrapper registered it')
-			.toContain('MultiplayerButton');
+		const after = await buttonNames(page);
+		expect(after, 'AFTER: the wrapper registered Host').toContain('KDMPHost');
+		expect(after, 'AFTER: and Join').toContain('KDMPJoin');
 
-		// Clicking it is invoking the registered handler — the same thing KD's own click dispatch does.
+		// Clicking is invoking the registered handler — the same thing KD's own click dispatch does.
 		const state = await page.evaluate(() => {
 			// @ts-ignore
-			KDButtonsCache['MultiplayerButton'].func({});
+			KDButtonsCache['KDMPJoin'].func({});
 			// @ts-ignore
-			return { screen: KinkyDungeonState, view: window.KDMPLobby && window.KDMPLobby.view };
+			return { screen: KinkyDungeonState, phase: window.KDMPLobby && window.KDMPLobby.phase };
 		});
 		expect(state.screen).toBe('Multiplayer');
-		// KDM-272 — a player who has never been told how co-op differs lands on the BRIEFING, and the
-		// root is one Back away. This page injects the lobby script alone, with no `coop-bootstrap.js`
-		// to remember anything, so it is a first-ever open every time — which is the degraded reading
-		// the lobby is specified to take (`briefingSeen()` answers false when it cannot know).
-		expect(state.view, 'the entry opens the lobby ON the briefing, not past it').toBe('about');
+		// KDM-272 — a player who has never been told how co-op differs lands on the BRIEFING. This
+		// page injects the lobby script alone, with no `coop-bootstrap.js` to remember anything, so it
+		// is a first-ever entry every time — the degraded reading the lobby is specified to take
+		// (`briefingSeen()` answers false when it cannot know).
+		expect(state.phase, 'the entry opens ON the briefing, not past it').toBe('about');
 	});
 
-	test('the lobby paints its own screen, and the stock frame paints nothing underneath', async ({ isolatedPage: page }) => {
+	test('the handshake screen paints its own buttons, and the stock frame paints nothing underneath', async ({ isolatedPage: page }) => {
 		await bootKD(page);
 		await injectLobby(page);
-		await page.evaluate(() => { KinkyDungeonState = 'Multiplayer'; window.KDMPLobby.view = 'menu'; });
+		await page.evaluate(() => { KinkyDungeonState = 'Multiplayer'; window.KDMPLobby.phase = 'connect'; });
 		await frames(page);
 
 		const names = await buttonNames(page);
-		expect(names.sort(), 'exactly the lobby\'s own buttons — a stock fallthrough would add more')
-			// KDM-238 added KDMPPerks to the root view — KD's own perk screen, reached from the lobby.
-			// KDM-256 added KDMPChar beside it — KD's own class screen, and the Wardrobe beyond it.
-			// KDM-272 added KDMPAbout — the way back into the briefing after the first showing.
-			.toEqual(['KDMPAbout', 'KDMPBack', 'KDMPChar', 'KDMPHost', 'KDMPJoin', 'KDMPPerks']);
+		expect(names.sort(), 'exactly our own buttons — a stock fallthrough would add more')
+			// KDM-293 — the root menu is gone; what is left is the connect form. `KDMPAbout` is the
+			// way back into the briefing, which used to hang off the root and now hangs off this.
+			.toEqual(['KDMPAbout', 'KDMPBack', 'KDMPConnect']);
 	});
 
-	test('Back returns to the menu; Host and Join each open their own view', async ({ isolatedPage: page }) => {
-		await bootKD(page);
-		await injectLobby(page);
-
-		const seen = await page.evaluate(async () => {
-			const step = async (btn: string) => {
-				// @ts-ignore
-				KDButtonsCache[btn].func({});
-				await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-				// @ts-ignore
-				return window.KDMPLobby.view;
-			};
-			KinkyDungeonState = 'Multiplayer';
-			// @ts-ignore
-			window.KDMPLobby.view = 'menu';
-			await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-
-			const host = await step('KDMPHost');
-			// @ts-ignore
-			window.KDMPLobby.view = 'menu';
-			await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-			const join = await step('KDMPJoin');
-			// @ts-ignore
-			window.KDMPLobby.view = 'menu';
-			await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-			const back = await step('KDMPBack');
-			// @ts-ignore
-			return { host, join, back, screen: KinkyDungeonState };
-		});
-
-		expect(seen.host).toBe('host');
-		expect(seen.join).toBe('join');
-		expect(seen.back).toBe('menu');
-		expect(seen.screen, 'Back from the lobby root leaves the Multiplayer screen').toBe('Menu');
-	});
 
 	test('the join view offers a real address field, prefilled and editable', async ({ isolatedPage: page }) => {
 		await bootKD(page);

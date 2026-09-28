@@ -37,7 +37,7 @@ test.describe('KDM-233 — hosting and joining, end to end', () => {
 		try {
 			await openLobby(host, port);
 			await press(host, 'KDMPHost');
-			expect((await lobbyState(host)).view).toBe('host');
+			expect((await lobbyState(host)).phase).toBe('waiting');
 
 			await guestAsks(guest, port, 'Ada');
 

@@ -66,7 +66,8 @@ function drawHostFrame(locHost: string, share?: string[] | null) {
 	runInContext(readFileSync(SRC, 'utf8'), ctx, { filename: 'coop-lobby.js' });
 
 	const lobby = ctx.window.KDMPLobby;
-	lobby.view = 'host';
+	// KDM-293 — 'view' was renamed to 'phase' and 'host' became 'waiting' when the root menu went.
+	lobby.phase = 'waiting';
 	if (share !== undefined) lobby.share = share as any;
 	ctx.KinkyDungeonRun();
 

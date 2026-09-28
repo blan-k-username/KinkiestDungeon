@@ -117,8 +117,11 @@ test.describe('KDM-237 — the name you type is the name you get', () => {
 			await guest.locator('#KDMPAddress').fill(`127.0.0.1:${port}`);
 			await guest.locator('#KDMPName').fill('');
 			await press(guest, 'KDMPConnect');
-			await expect.poll(async () => (await lobbyState(host)).pending !== undefined,
-				{ timeout: 30_000, message: 'the host is asked about the guest' }).toBe(true);
+			// KDM-293 — was `pending !== undefined`, which is TRUE for the initial `null` and so never
+			// waited at all; Accept was pressed before the request arrived. Pre-existing, and only
+			// exposed when this slice shifted the timing. Poll for a REAL prompt, as join-flow does.
+			await expect.poll(async () => (await lobbyState(host)).pending?.clientId,
+				{ timeout: 30_000, message: 'the host is asked about the guest' }).toBeTruthy();
 			await press(host, 'KDMPAccept');
 			await expect.poll(() => bridge.session.players.length,
 				{ timeout: 120_000, message: 'both players seated' }).toBe(2);

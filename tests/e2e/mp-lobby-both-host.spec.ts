@@ -47,7 +47,7 @@ test.describe('KDM-270 — the second Host press', () => {
 		try {
 			await openLobby(A, port);
 			await press(A, 'KDMPHost');
-			expect((await lobbyState(A)).view).toBe('host');
+			expect((await lobbyState(A)).phase).toBe('waiting');
 
 			/*
 			 * KDM-280 — B used to be handed a client id here, because `stableId` minted the literal
@@ -75,8 +75,8 @@ test.describe('KDM-270 — the second Host press', () => {
 				.not.toBe(idA);
 
 			// ── the refusal moves it, and does not hang up ──────────────────────────────────
-			await expect.poll(async () => (await lobbyState(B)).view,
-				{ message: 'the refusal takes B to the join view', timeout: 15_000 }).toBe('join');
+			await expect.poll(async () => (await lobbyState(B)).phase,
+				{ message: 'the refusal takes B to the connect phase', timeout: 15_000 }).toBe('connect');
 			/*
 			 * It got there BY BEING REFUSED — the assertion that stops this being "the lobby was
 			 * already on the join view". Deliberately the error text and not a view transition read

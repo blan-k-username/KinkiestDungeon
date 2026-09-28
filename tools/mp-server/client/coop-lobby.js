@@ -1,7 +1,17 @@
 /**
  * tools/mp-server/client/coop-lobby.js  (KDM-233)
  *
- * THE MULTIPLAYER ENTRY — a button on KD's own main menu, and the host/join screens behind it.
+ * THE MULTIPLAYER ENTRY — Host / Continue / Join on KD's own class screen, and the handshake screen
+ * behind them.
+ *
+ * ── KDM-293: WHY THERE IS NO MULTIPLAYER MENU ─────────────────────────────────────────────────────
+ * There was one, and it was the problem. It duplicated KD's own screens and — worse — a player who
+ * had just built a character had to abandon it to reach co-op. The three ACTIONS now sit on `'Diff'`,
+ * where the player already is; the two ROUTERS that used to send them to `'Stats'` and `'Diff'` are
+ * gone, because a router to the screen you are standing on is the definition of redundant.
+ *
+ * What is left of ours is only what KD has no equivalent for: an address to type, a name, the host's
+ * approve/decline prompt, the mod diff, the world summary, the refusals and the briefing.
  *
  * A classic (non-module) script sharing the bundle's global scope. It draws with KD's own widgets
  * and decides nothing about the session: hosting and joining are asked for through
@@ -37,7 +47,14 @@
 	var W = 1000, MID = W - 350 / 2;
 
 	var lobby = {
-		view: 'menu',            // 'menu' | 'host' | 'join'
+		// KDM-293 — 'connect' (address + name) | 'waiting' (a request is out, or we are hosting) |
+		// 'about' (the briefing). The host's approval prompt is not a fourth phase: `drawHost` already
+		// branches on `lobby.pending`, so "somebody is asking" is data, not navigation.
+		phase: 'connect',
+		// The KD screen this was opened from, so Back is a route back and not a dead end.
+		returnTo: 'Menu',
+		// Where the briefing hands off to once it has been read.
+		next: 'connect',
 		status: '',              // a line of prose for the player — never a code
 		error: '',
 		_drawCount: 0,           // observed by the double-wrap test
@@ -93,81 +110,82 @@
 		 */
 		seed: '',
 		/**
-		 * KDM-238 — the perk keys this player committed on KD's own perk screen, and whether a pick
-		 * is in progress right now.
+		 * KDM-293 — the ONE declaration this lobby sends: class, outfit and perks, read from KD's own
+		 * globals at the moment of declaring.
 		 *
-		 * `perkPick` is what makes the `KDPerksStart` / `KDPerksBack` override CONDITIONAL: outside a
-		 * co-op pick those two buttons must keep doing KD's own thing (see `drawPerkPickOverrides`).
-		 * Both survive moving between views, unlike the DOM-backed name field — there is no element
-		 * for `KDCullTempElements` to destroy.
-		 */
-		perks: [],
-		perkPick: false,
-		// KDM-279 — there is no `playerPerks()` any more. It answered the same question
-		// `playerCharacter()` now answers, and leaving a second accessor beside it is how the two
-		// declarations grew apart in the first place.
-		/**
-		 * KDM-256 R1 — the character this player built, or null, plus the same conditional flag the
-		 * perk pick uses. `null` (never `{}`) because "declared nothing" has exactly one meaning all
-		 * the way down to `SwapSession.characterOf` — a player who built nothing is seated on KD's defaults.
-		 */
-		character: null,
-		charPick: false,
-		/**
-		 * KDM-256 / KDM-279 — the ONE declaration this lobby sends: class, outfit, style and perks.
+		 * ⚠️ THERE IS NOTHING TO CACHE ANY MORE, and that is the whole shape of this slice. The lobby
+		 * used to send the player to KD's perk and character screens and BORROW their buttons to get
+		 * a value back; now the player is already standing on `'Diff'` when they press Host or Join,
+		 * so the true value is simply what KD's globals say, right now. `lobby.character`,
+		 * `lobby.perks`, `charPick` and `perkPick` all existed only to carry a value across a screen
+		 * change that no longer happens.
 		 *
-		 * ⚠️ THE TWO SCREENS STAY TWO SCREENS. `charPick` and `perkPick` are separate KD screens with
-		 * separate commit paths, and KDM-279 is a refactor with no player-visible change — so the
-		 * merge happens HERE, at the moment of declaring, not in the UI. `lobby.character` and
-		 * `lobby.perks` remain what each screen wrote.
+		 * Answers `null` when nothing was chosen, because "declared nothing" has exactly one meaning
+		 * all the way down (`SwapSession.characterOf` → KD's own default): a player who built nothing
+		 * is seated on KD's defaults.
 		 *
-		 * Answers `null` when neither screen was used, because "declared nothing" has exactly one
-		 * meaning all the way down (`SwapSession.characterOf` → KD's own default). Note the perks
-		 * alone are enough to make a package: a player may take KD's default class in the outfit it
-		 * comes with and still have chosen perks, and that is a declaration.
+		 * ⚠️ THE PERK LIST LEGITIMATELY CONTAINS WORLD KEYS. `KDUpdatePlugSettings`
+		 * (`KinkyDungeon.ts:6116-6146`) writes 21 game-mode keys into the SAME `KinkyDungeonStatsChoice`
+		 * Map the perk grid uses, so a guest who toggled Random Mode sends `randomMode` here. That is
+		 * expected and is refused server-side, twice: `applyPerks` re-adds only keys KD's own
+		 * `KinkyDungeonStatsPresets` knows (`join-gate.js:223`), and `applyModes` re-asserts the host's
+		 * modes afterwards (`headless-host.js:1793`). Do not "fix" it by filtering here — the server is
+		 * the authority, and a second filter would be a second thing to keep in step.
 		 */
 		playerCharacter: function () {
-			var pkg = lobby.character ? JSON.parse(JSON.stringify(lobby.character)) : null;
-			if (lobby.perks && lobby.perks.length) {
-				pkg = pkg || {};
-				pkg.perks = lobby.perks.slice();
-			}
-			return pkg;
+			var pkg = {};
+			try {
+				if (typeof KinkyDungeonClassMode === 'string' && KinkyDungeonClassMode) pkg.class = KinkyDungeonClassMode;
+				if (typeof KinkyDungeonCurrentDress === 'string' && KinkyDungeonCurrentDress) pkg.outfit = KinkyDungeonCurrentDress;
+			} catch (e) { pkg = {}; }
+			var chosen = [];
+			try {
+				if (typeof KinkyDungeonStatsChoice !== 'undefined' && KinkyDungeonStatsChoice) {
+					KinkyDungeonStatsChoice.forEach(function (on, key) { if (on) chosen.push(String(key)); });
+				}
+			} catch (e) { chosen = []; }
+			if (chosen.length) pkg.perks = chosen;
+			return Object.keys(pkg).length ? pkg : null;
 		},
 		/**
-		 * KDM-272 A1 — the first time this player ever opens the lobby they land on the briefing,
-		 * every time after that on the root.
+		 * KDM-293 — open the handshake screen, remembering the screen we came from.
 		 *
-		 * Here, and not on Host/Join, because the perk and character picks are buttons on the ROOT
-		 * (`KDMPPerks`, `KDMPChar`) — the host connects straight from that view, so anything riding
-		 * the handshake is declared before either choice is pressed. There is therefore no moment
-		 * after approval that is still upstream of the perk grid, and opening the lobby is the last
-		 * one that is.
+		 * `returnTo` is what makes Back a real route back rather than a dead end, and it is what lets
+		 * KDM-272's briefing keep meaning something: the player can always return to the class grid
+		 * and revise a choice they made before they were told the co-op rules. The old road showed the
+		 * briefing once, upstream of the perk grid; that ordering is gone with the root menu, and this
+		 * is what replaces it.
 		 *
-		 * `briefingSeen()` is the bootstrap's — the lobby asks, it does not own storage, exactly as
-		 * with `__coopLastAddress`. Absent (a bundle-only test page) reads as "not seen", which shows
-		 * the briefing rather than silently swallowing it.
+		 * `briefingSeen()` is the bootstrap's — the lobby asks, it does not own storage. Absent (a
+		 * bundle-only test page) reads as "not seen", which shows the briefing rather than silently
+		 * swallowing it.
 		 */
-		open: function () {
+		/**
+		 * ⚠️ `action` RUNS AFTER THE BRIEFING, NEVER BEHIND IT. Host and Continue ask for a seat the
+		 * moment they are pressed, and a first-ever player is shown the briefing on the way in — so
+		 * passing the connect as a callback is what stops us advertising a session while the player is
+		 * still reading the rules that govern it. KDM-272 put the briefing upstream of every
+		 * declaration; the root menu used to guarantee that by being upstream of the buttons, and this
+		 * is what guarantees it now that the buttons are on KD's screen.
+		 */
+		open: function (phase, action) {
+			lobby.returnTo = KinkyDungeonState;
 			KinkyDungeonState = 'Multiplayer';
-			lobby.view = briefingSeen() ? 'menu' : 'about';
+			lobby.next = phase || 'connect';
 			lobby.error = '';
 			lobby.status = '';
+			if (briefingSeen()) {
+				lobby.phase = lobby.next;
+				if (action) action();
+				return;
+			}
+			lobby.phase = 'about';
+			lobby.pendingAction = action || null;
 		},
-		/**
-		 * KDM-272 — back to the lobby ROOT from a KD screen we borrowed.
-		 *
-		 * Split out of `open()` the moment `open()` stopped always meaning "the root". Returning from
-		 * the perk or character screen is a RETURN, not an entry: the player has already been told how
-		 * co-op differs on the way in, and re-showing the briefing every time they close the perk grid
-		 * would be the opposite of "once".
-		 *
-		 * One function because `commitPerks` and `commitCharacter` both need it — and they had already
-		 * drifted, `commitCharacter` calling `open()` while `commitPerks` set the two fields by hand,
-		 * which is exactly how one of them would have kept the bug.
-		 */
-		toRoot: function () { KinkyDungeonState = 'Multiplayer'; lobby.view = 'menu'; return true; },
-		close: function () { lobby.leave(); KinkyDungeonState = 'Menu'; },
+		/** Whatever the briefing is holding back; consumed by its Back button. */
+		pendingAction: null,
+		/** Back to the screen the player came from. Never to a menu of ours — there isn't one. */
+		close: function () { lobby.leave(); KinkyDungeonState = lobby.returnTo || 'Menu'; },
 		/**
 		 * KDM-236 T — the ONE way back to the lobby root.
 		 *
@@ -182,7 +200,7 @@
 			if (typeof window.__coopDisconnect === 'function') {
 				try { window.__coopDisconnect(); } catch (e) { /* nothing to drop */ }
 			}
-			lobby.view = 'menu';
+			lobby.phase = 'connect';
 			lobby.pending = null;
 			lobby.status = '';
 			lobby.error = '';
@@ -249,22 +267,79 @@
 	var T = KDMPT.t;
 	var kdText = KDMPT.kdText;
 
-	// ---- the entry on KD's own menu --------------------------------------------------------
+	// ---- the entries on KD's own class/start screen -----------------------------------------
 
-	function drawMenuEntry() {
-		DrawButtonKDEx('MultiplayerButton', function () { lobby.open(); return true; },
-			true, MID, 680, 350, 64, T('KDMPLobbyTitle'), '#ffffff', '');
+	/**
+	 * KDM-293 — Host / Continue Save / Join, on the screen the player is already standing on.
+	 *
+	 * ── WHY HERE AND NOT ON A MENU OF OURS ────────────────────────────────────────────────────────
+	 * The root menu these three used to live on duplicated KD's own screens and, worse, forced a
+	 * player who had just built a character to leave it behind. KD's road is `Menu → Name → Diff`;
+	 * by the time you are here you have picked a class and (one stock button away) your perks. So
+	 * these are actions on a character that already exists, and nothing has to be carried anywhere.
+	 *
+	 * The two buttons that are NOT here are the point: `KDMPPerks` and `KDMPChar` were routers to
+	 * `'Stats'` and `'Diff'`, and a router to the screen you are on is the definition of redundant.
+	 *
+	 * ── GEOMETRY IS CORRECTNESS HERE, NOT LAYOUT ──────────────────────────────────────────────────
+	 * `KinkyDungeonHandleClick` runs `KDProcessButtons()` before its `MouseIn` chain and returns on a
+	 * hit (`KinkyDungeon.ts:6225`), so a button of ours that overlaps a stock one STEALS its clicks
+	 * with both still painted. A right-hand column at x=1650 was chosen after a full-width row at
+	 * y=860 was found to cover `backButton` at (1075, 900, 350, 64) — KD's own way off this screen,
+	 * drawn by the setup-tab helper (`:7628`) rather than by the `'Diff'` branch, which is exactly why
+	 * reading the branch did not reveal it.
+	 *
+	 * Clear of: the class grid (ends x=1622), `backButton` (x 1075-1425), `GoToWardrobe`
+	 * (x 30-470, y 942) and the setup tabs (y 10-50). `mp-entry-diff.spec.ts` #11 asserts this by
+	 * computing the rectangles rather than trusting this comment.
+	 */
+	var COL = 1650, COLW = 300;
+
+	function drawDiffEntries() {
+		// Asked BEFORE either action, because both connect straight from this screen — anything that
+		// rides the handshake has to exist before the button is pressed. Same reason the root asked.
+		drawField('KDMPSeed', T('KDMPWorldSeedField'), 'seed', 400, COL, COLW);
+		drawField('KDMPName', T('KDMPYourName'), 'name', 500, COL, COLW);
+
+		DrawButtonKDEx('KDMPHost', function () {
+			lobby.open('waiting', function () { hostConnect(); });
+			return true;
+		}, true, COL, 650, COLW, 64, T('KDMPHostGame'), '#ffffff', '');
+
+		// KDM-243 A5 — hosting a run that is ALREADY IN PROGRESS. Drawn only when there is a save to
+		// continue, so a player who has never played is not offered a button that can only disappoint
+		// them. The save is read at the PRESS, not at draw time — they may have been playing seconds
+		// ago, and the freshest save is the one they mean.
+		var saved = localSave();
+		if (saved) {
+			DrawButtonKDEx('KDMPContinue', function () {
+				// A6 — the save is read at the PRESS and again inside the action, because the briefing
+				// may sit between the two and the freshest save is still the one they mean.
+				lobby.open('waiting', function () {
+					var str = localSave();
+					if (!saveIsUsable(str)) {
+						// Refuse privately, in words, and do NOT connect.
+						lobby.error = T('KDMPSaveUnusable');
+						return;
+					}
+					hostConnect(str);
+				});
+				return true;
+			}, true, COL, 720, COLW, 64, T('KDMPContinueSave'), '#ffffff', '');
+		}
+
+		DrawButtonKDEx('KDMPJoin', function () { lobby.open('connect'); return true; },
+			true, COL, saved ? 790 : 720, COLW, 64, T('KDMPJoinGame'), '#ffffff', '');
 	}
 
-	// ---- the lobby screen ------------------------------------------------------------------
+	// ---- the handshake screen ---------------------------------------------------------------
 
 	function drawLobby() {
 		lobby._drawCount++;
 		DrawTextKD(T('KDMPLobbyTitle'), W, 120, '#ffffff', '#000000', 48);
-		if (lobby.view === 'menu') return drawRoot();
-		if (lobby.view === 'host') return drawHost();
-		if (lobby.view === 'join') return drawJoin();
-		if (lobby.view === 'about') return drawAbout();
+		if (lobby.phase === 'waiting') return drawHost();
+		if (lobby.phase === 'connect') return drawJoin();
+		if (lobby.phase === 'about') return drawAbout();
 	}
 
 	// ---- KDM-272: how co-op differs, said once ---------------------------------------------
@@ -306,23 +381,29 @@
 			DrawTextKD(T(ABOUT_LINES[i]),
 				W, 280 + i * 62, '#ffffff', '#000000', 24);
 		}
-		// `view = 'menu'`, NOT `lobby.leave()`: reading the briefing is not cancelling anything, and
-		// `leave()` would drop a host socket that Host→Cancel→About may already have left open.
-		DrawButtonKDEx('KDMPBack', function () { lobby.view = 'menu'; return true; },
-			true, MID, 700, 350, 64, T('KDMPBack'), '#ffffff', '');
+		// Straight to the phase this entry was headed for, NOT `lobby.leave()`: reading the briefing is
+		// not cancelling anything, and `leave()` would drop a host socket that a Cancel→About detour
+		// may already have left open.
+		DrawButtonKDEx('KDMPBack', function () {
+			lobby.phase = lobby.next || 'connect';
+			var act = lobby.pendingAction;
+			lobby.pendingAction = null;
+			if (act) act();
+			return true;
+		}, true, MID, 700, 350, 64, T('KDMPBack'), '#ffffff', '');
 	}
 
 	/**
-	 * KDM-237 N1 — "Your name", drawn by the root view AND the join view from this one function.
+	 * KDM-237 N1 — "Your name", drawn by KD's class screen AND the connect phase from one function.
 	 *
-	 * Two call sites, one field: the host is asked on the root (they connect straight from there, so
+	 * Two call sites, one field: the host is asked on `'Diff'` (they connect straight from there, so
 	 * the field has to exist before Host is pressed), and the guest keeps theirs beside the address
 	 * where it already was. Writing it twice is how the two would drift apart.
 	 *
 	 * Seeded from `lobby.name` on creation, and caching back into it every frame, for the same reason
 	 * `addressDefault()` exists: `KDTextField` honours `Value` only when it CREATES the element, and
-	 * `KDCullTempElements` destroys any field not drawn this frame — so moving between views destroys
-	 * and re-creates this input, and the cache is what carries what the player typed across.
+	 * `KDCullTempElements` destroys any field not drawn this frame — so moving between screens
+	 * destroys and re-creates this input, and the cache is what carries what the player typed across.
 	 */
 	function drawNameField(y) { drawField('KDMPName', T('KDMPYourName'), 'name', y); }
 
@@ -330,29 +411,20 @@
 	 * KDM-259 — a labelled text field whose value lives in `lobby[key]`.
 	 *
 	 * One function because the name field and the seed field are the same widget with a different
-	 * label: both are drawn on a view the player leaves and comes back to, both are therefore
+	 * label: both are drawn on a screen the player leaves and comes back to, both are therefore
 	 * destroyed by `KDCullTempElements`, and both survive only because of the cache-back on the last
 	 * line. Writing that mechanic twice is how the second copy would forget it.
+	 *
+	 * KDM-293 — `x`/`w` default to the handshake screen's centred column; `drawDiffEntries` passes
+	 * its own so the same widget can sit in the right-hand column on KD's class screen.
 	 */
-	function drawField(id, label, key, y) {
-		DrawTextKD(label, W, y, '#ffffff', '#000000', 28);
-		KDTextField(id, MID, y + 30, 350, 56, 'text', lobby[key], '24');
+	function drawField(id, label, key, y, x, w) {
+		var left = (x === undefined) ? MID : x;
+		var width = (w === undefined) ? 350 : w;
+		DrawTextKD(label, left + width / 2, y, '#ffffff', '#000000', 28);
+		KDTextField(id, left, y + 30, width, 56, 'text', lobby[key], '24');
 		var el = document.getElementById(id);
 		if (el) lobby[key] = String(el.value || '');
-	}
-
-	/**
-	 * KDM-259 — "World seed", on the ROOT view beside the name and for the same reason: `KDMPHost`
-	 * connects straight from here, and the world declaration is read at ask time (KDM-270). A field
-	 * on the Host view — where the task originally imagined it — would be typed into after the
-	 * declaration had already gone.
-	 *
-	 * The label says "optional" rather than the lobby inventing a placeholder value, because a
-	 * displayed default would be a claim about what the server is configured with, which this client
-	 * does not know.
-	 */
-	function drawSeedField(y) {
-		drawField('KDMPSeed', T('KDMPWorldSeedField'), 'seed', y);
 	}
 
 	/**
@@ -404,91 +476,6 @@
 			return !!(d && d.spells && d.level !== undefined && d.checkpoint
 				&& d.inventory && d.costs && d.rep && d.dress);
 		} catch (e) { return false; }
-	}
-
-	function drawRoot() {
-		// Asked BEFORE either choice, because the host connects straight from this view. y=190 puts
-		// the field at ~192-248, clear of the Host button at 268-332.
-		drawNameField(190);
-		// KDM-259 — and the seed, in the row below it. Everything under this row moved down by one
-		// (+100) to make space; the offset is applied at each call rather than by re-deriving the
-		// layout, which is the same way KDM-243's Continue row was added.
-		drawSeedField(290);
-		DrawButtonKDEx('KDMPHost', function () {
-			lobby.view = 'host';
-			lobby.error = '';
-			hostConnect();
-			return true;
-		}, true, MID, 400, 350, 64, T('KDMPHostGame'), '#ffffff', '');
-
-		/*
-		 * KDM-243 A5 — hosting a run that is ALREADY IN PROGRESS.
-		 *
-		 * Drawn only when there is actually a save to continue, so a player who has never played does
-		 * not get a button that can only disappoint them. Beside Host rather than replacing it: "start
-		 * a new co-op game" and "continue my run with a friend" are two different intentions, and the
-		 * host chooses which one this session is.
-		 *
-		 * The save is read HERE, at the press, not cached at draw time — the player may have been
-		 * playing seconds ago, and the freshest save is the one they mean.
-		 */
-		var saved = localSave();
-		if (saved) {
-			DrawButtonKDEx('KDMPContinue', function () {
-				lobby.error = '';
-				var str = localSave();
-				if (!saveIsUsable(str)) {
-					// A6 — refuse privately, in words, and do NOT connect. `error` is what the lobby
-					// already paints for every other refusal.
-					lobby.error = T('KDMPSaveUnusable');
-					return true;
-				}
-				lobby.view = 'host';
-				hostConnect(str);
-				return true;
-			}, true, MID, 480, 350, 64, T('KDMPContinueSave'), '#ffffff', '');
-		}
-
-		DrawButtonKDEx('KDMPJoin', function () {
-			lobby.view = 'join';
-			lobby.error = '';
-			return true;
-		}, true, MID, saved ? 560 : 480, 350, 64, T('KDMPJoinGame'), '#ffffff', '');
-
-		// KDM-238 R1 — asked BEFORE either choice, like the name above it: the host connects straight
-		// from this view, so anything that has to ride the handshake must be pickable here.
-		DrawButtonKDEx('KDMPPerks', function () {
-			lobby.error = '';
-			lobby.perkPick = true;
-			KinkyDungeonState = 'Stats';       // KD's OWN perk screen — see drawPerkPickOverrides
-			return true;
-			// KDM-243 — everything below Continue moves down by one row when it is present. The
-			// offset is applied here rather than by re-numbering, so the no-save layout (which the
-			// whole existing lobby suite asserts on) stays byte-identical.
-		}, true, MID, saved ? 640 : 560, 350, 64, T('KDMPPerksBtn'), '#ffffff', '');
-
-		// KDM-256 R1 — the character pick, beside the perk pick and for the same reason: the host
-		// connects straight from this view, so anything that must ride the handshake is chosen here.
-		// `'Diff'` is KD's own class screen, and the Wardrobe is one stock button beyond it.
-		DrawButtonKDEx('KDMPChar', function () {
-			lobby.error = '';
-			lobby.charPick = true;
-			KinkyDungeonState = 'Diff';        // KD's OWN class/start screen — see drawCharPickOverrides
-			return true;
-		}, true, MID, saved ? 740 : 660, 350, 64, T('KDMPCharBtn'), '#ffffff', '');
-
-		// KDM-272 A3 — the way back into the briefing, so it is not lost after the first run.
-		// Last before Back, and inside the same `saved ? … : …` ladder KDM-243 established: the
-		// Continue row is conditional, so every button under it carries the +100 at its own call site
-		// rather than the layout being re-derived.
-		DrawButtonKDEx('KDMPAbout', function () {
-			lobby.error = '';
-			lobby.view = 'about';
-			return true;
-		}, true, MID, saved ? 840 : 760, 350, 64, T('KDMPAboutBtn'), '#ffffff', '');
-
-		DrawButtonKDEx('KDMPBack', function () { lobby.close(); return true; },
-			true, MID, saved ? 920 : 840, 350, 64, T('KDMPBack'), '#ffffff', '');
 	}
 
 	/** At most three addresses, so the list cannot grow down the screen into the Cancel button. */
@@ -580,131 +567,9 @@
 		DrawTextKD(lobby.status || T('KDMPWaitingGuest'),
 			W, 400 + drop, '#ffffff', '#000000', 24);
 		if (lobby.error) DrawTextKD(lobby.error, W, 440 + drop, '#ff8080', '#000000', 24);
-		DrawButtonKDEx('KDMPBack', function () { lobby.leave(); return true; },
+		DrawButtonKDEx('KDMPBack', function () { lobby.close(); return true; },
 			true, MID, 480 + drop, 350, 64, T('KDMPCancel'), '#ffffff', '');
 	}
-
-	/**
-	 * KDM-238 R1 — the perk pick, on KD's OWN screen.
-	 *
-	 * `KinkyDungeonState = 'Stats'` is KD's perk screen (`KinkyDungeon.ts:2861`), and everything on
-	 * it — the grid, the point budget, Clear All, the three configs, the filter, copy/paste — is
-	 * stock. Nothing here re-implements any of it, which is epic AC2 satisfied by not writing code.
-	 *
-	 * Two of that screen's buttons do the wrong thing for a co-op player, and exactly two are taken
-	 * back while `lobby.perkPick` is set:
-	 *
-	 *   KDPerksStart  stock: KinkyDungeonStartNewGame() — would start a SOLO game
-	 *   KDPerksBack   stock: KinkyDungeonState = "Diff"
-	 *
-	 * ⚠️ THE SAME CACHE MECHANIC AS THE MENU ENTRY, and it works for the same reason: `DrawButtonKDEx`
-	 * registers `KDButtonsCache[name] = params` (`:3720`), the cache is wiped per frame (`:1670`), and
-	 * clicks are dispatched by iterating it (`:4321`). Registration is keyed by NAME, so replacing the
-	 * entry AFTER `_prev` has drawn it replaces its handler. Do it before `_prev` and it is wiped.
-	 *
-	 * ⚠️ AND IT IS CONDITIONAL. Without `perkPick` the stock buttons are left entirely alone, so a
-	 * solo player's perk screen is untouched — asserted from both sides in `mp-lobby-perks.spec.ts`,
-	 * because an unconditional override would pass the co-op half and silently break the game's own.
-	 */
-	/**
-	 * Take back the named buttons on a KD screen we have borrowed, and send them to `commit`.
-	 *
-	 * ONE implementation, shared by the perk pick (KDM-238) and the character pick (KDM-256). It was
-	 * about to be a second near-identical copy differing only in a flag and three button names, which
-	 * is precisely the clone this repo's DRY rule forbids — and the copy would have been the one that
-	 * missed the next fix to the cache mechanics above.
-	 *
-	 * ⚠️ ALL-OR-NOTHING. If any named button is missing, NOTHING is overridden: a half-borrowed screen
-	 * is one where some buttons return to the lobby and others start a solo game. The commonest cause
-	 * is simply being a frame early — the cache is populated by `_prev`'s draw.
-	 */
-	function borrowButtons(active, names, commit) {
-		if (!active) return;
-		var b = (typeof KDButtonsCache !== 'undefined') && KDButtonsCache;
-		if (!b) return;
-		for (var i = 0; i < names.length; i++) if (!b[names[i]]) return;   // not that screen (yet)
-		// The stock geometry and label are kept — it is the button the player is already looking at;
-		// only the handler is ours.
-		for (var j = 0; j < names.length; j++) b[names[j]] = withHandler(b[names[j]], commit);
-	}
-
-	function drawPerkPickOverrides() {
-		borrowButtons(lobby.perkPick, ['KDPerksStart', 'KDPerksBack'], lobby.commitPerks);
-	}
-
-	/**
-	 * KDM-256 R1 — the CHARACTER pick, on KD's own screens, by exactly the same mechanic.
-	 *
-	 * `KinkyDungeonState = 'Diff'` is KD's class/start screen (`KinkyDungeon.ts:2546`). Everything on
-	 * it is stock — the class grid, and its own button through to the WARDROBE (`:6309`), which is
-	 * the outfit and appearance surface. The Wardrobe needs no override at all: its back button
-	 * returns to `Diff`, which is where we are borrowing from, so the player simply arrives back
-	 * under our buttons.
-	 *
-	 * THREE buttons are taken back, not two, and all three for one reason: every one of them starts a
-	 * SOLO game (`startQuick`, `startGameKinky`, `startGame`). Miss one and a co-op player who
-	 * pressed it is dropped into single-player with their lobby still open.
-	 */
-	function drawCharPickOverrides() {
-		borrowButtons(lobby.charPick, ['startQuick', 'startGameKinky', 'startGame'], lobby.commitCharacter);
-	}
-
-	/**
-	 * KDM-256 R1 — take what KD says the character is, and go back to the lobby.
-	 *
-	 * READ FROM KD'S OWN GLOBALS, never from fields of our own, for the reason `commitPerks` gives:
-	 * the class grid, the Wardrobe and its presets all write there, so those are the only values true
-	 * whatever route the player took through the screens.
-	 *
-	 * `style` is deliberately NOT collected. It is a declarable field (the server applies it to the
-	 * avatar) but KD has no player-facing style picker on these screens, so there is nothing honest to
-	 * read — and inventing a lobby control for it would be this layer choosing a look for the player.
-	 * The outfit is what the Wardrobe actually changes, and it is what the peer sees.
-	 *
-	 * Answers `null` rather than `{}` when nothing was read: "declared nothing" has one meaning.
-	 */
-	lobby.commitCharacter = function () {
-		var pkg = {};
-		try {
-			if (typeof KinkyDungeonClassMode === 'string' && KinkyDungeonClassMode) pkg.class = KinkyDungeonClassMode;
-			if (typeof KinkyDungeonCurrentDress === 'string' && KinkyDungeonCurrentDress) pkg.outfit = KinkyDungeonCurrentDress;
-		} catch (e) { pkg = {}; }
-		lobby.character = Object.keys(pkg).length ? pkg : null;
-		lobby.charPick = false;
-		lobby.toRoot();
-		return true;
-	};
-
-	/** A copy of a cache entry with its click handler replaced. */
-	function withHandler(params, func) {
-		var out = {};
-		for (var k in params) if (Object.prototype.hasOwnProperty.call(params, k)) out[k] = params[k];
-		out.func = func;
-		return out;
-	}
-
-	/**
-	 * Take what KD says is chosen, and go back to the lobby.
-	 *
-	 * READ FROM `KinkyDungeonStatsChoice`, never from a field of our own: the grid, Clear All, the
-	 * three config buttons and the paste box all write there, so it is the only value that is true
-	 * whatever route the player took through the screen.
-	 *
-	 * Both overridden buttons come here. Start and Back differ in stock KD only in where they go
-	 * next, and for a co-op pick there is one answer to that — the lobby.
-	 */
-	lobby.commitPerks = function () {
-		var chosen = [];
-		try {
-			if (typeof KinkyDungeonStatsChoice !== 'undefined' && KinkyDungeonStatsChoice) {
-				KinkyDungeonStatsChoice.forEach(function (on, key) { if (on) chosen.push(String(key)); });
-			}
-		} catch (e) { chosen = []; }
-		lobby.perks = chosen;
-		lobby.perkPick = false;
-		lobby.toRoot();
-		return true;
-	};
 
 	function answer(accept) {
 		lobby.pending = null;
@@ -756,8 +621,27 @@
 			return true;
 		}, true, MID, joinY, 350, 64, T('KDMPConnectBtn'), '#ffffff', '');
 
-		DrawButtonKDEx('KDMPBack', function () { lobby.leave(); return true; },
+		DrawButtonKDEx('KDMPBack', function () { lobby.close(); return true; },
 			true, MID, joinY + 80, 350, 64, T('KDMPBack'), '#ffffff', '');
+
+		/*
+		 * KDM-272 A3 / KDM-293 R4.5 — the way back INTO the briefing, so it is not lost after the
+		 * first run. It used to live on the lobby root; when that was deleted this button went with
+		 * it and nothing noticed, because every screen still painted and every e2e still passed.
+		 *
+		 * What noticed was `mp-client-strings.spec.ts`'s drift guard: `KDMPAboutBtn` was declared and
+		 * asked for by nobody. That is the guard earning its keep — an unreachable briefing is a
+		 * feature silently removed, and no assertion about the screens themselves would see it.
+		 *
+		 * `next` is set so Back from the briefing returns HERE rather than to whatever phase the
+		 * player last opened, and no action is stashed: re-reading is not a request for a seat.
+		 */
+		DrawButtonKDEx('KDMPAbout', function () {
+			lobby.error = '';
+			lobby.next = 'connect';
+			lobby.phase = 'about';
+			return true;
+		}, true, MID, joinY + 160, 350, 64, T('KDMPAboutBtn'), '#ffffff', '');
 	}
 
 	// ---- KDM-257: what the two sides are about to exchange, in words -----------------------
@@ -977,13 +861,11 @@
 		// would be erased and our button would paint but never click.
 		var r = _prev.apply(this, arguments);
 		try {
-			if (KinkyDungeonState === 'Menu') drawMenuEntry();
+			// KDM-293 — the co-op entries live on KD's class/start screen. Nothing is drawn on 'Menu'
+			// and nothing is borrowed on 'Stats' any more: the player reaches both by KD's own road,
+			// so there is no journey of ours to send them on and none to bring them back from.
+			if (KinkyDungeonState === 'Diff') drawDiffEntries();
 			else if (KinkyDungeonState === 'Multiplayer') drawLobby();
-			// KDM-238 — KD's own perk screen, with two of its buttons pointed back at the lobby. Not
-			// an `else if` on 'Stats' alone: the override only applies to a co-op pick, and that
-			// condition lives in one place, inside the function.
-			else if (KinkyDungeonState === 'Stats') drawPerkPickOverrides();
-			else if (KinkyDungeonState === 'Diff') drawCharPickOverrides();
 			// KDM-257 R3 — the degraded-sync notice, on THIS wrap. A second wrap of KinkyDungeonRun
 			// from another client script is the duplication [[KDM-229]] was raised for; one global,
 			// one wrap, and the branch that needs it lives here with the others.

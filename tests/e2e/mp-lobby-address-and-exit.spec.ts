@@ -227,7 +227,9 @@ test.describe('KDM-236 — the address you used, and the way back out', () => {
 			await expect.poll(() => bridge.gate.host,
 				{ timeout: 30_000, message: 'T1 — cancelling gives the seat back' }).toBe(null);
 			expect(await page.evaluate(() => !window.__coop.ws), 'no socket left on the client').toBe(true);
-			expect((await lobbyState(page)).view, 'and we are back at the lobby root').toBe('menu');
+			// KDM-293 — Back now returns to the screen the entry was pressed from, not to a menu of ours.
+			expect(await page.evaluate(() => KinkyDungeonState),
+				'and we are back on the screen we came from').toBe('Diff');
 		} finally {
 			await ctx.close().catch(() => {});
 			try { bridge.close(); } catch (e) { /* ignore */ }
@@ -259,7 +261,8 @@ test.describe('KDM-236 — the address you used, and the way back out', () => {
 			const g = await lobbyState(guest);
 			expect(await guest.evaluate(() => window.__coop.started),
 				'T3 — a late answer must not start a session we left').toBe(false);
-			expect(g.view, 'T3 — and must not paint over the lobby we returned to').toBe('menu');
+			expect(await guest.evaluate(() => KinkyDungeonState),
+				'T3 — and must not paint over the screen we returned to').toBe('Diff');
 			expect(g.error, 'T3 — nor report an error about a request we withdrew').toBe('');
 		} finally {
 			await hostCtx.close().catch(() => {});

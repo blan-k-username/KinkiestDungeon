@@ -76,14 +76,6 @@ export async function press(page: any, button: string) {
  *
  * So: assert the state every frame until the menu is really on screen. Idempotent and cheap.
  */
-async function gotoMenu(page: any, timeout = 30_000) {
-	await page.waitForFunction(() => {
-		// @ts-ignore — bundle `let` globals, readable by bare name.
-		if (KinkyDungeonState !== 'Menu') { KinkyDungeonState = 'Menu'; return false; }
-		// @ts-ignore
-		return !!(KDButtonsCache && KDButtonsCache.MultiplayerButton);
-	}, undefined, { timeout, polling: 'raf' });
-}
 
 export async function openLobby(page: any, port: number, host = '127.0.0.1', opts: { preload?: boolean; briefing?: boolean } = {}) {
 	// KD's OWN setting for "don't play the intro" (`KDFirstRunMainmenu`, KinkyDungeon.ts:8439-8449),
@@ -103,22 +95,81 @@ export async function openLobby(page: any, port: number, host = '127.0.0.1', opt
 	// Before leaving the Consent screen — that is the only place preload can complete. See
 	// `waitAssetsPreloaded`.
 	if (opts.preload) await waitAssetsPreloaded(page);
-	await gotoMenu(page);
-	await press(page, 'MultiplayerButton');
-	// KDM-272 — a player who has never seen the co-op briefing lands on it, not on the root. Every
-	// spec but `mp-lobby-about` is about something else and wants the root it has always had, so it
-	// is dismissed HERE rather than by a copy of this in each of them. `{briefing: true}` opts out,
-	// and the one spec that opts out is the one that asserts the real first-open behaviour — so this
-	// convenience cannot be what makes that spec pass.
+	// KDM-293 — the co-op entries moved from a Multiplayer menu of ours onto KD's own class screen.
+	// The BUTTON IDS did not change (`KDMPHost`, `KDMPContinue`, `KDMPJoin`), so every caller that
+	// already knows which one it wants needs only this different way of arriving — which is why this
+	// one edit migrates the whole suite instead of seventeen.
+	await onEntries(page);
+	// KDM-272 — a player who has never seen the co-op briefing is shown it on their FIRST entry, and
+	// the entry's action is held until they have read it. Every spec but `mp-lobby-about` is about
+	// something else, so the briefing is marked seen HERE rather than by a copy in each of them.
+	// `{briefing: true}` opts out, and the one spec that opts out is the one asserting the real
+	// first-entry behaviour — so this convenience cannot be what makes that spec pass.
+	//
+	// Marked BEFORE the entry is pressed, not dismissed after: the action now rides through the
+	// briefing as a callback, so dismissing afterwards would change WHEN the connect happens.
 	if (!opts.briefing) {
-		const view = await page.evaluate(() => (window as any).KDMPLobby.view);
-		if (view === 'about') await press(page, 'KDMPBack');
+		await page.evaluate(() => {
+			try { (window as any).__coopMarkBriefingSeen(); } catch (e) { /* storage disabled */ }
+		});
 	}
+}
+
+/**
+ * Park the page on KD's class/start screen with our entries registered.
+ *
+ * ⚠️ POLLS FOR THE ENTRY, not for a frame count. `'Diff'` is reachable in one assignment, but our
+ * buttons are registered by the wrap that runs AFTER `_prev`'s draw, so the first frame on the screen
+ * has KD's buttons and not ours. Polling is what makes this insensitive to how many frames the page
+ * happens to need — the same reason `gotoMenu` polled rather than settling.
+ */
+async function onEntries(page: any, timeout = 30_000) {
+	/*
+	 * ⚠️ LET THE PAGE SETTLE ON THE MENU FIRST, and this is not belt-and-braces.
+	 *
+	 * When preload finishes, KD schedules a 100 ms timer that drops the page on `Intro` and then the
+	 * menu — silently undoing any state forced beforehand. The old `gotoMenu` was immune by accident:
+	 * the menu IS where that timer lands, so polling for it could not be raced. Parking straight on
+	 * `'Diff'` is not, and the timer fires just after the poll succeeds.
+	 *
+	 * It cost six specs — every one of them a `{ preload: true }` caller (`mp-save-export`,
+	 * `mp-save-import`, `mp-mod-sync-guest`, `mp-coop-render-alive`) — failing with
+	 * `no such button: KDMPHost (have: GameContinue,GameStart,…)`, i.e. sitting on the main menu.
+	 * That the failures were exactly the preload set is what identified the timer.
+	 */
+	await page.waitForFunction(() => {
+		// @ts-ignore — bundle `let` globals, readable by bare name.
+		if (KinkyDungeonState !== 'Menu') { KinkyDungeonState = 'Menu'; return false; }
+		// @ts-ignore — a stock menu button: `MultiplayerButton` is gone (KDM-293).
+		return !!(KDButtonsCache && KDButtonsCache.GameStart);
+	}, undefined, { timeout, polling: 'raf' });
+	await page.waitForFunction(() => {
+		// @ts-ignore
+		if (KinkyDungeonState !== 'Diff') { KinkyDungeonState = 'Diff'; return false; }
+		// @ts-ignore
+		return !!(KDButtonsCache && KDButtonsCache.KDMPJoin && KDButtonsCache.KDMPHost);
+	}, undefined, { timeout, polling: 'raf' });
+}
+
+
+/**
+ * KDM-293 — the same road as `openLobby`, but WITHOUT marking the briefing seen.
+ *
+ * The only difference between the two is that convenience, so this delegates rather than repeating
+ * the navigation: a second copy of "boot, skip the intro, wait for the entries" is exactly the drift
+ * this file exists to prevent. `mp-entry-diff.spec.ts` uses this because one of its tests is about the
+ * first-entry briefing itself, and the rest dismiss it explicitly so the dismissal is visible in the
+ * test rather than hidden in a helper.
+ */
+export async function openEntry(page: any, port: number, host = '127.0.0.1') {
+	await openLobby(page, port, host, { briefing: true });
 }
 
 /** The lobby's own view of itself — the fields the specs assert on. */
 export const lobbyState = (page: any) => page.evaluate(() => ({
-	view: window.KDMPLobby.view,
+	// KDM-293 — 'connect' | 'waiting' | 'about'. Replaces the old `view`, whose 'menu' value named a
+	// screen that no longer exists.
+	phase: window.KDMPLobby.phase,
 	pending: window.KDMPLobby.pending,
 	error: window.KDMPLobby.error,
 	status: window.KDMPLobby.status,

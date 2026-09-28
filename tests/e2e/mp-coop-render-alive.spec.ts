@@ -7,8 +7,8 @@
  * until `KDInitCanvas()` runs, and that is reached only through
  * `KinkyDungeonStartNewGame` -> `KinkyDungeonInitialize` (`KinkyDungeonGame.ts:95, :568, :577`).
  *
- * On the LEGACY `#coop=` path that ordering is safe: `boot()` runs `enterGame()` and only then
- * `connect()`, so the game is initialised before a state frame can arrive. On the LOBBY path the
+ * On the removed `#coop=` path (KDM-302) that ordering was safe: `boot()` ran `enterGame()` and only
+ * then `connect()`. On the LOBBY path — now the only one — the
  * socket is opened first (from the Host/Join button) and `enterGame()` runs later, on
  * `joined.started` — and it defers on assets and on mod execution via `setTimeout`. In that window a
  * state frame arrives, pins the screen to `'Game'`, and the next frame runs
@@ -24,8 +24,9 @@
  * lobby flow and passes green while the screen is frozen.
  *
  * ── WHY IT IS NOT A VACUOUS GREEN ─────────────────────────────────────────────────────────────────
- *  1. The LEGACY path is run as a control, with the identical assertions. It passes before the fix
- *     and after it, so a green here cannot come from an oracle that never fires.
+ *  1. A pair joined straight through `__coopConnect` (the harness road — no lobby UI, no deferred
+ *     entry race to lose) is run as a control, with the identical assertions, so a green here cannot
+ *     come from an oracle that never fires. (Until KDM-302 the control was the `#coop=` path.)
  *  2. Liveness is measured, not inferred: a probe is written onto `KDButtonsCache`, which the game
  *     wipes and REPLACES at the top of every frame (`KinkyDungeon.ts:1670-1671`). If the probe
  *     survives, no frame ran. That is a direct observation of the thing the player loses.
@@ -70,7 +71,7 @@ const drawable = (P: any) => P.evaluate(() => ({
 const FILL = /fillStyle/;
 
 test.describe('KDM-258 — a co-op session renders, however it was started', () => {
-	test('CONTROL: the legacy #coop= path renders and keeps rendering', async ({ browser }) => {
+	test('CONTROL: a pair joined straight through __coopConnect renders and keeps rendering', async ({ browser }) => {
 		test.setTimeout(MP_TEST_TIMEOUT);
 		const { server, bridge, port } = await start(0);
 		const cA = await browser.newContext(); const cB = await browser.newContext();
@@ -80,8 +81,8 @@ test.describe('KDM-258 — a co-op session renders, however it was started', () 
 			await bootCoopPair(A, B, port);
 			const d = await drawable(A);
 			expect(d.state, 'the control has to actually reach the game, or it controls nothing').toBe('Game');
-			expect(d.contextReady, 'legacy path: the game was initialised before the screen was pinned').toBe(true);
-			expect(errA.filter((e) => FILL.test(e)), 'no null-context draw on the legacy path').toEqual([]);
+			expect(d.contextReady, 'control: the game was initialised before the screen was pinned').toBe(true);
+			expect(errA.filter((e) => FILL.test(e)), 'no null-context draw on the control').toEqual([]);
 			expect(await loopAlive(A), 'and the render loop is still running').toBe(true);
 		} finally {
 			await cA.close().catch(() => {}); await cB.close().catch(() => {});

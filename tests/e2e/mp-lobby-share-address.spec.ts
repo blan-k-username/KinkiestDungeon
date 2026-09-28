@@ -46,7 +46,7 @@ async function hostScreenAt(page: any, port: number, origin: string) {
 	// it is showing. Waiting on `share` itself would make a pre-fix run hang for the full timeout
 	// instead of failing its assertion.
 	await page.waitForFunction(
-		() => (window as any).KDMPLobby.view === 'host', undefined, { polling: 'raf', timeout: 60_000 });
+		() => (window as any).KDMPLobby.phase === 'waiting', undefined, { polling: 'raf', timeout: 60_000 });
 	return screenText(page);
 }
 

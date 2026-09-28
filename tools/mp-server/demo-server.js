@@ -9,12 +9,12 @@
  *
  * It injects two scripts into index.html on the fly (the stock index.html is left
  * untouched on disk): the thin-client core (render-client.js) and a co-op bootstrap
- * (coop-bootstrap.js) that the Multiplayer lobby drives (`__coopConnect`) to wire render + input.
+ * (coop-bootstrap.js) that the co-op column on the class screen drives (`__coopConnect`) to wire render + input.
  *
  * UAT flow (in Docker, port mapped to your host — `./run-kd-game.sh --mp` in the kd-mods-src
  * sibling, which is the one launcher; KDM-255):
- *   1. window 1 → http://localhost:8090/  → Multiplayer → Host  (creates the session, waits)
- *   2. window 2 → the address the Host screen names → Multiplayer → Join; window 1 lets them in
+ *   1. window 1 → http://localhost:8090/ → new game → Host Game  (creates the session, waits)
+ *   2. window 2 → the address the Host screen names → new game → Join Game; window 1 lets them in
  *   3. WASD moves; BOTH must move to advance a turn (lockstep co-op). You see
  *      the other player's avatar and a shared enemy the server owns.
  *
@@ -139,7 +139,7 @@ const INJECT = [
 	// KinkyDungeonDrawMessages and registers itself in KD's own KDLogFilters /
 	// KDFocusableTextFields arrays.
 	'/tools/mp-server/client/coop-chat.js',
-	// KDM-233: the main-menu Multiplayer entry + host/join screens. AFTER coop-bootstrap — it drives
+	// KDM-233 / KDM-293: the co-op column on KD's class screen + host/join screens. AFTER coop-bootstrap — it drives
 	// `window.__coopConnect` / `window.__coopAnswerJoin`.
 	'/tools/mp-server/client/coop-lobby.js',
 	PEACE_DLG_ROUTE,                // KDM-230: needs KDDialogue, so after the bundle is in scope
@@ -471,6 +471,6 @@ if (require.main === module) {
 	console.log(`\n  [mp-server] BUILD: ${MP_BUILD}\n`);
 	start(PORT).then(({ port }) => {
 		// eslint-disable-next-line no-console
-		console.log(`\n  Co-op demo running:  http://localhost:${port}/  — Multiplayer, then Host (or Join)\n`);
+		console.log(`\n  Co-op demo running:  http://localhost:${port}/  — start a new game, then Host Game (or Join Game)\n`);
 	});
 }
