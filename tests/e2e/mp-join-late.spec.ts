@@ -14,13 +14,20 @@
  * second one.
  */
 import { test, expect } from '@playwright/test';
-import { MP_TEST_TIMEOUT, COOP_BOOT_TIMEOUT, PAGE_ERROR_NOISE } from './helpers/coop';
+import { MP_TEST_TIMEOUT, COOP_BOOT_TIMEOUT, PAGE_ERROR_NOISE, coopJoinPage, coopAcceptPending } from './helpers/coop';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
 
-/** Boot one page as a co-op client and wait for it to be playing. */
-async function bootOne(P: any, port: number, id: string) {
-	await P.goto(`http://127.0.0.1:${port}/#coop=${id}`);
+/**
+ * Boot one page as a co-op client and wait for it to be playing.
+ *
+ * KDM-302 — through the lobby's own road (`coopJoinPage`). The HOST is `A`; `B` asks as the guest and
+ * `A` answers — mid-run, that is the in-game question (KDM-297), which this spec used to skip because
+ * the `#coop=` shortcut answered for the host.
+ */
+async function bootOne(P: any, port: number, id: string, host?: any) {
+	await coopJoinPage(P, port, id, host ? 'guest' : 'host');
+	if (host) await coopAcceptPending(host);
 	await P.waitForFunction(
 		() => { const c = (window as any).__coop; return !!c && !!c.started; },
 		undefined, { timeout: COOP_BOOT_TIMEOUT },
@@ -96,7 +103,7 @@ test('a friend can join a run already in progress, and the two then play togethe
 			const crashesBefore = crashes.length;
 
 			// ---- the friend arrives ------------------------------------------------------------------
-			await bootOne(B, port, 'B');
+			await bootOne(B, port, 'B', A);
 			await B.waitForTimeout(1500);
 			// Now that B is playing, watch it — see the note on the recorder above.
 			B.on('pageerror', record('B'));

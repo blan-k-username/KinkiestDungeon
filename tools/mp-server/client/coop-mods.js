@@ -267,8 +267,8 @@
 	 * Prepare, optionally fetch the host's mods, then execute — once. Idempotent: the first call owns
 	 * the attempt and every later one gets the same promise, so a retrying caller cannot start twice.
 	 *
-	 * `opts.fetchFrom` is the HOST's http origin. Absent for a host, and for the legacy `#coop=` path,
-	 * where there is no host mod set to reconcile against.
+	 * `opts.fetchFrom` is the HOST's http origin. Absent for a host, which has no host mod set to
+	 * reconcile against.
 	 */
 	function ensureExecuted(opts) {
 		if (started) return ready;

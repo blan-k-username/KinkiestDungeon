@@ -56,7 +56,7 @@
  */
 import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
-import { MP_TEST_TIMEOUT } from './helpers/coop';
+import { MP_TEST_TIMEOUT, coopJoinPage } from './helpers/coop';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
 
@@ -103,7 +103,8 @@ async function screen(P: Page) {
 
 test('frame-rate controls: plain game vs co-op client', async ({ browser }) => {
 	test.setTimeout(MP_TEST_TIMEOUT);
-	const { server, port } = await start(0);
+	// KDM-302: requiredPlayers 1 — arm C is a host playing ALONE; see the note at arm C.
+	const { server, port } = await start(0, { requiredPlayers: 1 });
 	const ctx = await browser.newContext();
 	const out: any = {};
 
@@ -133,10 +134,20 @@ test('frame-rate controls: plain game vs co-op client', async ({ browser }) => {
 		out.plainScreen = await screen(plain);
 		out.gameFpsSolo = await fps(plain, DUNGEON_SAMPLE_MS);   // reference only — see below
 
-		// C) a co-op client page (unpaired: no partner, so no session traffic at all)
+		/*
+		 * C) a co-op client page, playing ALONE.
+		 *
+		 * ⚠️ KDM-302 CHANGED WHAT THIS ARM IS. It used to be `#coop=SOLO`: a co-op client that entered
+		 * the dungeon on load and was never paired, so NO session traffic at all. That URL shortcut is
+		 * gone — the lobby is the only way in — and a lobby host only enters the dungeon once its
+		 * session starts. So this is now a host in a started ONE-player session (`requiredPlayers: 1`):
+		 * the same proxy and the same dungeon, plus the real per-frame input/ack traffic a player
+		 * generates. Readings before 2026-09-28 are not directly comparable with readings after.
+		 */
 		const coop = await ctx.newPage();
-		await coop.goto(`http://127.0.0.1:${port}/#coop=SOLO`);
-		await waitLoaded(coop);
+		await coopJoinPage(coop, port, 'SOLO', 'host');
+		await coop.waitForFunction(() => { const c = (window as any).__coop; return !!(c && c.started && c._entered); },
+			undefined, { timeout: 240_000 });
 		await coop.bringToFront();
 		await coop.waitForTimeout(2000);
 		out.coopScreen = await screen(coop);

@@ -9,13 +9,13 @@
  *
  * It injects two scripts into index.html on the fly (the stock index.html is left
  * untouched on disk): the thin-client core (render-client.js) and a co-op bootstrap
- * (coop-bootstrap.js) that reads `#coop=<id>` from the URL and wires render + input.
+ * (coop-bootstrap.js) that the Multiplayer lobby drives (`__coopConnect`) to wire render + input.
  *
  * UAT flow (in Docker, port mapped to your host — `./run-kd-game.sh --mp` in the kd-mods-src
  * sibling, which is the one launcher; KDM-255):
- *   1. window 1 → http://localhost:8090/#coop=A   (creates the session, waits)
- *   2. window 2 → http://localhost:8090/#coop=B   (both in → shared dungeon starts)
- *   3. arrow keys move; BOTH must move to advance a turn (lockstep co-op). You see
+ *   1. window 1 → http://localhost:8090/  → Multiplayer → Host  (creates the session, waits)
+ *   2. window 2 → the address the Host screen names → Multiplayer → Join; window 1 lets them in
+ *   3. WASD moves; BOTH must move to advance a turn (lockstep co-op). You see
  *      the other player's avatar and a shared enemy the server owns.
  *
  * Not a hardened server (no caching/range/security) — a local UAT harness only.
@@ -471,7 +471,6 @@ if (require.main === module) {
 	console.log(`\n  [mp-server] BUILD: ${MP_BUILD}\n`);
 	start(PORT).then(({ port }) => {
 		// eslint-disable-next-line no-console
-		console.log(`\n  Co-op demo running:  http://localhost:${port}/#coop=A   (window 1)`);
-		console.log(`                       http://localhost:${port}/#coop=B   (window 2)\n`);
+		console.log(`\n  Co-op demo running:  http://localhost:${port}/  — Multiplayer, then Host (or Join)\n`);
 	});
 }

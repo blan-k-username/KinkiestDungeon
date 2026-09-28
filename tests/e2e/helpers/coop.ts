@@ -124,11 +124,51 @@ async function waitForCoop(page: Page, label: string, stage: 'connected' | 'star
 }
 
 /**
+ * KDM-302 — put ONE page into the co-op session the way the lobby does. There is no other way in.
+ *
+ * The `#coop=<id>` URL shortcut used to do this: the window claimed the host seat on load and
+ * auto-answered every join request. It was removed because it was a second road that hid real bugs
+ * (KDM-297: no human host was ever asked mid-run). This helper takes the lobby's OWN road —
+ * `window.__coopConnect`, which the Host/Join buttons call — and only skips the typing. `clientId` is
+ * passed explicitly so specs keep their stable `A` / `B` ids.
+ *
+ * Waits for KD's asset preload first, because `enterGame()` does too: a page that asks for a seat
+ * before its assets are in is seated, then sits on the lobby until they are.
+ */
+export async function coopJoinPage(
+	P: Page, port: number, id: string, role: 'host' | 'guest', timeout = COOP_BOOT_TIMEOUT,
+): Promise<void> {
+	await P.goto(`http://127.0.0.1:${port}/`);
+	await P.waitForFunction(() => typeof (window as any).__coopConnect === 'function'
+		// @ts-ignore bare let-global — set on the Consent screen, which a normal boot passes through
+		&& typeof KDLoadingFinished !== 'undefined' && KDLoadingFinished === true,
+	undefined, { timeout });
+	await P.evaluate(({ i, r }) => { (window as any).__coopConnect({ role: r, clientId: i }); }, { i: id, r: role });
+}
+
+/**
+ * KDM-302 — the HOST lets the waiting guest in, as a player would.
+ *
+ * Before the session starts the question lands in the lobby (`KDMPLobby.pending`); once it is running
+ * the server asks in the game (`KDCoopJoinAsk`, KDM-297). Either way the answer is the lobby's own
+ * `__coopAnswerJoin` — the server's `_answerJoin` is one method for both screens.
+ */
+export async function coopAcceptPending(host: Page, timeout = COOP_BOOT_TIMEOUT): Promise<void> {
+	await host.waitForFunction(() => {
+		const L = (window as any).KDMPLobby;
+		// @ts-ignore bare let-global
+		const g = typeof KDGameData !== 'undefined' ? KDGameData : null;
+		return !!(L && L.pending) || !!(g && g.CurrentDialog === 'KDCoopJoinAsk');
+	}, undefined, { timeout });
+	await host.evaluate(() => { (window as any).__coopAnswerJoin(true); });
+}
+
+/**
  * Open both co-op clients and wait until the shared session is live in each.
  *
- * Order is load-bearing and preserved from the original inline block: A connects FIRST (it creates
- * the session), then B joins, and only then does the server start the shared world — so `started` is
- * awaited on both only after B has navigated.
+ * Order is load-bearing: A takes the HOST seat first (it creates the session), then B asks as the
+ * guest and A lets them in — only then does the server start the shared world, so `started` is awaited
+ * on both only after the answer.
  */
 export async function bootCoopPair(
 	A: Page,
@@ -137,11 +177,12 @@ export async function bootCoopPair(
 	opts: { timeout?: number; settleMs?: number } = {},
 ): Promise<void> {
 	const timeout = opts.timeout ?? COOP_BOOT_TIMEOUT;
-	await A.goto(`http://127.0.0.1:${port}/#coop=A`);
+	await coopJoinPage(A, port, 'A', 'host', timeout);
 	await waitForCoop(A, 'A', 'connected', timeout);
 
-	await B.goto(`http://127.0.0.1:${port}/#coop=B`);
-	// both joined → server starts the shared world → both receive their first state
+	await coopJoinPage(B, port, 'B', 'guest', timeout);
+	await coopAcceptPending(A, timeout);
+	// both seated → server starts the shared world → both receive their first state
 	await waitForCoop(A, 'A', 'started', timeout);
 	await waitForCoop(B, 'B', 'started', timeout);
 

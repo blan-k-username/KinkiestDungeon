@@ -417,13 +417,14 @@ class WSBridge {
 	 * KDM-279 took that argument one step further: perks were a separate field travelling beside the
 	 * character, so they became part of it.
 	 *
-	 * Safe on the `#coop=` path (R9): `nameOf` answers `''` and `characterOf` answers `null` for a
-	 * player who declared neither, and every setter here CLEARS rather than sets on an empty value —
-	 * so those sessions keep KD's own default perk state and character.
+	 * Safe for a player who declares nothing (R9 — the MP e2e harness, and formerly `#coop=`):
+	 * `nameOf` answers `''` and `characterOf` answers `null` for a player who declared neither, and
+	 * every setter here CLEARS rather than sets on an empty value — so those sessions keep KD's own
+	 * default perk state and character.
 	 *
-	 * ⚠️ KDM-282 changed what an UNNAMED player on that path is CALLED, deliberately. `#coop=` has
-	 * been a shortcut into the gate flow since KDM-255, so it does carry a real role, and its
-	 * unnamed players now read `Player 1`/`Player 2` instead of `Player <opaque-id>`. NF2's
+	 * ⚠️ KDM-282 changed what such an UNNAMED player is CALLED, deliberately. Every join goes through
+	 * the gate, so it carries a real role, and unnamed players read `Player 1`/`Player 2` instead of
+	 * `Player <opaque-id>`. NF2's
 	 * byte-identical guarantee moved to where it always belonged — a session nobody told a role,
 	 * which is every direct-constructed `SwapSession` in the unit suite. `mp-lobby-name.spec.ts`
 	 * pins the new answer.
@@ -624,11 +625,9 @@ class WSBridge {
 				 * that road. It was the road `#coop=<id>` and eleven node-layer specs took, which is why
 				 * KDM-233 shipped the gate without being able to remove it.
 				 *
-				 * `#coop=` is now a SHORTCUT INTO this flow rather than a second implementation of it:
-				 * the window asks for the host seat, is refused `already_hosting` if someone already has
-				 * it, and comes back as a guest whom the host's own page auto-answers
-				 * (`coop-bootstrap.js`). The auto-answer is deliberately CLIENT-side — a server-side
-				 * auto-approve flag would be this same duplication in a new coat.
+				 * `#coop=` then became a shortcut INTO this flow with a client-side auto-answer, and
+				 * KDM-302 removed it altogether: the lobby is the only client road, and a HUMAN host
+				 * answers every join. There is no auto-approve anywhere, client or server.
 				 */
 				if (msg.role === 'host') {
 					// KDM-260 — the shape is declared once, at the top of this file, so a new handshake

@@ -27,7 +27,7 @@
  */
 import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
-import { MP_TEST_TIMEOUT } from './helpers/coop';
+import { MP_TEST_TIMEOUT, coopJoinPage } from './helpers/coop';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
 
@@ -155,7 +155,8 @@ async function nativeMetrics(P: Page, ms: number) {
 
 test('KDM-207: attribute the co-op client extra frame cost by script', async ({ browser }) => {
 	test.setTimeout(MP_TEST_TIMEOUT);
-	const { server, port } = await start(0);
+	// KDM-302: requiredPlayers 1 — arm C is a host playing ALONE; see the note at arm C.
+	const { server, port } = await start(0, { requiredPlayers: 1 });
 	const ctx = await browser.newContext();
 	const out: any = {};
 
@@ -182,10 +183,15 @@ test('KDM-207: attribute the co-op client extra frame cost by script', async ({ 
 		out.plainProfile = await profileByScript(plain, SAMPLE_MS);
 		out.plainNative = await nativeMetrics(plain, 3000);
 
-		// ── C) co-op client, unpaired ────────────────────────────────────────────────────────────
+		// ── C) co-op client, playing alone ───────────────────────────────────────────────────────
+		// ⚠️ KDM-302: this arm was `#coop=SOLO` (entered the dungeon on load, never paired, no session
+		// traffic). The shortcut is gone; a lobby host enters the dungeon only once its session starts,
+		// so this is now a host in a started ONE-player session — same proxy, same dungeon, plus the
+		// real input/ack traffic. Profiles before 2026-09-28 are not directly comparable.
 		const coop = await ctx.newPage();
-		await coop.goto(`http://127.0.0.1:${port}/#coop=SOLO`);
-		await waitLoaded(coop);
+		await coopJoinPage(coop, port, 'SOLO', 'host');
+		await coop.waitForFunction(() => { const c = (window as any).__coop; return !!(c && c.started && c._entered); },
+			undefined, { timeout: 240_000 });
 		await coop.bringToFront();
 		// KDM-254: WAIT for the proxy to be live, don't sample and hope. The validity gate below
 		// asserts `coopConnected`, and a fixed sleep would make that a race on a contended host —

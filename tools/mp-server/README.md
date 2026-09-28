@@ -288,7 +288,7 @@ call, not a step of this workflow. If one is ever filed, replace the `unfiled:` 
 
 ## Hosting and joining (KDM-233)
 
-Entry is no longer only `#coop=<id>`. The main menu has a **Multiplayer** entry, and a friend joins by
+The **Multiplayer** entry on the main menu is the only way into a co-op game (KDM-302 removed the `#coop=<id>` URL shortcut). A friend joins by
 typing the host's LAN address — there is no join code and no account: **the host approves each join**.
 
 ```
@@ -460,9 +460,9 @@ not the pipeline.
   localised build that knows `KDMPBack` wins and one that does not is unchanged.
 
 **Not done here:** per-player character CREATION — appearance, outfit, class, pronouns (KDM-256);
-names themselves landed in KDM-237. The legacy `#coop=` path still joins directly, bypassing the
-gate, so two entry paths exist until **KDM-255** converges them — that path is also what keeps the MP
-e2e suite green, which is why retiring it is its own task.
+names themselves landed in KDM-237. The legacy `#coop=` path is gone (KDM-302): the MP e2e harness
+joins through the lobby's own `__coopConnect` (`tests/e2e/helpers/coop.ts` `coopJoinPage`), and the
+host answers every join, exactly as a player does.
 
 ## Mod sync (KDM-249)
 

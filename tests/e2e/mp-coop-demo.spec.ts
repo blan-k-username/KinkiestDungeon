@@ -34,16 +34,13 @@ test('two browser windows play one shared co-op dungeon via the demo server', as
 		await bootCoopPair(A, B, port);
 
 		/*
-		 * KDM-255 R3 — the `#coop=` windows got in THROUGH THE GATE, not around it.
+		 * KDM-255 R3 / KDM-302 — both windows got in THROUGH THE GATE, not around it.
 		 *
-		 * `#coop=` used to send a roleless `join` that `ws-bridge` seated directly, leaving
-		 * `gate.slotOf` null for both windows while the session ran perfectly well. So this is the
-		 * one assertion that can tell the shortcut from the bypass, and it is made here — in the
-		 * spec that already boots the real pair through the real server — rather than in a
-		 * mock-shaped unit test that could not have caught the old shape at all.
-		 *
-		 * Window B necessarily lost the host claim and came back as the guest (D1): that is what
-		 * slot 1 records.
+		 * A roleless `join` used to be seated directly by `ws-bridge`, leaving `gate.slotOf` null for
+		 * both windows while the session ran perfectly well. This is the one assertion that can tell
+		 * a gated seat from a bypass, made in the spec that boots the real pair through the real
+		 * server. Since KDM-302 the pair joins through the lobby's own `__coopConnect` (no `#coop=`):
+		 * A asked for the host seat, B asked as the guest and A answered.
 		 */
 		expect(bridge.gate.slotOf('A'), 'A claimed the host seat').toBe(0);
 		expect(bridge.gate.slotOf('B'), 'B was admitted as the guest, by A answering').toBe(1);

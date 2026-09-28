@@ -109,7 +109,7 @@
 		/**
 		 * KDM-256 R1 — the character this player built, or null, plus the same conditional flag the
 		 * perk pick uses. `null` (never `{}`) because "declared nothing" has exactly one meaning all
-		 * the way down to `SwapSession.characterOf`, and it is what keeps the `#coop=` road unchanged.
+		 * the way down to `SwapSession.characterOf` — a player who built nothing is seated on KD's defaults.
 		 */
 		character: null,
 		charPick: false,
