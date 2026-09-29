@@ -22,7 +22,7 @@
  *     this regardless".
  */
 import { test, expect } from '@playwright/test';
-import { press, openLobby, guestAsks, lobbyState, settle } from '../helpers/mp-lobby';
+import { press, openLobby, lobbyState, settle, guestJoinsAndIsAccepted, goldOf } from '../helpers/mp-lobby';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
 
@@ -65,25 +65,6 @@ async function playSinglePlayerAndSave(page: any, port: number): Promise<string>
 	return page.evaluate(() => String(localStorage.getItem('KinkyDungeonSave') || ''));
 }
 
-/** This page's own gold, as the player would see it — the marker's read side. */
-const goldOf = (page: any) => page.evaluate(() => {
-	// eslint-disable-next-line no-eval
-	try { return Number((0, eval)('KinkyDungeonGold')); } catch (e) { return NaN; }
-});
-
-/** Bring a guest in and have the host accept, returning once the session really has two players. */
-async function guestJoinsAndIsAccepted(host: any, guest: any, port: number, bridge: any) {
-	await guestAsks(guest, port, 'Ada');
-	// 120s rather than 60s: the two-browser join handshake is the first thing to slow down on a
-	// loaded host — measured here, it timed out once at 60s in a back-to-back run and then passed
-	// alone in 48s end to end. The ASSERTION is unchanged; only the patience is, because host
-	// contention is not a product signal (see the runner's own "is this red real?" epilogue).
-	await expect.poll(async () => (await lobbyState(host)).pending?.name,
-		{ timeout: 120_000, message: 'the host should be prompted' }).toBe('Ada');
-	await press(host, 'KDMPAccept');
-	await expect.poll(() => bridge.session.players.length,
-		{ timeout: 180_000, message: 'accepted guest is seated' }).toBe(2);
-}
 
 test.describe('KDM-243 — continue a single-player save in co-op', () => {
 	test('the host resumes their own saved run, and the guest arrives as a fresh character', async ({ browser }) => {

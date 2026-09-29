@@ -60,6 +60,11 @@ Co-op is opt-in. Start the server the normal way and nothing is listening for a 
 class screen, which now has a **co-op column**: *Your name*, *World seed*, and the buttons **Host
 Game**, **Continue Save** (only if you have a save) and **Join Game**.
 
+**Already playing solo?** You do not have to leave your run. Open the game's own menu and press
+**Host this game**: the run as it is right now — floor, items, character, everything — becomes the
+co-op session, and you go straight to step 5's screen with the address to share. **Cancel** there
+puts you back in your run, still solo. (Your own save is not touched by pressing it.)
+
 The first time you press one of them you are shown **"Playing together is a little different"** —
 the short version of [How co-op differs](#how-co-op-differs) below. You can come back to it any time
 with **How co-op differs**.

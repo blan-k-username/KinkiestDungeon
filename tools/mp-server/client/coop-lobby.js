@@ -1,8 +1,8 @@
 /**
  * tools/mp-server/client/coop-lobby.js  (KDM-233)
  *
- * THE MULTIPLAYER ENTRY — Host / Continue / Join on KD's own class screen, and the handshake screen
- * behind them.
+ * THE MULTIPLAYER ENTRY — Host / Continue / Join on KD's own class screen, "Host this game" on KD's
+ * own in-game menu (KDM-294), and the handshake screen behind them.
  *
  * ── KDM-293: WHY THERE IS NO MULTIPLAYER MENU ─────────────────────────────────────────────────────
  * There was one, and it was the problem. It duplicated KD's own screens and — worse — a player who
@@ -315,21 +315,86 @@
 			DrawButtonKDEx('KDMPContinue', function () {
 				// A6 — the save is read at the PRESS and again inside the action, because the briefing
 				// may sit between the two and the freshest save is still the one they mean.
-				lobby.open('waiting', function () {
-					var str = localSave();
-					if (!saveIsUsable(str)) {
-						// Refuse privately, in words, and do NOT connect.
-						lobby.error = T('KDMPSaveUnusable');
-						return;
-					}
-					hostConnect(str);
-				});
+				lobby.open('waiting', function () { hostSave(localSave()); });
 				return true;
 			}, true, COL, 720, COLW, 64, T('KDMPContinueSave'), '#ffffff', '');
 		}
 
 		DrawButtonKDEx('KDMPJoin', function () { lobby.open('connect'); return true; },
 			true, COL, saved ? 790 : 720, COLW, 64, T('KDMPJoinGame'), '#ffffff', '');
+	}
+
+	// ---- the entry on KD's in-game menu -----------------------------------------------------
+
+	/**
+	 * KDM-294 — "Host this game": the run the player is ALREADY PLAYING becomes the session.
+	 *
+	 * The owner's brief was "let the Host start the game as usual SP, no difference", so hosting is
+	 * reached from inside a solo game, on KD's own in-game menu (`KinkyDungeonDrawState === 'Restart'`),
+	 * without a trip back to the main menu. `lobby.open` captures `returnTo = 'Game'`, so Cancel lands
+	 * the player back on the menu they pressed this from, their run untouched and still solo — the
+	 * page only becomes a co-op client once a guest is admitted (`enterGame` on a started `joined`).
+	 *
+	 * ── GEOMETRY IS CORRECTNESS, AND HERE THE CACHE CANNOT SEE THE RISK ───────────────────────────
+	 * Three of this menu's controls are hand-rolled `MouseIn` hit-tests, not cache buttons (Save &
+	 * Quit 975,650 · Capture 975,800 · Check Perks 1650,900 — `KinkyDungeonHUD.ts`, Restart branch),
+	 * and `KDProcessButtons()` runs before them and returns on a hit. So a rectangle of ours over one
+	 * of them silently steals it. (975, 900, 550, 64) is the vacated slot of KD's own commented-out
+	 * `KinkyDungeonRestartYes` button: the menu's column, the row after Capture, clear of all of them.
+	 * `mp-entry-game.spec.ts` #2/#3 prove it by geometry AND by real clicks.
+	 *
+	 * Not drawn inside a session (`__coop._entered`): a guest cannot host the host's game, and a host
+	 * is already hosting it.
+	 */
+	function drawGameEntry() {
+		if (KinkyDungeonDrawState !== 'Restart') return;
+		if (window.__coop && window.__coop._entered) return;
+		DrawButtonKDEx('KDMPHostRun', function () {
+			// Read inside the action, after any briefing: the game is paused on our screen, so this is
+			// still the run as the player left it — and it is the freshest save there is.
+			lobby.open('waiting', function () {
+				nameDefault(KDGameData && KDGameData.PlayerName);
+				hostSave(currentRunSave());
+			});
+			return true;
+		}, true, 975, 900, 550, 64, T('KDMPHostRun'), '#ffffff', '');
+	}
+
+	/**
+	 * KDM-294 D294-2 — the run as it is RIGHT NOW, in the form KD itself saves it.
+	 *
+	 * KD's own recipe, verbatim from its "Get save code" (`KinkyDungeonHUD.ts`, Restart branch):
+	 * `KinkyDungeonSaveGame(true)` + `LZString.compressToBase64`. `true` means "to a string only" —
+	 * nothing is queued to storage, so pressing the entry and then cancelling leaves the player's own
+	 * save exactly as it was. Not `localStorage.KinkyDungeonSave`: that is up to one autosave stale.
+	 *
+	 * `''` on any throw, which `hostSave` refuses in words rather than advertising a broken session.
+	 */
+	function currentRunSave() {
+		try { return LZString.compressToBase64(JSON.stringify(KinkyDungeonSaveGame(true))); }
+		catch (e) { return ''; }
+	}
+
+	/**
+	 * KDM-243 A6 / KDM-294 D294-3 — host with a save, or refuse it in words and do NOT connect.
+	 *
+	 * The ONE judge-then-host, shared by Continue Save (the stored save) and Host this game (the live
+	 * run): they differ only in where the string comes from.
+	 */
+	function hostSave(str) {
+		if (!saveIsUsable(str)) {
+			lobby.error = T('KDMPSaveUnusable');
+			return;
+		}
+		hostConnect(str);
+	}
+
+	/**
+	 * KDM-294 R7 — a player who typed no name is known by their character's, never by a blank.
+	 * A name they DID type always wins. Shared with KDM-295, which takes it from a save slot.
+	 */
+	function nameDefault(n) {
+		if (!lobby.name && n) lobby.name = String(n);
 	}
 
 	// ---- the handshake screen ---------------------------------------------------------------
@@ -869,7 +934,8 @@
 			// KDM-257 R3 — the degraded-sync notice, on THIS wrap. A second wrap of KinkyDungeonRun
 			// from another client script is the duplication [[KDM-229]] was raised for; one global,
 			// one wrap, and the branch that needs it lives here with the others.
-			else if (KinkyDungeonState === 'Game') drawModWarning();
+			// KDM-294 — and "Host this game" on KD's in-game menu, on the same branch for the same reason.
+			else if (KinkyDungeonState === 'Game') { drawModWarning(); drawGameEntry(); }
 		} catch (e) {
 			if (window.__KDMP_DEBUG) { try { console.error('[coop lobby]', e); } catch (_) { /* noop */ } }
 		}

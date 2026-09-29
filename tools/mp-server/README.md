@@ -288,7 +288,7 @@ call, not a step of this workflow. If one is ever filed, replace the `unfiled:` 
 
 ## Hosting and joining (KDM-233)
 
-The co-op column on the game's own new-game (class) screen — **Host Game**, **Continue Save**, **Join Game** (KDM-293) — is the only way into a co-op game (KDM-302 removed the `#coop=<id>` URL shortcut). A friend joins by
+The co-op column on the game's own new-game (class) screen — **Host Game**, **Continue Save**, **Join Game** (KDM-293) — and **Host this game** on the game's own in-game menu (KDM-294, hosts the solo run in progress) are the only ways into a co-op game (KDM-302 removed the `#coop=<id>` URL shortcut). A friend joins by
 typing the host's LAN address — there is no join code and no account: **the host approves each join**.
 
 ```

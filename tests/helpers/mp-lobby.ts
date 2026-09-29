@@ -17,6 +17,7 @@
  * (`tools/mp-server/demo-server.js`, `INJECT`), so on the plain static `baseURL` there is no
  * `MultiplayerButton` to press. Every caller starts its own server with `start(0)`.
  */
+import { expect } from '@playwright/test';
 import { waitForBundleReady } from './bundle';
 
 /**
@@ -78,6 +79,53 @@ export async function press(page: any, button: string) {
  */
 
 export async function openLobby(page: any, port: number, host = '127.0.0.1', opts: { preload?: boolean; briefing?: boolean } = {}) {
+	await bootToMenu(page, port, host, opts);
+	// KDM-293 — the co-op entries moved from a Multiplayer menu of ours onto KD's own class screen.
+	// The BUTTON IDS did not change (`KDMPHost`, `KDMPContinue`, `KDMPJoin`), so every caller that
+	// already knows which one it wants needs only this different way of arriving — which is why this
+	// one edit migrates the whole suite instead of seventeen.
+	await onDiff(page);
+}
+
+/**
+ * KDM-294 — the other road in: a SOLO run already in progress, with KD's in-game menu open.
+ *
+ * Same boot as `openLobby` (one copy of "skip the intro, settle on the menu, mark the briefing"),
+ * then a real single-player game — KD's own `KinkyDungeonStartNewGame`, a few real turns — and the
+ * in-game menu (`KinkyDungeonDrawState = 'Restart'`), polled until our entry is registered for the
+ * same reason `onDiff` polls: the wrap draws AFTER `_prev`, so the first frame has KD's buttons only.
+ *
+ * Preload is always waited for here: a game cannot be started before its assets are.
+ */
+export async function openGameMenu(page: any, port: number, opts: { briefing?: boolean } = {}) {
+	await bootToMenu(page, port, '127.0.0.1', { preload: true, briefing: opts.briefing });
+	await page.evaluate(() => {
+		// Bare names through `eval`: bundle-scope `let`s are not properties of `window`.
+		// eslint-disable-next-line no-eval
+		(0, eval)('KDReloadMainData(true); KinkyDungeonStartNewGame(false);');
+		// eslint-disable-next-line no-eval
+		(0, eval)('for (var i = 0; i < 3; i++) KinkyDungeonAdvanceTime(1);');
+	});
+	await onGameMenu(page);
+}
+
+/** Re-park on KD's in-game menu and wait for our entry — also used after a Cancel or a stock click. */
+export async function onGameMenu(page: any, timeout = 30_000) {
+	await page.waitForFunction(() => {
+		// @ts-ignore — bundle `let` globals, readable by bare name.
+		if (KinkyDungeonState !== 'Game') { KinkyDungeonState = 'Game'; return false; }
+		// @ts-ignore
+		if (KinkyDungeonDrawState !== 'Restart') { KinkyDungeonDrawState = 'Restart'; return false; }
+		// @ts-ignore
+		return !!(KDButtonsCache && KDButtonsCache.KDMPHostRun);
+	}, undefined, { timeout, polling: 'raf' });
+}
+
+/**
+ * The part of `openLobby` every road shares: boot, skip the intro, settle on KD's main menu, and
+ * mark the co-op briefing seen unless the caller is the one spec that is about it.
+ */
+async function bootToMenu(page: any, port: number, host: string, opts: { preload?: boolean; briefing?: boolean }) {
 	// KD's OWN setting for "don't play the intro" (`KDFirstRunMainmenu`, KinkyDungeon.ts:8439-8449),
 	// read out of localStorage at init (`:1003`). Without it, preload finishing schedules a 100 ms
 	// timer that drops the page on the Intro screen — which has no buttons and only advances on a
@@ -95,11 +143,7 @@ export async function openLobby(page: any, port: number, host = '127.0.0.1', opt
 	// Before leaving the Consent screen — that is the only place preload can complete. See
 	// `waitAssetsPreloaded`.
 	if (opts.preload) await waitAssetsPreloaded(page);
-	// KDM-293 — the co-op entries moved from a Multiplayer menu of ours onto KD's own class screen.
-	// The BUTTON IDS did not change (`KDMPHost`, `KDMPContinue`, `KDMPJoin`), so every caller that
-	// already knows which one it wants needs only this different way of arriving — which is why this
-	// one edit migrates the whole suite instead of seventeen.
-	await onEntries(page);
+	await onMenu(page);
 	// KDM-272 — a player who has never seen the co-op briefing is shown it on their FIRST entry, and
 	// the entry's action is held until they have read it. Every spec but `mp-lobby-about` is about
 	// something else, so the briefing is marked seen HERE rather than by a copy in each of them.
@@ -116,21 +160,16 @@ export async function openLobby(page: any, port: number, host = '127.0.0.1', opt
 }
 
 /**
- * Park the page on KD's class/start screen with our entries registered.
- *
- * ⚠️ POLLS FOR THE ENTRY, not for a frame count. `'Diff'` is reachable in one assignment, but our
- * buttons are registered by the wrap that runs AFTER `_prev`'s draw, so the first frame on the screen
- * has KD's buttons and not ours. Polling is what makes this insensitive to how many frames the page
- * happens to need — the same reason `gotoMenu` polled rather than settling.
+ * Settle the page on KD's main menu. Every road into co-op (`onDiff`, `openGameMenu`) starts here.
  */
-async function onEntries(page: any, timeout = 30_000) {
+async function onMenu(page: any, timeout = 30_000) {
 	/*
 	 * ⚠️ LET THE PAGE SETTLE ON THE MENU FIRST, and this is not belt-and-braces.
 	 *
 	 * When preload finishes, KD schedules a 100 ms timer that drops the page on `Intro` and then the
 	 * menu — silently undoing any state forced beforehand. The old `gotoMenu` was immune by accident:
 	 * the menu IS where that timer lands, so polling for it could not be raced. Parking straight on
-	 * `'Diff'` is not, and the timer fires just after the poll succeeds.
+	 * `'Diff'` (or starting a game — KDM-294) is not, and the timer fires just after the poll succeeds.
 	 *
 	 * It cost six specs — every one of them a `{ preload: true }` caller (`mp-save-export`,
 	 * `mp-save-import`, `mp-mod-sync-guest`, `mp-coop-render-alive`) — failing with
@@ -143,6 +182,17 @@ async function onEntries(page: any, timeout = 30_000) {
 		// @ts-ignore — a stock menu button: `MultiplayerButton` is gone (KDM-293).
 		return !!(KDButtonsCache && KDButtonsCache.GameStart);
 	}, undefined, { timeout, polling: 'raf' });
+}
+
+/**
+ * Park the page on KD's class/start screen with our entries registered.
+ *
+ * ⚠️ POLLS FOR THE ENTRY, not for a frame count. `'Diff'` is reachable in one assignment, but our
+ * buttons are registered by the wrap that runs AFTER `_prev`'s draw, so the first frame on the screen
+ * has KD's buttons and not ours. Polling is what makes this insensitive to how many frames the page
+ * happens to need — the same reason `gotoMenu` polled rather than settling.
+ */
+async function onDiff(page: any, timeout = 30_000) {
 	await page.waitForFunction(() => {
 		// @ts-ignore
 		if (KinkyDungeonState !== 'Diff') { KinkyDungeonState = 'Diff'; return false; }
@@ -290,3 +340,91 @@ export async function paintedBy(page: any, fn: string): Promise<string[]> {
 		return seen;
 	}, fn);
 }
+
+/** A stock control KD hit-tests by hand (`MouseIn`), so it is NOT in `KDButtonsCache`. */
+export type Rect = { name: string; x: number; y: number; w: number; h: number };
+
+/**
+ * Pitfall #30, as a helper: every overlap between one of OUR buttons and anything else on screen.
+ *
+ * `KinkyDungeonHandleClick` runs `KDProcessButtons()` before its `MouseIn` chain and returns on a hit
+ * (`KinkyDungeon.ts:6421`), so a button of ours that overlaps a stock control STEALS its clicks with
+ * both still painted. Checked against every other `KDButtonsCache` entry, computed live, plus the
+ * caller's list of hand-rolled `MouseIn` regions — which no cache read can see. One copy, because
+ * KDM-293 (class screen) and KDM-294 (in-game menu) need exactly the same rule.
+ *
+ * Answers `['<ours>:MISSING']` for an entry that is not registered, so an absent button cannot pass.
+ */
+export async function clashes(page: any, ours: string[], mouseIn: Rect[] = []): Promise<string[]> {
+	return page.evaluate((a: { ours: string[]; mouseIn: Rect[] }) => {
+		const box = (l: number, t: number, w: number, h: number) => ({ l, t, r: l + w, b: t + h });
+		const hit = (A: any, B: any) => A.l < B.r && B.l < A.r && A.t < B.b && B.t < A.b;
+		const hits: string[] = [];
+		for (const mine of a.ours) {
+			// @ts-ignore — bundle `let` global, readable by bare name.
+			const m = KDButtonsCache[mine];
+			if (!m) { hits.push(mine + ':MISSING'); continue; }
+			const A = box(m.Left, m.Top, m.Width, m.Height);
+			// @ts-ignore
+			for (const name of Object.keys(KDButtonsCache)) {
+				if (a.ours.indexOf(name) >= 0) continue;
+				// @ts-ignore
+				const s = KDButtonsCache[name];
+				if (hit(A, box(s.Left, s.Top, s.Width, s.Height))) hits.push(mine + ' over ' + name);
+			}
+			for (const r of a.mouseIn) {
+				if (hit(A, box(r.x, r.y, r.w, r.h))) hits.push(mine + ' over ' + r.name);
+			}
+		}
+		return hits;
+	}, { ours, mouseIn });
+}
+
+/**
+ * A REAL click at canvas coordinates: KD's own dispatch, cache buttons first and then the `MouseIn`
+ * chain — the only way to prove a hand-rolled stock control still wins its own pixels.
+ * (`press()` cannot: it calls a cache entry's handler by name, and `MouseIn` controls have no entry.)
+ */
+export async function clickAt(page: any, x: number, y: number) {
+	await page.evaluate((p: { x: number; y: number }) => {
+		// @ts-ignore — bundle `let` globals; bare assignment is what KD's own mouse handler does.
+		MouseX = p.x; MouseY = p.y;
+		// @ts-ignore
+		KinkyDungeonHandleClick({});
+	}, { x, y });
+	await settle(page);
+}
+
+/**
+ * Bring a guest in and have the host accept, returning once the session really has two players.
+ *
+ * Was copied verbatim in `mp-save-import` and `mp-save-export`, and KDM-294 would have been the third
+ * copy. 120s rather than 60s for the prompt: the two-browser join handshake is the first thing to slow
+ * down on a loaded host. The assertion is unchanged; only the patience is.
+ */
+export async function guestJoinsAndIsAccepted(host: any, guest: any, port: number, bridge: any, name = 'Ada') {
+	await guestAsks(guest, port, name);
+	await expect.poll(async () => (await lobbyState(host)).pending?.name,
+		{ timeout: 120_000, message: 'the host should be prompted' }).toBe(name);
+	await press(host, 'KDMPAccept');
+	await expect.poll(() => bridge.session.players.length,
+		{ timeout: 180_000, message: 'accepted guest is seated' }).toBe(2);
+}
+
+/** This page's own gold, as the player would see it — the save specs' marker, read side. */
+export const goldOf = (page: any): Promise<number> => page.evaluate(() => {
+	// eslint-disable-next-line no-eval
+	try { return Number((0, eval)('KinkyDungeonGold')); } catch (e) { return NaN; }
+});
+
+/**
+ * Replace the transport with a recorder: every `__coopConnect` the lobby makes is kept, none dials.
+ * For single-page tests about what an entry DECLARES — not about the server. Shared by KDM-294's and
+ * KDM-295's specs, which assert the same thing (the declaration) from two different entries.
+ */
+export const recordConnects = (page: any) => page.evaluate(() => {
+	const w = window as any;
+	w.__kdmpConnects = [];
+	w.__coopConnect = function (opts: any) { w.__kdmpConnects.push(opts); return null; };
+});
+export const connects = (page: any): Promise<any[]> => page.evaluate(() => (window as any).__kdmpConnects as any[]);

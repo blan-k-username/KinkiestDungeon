@@ -27,7 +27,7 @@
  *     happened to contain a run".
  */
 import { test, expect } from '@playwright/test';
-import { press, openLobby, guestAsks, lobbyState, settle } from '../helpers/mp-lobby';
+import { press, openLobby, settle, guestJoinsAndIsAccepted } from '../helpers/mp-lobby';
 import { contextMenuAt } from './helpers/coop';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
@@ -128,16 +128,6 @@ async function stockLoad(page: any): Promise<{ ok: boolean; gold: number; remote
 	});
 }
 
-async function guestJoinsAndIsAccepted(host: any, guest: any, port: number, bridge: any) {
-	await guestAsks(guest, port, 'Ada');
-	// 120s rather than 60s: the two-browser join handshake is the first thing to slow down on a
-	// loaded host. The assertion is unchanged; only the patience is.
-	await expect.poll(async () => (await lobbyState(host)).pending?.name,
-		{ timeout: 120_000, message: 'the host should be prompted' }).toBe('Ada');
-	await press(host, 'KDMPAccept');
-	await expect.poll(() => bridge.session.players.length,
-		{ timeout: 180_000, message: 'accepted guest is seated' }).toBe(2);
-}
 
 /**
  * Plant the co-op run's marker on the HOST's character, server-side.

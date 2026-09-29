@@ -37,7 +37,7 @@
  */
 import { test, expect } from '../helpers/playwright-fixtures';
 import { bootKD } from '../helpers/bundle';
-import { injectLobby, press, settle, openEntry, lobbyState } from '../helpers/mp-lobby';
+import { injectLobby, press, settle, openEntry, lobbyState, clashes } from '../helpers/mp-lobby';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
 
@@ -244,23 +244,8 @@ test.describe('KDM-293 — the co-op entries live on KD\'s class screen', () => 
 		await injectLobby(page);
 		await onClassScreen(page);
 
-		const clashes = await page.evaluate((ours: string[]) => {
-			const box = (b: any) => ({ l: b.Left, t: b.Top, r: b.Left + b.Width, b: b.Top + b.Height });
-			const hits: string[] = [];
-			for (const mine of ours) {
-				const a = KDButtonsCache[mine];
-				if (!a) { hits.push(mine + ':MISSING'); continue; }
-				const A = box(a);
-				for (const name of Object.keys(KDButtonsCache)) {
-					if (ours.indexOf(name) >= 0) continue;
-					const B = box(KDButtonsCache[name]);
-					if (A.l < B.r && B.l < A.r && A.t < B.b && B.t < A.b) hits.push(mine + ' over ' + name);
-				}
-			}
-			return hits;
-		}, ['KDMPHost', 'KDMPJoin']);
-
-		expect(clashes, 'a co-op entry sitting on a stock button eats its clicks').toEqual([]);
+		expect(await clashes(page, ['KDMPHost', 'KDMPJoin']),
+			'a co-op entry sitting on a stock button eats its clicks').toEqual([]);
 	});
 
 	test('#10 the routers and the menu entry are gone from every screen', async ({ isolatedPage: page }) => {
