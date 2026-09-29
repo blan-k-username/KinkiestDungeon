@@ -125,7 +125,7 @@ export async function onGameMenu(page: any, timeout = 30_000) {
  * The part of `openLobby` every road shares: boot, skip the intro, settle on KD's main menu, and
  * mark the co-op briefing seen unless the caller is the one spec that is about it.
  */
-async function bootToMenu(page: any, port: number, host: string, opts: { preload?: boolean; briefing?: boolean }) {
+export async function bootToMenu(page: any, port: number, host: string, opts: { preload?: boolean; briefing?: boolean }) {
 	// KD's OWN setting for "don't play the intro" (`KDFirstRunMainmenu`, KinkyDungeon.ts:8439-8449),
 	// read out of localStorage at init (`:1003`). Without it, preload finishing schedules a 100 ms
 	// timer that drops the page on the Intro screen — which has no buttons and only advances on a
@@ -428,3 +428,42 @@ export const recordConnects = (page: any) => page.evaluate(() => {
 	w.__coopConnect = function (opts: any) { w.__kdmpConnects.push(opts); return null; };
 });
 export const connects = (page: any): Promise<any[]> => page.evaluate(() => (window as any).__kdmpConnects as any[]);
+
+/**
+ * KDM-295 — a save CODE for a solo run started as `klass` by a character called `name`, produced by
+ * KD's own serialiser (`KinkyDungeonSaveGame(true)` + `LZString.compressToBase64`, the recipe of KD's
+ * "Get save code"). Answers the code; the page is left in that run.
+ *
+ * `klass` is picked by index into KD's own class table (`KDClassStart`), and the chosen key is
+ * returned too, so a spec never hard-codes a class name the game may rename.
+ */
+export async function saveCodeFor(page: any, classIndex: number, name: string): Promise<{ code: string; klass: string }> {
+	return page.evaluate((a: { i: number; name: string }) => {
+		// eslint-disable-next-line no-eval
+		const ev = (s: string) => (0, eval)(s);
+		const klass = String(ev('Object.keys(KDClassStart)[' + (a.i | 0) + ']'));
+		ev('KDReloadMainData(true); KinkyDungeonClassMode = ' + JSON.stringify(klass) + '; KinkyDungeonStartNewGame(false);');
+		ev('for (var i = 0; i < 2; i++) KinkyDungeonAdvanceTime(1);');
+		ev('KDGameData.PlayerName = ' + JSON.stringify(a.name) + ';');
+		const code = String(ev('LZString.compressToBase64(JSON.stringify(KinkyDungeonSaveGame(true)))'));
+		return { code, klass };
+	}, { i: classIndex, name });
+}
+
+/**
+ * KDM-295 — KD's save-slot screen with a save SELECTED, by KD's own road: main menu `LoadGame` →
+ * paste the code → `LoadFromCodeButton`, which sets `LoadMenuCurrentSave` exactly as a slot press does.
+ * Polls until our entry is registered AND enabled — enabled is the whole gate (R2).
+ */
+export async function openSlotsWith(page: any, code: string, timeout = 30_000) {
+	await onMenu(page);
+	await press(page, 'LoadGame');
+	await page.locator('#saveInputField').fill(code);
+	await press(page, 'LoadFromCodeButton');
+	await page.waitForFunction(() => {
+		// @ts-ignore — bundle `let` globals, readable by bare name.
+		const b = KDButtonsCache && KDButtonsCache.KDMPJoinSave;
+		// @ts-ignore
+		return KinkyDungeonState === 'LoadSlots' && !!b && !!b.enabled;
+	}, undefined, { timeout, polling: 'raf' });
+}

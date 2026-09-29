@@ -2,7 +2,8 @@
  * tools/mp-server/client/coop-lobby.js  (KDM-233)
  *
  * THE MULTIPLAYER ENTRY — Host / Continue / Join on KD's own class screen, "Host this game" on KD's
- * own in-game menu (KDM-294), and the handshake screen behind them.
+ * own in-game menu (KDM-294), "Join with this character" on KD's own save-slot screen (KDM-295), and
+ * the handshake screen behind them.
  *
  * ── KDM-293: WHY THERE IS NO MULTIPLAYER MENU ─────────────────────────────────────────────────────
  * There was one, and it was the problem. It duplicated KD's own screens and — worse — a player who
@@ -133,19 +134,22 @@
 		 * the authority, and a second filter would be a second thing to keep in step.
 		 */
 		playerCharacter: function () {
-			var pkg = {};
 			try {
-				if (typeof KinkyDungeonClassMode === 'string' && KinkyDungeonClassMode) pkg.class = KinkyDungeonClassMode;
-				if (typeof KinkyDungeonCurrentDress === 'string' && KinkyDungeonCurrentDress) pkg.outfit = KinkyDungeonCurrentDress;
-			} catch (e) { pkg = {}; }
-			var chosen = [];
-			try {
-				if (typeof KinkyDungeonStatsChoice !== 'undefined' && KinkyDungeonStatsChoice) {
-					KinkyDungeonStatsChoice.forEach(function (on, key) { if (on) chosen.push(String(key)); });
-				}
-			} catch (e) { chosen = []; }
-			if (chosen.length) pkg.perks = chosen;
-			return Object.keys(pkg).length ? pkg : null;
+				return characterPackage(KinkyDungeonClassMode, KinkyDungeonCurrentDress,
+					(typeof KinkyDungeonStatsChoice !== 'undefined' && KinkyDungeonStatsChoice)
+						? Array.from(KinkyDungeonStatsChoice) : []);
+			} catch (e) { return null; }
+		},
+		/**
+		 * KDM-295 — `{character, name}` extracted from the save a player chose on KD's save-slot
+		 * screen, or `null` for every other entry. Set by `open()`'s third argument and RESET by every
+		 * `open()`, so it is per-entry and can never go stale: a player who backs out of a save-slot
+		 * join and then joins from the class screen declares the class screen's character (R7).
+		 */
+		fromSave: null,
+		/** What this entry declares: the chosen save's character, else KD's live globals. */
+		declaration: function () {
+			return lobby.fromSave ? lobby.fromSave.character : lobby.playerCharacter();
 		},
 		/**
 		 * KDM-293 — open the handshake screen, remembering the screen we came from.
@@ -168,8 +172,9 @@
 		 * declaration; the root menu used to guarantee that by being upstream of the buttons, and this
 		 * is what guarantees it now that the buttons are on KD's screen.
 		 */
-		open: function (phase, action) {
+		open: function (phase, action, source) {
 			lobby.returnTo = KinkyDungeonState;
+			lobby.fromSave = source || null;
 			KinkyDungeonState = 'Multiplayer';
 			lobby.next = phase || 'connect';
 			lobby.error = '';
@@ -397,14 +402,100 @@
 		if (!lobby.name && n) lobby.name = String(n);
 	}
 
+	// ---- the entry on KD's save-slot screen -------------------------------------------------
+
+	/**
+	 * KDM-295 — "Join with this character": bring a character you already made, from a save slot.
+	 *
+	 * ── WHAT TRAVELS (owner's decision, 2026-09-29) ───────────────────────────────────────────────
+	 * The CHARACTER: class, outfit, perk choices, and its name as the default name. NOT the run —
+	 * floor, items, spells and gold stay in the slot, and the slot is never written. The connect
+	 * phase says so before Connect is pressed (`KDMPSaveCharacterOnly`), because discarding progress
+	 * SILENTLY was the trap this slice was filed to avoid. Carrying the run would need wire fields
+	 * and server seating this epic ruled out.
+	 *
+	 * Added, not borrowed: every control on this screen stays KD's. Live exactly when KD's own
+	 * "Play Slot" is — the same `LoadMenuCurrentSave` test `KDLoadGame` applies to itself. Placed
+	 * directly above it, same column and width (1570, 832, 350, 44): in the gap between the
+	 * preview panel (which ends at y=830 — 64 tall would sit on its border) and `KDLoadGame` at y=880.
+	 * `mp-entry-slots.spec.ts` #2 checks every cache button — which on this screen is every control.
+	 *
+	 * An unreadable save does nothing when pressed: KD's own preview already says "Invalid" for it.
+	 */
+	function drawSlotsEntry() {
+		var selected = (typeof LoadMenuCurrentSave === 'string' && LoadMenuCurrentSave !== '');
+		DrawButtonKDEx('KDMPJoinSave', function () {
+			var src = selected ? saveCharacter(LoadMenuCurrentSave) : null;
+			if (!src) return true;
+			lobby.open('connect', function () { nameDefault(src.name); }, src);
+			return true;
+		}, selected, 1570, 832, 350, 44, T('KDMPJoinSave'), selected ? '#ffffff' : '#888888', '');
+	}
+
+	/**
+	 * KDM-295 — a save string → `{character, name}`, or `null` if it cannot be read.
+	 *
+	 * The three fields are the SAME three globals `playerCharacter()` reads live, as KD's own
+	 * `KinkyDungeonGenerateSaveData` stored them: `startingClass` ← `KinkyDungeonClassMode`, `dress`
+	 * ← `KinkyDungeonCurrentDress`, `statchoice` ← `Array.from(KinkyDungeonStatsChoice)`. So one
+	 * builder serves both, and the class screen and the save slot cannot declare differently shaped
+	 * packages. Decompressed with KD's own `DecompressB64`, the one `saveIsUsable` uses.
+	 */
+	function saveCharacter(str) {
+		try {
+			var d = JSON.parse(DecompressB64(String(str).trim()));
+			if (!d || typeof d !== 'object') return null;
+			var name = (d.KDGameData && d.KDGameData.PlayerName) || (d.saveStat && d.saveStat.name) || '';
+			return {
+				character: characterPackage(d.startingClass, d.dress, Array.isArray(d.statchoice) ? d.statchoice : []),
+				name: String(name || ''),
+			};
+		} catch (e) { return null; }
+	}
+
+	/**
+	 * KDM-295 D295-1 — the ONE character package: `{class?, outfit?, perks?}`, or `null` for "declared
+	 * nothing" (never `{}` — see `playerCharacter`'s note on what `null` means downstream).
+	 * `entries` are `[key, on]` pairs, which is what both `Array.from(KinkyDungeonStatsChoice)` and a
+	 * save's `statchoice` are.
+	 */
+	function characterPackage(klass, outfit, entries) {
+		var pkg = {};
+		if (typeof klass === 'string' && klass) pkg.class = klass;
+		if (typeof outfit === 'string' && outfit) pkg.outfit = outfit;
+		var chosen = [];
+		for (var i = 0; i < entries.length; i++) {
+			var e = entries[i];
+			if (e && e[1]) chosen.push(String(e[0]));
+		}
+		if (chosen.length) pkg.perks = chosen;
+		return Object.keys(pkg).length ? pkg : null;
+	}
+
 	// ---- the handshake screen ---------------------------------------------------------------
 
 	function drawLobby() {
 		lobby._drawCount++;
+		hideStockTextArea();
 		DrawTextKD(T('KDMPLobbyTitle'), W, 120, '#ffffff', '#000000', 48);
 		if (lobby.phase === 'waiting') return drawHost();
 		if (lobby.phase === 'connect') return drawJoin();
 		if (lobby.phase === 'about') return drawAbout();
+	}
+
+	/**
+	 * KDM-295 — keep KD's save-slot paste box off OUR screen.
+	 *
+	 * ⚠️ A dedicated screen does NOT hide every stock field for free (a correction to KDM-291 §2).
+	 * `saveInputField` is made by `ElementCreateTextArea`, not the per-frame `KDTextField`, so
+	 * `KDCullTempElements` never removes it; KD removes it by hand in each of its own exits from
+	 * `LoadSlots`, and ours is not one of them. Hidden, not removed: `ElementPosition` sets
+	 * `display: inline` on every `LoadSlots` frame, so Back brings it back by KD's own hand, with
+	 * whatever the player pasted still in it. A no-op on every other road, where it does not exist.
+	 */
+	function hideStockTextArea() {
+		var el = document.getElementById('saveInputField');
+		if (el && el.style.display !== 'none') el.style.display = 'none';
 	}
 
 	// ---- KDM-272: how co-op differs, said once ---------------------------------------------
@@ -504,7 +595,7 @@
 		var opts = {
 			role: 'host',
 			name: lobby.playerName(),
-			character: lobby.playerCharacter(),
+			character: lobby.declaration(),
 			seed: lobby.seed,
 		};
 		if (save) opts.save = save;
@@ -662,6 +753,15 @@
 	}
 
 	function drawJoin() {
+		// KDM-295 R4 — said BEFORE Connect, every frame this phase is up: joining from a save brings
+		// the character and leaves the run in the slot. Between the title (120) and the address (250).
+		if (lobby.fromSave) {
+			// Two lines, not one: a single sentence long enough to say both halves ran into KD's art
+			// column (x<500) at a readable size — seen on a screenshot, not guessed.
+			DrawTextKD(T('KDMPSaveCharacterOnly', { NAME: lobby.fromSave.name || T('KDMPSomeone') }),
+				W, 172, '#ffd98a', '#000000', 22);
+			DrawTextKD(T('KDMPSaveRunStays'), W, 204, '#ffd98a', '#000000', 22);
+		}
 		DrawTextKD(T('KDMPHostAddress'), W, 250, '#ffffff', '#000000', 28);
 		KDTextField('KDMPAddress', MID, 280, 350, 56, 'text', addressDefault(), '64');
 		drawNameField(370);
@@ -682,7 +782,7 @@
 		DrawButtonKDEx('KDMPConnect', function () {
 			lobby.error = '';
 			lobby.status = T('KDMPConnecting');
-			connect({ role: 'guest', address: lobby.address(), name: lobby.playerName(), character: lobby.playerCharacter() });
+			connect({ role: 'guest', address: lobby.address(), name: lobby.playerName(), character: lobby.declaration() });
 			return true;
 		}, true, MID, joinY, 350, 64, T('KDMPConnectBtn'), '#ffffff', '');
 
@@ -930,6 +1030,8 @@
 			// and nothing is borrowed on 'Stats' any more: the player reaches both by KD's own road,
 			// so there is no journey of ours to send them on and none to bring them back from.
 			if (KinkyDungeonState === 'Diff') drawDiffEntries();
+			// KDM-295 — "Join with this character" beside KD's own "Play Slot".
+			else if (KinkyDungeonState === 'LoadSlots') drawSlotsEntry();
 			else if (KinkyDungeonState === 'Multiplayer') drawLobby();
 			// KDM-257 R3 — the degraded-sync notice, on THIS wrap. A second wrap of KinkyDungeonRun
 			// from another client script is the duplication [[KDM-229]] was raised for; one global,

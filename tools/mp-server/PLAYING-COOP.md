@@ -151,6 +151,12 @@ so choose them **before** you join: they are sent along with your request.
 
 You do not choose the seed, the game mode or the difficulty — those are the host's.
 
+**Or bring a character you already have.** Instead of a new game, choose **Load Game** on the main
+menu, pick a save (a slot, or a pasted code), and press **Join with this character** just above
+*Play*. You go straight to step 4. **Only the character comes along** — class, outfit, perks and
+name. That save's floor, items, spells and gold stay in the slot, untouched, and the join screen says
+so before you ask. **Back** returns you to the save list with your save still selected.
+
 **4. Press Join Game, then check the address.** *Host address* is already filled in with wherever
 this page came from — so if you opened the host's link, it is **already correct** and you can leave
 it alone. (It also remembers the last host you successfully reached, so a second session is usually
