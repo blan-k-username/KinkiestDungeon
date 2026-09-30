@@ -2991,7 +2991,11 @@ class SwapSession {
 			// is still restored to full so it never dies and the peer stays targetable; that is a
 			// representation detail now, not a measurement.
 			if (eid != null && ec && ec.maxhp != null) {
-				this.world.setAvatarEnemy(eid, ec.maxhp, ec.maxhp, 0);
+				// KDM-311: `aggro = false`. This restore used to stamp `hostile = 9999` as well, and the war
+				// detector above reads `hostile` as KD's own aggro — so NEXT turn it saw our stamp as an
+				// attack and declared war in every co-op session. A PvP peer is re-armed (with aggro) by
+				// `_armPeerEnemies` before anyone acts on it, so nothing that wants the stamp loses it.
+				this.world.setAvatarEnemy(eid, ec.maxhp, ec.maxhp, 0, false);
 				/*
 				 * …but that is the ARMING call, and it also stamps `faction = 'Enemy'` and
 				 * `hostile = 9999` (headless-host.js). It runs here for EVERY avatar EVERY turn,
@@ -3004,6 +3008,9 @@ class SwapSession {
 				 *
 				 * So undo the hostility half whenever this player is at war with nobody. The hp
 				 * restore — the only thing this call is wanted for here — stands.
+				 *
+				 * (KDM-311: the `hostile` half is no longer stamped here at all — see above. The
+				 * `faction` half still is, which is what the truce undo below exists for.)
 				 */
 				// Scoped to pairs that NEGOTIATED a truce, not to "not at war with anyone". Plain co-op
 				// has always left avatars stamped Enemy by this call, and that is load-bearing world

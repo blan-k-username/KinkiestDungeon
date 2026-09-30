@@ -2385,13 +2385,19 @@ class HeadlessHost {
 	 * (KinkyDungeonMove bump → KDDoAttack/KDDamageEnemy, real defeat/capture) targets it. hp tracks the
 	 * peer's Will (maxhp = WillMax) so KD's real low-hp helpless/capture thresholds fire near Will 0.
 	 */
-	setAvatarEnemy(entityId, hp, maxhp, stun) {
+	/**
+	 * @param {boolean} [aggro=true] KDM-311 — also stamp KD's aggro (`hostile = 9999`). The PvP arming
+	 * wants it; the per-turn hp restore does not: `hostile` is exactly what the war detector reads as
+	 * "an attack happened", so stamping it there declared war on turn 1 of every co-op session.
+	 */
+	setAvatarEnemy(entityId, hp, maxhp, stun, aggro = true) {
 		return this.eval(`(function(){
 			var e = KDMapData.Entities.find(function(en){ return en.id === ${entityId | 0}; });
 			if (!e) return null;
 			e.Enemy.maxhp = ${Number(maxhp) || 10};
 			e.hp = Math.max(0, ${Number(hp) || 0});
-			e.faction = 'Enemy'; e.hostile = 9999; e.ce = undefined; e.player = undefined;
+			e.faction = 'Enemy'; e.ce = undefined; e.player = undefined;
+			if (${aggro ? 1 : 0}) e.hostile = 9999;
 			// KD-101: stun marks the avatar "disabled" (KinkyDungeonIsStunned) so the game's real
 			// KDCanApplyBondage gate lets a SUBDUED peer be tied — the avatar's hp is a per-turn damage
 			// gauge (always full) and can't express the victim's subdued state, so we set it explicitly.
