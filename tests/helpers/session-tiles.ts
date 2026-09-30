@@ -42,3 +42,20 @@ export function freeNeighbour(s: any, id: string): { x: number, y: number, dx: n
 	}
 	return null;
 }
+
+/**
+ * Free tiles between `min` and `max` steps (Chebyshev) from `id` — candidate spots for something the
+ * player should HEAR but not see (KD draws an enemy's noise ripple only when it is out of sight). A
+ * spec cycles through them rather than trusting any single spot to be behind a wall.
+ */
+export function tilesAtRange(s: any, id: string, min: number, max: number): Array<{ x: number, y: number }> {
+	const p = s.posOf(id);
+	const out: Array<{ x: number, y: number }> = [];
+	for (let dx = -max; dx <= max; dx++) {
+		for (let dy = -max; dy <= max; dy++) {
+			const d = Math.max(Math.abs(dx), Math.abs(dy));
+			if (d >= min && d <= max && isFree(s, p.x + dx, p.y + dy)) out.push({ x: p.x + dx, y: p.y + dy });
+		}
+	}
+	return out;
+}

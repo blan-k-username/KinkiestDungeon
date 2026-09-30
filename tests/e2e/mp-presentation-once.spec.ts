@@ -24,12 +24,13 @@
  */
 import { test, expect } from '@playwright/test';
 import { bootCoopPair, MP_TEST_TIMEOUT } from './helpers/coop';
+import { tilesAtRange } from '../helpers/session-tiles';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
 
 test('KDM-196: ripples draw once per event, and the SP bar keeps its animation', async ({ browser }) => {
 	test.setTimeout(MP_TEST_TIMEOUT);
-	const { server, bridge, port } = await start(0);
+	const { server, bridge, port } = await start(0, { enemyType: 'Rat' });   // KDM-309: the ripples come from ENEMY noise, and the demo enemy is opt-in now
 	const ctxA = await browser.newContext({ viewport: { width: 1280, height: 720 } });
 	const ctxB = await browser.newContext({ viewport: { width: 1280, height: 720 } });
 	const A = await ctxA.newPage();
@@ -72,8 +73,17 @@ test('KDM-196: ripples draw once per event, and the SP bar keeps its animation',
 
 		// Real turns until the world actually produces an off-screen noise (it is a random enemy
 		// behaviour, so drive turns until one lands rather than assuming a fixed count does it).
+		// KDM-309: KD draws an enemy's noise ripple only while the enemy is OUT OF SIGHT, and the party
+		// now starts on KD's own start tile with the (opt-in) demo enemy summoned in view. So between
+		// turns that produced nothing, the enemy is moved to another spot 6-10 tiles off — some of them
+		// are behind a wall. The noise itself is still the game's own, from a real turn.
+		const s = bridge.session;
+		const spots = tilesAtRange(s, 'A', 6, 10);
+		expect(spots.length, 'precondition: somewhere to put an unseen enemy').toBeGreaterThan(0);
 		let delivered = 0;
 		for (let i = 0; i < 24 && delivered === 0; i++) {
+			const spot = spots[(i * 7) % spots.length];
+			s.world.moveAvatar(s.enemyId, spot.x, spot.y);
 			await advance();
 			delivered = await A.evaluate(() => (window as any).__p196.addedByRealSnapshots);
 		}
