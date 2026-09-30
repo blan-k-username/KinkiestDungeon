@@ -79,6 +79,8 @@
 		reconnect: { attempts: 0, total: 0, nextDelayMs: null },
 		// KDM-163: route-ness of each in-flight send, in order (see submit()).
 		_sentRoute: [],
+		// KDM-310: route-ness of OUR action that entered lockstep (set on `waiting`, read on `state`).
+		_waitRoute: undefined,
 		// KDM-186 RULE 1 state: types with an unacknowledged send, the types in flight in ORDER (so a
 		// reply frees the right one), and the latest superseded action per type awaiting a free slot.
 		// KDM-186 RULE 1 state: unacknowledged sends per type, the types + payload keys in flight in
@@ -686,6 +688,7 @@
 	 */
 	function installRouteDriver() {
 		coop._stepRoute = stepRoute;   // test hook (deterministic e2e route driving)
+		coop._inDanger = inDangerIgnoringPartners;   // test hook: the danger the route driver obeys
 		if (typeof KDFastMoveTo !== 'function' || KDFastMoveTo.__coopWrapped) return;
 		var _origFast = KDFastMoveTo;
 		KDFastMoveTo = function () {
@@ -695,7 +698,10 @@
 			KinkyDungeonFastMovePath = [];               // stop KD's own per-frame drainer
 			coop.route = path.length ? path : null;
 			coop.routeFresh = !!coop.route;              // a NEW click — see stepRoute's danger rule
-			stepRoute();                                 // submit the first step this turn
+			// KDM-310 — a NEW click is a new decision: its first step is sent even while an earlier
+			// action is still waiting for the partner, and the server keeps only the latest
+			// (swap-session `submit`, last-wins). Auto-walk steps keep the one-per-turn gate.
+			stepRoute(true);
 			return r;
 		};
 		KDFastMoveTo.__coopWrapped = true;
@@ -707,8 +713,9 @@
 	 * server moved us off the path), or when an enemy appears (KD's fast-move does the
 	 * same via KinkyDungeonInDanger).
 	 */
-	function stepRoute() {
-		if (coop.submitted) return;   // already acted this turn — don't consume a route step
+	function stepRoute(freshClick) {
+		// Already acted this turn — an AUTO-walk step must not replace it. A fresh click may (KDM-310).
+		if (coop.submitted && !freshClick) return;
 		if (!coop.route || !coop.route.length) { coop.route = null; return; }
 		/*
 		 * In danger, KD's OWN fast-move keeps the FIRST step of a path the player has just clicked and
@@ -717,7 +724,7 @@
 		 * first step included, so with any enemy in sight the mouse did NOTHING while the keyboard still
 		 * worked (owner UAT 2026-09-27; `tests/e2e/mp-click-move-danger.spec.ts`).
 		 */
-		if (typeof KinkyDungeonInDanger === 'function' && KinkyDungeonInDanger()) {
+		if (inDangerIgnoringPartners()) {
 			if (!coop.routeFresh) { coop.route = null; return; }
 			coop.route = [coop.route[0]];
 		}
@@ -727,7 +734,39 @@
 		if (Math.max(Math.abs(dx), Math.abs(dy)) > 1.5) { coop.route = null; return; }  // displaced/blocked
 		coop.route.shift();
 		coop.routeFresh = false;                          // the clicked step is taken; the rest is auto-walk
-		submit({ kdType: 'move', data: { dir: { x: dx, y: dy }, delta: 1, AllowInteract: true } }, true);
+		submit({ kdType: 'move', data: { dir: { x: dx, y: dy }, delta: 1, AllowInteract: true } }, true, !!freshClick);
+	}
+
+	/**
+	 * KDM-310 — KD's OWN "is an enemy in view?" (`KinkyDungeonInDanger`), asked as a single player would
+	 * be asked it: the PARTNER is not an enemy.
+	 *
+	 * Owner UAT 2026-09-30: "the char doesn't remember the planned path". The route driver follows KD's
+	 * single-player rule — stop auto-walking while in danger — and in co-op that was ALWAYS true,
+	 * because the other player's avatar is a non-allied entity in view (measured: with every enemy
+	 * removed, the only one left was `RemotePlayer_<partner>`). So every click moved one tile.
+	 *
+	 * Rather than re-implement KD's danger test, `KDHostile` answers false for a peer avatar for the
+	 * duration of this ONE call and is restored in a `finally`. Everything else — real enemies,
+	 * warnings, bullets, stealth, the `danger` flag — is still KD's own decision, so a real enemy stops
+	 * the walk exactly as in single player (`mp-click-move-route.spec.ts` #2).
+	 *
+	 * ⚠️ `allowFlag = false` — KD's sticky `danger` flag is NOT consulted. KD sets it every turn that
+	 * `KinkyDungeonInDanger(false)` holds (`KinkyDungeonGame.ts`, per-turn), and on the SERVER that
+	 * test sees the partner's avatar, so in co-op the flag is set every single turn and arrives here
+	 * in the bundle — it cannot tell us whether a real enemy was involved. The live test below still
+	 * sees every real enemy in view; what is lost is only KD's short afterglow once one leaves view.
+	 */
+	function inDangerIgnoringPartners() {
+		if (typeof KinkyDungeonInDanger !== 'function') return false;
+		var rc = window.KDRenderClient;
+		if (typeof KDHostile !== 'function' || !rc || typeof rc.isPeerAvatar !== 'function') return !!KinkyDungeonInDanger(false);
+		var _hostile = KDHostile;
+		KDHostile = function (enemy) {
+			if (rc.isPeerAvatar(enemy)) return false;
+			return _hostile.apply(this, arguments);
+		};
+		try { return !!KinkyDungeonInDanger(false); } finally { KDHostile = _hostile; }
 	}
 
 	/**
@@ -1259,6 +1298,7 @@
 		coop._snapSeq = 0;
 		coop._sentTypes.length = 0;
 		coop._sentRoute.length = 0;
+		coop._waitRoute = undefined;
 		coop._inFlight = {};
 		coop._pending = {};
 		coop.submitted = false;
@@ -1367,7 +1407,7 @@
 			// KDM-186: an ACK is a reply that carries no state — the server applied our input and this
 			// player's own state did not move. It still consumed exactly one send, so the in-order
 			// bookkeeping must unwind for it exactly like a 'ui' state reply; it just has nothing to apply.
-			if (m.type === 'ack') { coop._sentRoute.shift(); ackOne('ui'); return; }   // applied, no turn ⇒ stream
+			if (m.type === 'ack') { unwindOne('ui'); return; }   // applied, no turn ⇒ stream
 			// ── KDM-233: the approval handshake ────────────────────────────────────────────────
 			// These arrive BEFORE the session exists, so none of them touch game state.
 			if (m.type === 'awaiting_approval') {
@@ -1558,8 +1598,7 @@
 				// is what used to kill click-to-move: with every input routed, KD's draw loop sends
 				// `setMoveDirection` each frame, so this branch runs ~60×/s.
 				coop.started = true;
-				coop._sentRoute.shift();          // this reply consumed one send: it was a UI input
-				ackOne('ui');                     // KDM-186: applied without consuming a turn ⇒ presentation
+				unwindOne('ui');                  // KDM-186: applied without consuming a turn ⇒ presentation
 				// KDM-206: the per-frame path now carries a delta; resolve it against our copy. A null
 				// means we asked for a resync — apply nothing rather than render a half-merged state.
 				var uiSnap = resolveState(m);
@@ -1568,19 +1607,25 @@
 			}
 			else if (m.type === 'state') {
 				coop.started = true;
+				var wasWaiting = coop.submitted;
 				coop.submitted = false;
 				// A turn resolved. If OUR action in it was a MANUAL one (not a route step), it cancels
 				// any in-progress route — the player changed their mind. Deciding this here rather than
 				// at send time is the point: at send time the client cannot know whether an input
 				// consumes a turn at all, and per-frame UI chatter would cancel every route.
 				// An empty queue means this turn was resolved by the PEER while we sent nothing.
-				if (coop._sentRoute.length && coop._sentRoute.shift() === false) coop.route = null;
-				coop._sentRoute.length = 0;       // per-turn: nothing sent before now is still pending
-				// KDM-186: a resolved turn drains the whole in-flight queue too — the bridge has answered
-				// everything that preceded it, so no type may stay blocked behind a reply that will never come.
-				coop._sentTypes.length = 0; coop._inFlight = {};
-				// Flush anything a stream was holding: its slot will never be freed by a reply now.
-				for (var _pt in coop._pending) { var _p = coop._pending[_pt]; delete coop._pending[_pt]; rawSend(_pt, _p.action, _p.route); }
+				//
+				// KDM-310 — and only THIS frame's own reply is unwound. The bridge tags `reply` on the frame
+				// that answers the input which resolved the turn; any other turn frame was resolved by the
+				// PEER and answers none of our sends. This used to wipe the whole queue instead ("the bridge
+				// has answered everything that preceded it"), which is only true of the reply: when the
+				// peer resolves the turn, the hover inputs we sent just before are still unanswered, their
+				// late acks then popped the NEXT sends — `move` was learned as a stream and `waiting` read
+				// a stale `false` — and every click-to-move died after a step. The action that waited was
+				// read off the queue when its `waiting` arrived.
+				var ours = m.reply ? unwindOne('turn') : (wasWaiting ? coop._waitRoute : undefined);
+				coop._waitRoute = undefined;
+				if (ours === false) coop.route = null;
 				coop.lastTick = m.tick;
 				if (window.__KDMP_DEBUG && m.serverLog && m.serverLog.length) {
 					// KD-098: echo the server's per-turn diagnostics into THIS browser console
@@ -1610,9 +1655,11 @@
 				// KDM-163: the server has confirmed our input entered LOCKSTEP — that, and not the act
 				// of sending, is what means "I have acted this turn".
 				coop.submitted = true;
-				// a MANUAL action (not a route step) cancels an in-progress route
-				if (coop._sentRoute.length && coop._sentRoute.shift() === false) coop.route = null;
-				ackOne('turn');                   // KDM-186: it entered lockstep ⇒ a command, never sampled
+				// a MANUAL action (not a route step) cancels an in-progress route. KDM-310: and remember
+				// which kind WAITED — the turn that resolves it is answered by the peer (see `state`).
+				// KDM-186: it entered lockstep ⇒ a command, never sampled.
+				coop._waitRoute = unwindOne('turn');
+				if (coop._waitRoute === false) coop.route = null;
 				setStatus('Co-op ' + id + ': submitted, waiting for ' + (m.waitingOn || []).join(', ') + '…');
 			} else if (m.type === 'await') {
 				// a peer has acted and is waiting on US — act so the turn can resolve.
@@ -1624,6 +1671,7 @@
 				// or the player is locked out of the very action that would unblock them.
 				coop.submitted = false;
 				coop.blocked = m.reason || 'blocked';
+				unwindOne();                      // KDM-310: a refusal still answers the input — free its slot
 				setStatus('Co-op ' + id + ': ' + (m.reason === 'peace-offer'
 					? 'a peace offer is waiting — RIGHT-CLICK YOURSELF to accept or refuse'
 					// KDM-251 D6: a refused move must not read as a hang. Name the cause every time,
@@ -1663,6 +1711,7 @@
 						: 'COULD NOT SAVE THE RUN — ' + w.err + ' (your previous save is untouched)'));
 				}
 			} else if (m.type === 'error') {
+				if (m.reply) unwindOne();         // KDM-310: an input that threw is still answered
 				setStatus('Co-op ' + id + ': error — ' + m.error);
 			}
 		};
@@ -1677,12 +1726,13 @@
 		};
 	}
 
-	function submit(action, fromRoute) {
+	function submit(action, fromRoute, replace) {
 		// A MANUAL action may REPLACE an already-submitted-but-unresolved one (we're still waiting for
 		// the peer): the server keeps only the latest pending action and the turn waits for the peer
 		// regardless, so e.g. opening "Tie Up" / applying a restraint after you've already moved still
-		// works instead of being silently dropped. Route auto-steps still respect the one-per-turn gate.
-		var blocked = !ws || ws.readyState !== 1 || !coop.started || (coop.submitted && !!fromRoute);
+		// works instead of being silently dropped. Route auto-steps still respect the one-per-turn gate —
+		// except the first step of a NEW click (`replace`, KDM-310), which is a new decision like a key.
+		var blocked = !ws || ws.readyState !== 1 || !coop.started || (coop.submitted && !!fromRoute && !replace);
 		if (blocked) {
 			if (window.__KDMP_DEBUG) {
 				try {
@@ -1751,6 +1801,19 @@
 			try { console.log('[coop ' + id + '] submit ->', JSON.stringify(action)); } catch (e) { /* ignore */ }
 		}
 		ws.send(JSON.stringify({ type: 'input', action: action }));
+	}
+
+	/**
+	 * KDM-310 — the ONE unwind for a reply: it answers the oldest unanswered send, so pop that send's
+	 * route-ness (returned) and free its type's slot. Every reply to an input comes through here —
+	 * ack, ui state, `waiting`, the turn frame tagged `reply`, `blocked`, an input `error` — and
+	 * nothing else does, so the queue can never drift from the wire the way the per-turn wipe made it.
+	 * @param {string} [kind] what the server said this input IS ('ui' / 'turn'); omitted = unknown.
+	 */
+	function unwindOne(kind) {
+		var route = coop._sentRoute.shift();
+		ackOne(kind);
+		return route;
 	}
 
 	/**

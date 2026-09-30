@@ -163,20 +163,33 @@ test('two browser windows play one shared co-op dungeon via the demo server', as
 		await A.evaluate(() => { /* @ts-ignore bare let-global */ KinkyDungeonInDanger = function () { return false; }; });
 		// Probe KD's REAL pathfinder (wrapped to capture the path) for a reachable
 		// multi-step route from A; suppress sends while probing.
+		// KDM-310: a click now sends its first step even while an action is waiting (a new click
+		// REPLACES it), so `submitted = true` no longer suppresses anything. Block the wire with
+		// `started = false` instead, and trap the route the wrap captures BEFORE its first step is
+		// taken off it; then hand the whole path back for the deterministic kick below.
 		const setup = await A.evaluate(() => {
 			const w = window as any;
 			// @ts-ignore bare let-global
 			const p = KinkyDungeonPlayerEntity;
-			w.__coop.submitted = true;
+			w.__coop.started = false;
+			let captured: any = null;
+			let cur: any = null;
+			Object.defineProperty(w.__coop, 'route', { configurable: true,
+				get() { return cur; }, set(v) { if (v && !captured) captured = v.slice(); cur = v; } });
 			const cands = [[3, 0], [0, 3], [-3, 0], [0, -3], [2, 2], [-2, 2], [2, -2], [-2, -2], [4, 0], [0, 4], [5, 0], [0, 5]];
+			let out: any = null;
 			for (const [dx, dy] of cands) {
-				w.__coop.route = null;
+				captured = null;
 				// @ts-ignore bare let-global — KD's real fast-move pathfinder
 				KDFastMoveTo(p.x + dx, p.y + dy);
 				// @ts-ignore
-				if (w.__coop.route && w.__coop.route.length >= 2) return { len: w.__coop.route.length, fastPath: (KinkyDungeonFastMovePath || []).length };
+				if (captured && captured.length >= 2) { out = { len: captured.length, fastPath: (KinkyDungeonFastMovePath || []).length }; break; }
 			}
-			return null;
+			delete w.__coop.route;
+			w.__coop.route = out ? captured : null;
+			w.__coop.routeFresh = false;
+			w.__coop.started = true;
+			return out;
 		});
 		expect(setup, 'no reachable >=2-step route from A').not.toBeNull();
 		// KD's own per-frame drainer is disabled (path captured, not drained locally)

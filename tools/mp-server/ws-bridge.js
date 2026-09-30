@@ -144,13 +144,14 @@ const OUTBOUND_MESSAGES = Object.freeze({
 	// `seq` comes from `_stateFrame`, not from any call site's literal: it is the client's gap
 	// detector, and a frame without one would be merged onto a base nobody can name (KDM-206).
 	// `kind` is absent on a turn-resolving frame, and 'ui' / 'push' otherwise (KDM-252).
+	// `reply` marks the turn frame that answers the input which resolved it (KDM-310).
 	state:             Object.freeze({ required: Object.freeze(['tick', 'seq']),
-		optional: Object.freeze(['kind', 'srv', 'serverLog', 'snapshot', 'delta']) }),
+		optional: Object.freeze(['kind', 'srv', 'serverLog', 'snapshot', 'delta', 'reply']) }),
 	ack:               Object.freeze({ required: Object.freeze(['tick', 'srv']) }),
 	waiting:           Object.freeze({ required: Object.freeze(['waitingOn']) }),
 	'await':           Object.freeze({ required: Object.freeze(['waitingOn', 'graceMs']) }),
 	blocked:           Object.freeze({ required: Object.freeze(['reason']) }),
-	error:             Object.freeze({ required: Object.freeze(['error']) }),
+	error:             Object.freeze({ required: Object.freeze(['error']), optional: Object.freeze(['reply']) }),
 	ping:              Object.freeze({ required: Object.freeze(['t']) }),
 
 	// ── presence (KDM-250/251/252/253) ───────────────────────────────────────────────────────────
@@ -364,8 +365,17 @@ class WSBridge {
 				// KDM-192: a stream input that a NEWER one of the same type already supersedes — with both
 				// already sitting in this same socket read — is stale before we even look at it. Applying
 				// it costs a full transaction and buys nothing but latency for whatever follows.
-				if (superseded.has(bi)) { this._noteCoalesced(clientId, msg); continue; }
+				// KDM-310: …but it is still ANSWERED, with the bare ack an unchanged ui input gets. The client
+				// matches replies to sends strictly in order, one each (`ackOne`, `_sentRoute`); a silent
+				// drop shifted every later reply onto an earlier send, so a stream's ack was credited to
+				// the `move` behind it and click-to-move stopped after a step (owner UAT 2026-09-30).
+				// Truthful: the newer reading, answered next, carries whatever state this one would have.
 				this._batch = { size: parsed.length, index: bi, waitMs: now() - tBatch };
+				if (superseded.has(bi)) {
+					this._noteCoalesced(clientId, msg);
+					this._send(socket, { type: 'ack', tick: this.session.turn, srv: this._srvStamp(0) });
+					continue;
+				}
 				clientId = this._handle(socket, msg, clientId);
 			}
 			this._batch = null;
@@ -826,7 +836,7 @@ class WSBridge {
 						if (res.advanced) break;
 					}
 				}
-				if (res.advanced) { this._clearGrace(); this._turnResolved(res); }
+				if (res.advanced) { this._clearGrace(); this._turnResolved(res, clientId); }
 				else {
 					this._send(socket, { type: 'waiting', waitingOn: res.waitingOn });
 					// tell the awaited players they're holding up the turn (UI can show it
@@ -838,7 +848,9 @@ class WSBridge {
 					this._armGrace();
 				}
 			} catch (e) {
-				this._send(socket, { type: 'error', error: String(e && e.message || e) });
+				// KDM-310: `reply` — this error ANSWERS the input, so the client unwinds its slot for it
+				// (the other `error`s, about saves and seats, answer no input).
+				this._send(socket, { type: 'error', error: String(e && e.message || e), reply: true });
 			}
 		}
 		return clientId;
@@ -1361,8 +1373,9 @@ class WSBridge {
 	 * host on the `error` channel (R6), and a failed export must not be able to hold up the state
 	 * frame that every player is waiting on.
 	 */
-	_turnResolved(res) {
-		this._broadcastState();
+	/** @param {string} [replyTo] the client whose input resolved the turn — see `_broadcastState`. */
+	_turnResolved(res, replyTo) {
+		this._broadcastState(replyTo);
 		if (res && res.exportDue) this._sendExport(this.gate.host, res.exportDue);
 	}
 
@@ -1632,7 +1645,13 @@ class WSBridge {
 		this._snapSeq.delete(clientId);
 	}
 
-	_broadcastState() {
+	/**
+	 * @param {string} [replyTo] KDM-310 — the client whose input resolved this turn. Its frame is the
+	 * REPLY to that input and is tagged `reply: true`; everyone else's is news, answering none of their
+	 * sends. The client matches replies to sends in order, and it cannot tell the two apart itself: a
+	 * turn the partner resolves can arrive while its own inputs are still unanswered.
+	 */
+	_broadcastState(replyTo) {
 		this._clearGrace();
 		const tick = this.session.turn;
 		// KD-098: forward the server's per-turn diagnostics to every client so they show up
@@ -1650,7 +1669,8 @@ class WSBridge {
 			// `_lastSnap` always matches what the client actually holds. A full snapshot sent here
 			// without recording it would leave the next ui delta diffed against a base the client
 			// never had.
-			this._send(sock, Object.assign({ type: 'state', tick, serverLog }, this._stateFrame(cid)));
+			this._send(sock, Object.assign({ type: 'state', tick, serverLog },
+				cid === replyTo ? { reply: true } : null, this._stateFrame(cid)));
 		}
 	}
 

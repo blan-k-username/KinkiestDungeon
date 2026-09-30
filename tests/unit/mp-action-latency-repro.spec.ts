@@ -19,7 +19,7 @@
  */
 import { describe, it, expect } from 'vitest';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { WSBridge } = require('../../tools/mp-server/ws-bridge');
+const { WSBridge, decodeFrames } = require('../../tools/mp-server/ws-bridge');
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const net = require('net');
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -56,39 +56,56 @@ const frame = (i: number) => ({
 	type: 'input', action: { kdType: 'setMoveDirection', data: { dir: { x: 0, y: i % 2 ? -1 : 1 } } },
 });
 
+// One socket read carrying a burst of stream frames, then a real COMMAND behind them — exactly the
+// shape the owner's session produced.
+const burst = () => Buffer.concat([
+	...Array.from({ length: BURST }, (_, i) => maskFrame(JSON.stringify(frame(i)))),
+	maskFrame(JSON.stringify({
+		type: 'input',
+		action: { kdType: 'move', data: { dir: { x: 0, y: 0, delta: 1 }, delta: 1, AllowInteract: true } },
+	})),
+]);
+
+/** Every message the server sends on `sock`, parsed, in arrival order. */
+function collect(sock: any): any[] {
+	const got: any[] = [];
+	let buf = Buffer.alloc(0);
+	sock.on('data', (chunk: Buffer) => {
+		const out = decodeFrames(Buffer.concat([buf, chunk]));
+		buf = out.rest;
+		for (const m of out.messages) { try { got.push(JSON.parse(m)); } catch (e) { /* close frame */ } }
+	});
+	return got;
+}
+
+/** A real bridge with A and B through the join gate and the session started. */
+async function startedPair() {
+	const bridge: any = new WSBridge({
+		requiredPlayers: 2, seed: 'action-latency', autoAdvance: false, idleGraceMs: 0,
+		seedInputKinds: true,
+	});
+	const port = await bridge.listen(0);
+	const a = await connect(port);
+	const b = await connect(port);
+	// KDM-255 — through the join gate, the only road in. The `session.started` precondition below is
+	// the proof the handshake actually completed.
+	a.write(maskFrame(JSON.stringify({ type: 'join', clientId: 'A', role: 'host' })));
+	b.write(maskFrame(JSON.stringify({ type: 'join', clientId: 'B', role: 'guest' })));
+	await new Promise((r) => setTimeout(r, 250));
+	a.write(maskFrame(JSON.stringify({ type: 'join_answer', accept: true })));
+	await new Promise((r) => setTimeout(r, 4000));
+	expect(bridge.session.started, 'precondition: session must have started').toBe(true);
+	expect(bridge.session.inputKind.get('setMoveDirection'),
+		'precondition: the type must be classified a STREAM, or coalescing must not apply').toBe('ui');
+	return { bridge, a, b };
+}
+
 describe('KDM-192 — a burst of per-frame stream input must not cost a transaction each', () => {
 	it('coalesces superseded stream inputs within one socket read, and never drops a command', async () => {
-		const bridge: any = new WSBridge({
-			requiredPlayers: 2, seed: 'action-latency', autoAdvance: false, idleGraceMs: 0,
-			seedInputKinds: true,
-		});
-		const port = await bridge.listen(0);
+		const { bridge, a, b } = await startedPair();
 		try {
-			const a = await connect(port);
-			const b = await connect(port);
-			a.on('data', () => {}); b.on('data', () => {});
-			// KDM-255 — through the join gate, the only road in. Written blind (this spec reads nothing
-			// off its sockets, by design); the `session.started` precondition below is the proof the
-			// handshake actually completed.
-			a.write(maskFrame(JSON.stringify({ type: 'join', clientId: 'A', role: 'host' })));
-			b.write(maskFrame(JSON.stringify({ type: 'join', clientId: 'B', role: 'guest' })));
-			await new Promise((r) => setTimeout(r, 250));
-			a.write(maskFrame(JSON.stringify({ type: 'join_answer', accept: true })));
-			await new Promise((r) => setTimeout(r, 4000));
-			expect(bridge.session.started, 'precondition: session must have started').toBe(true);
-			expect(bridge.session.inputKind.get('setMoveDirection'),
-				'precondition: the type must be classified a STREAM, or coalescing must not apply').toBe('ui');
-
-			// One socket read carrying a burst of stream frames, then a real COMMAND behind them —
-			// exactly the shape the owner's session produced.
-			const burst = Buffer.concat([
-				...Array.from({ length: BURST }, (_, i) => maskFrame(JSON.stringify(frame(i)))),
-				maskFrame(JSON.stringify({
-					type: 'input',
-					action: { kdType: 'move', data: { dir: { x: 0, y: 0, delta: 1 }, delta: 1, AllowInteract: true } },
-				})),
-			]);
-			a.write(burst);
+			collect(a); collect(b);
+			a.write(burst());
 			await new Promise((r) => setTimeout(r, 4000));
 
 			// Read the EMITTED lines, not the live counters: the 1 Hz ticker drains them (and the lines
@@ -118,6 +135,53 @@ describe('KDM-192 — a burst of per-frame stream input must not cost a transact
 				.toBeGreaterThan(0);
 			expect(uiApplied.ui, "the NEWEST stream reading must still be applied — not all dropped")
 				.toBeGreaterThan(0);
+
+			a.destroy(); b.destroy();
+		} finally {
+			bridge.close();
+		}
+	}, BOOT_TIMEOUT);
+
+	/*
+	 * KDM-310 — coalescing must still ANSWER every input it drops.
+	 *
+	 * The client matches replies to its sends strictly in order, one reply per send (`ackOne`,
+	 * `_sentRoute`). A coalesced input used to be skipped with no reply at all, so every later reply was
+	 * credited to an EARLIER send: a stream's `ui` ack landed on the `move` behind it, the client learned
+	 * `move` was a stream, and click-to-move stopped after a step or two (owner UAT 2026-09-30).
+	 */
+	it('answers every input in the burst, coalesced or not, once and in order', async () => {
+		const { bridge, a, b } = await startedPair();
+		try {
+			const fromA = collect(a); const fromB = collect(b);
+			await new Promise((r) => setTimeout(r, 500));
+			fromA.length = 0;                 // only what the burst is answered with
+			a.write(burst());
+			await new Promise((r) => setTimeout(r, 4000));
+
+			// A reply to an input: its bare ack, its ui state frame, or `waiting` for a lockstep command.
+			// A server-initiated `push` frame answers nothing.
+			const answers = fromA.filter((m) => m.type === 'ack' || m.type === 'waiting'
+				|| (m.type === 'state' && m.kind !== 'push'));
+			// eslint-disable-next-line no-console
+			console.log('\nKDM-310 — reply types: ' + answers.map((m) => m.type + (m.kind ? ':' + m.kind : '')).join(' '));
+			expect((bridge._statsLog || []).join('\n'), 'precondition: the burst must actually have been coalesced')
+				.toMatch(/coalesced \d+/);
+			expect(answers.length, 'one reply per input sent').toBe(BURST + 1);
+			expect(answers[answers.length - 1].type, 'the COMMAND is answered last, as the lockstep reply')
+				.toBe('waiting');
+
+			// …and the turn the PARTNER then resolves is a reply to the partner's input only. A's frame
+			// answers none of A's sends, and must say so, or A credits it to whatever it sent last.
+			fromA.length = 0; fromB.length = 0;
+			b.write(maskFrame(JSON.stringify({ type: 'input', action: { kind: 'wait' } })));
+			await new Promise((r) => setTimeout(r, 4000));
+			const turnA = fromA.filter((m) => m.type === 'state' && !m.kind);
+			const turnB = fromB.filter((m) => m.type === 'state' && !m.kind);
+			expect(turnB.length, 'precondition: the partner resolved exactly one turn').toBe(1);
+			expect(turnA.length, 'precondition: A was told about that turn').toBe(1);
+			expect(turnB[0].reply, "the resolver's frame answers its own input").toBe(true);
+			expect(turnA[0].reply, "the other player's frame answers nothing of theirs").toBeUndefined();
 
 			a.destroy(); b.destroy();
 		} finally {

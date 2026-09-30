@@ -103,6 +103,16 @@
 	}
 
 	/**
+	 * KDM-310 — is this entity another PLAYER's avatar (a `RemotePlayer` / `RemotePlayer_<label>` def)?
+	 * The one definition: `ensureAvatarDefs`, the snapshot restraint reset and the route driver's
+	 * danger check (coop-bootstrap.js) all ask this, and used to spell it out inline.
+	 */
+	function isPeerAvatar(en) {
+		var nm = en && en.Enemy && en.Enemy.name;
+		return typeof nm === 'string' && nm.indexOf('RemotePlayer') === 0;
+	}
+
+	/**
 	 * Ensure the `RemotePlayer` avatar enemy-def exists in THIS browser. The server
 	 * represents each other player as a `RemotePlayer` ally entity; the snapshot only
 	 * carries `enemyName`, and apply() re-links the def by name. The stock browser
@@ -140,7 +150,7 @@
 		for (var i = 0; i < entities.length; i++) {
 			var en = entities[i];
 			var nm = en && en.Enemy && en.Enemy.name;
-			if (!nm || nm.indexOf('RemotePlayer') !== 0) continue;
+			if (!isPeerAvatar(en)) continue;
 			if (!KinkyDungeonGetEnemyByName(nm)) {
 				KinkyDungeonEnemies.push(Object.assign({}, base, { name: nm }));
 				added = true;
@@ -585,7 +595,7 @@
 				if (KDMapData && Array.isArray(KDMapData.Entities) && typeof KDSetNPCRestraints === 'function') {
 					for (var ai = 0; ai < KDMapData.Entities.length; ai++) {
 						var av = KDMapData.Entities[ai];
-						if (av && av.Enemy && typeof av.Enemy.name === 'string' && av.Enemy.name.indexOf('RemotePlayer') === 0) {
+						if (isPeerAvatar(av)) {
 							try { KDSetNPCRestraints(av.id, {}); av.boundLevel = av.boundLevel || 0; } catch (e) { /* ignore */ }
 						}
 					}
@@ -787,6 +797,8 @@
 		 * rerouting its clicks to a server that is not there is how "Accept does nothing" shipped.
 		 */
 		isClientMode: function () { return clientMode; },
+		/** KDM-310 — see `isPeerAvatar` above. */
+		isPeerAvatar: isPeerAvatar,
 
 		disableLocalSim: function () {
 			clientMode = true;
