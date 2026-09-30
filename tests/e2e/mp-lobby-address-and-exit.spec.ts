@@ -208,6 +208,52 @@ test.describe('KDM-236 — the address you used, and the way back out', () => {
 		}
 	});
 
+	/*
+	 * KDM-306 — the deadline measures the SERVER's silence, not the page's own.
+	 *
+	 * Captured (probe runs 14 and 25): the guest dialled, then its own page froze for ~11-16 s — KD's
+	 * work, not the network — while the 10 s deadline came due. On waking the overdue deadline ran
+	 * before the socket's queued open, closed it as "silent", and the join never left the guest: "Could
+	 * not reach <the host's own address>". Intermittent in four specs because it needs a long freeze.
+	 * Here the freeze is made deliberately, in the same task that dials, so the open cannot win the race.
+	 */
+	test('a page that freezes while its join is connecting still gets its join through (KDM-306)', async ({ browser }) => {
+		test.setTimeout(MP_TEST_TIMEOUT);
+		const { server, bridge, port } = await start(0);
+		const hostCtx = await browser.newContext();
+		const guestCtx = await browser.newContext();
+		const host = await hostCtx.newPage();
+		const guest = await guestCtx.newPage();
+		try {
+			await openLobby(host, port);
+			await press(host, 'KDMPHost');
+			await expect.poll(() => bridge.gate.host, { timeout: 30_000, message: 'precondition: a host is waiting' })
+				.toBeTruthy();
+
+			await openLobby(guest, port, 'localhost');
+			await guest.evaluate(() => { window.__coopConnectTimeoutMs = 1500; });
+			await openJoinView(guest);
+			await guest.locator('#KDMPAddress').fill(`127.0.0.1:${port}`);
+			await guest.locator('#KDMPName').fill('Ada');
+			const frozeMs = await guest.evaluate(() => {
+				// @ts-ignore — bundle `let` global
+				KDButtonsCache.KDMPConnect.func({});
+				const t = Date.now();
+				while (Date.now() - t < 4000) { /* the page is busy: no event of any kind can run */ }
+				return Date.now() - t;
+			});
+			expect(frozeMs, 'precondition: the freeze outlasted the deadline').toBeGreaterThan(1500 * 2);
+
+			await expect.poll(async () => (await lobbyState(host)).pending?.name,
+				{ timeout: 30_000, message: 'the join reached the host' }).toBe('Ada');
+			expect((await lobbyState(guest)).error, 'the guest was not told the host is unreachable').toBe('');
+		} finally {
+			await hostCtx.close().catch(() => {}); await guestCtx.close().catch(() => {});
+			try { bridge.close(); } catch (e) { /* ignore */ }
+			await new Promise((r) => server.close(r));
+		}
+	});
+
 	test('Cancel on the host view frees the seat (T1)', async ({ browser }) => {
 		test.setTimeout(MP_TEST_TIMEOUT);
 		const { server, bridge, port } = await start(0);

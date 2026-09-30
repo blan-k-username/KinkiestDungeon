@@ -1069,9 +1069,21 @@
 		if (coop.started) return;                      // a reconnect — not ours to time out
 		var ms = Number(window.__coopConnectTimeoutMs);
 		if (!(ms > 0)) ms = 10000;
+		var due = Date.now() + ms;
 		connectTimer = setTimeout(function () {
 			connectTimer = null;
 			if (ws !== sock || sock.readyState !== 0) return;   // opened, failed, or superseded
+			/*
+			 * KDM-306 — a deadline that runs LATE did not watch the server; the page was frozen.
+			 *
+			 * Measured (probe runs 14, 25): the page dialled and then its own main thread stalled
+			 * 11-16 s (KD's work, not the network). The timer came due inside the freeze, ran first on
+			 * waking — ahead of the socket's queued `open` — and closed a connection that had in fact
+			 * succeeded: "Could not reach" the host's own address, and the join never left the guest.
+			 * So a late firing grants a fresh window instead of a verdict. A server that is really
+			 * silent still gets given up on: that window runs with a live page, and fires on time.
+			 */
+			if (Date.now() - due > 1000) { armConnectDeadline(sock, where); return; }
 			coop._closedForGood = true;                // do not dial a silent door forever
 			try { sock.close(); } catch (e) { /* already going */ }
 			// F4: the progress line is REPLACED, never left standing as the terminal state.
