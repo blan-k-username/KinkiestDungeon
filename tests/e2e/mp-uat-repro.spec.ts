@@ -312,15 +312,20 @@ test('the floater queue drains once nothing is creating floaters', async ({ brow
 		await bootCoopPair(A, B, port);
 
 		// Make floaters the way the game does — many, so the queue is unmistakably non-empty.
-		await B.evaluate(() => {
+		// The peak is read in the SAME task that creates them (KDM-312). KD's floater draw ages at most
+		// 42 floaters per frame by the time since the last floater draw, so a frame landing between two
+		// evaluates after one of this page's multi-second stalls expired 42 of the 60 at once — and the
+		// precondition read exactly 60 - 42 = 18. That measured the page's frame timing, not the drain.
+		const peak = await B.evaluate(() => {
 			// @ts-ignore bare let-global — the game's own single creation point
 			const p = KinkyDungeonPlayerEntity;
 			for (let i = 0; i < 60; i++) {
 				// @ts-ignore
 				KinkyDungeonSendFloater(p, 16, '#ff5555');
 			}
+			// @ts-ignore bare let-global
+			return KinkyDungeonFloaters.length;
 		});
-		const peak = (await coopFloaters(B)).queue;
 		expect(peak, 'no floaters were created — nothing to measure').toBeGreaterThan(30);
 
 		// Nothing creates floaters from here on. They are transient: they MUST expire.
