@@ -59,6 +59,15 @@ test('a global dropped from the bundle goes back to its default (and the stale g
 
 		const pristine = read();
 
+		// KDM-308 added a SECOND guard against this exact state: after every apply the client drops a
+		// struggle group whose restraint is not worn (`mp-stale-struggle-group.spec.ts`). Nothing is
+		// worn in these snapshots, so that guard alone would empty the list and this spec could no
+		// longer see whether THIS rule works. Make every group read as worn while the rule is measured.
+		// @ts-ignore bare global
+		const realGetItem = KinkyDungeonGetRestraintItem;
+		// @ts-ignore
+		KinkyDungeonGetRestraintItem = () => ({ name: 'stub' });
+
 		// ---- CONTROL: no rule wired up == the old behaviour, which must still go stale ----
 		const savedRule = w.KDAbsentReset;
 		delete w.KDAbsentReset;
@@ -77,6 +86,9 @@ test('a global dropped from the bundle goes back to its default (and the stale g
 		const fixedBound = read();
 		w.KDRenderClient.apply(snapWithout());
 		const fixedFreed = read();
+
+		// @ts-ignore
+		KinkyDungeonGetRestraintItem = realGetItem;
 
 		// And the consequence that actually crashed: a cached group whose restraint is gone.
 		// @ts-ignore

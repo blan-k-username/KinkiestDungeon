@@ -113,6 +113,40 @@
 	}
 
 	/**
+	 * KDM-308 — a struggle group with no worn item must not reach KD's HUD.
+	 *
+	 * `KinkyDungeonStruggleGroups` is a CACHE of the worn set (KD's `KinkyDungeonUpdateStruggleGroups`
+	 * keeps only groups whose `KinkyDungeonGetRestraintItem(group)` is truthy), and this client adopts
+	 * the cache and the worn set from the server separately. When they disagree, KD's HUD dereferences
+	 * the missing item unguarded and the renderer dies every frame (owner UAT 2026-09-30:
+	 * `KDGetItemPreview` ← `KDDrawStruggleGroups`, reading 'type' of null; the earlier cousin at
+	 * KinkyDungeonHUD.ts:3511 is UPSTREAM_ISSUES.md #3).
+	 *
+	 * How the two fell out of step in that session is not known yet, so this does two things: it drops
+	 * exactly the entries KD's own rebuild would drop (no other derivation — KDM-162), and it reports
+	 * each one loudly with the worn set, so the next occurrence names its cause instead of crashing.
+	 */
+	function pruneStaleStruggleGroups() {
+		if (typeof KinkyDungeonStruggleGroups === 'undefined' || !Array.isArray(KinkyDungeonStruggleGroups)
+			|| typeof KinkyDungeonGetRestraintItem !== 'function') return;
+		var kept = [], stale = [];
+		for (var i = 0; i < KinkyDungeonStruggleGroups.length; i++) {
+			var sg = KinkyDungeonStruggleGroups[i];
+			if (sg && sg.group && KinkyDungeonGetRestraintItem(sg.group)) kept.push(sg);
+			else stale.push(sg && sg.group);
+		}
+		if (!stale.length) return;
+		KinkyDungeonStruggleGroups = kept;
+		KDRenderClient.staleStruggleGroups = (KDRenderClient.staleStruggleGroups || 0) + stale.length;
+		try {
+			var worn = [];
+			KinkyDungeonAllRestraint().forEach(function (it) { if (it && it.name) worn.push(it.name); });
+			console.warn('[coop] KDM-308: dropped struggle group(s) with no worn item: ' + stale.join(',')
+				+ ' — worn: ' + (worn.join(',') || '(none)') + '. Please report this line.');
+		} catch (e) { /* the report must never be what crashes */ }
+	}
+
+	/**
 	 * Ensure the `RemotePlayer` avatar enemy-def exists in THIS browser. The server
 	 * represents each other player as a `RemotePlayer` ally entity; the snapshot only
 	 * carries `enemyName`, and apply() re-links the def by name. The stock browser
@@ -648,6 +682,7 @@
 						}
 					} catch (e) { /* best-effort render sync */ }
 				}
+				pruneStaleStruggleGroups();
 				KinkyDungeonMessageLog = s.messages.log || [];
 			/*
 			 * KDM-186 — ONE-SHOT EVENTS ARE APPLIED AT MOST ONCE.

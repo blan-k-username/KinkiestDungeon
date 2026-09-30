@@ -145,6 +145,12 @@ changes behaviour where the code currently throws.
 per-player global whose key vanishes from the capture now goes back to its default on the client, as
 it already did on the host. This entry is defence in depth: a stale cache should not kill the renderer.
 
+**Second site, same window (KDM-308, 2026-09-30):** the hover path's
+`KDGetItemPreview(currentHighlightedItem || item)` reads `item.type` with `item` null — UAT crash
+"Cannot read properties of null (reading 'type')". The co-op client now drops any struggle group with no
+worn item after every snapshot (`render-client.js` `pruneStaleStruggleGroups`) and warns
+`[coop] KDM-308: …` with the worn set, because how that session's cache fell out of step is still unknown.
+
 ---
 
 ## `KinkyDungeonVision.ts:158` — operator precedence dereferences an undefined `Enemy`
