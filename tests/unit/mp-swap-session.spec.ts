@@ -8,6 +8,7 @@
  * damages the shared enemy).
  */
 import { describe, it, expect, beforeAll } from 'vitest';
+import { contestedTarget } from '../helpers/session-tiles';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { SwapSession } = require('../../tools/mp-server/swap-session');
 
@@ -17,7 +18,7 @@ describe('SwapSession — uniform action model (KD-085)', () => {
 	let s: any;
 
 	beforeAll(() => {
-		s = new SwapSession({ requiredPlayers: 2, seed: 'swap-session-seed' });
+		s = new SwapSession({ requiredPlayers: 2, seed: 'swap-session-seed', enemyType: 'Rat' });
 		s.join('A');
 		s.join('B');
 	}, BOOT_TIMEOUT);
@@ -66,22 +67,24 @@ describe('SwapSession — random-order conflict resolution (R9)', () => {
 		s.join('B');
 		const a0 = s.posOf('A');
 		const b0 = s.posOf('B');
-		// A and B start adjacent (B = A + (1,0)); both aim for (a0.x+1, a0.y+1)
-		const target = { x: a0.x + 1, y: a0.y + 1 };
+		// Both aim for one free tile adjacent to BOTH (found, not assumed — KDM-309).
+		const target: any = contestedTarget(s);
+		expect(target, 'precondition: a free tile both players can step onto').not.toBeNull();
 		s.submit('A', { kind: 'move', dx: target.x - a0.x, dy: target.y - a0.y });
 		s.submit('B', { kind: 'move', dx: target.x - b0.x, dy: target.y - b0.y });
 		const a1 = s.posOf('A');
 		const b1 = s.posOf('B');
 		const aOn = a1.x === target.x && a1.y === target.y;
 		const bOn = b1.x === target.x && b1.y === target.y;
-		// at most one occupies the contested tile (the loser was blocked by collision)
+		// exactly one occupies the contested tile (the loser was blocked by collision)
 		expect(aOn && bOn).toBe(false);
+		expect(aOn || bOn, 'somebody won the tile — a race nobody entered proves nothing').toBe(true);
 	}, BOOT_TIMEOUT);
 });
 
 describe('SwapSession — world authority (bump attack)', () => {
 	it('moving into the shared enemy damages it authoritatively', () => {
-		const s = new SwapSession({ requiredPlayers: 2, seed: 'swap-attack-seed' });
+		const s = new SwapSession({ requiredPlayers: 2, seed: 'swap-attack-seed', enemyType: 'Rat' });
 		s.join('A');
 		s.join('B');
 		// place the enemy directly next to A, then A moves into it (bump = attack)

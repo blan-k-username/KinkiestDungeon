@@ -17,7 +17,7 @@ test('two browser windows play one shared co-op dungeon via the demo server', as
 	// Heavyweight: TWO full game bundles (each preloads ~600 char assets) + the
 	// server's 3 headless instances. Generous timeouts to absorb the cold start.
 	test.setTimeout(MP_TEST_TIMEOUT);
-	const { server, bridge, port } = await start(0);
+	const { server, bridge, port } = await start(0, { enemyType: 'Rat' });
 
 	const ctxA = await browser.newContext();
 	const ctxB = await browser.newContext();

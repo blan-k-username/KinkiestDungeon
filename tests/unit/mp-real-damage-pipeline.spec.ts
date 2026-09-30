@@ -20,6 +20,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { SwapSession } = require('../../tools/mp-server/swap-session');
+import { freeNeighbour } from '../helpers/session-tiles';
 
 const BOOT_TIMEOUT = 240_000;
 
@@ -45,18 +46,26 @@ describe('KDM-164 — PvP damage uses the real player pipeline', () => {
 		s = new SwapSession({ requiredPlayers: 2, seed: 'kdm164-real', pvp: true });
 		s.join('A'); s.join('B');
 		await s.ready();
-		s.world.loadMod(RECORDER);
+		// A plain eval, NOT `loadMod`: loading a mod mid-session re-baselines every per-player default
+		// against the parked global player (headless-host `loadMod`, the accepted edge case). A player
+		// still on their post-init tile carries no position in their bundle (KDM-309 seats the host
+		// exactly there), so their next restore put them on the parking tile. The recorder only wraps
+		// a function; it has no per-player state to baseline.
+		s.world.eval(RECORDER);
 		// A acts first, so B's avatar is still where we put it when A swings. With random order the
 		// peer's own turn re-syncs its avatar back and silently undoes the setup (same mechanism as the
 		// KDM-163 mp-coop-demo flake).
 		s._shuffle = () => ['A', 'B'];
 	}, BOOT_TIMEOUT);
 
-	/** Put B's avatar directly below A and have A bump-attack it. */
+	/** Stand B's avatar on a free tile beside A and have A bump-attack it. */
 	function bumpB() {
-		const a = s.posOf('A');
-		s.world.moveAvatar(s.avatars.get('B'), a.x, a.y + 1);
-		s.submit('A', { kdType: 'move', data: { dir: { x: 0, y: 1 }, delta: 1, AllowInteract: true } });
+		// B off its own tile first, so "free" can include where B was standing.
+		s.world.moveAvatar(s.avatars.get('B'), 0, 0);
+		const n = freeNeighbour(s, 'A');
+		expect(n, 'precondition: a free tile beside A').not.toBeNull();
+		s.world.moveAvatar(s.avatars.get('B'), n!.x, n!.y);
+		s.submit('A', { kdType: 'move', data: { dir: { x: n!.dx, y: n!.dy }, delta: 1, AllowInteract: true } });
 		s.submit('B', { kind: 'wait' });
 	}
 	const dealt = () => JSON.parse(s.world.eval(

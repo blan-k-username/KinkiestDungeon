@@ -20,6 +20,7 @@
  */
 import { test, expect } from '@playwright/test';
 import { bootCoopPair, MP_TEST_TIMEOUT } from './helpers/coop';
+import { freeNeighbour } from '../helpers/session-tiles';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
 
@@ -30,23 +31,36 @@ const pos = (P: any) => P.evaluate(() => ({
 /**
  * Screen point of a tile at PATH distance `n` (BFS over walkable, empty tiles), skipping `avoid`.
  *
- * Waits until KD's camera is centred on the player first: right after boot `KinkyDungeonCamX/Y` can
- * still be settling, and a point computed from them then lands on the UI instead of the tile (seen:
- * the tile left of the player mapped to the top-right corner, and #3's first click did nothing).
+ * Only a tile whose screen point lies in the open play area counts, read from a camera that has stopped.
+ * Two ways a click used to land on UI instead of the tile: right after boot `KinkyDungeonCamX/Y` can
+ * still be settling (the tile left of the player mapped to the top-right corner), and near a map EDGE
+ * a neighbour of the player may sit under the HUD — the party now starts on KD's own
+ * start tile, which is often beside an edge (KDM-309). Polled, so a settling camera is simply waited out.
  */
 async function pathTarget(P: any, n: number, avoid: any = null) {
-	let t: any;
-	await expect.poll(async () => { t = await pathTargetNow(P, n, avoid); return !t || t.centred; },
-		{ timeout: 15_000, message: "KD's camera centres on the player" }).toBe(true);
+	let t: any; let prev = '';
+	await expect.poll(async () => {
+		t = await pathTargetNow(P, n, avoid);
+		const now = t ? [t.tx, t.ty, Math.round(t.x), Math.round(t.y)].join(',') : '';
+		const stable = now !== '' && now === prev;   // the camera has stopped moving
+		prev = now;
+		return stable && t.onScreen;
+	}, { timeout: 15_000, intervals: [250], message: `a tile ${n} steps away, clear of the HUD` }).toBe(true);
 	return t;
 }
 const pathTargetNow = (P: any, n: number, avoid: any) => P.evaluate((a: any) => {
 	// @ts-ignore
 	const p = KinkyDungeonPlayerEntity;
+	// A tile's centre in KD's 2000x1000 canvas space, and whether it is clear of the HUD.
+	// @ts-ignore
+	const gx = (x: number) => (x - KinkyDungeonCamX) * KinkyDungeonGridSizeDisplay + canvasOffsetX + KinkyDungeonGridSizeDisplay / 2;
+	// @ts-ignore
+	const gy = (y: number) => (y - KinkyDungeonCamY) * KinkyDungeonGridSizeDisplay + canvasOffsetY + KinkyDungeonGridSizeDisplay / 2;
+	const clear = (x: number, y: number) => gx(x) > 450 && gx(x) < 1550 && gy(y) > 150 && gy(y) < 850;
 	const key = (x: number, y: number) => x + ',' + y;
 	const seen: any = {}; seen[key(p.x, p.y)] = 0;
-	let frontier = [[p.x, p.y]]; let found: any = null;
-	for (let d = 1; d <= a.n && !found; d++) {
+	let frontier = [[p.x, p.y]]; const ring: number[][] = [];
+	for (let d = 1; d <= a.n; d++) {
 		const next: any[] = [];
 		for (const [x, y] of frontier) for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]]) {
 			const tx = x + dx, ty = y + dy; if (seen[key(tx, ty)] !== undefined) continue;
@@ -55,24 +69,18 @@ const pathTargetNow = (P: any, n: number, avoid: any) => P.evaluate((a: any) => 
 			// @ts-ignore
 			if (KDMapData.Entities.some((e: any) => e.x === tx && e.y === ty)) continue;
 			seen[key(tx, ty)] = d; next.push([tx, ty]);
-			if (d === a.n && !found && !(a.avoid && a.avoid.tx === tx && a.avoid.ty === ty)) found = [tx, ty];
+			if (d === a.n && !(a.avoid && a.avoid.tx === tx && a.avoid.ty === ty)) ring.push([tx, ty]);
 		}
 		frontier = next;
 	}
-	if (!found) return null;
-	const [tx, ty] = found;
-	// A tile's centre in KD's 2000x1000 canvas space.
-	// @ts-ignore
-	const gx = (x: number) => (x - KinkyDungeonCamX) * KinkyDungeonGridSizeDisplay + canvasOffsetX + KinkyDungeonGridSizeDisplay / 2;
-	// @ts-ignore
-	const gy = (y: number) => (y - KinkyDungeonCamY) * KinkyDungeonGridSizeDisplay + canvasOffsetY + KinkyDungeonGridSizeDisplay / 2;
-	const kx = gx(tx), ky = gy(ty);
-	// The player sits in the middle half of the view once the camera has followed them.
-	const centred = Math.abs(gx(p.x) - 1000) < 500 && Math.abs(gy(p.y) - 500) < 250;
+	if (!ring.length) return null;
+	const pick = ring.find(([x, y]) => clear(x, y)) || ring[0];
+	const [tx, ty] = pick;
 	// @ts-ignore
 	const view = (typeof PIXIapp !== 'undefined' && PIXIapp.view) || document.querySelector('canvas');
 	const r = view.getBoundingClientRect();
-	return { tx, ty, centred, x: r.left + kx * r.width / 2000, y: r.top + ky * r.height / 1000 };
+	return { tx, ty, onScreen: clear(tx, ty),
+		x: r.left + gx(tx) * r.width / 2000, y: r.top + gy(ty) * r.height / 1000 };
 }, { n, avoid });
 
 /** A REAL click: mouse down/up over the tile, through KD's own input path. */
@@ -90,18 +98,8 @@ async function partnerWaits(A: any, B: any) {
 	await A.waitForTimeout(1000);
 }
 
-/** Take the session's demo enemy out of the world, so the partner is the only other entity. */
-async function removeDemoEnemy(bridge: any, A: any, B: any) {
-	const id = bridge.session.enemyId;
-	bridge.session.world.eval(`KDMapData.Entities = KDMapData.Entities.filter(function(e){ return e.id !== ${id | 0}; }); KDUpdateEnemyCache = true;`);
-	await A.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
-	await partnerWaits(A, B);
-	await expect.poll(() => A.evaluate((i: number) => !KDMapData.Entities.some((e: any) => e.id === i), id),
-		{ timeout: 30_000, message: 'the demo enemy is gone on A' }).toBe(true);
-}
-
-async function withPair(body: (A: any, B: any, bridge: any) => Promise<void>, browser: any) {
-	const { server, bridge, port } = await start(0);
+async function withPair(body: (A: any, B: any, bridge: any) => Promise<void>, browser: any, overrides: any = null) {
+	const { server, bridge, port } = await start(0, overrides);
 	const ctxA = await browser.newContext({ viewport: { width: 1600, height: 900 } });
 	const ctxB = await browser.newContext({ viewport: { width: 1600, height: 900 } });
 	const A = await ctxA.newPage(); const B = await ctxB.newPage();
@@ -118,8 +116,10 @@ async function withPair(body: (A: any, B: any, bridge: any) => Promise<void>, br
 test.describe('KDM-310 — co-op click-to-move', () => {
 	test('#1 with only the partner in view, a clicked path is walked to its end', async ({ browser }) => {
 		test.setTimeout(MP_TEST_TIMEOUT);
-		await withPair(async (A, B, bridge) => {
-			await removeDemoEnemy(bridge, A, B);
+		await withPair(async (A, B) => {
+			// No demo enemy by default (KDM-309): the partner is the only other entity near the start.
+			// Asserted, so a generated enemy wandering into view fails loudly instead of making #1 #2.
+			expect(await A.evaluate(() => (window as any).__coop._inDanger()), 'control: nothing but the partner in view').toBe(false);
 			const t = await pathTarget(A, 4);
 			expect(t, 'control: a tile 4 steps away exists').not.toBeNull();
 			await click(A, t);
@@ -134,8 +134,17 @@ test.describe('KDM-310 — co-op click-to-move', () => {
 
 	test('#2 CONTROL — a real enemy in view still stops the walk after the first step, as in single player', async ({ browser }) => {
 		test.setTimeout(MP_TEST_TIMEOUT);
-		await withPair(async (A, B) => {
-			// The demo enemy stays: KD's own danger rule must still apply to it.
+		await withPair(async (A, B, bridge) => {
+			// The demo enemy, asked for (KDM-309 made it opt-in): KD's own danger rule must still apply to it.
+			// Right beside A, so it stays in view as A steps away: summoned a few tiles off the start tile,
+			// A walked 3 tiles in one run — presumably it had dropped out of view.
+			const s = bridge.session;
+			const beside = freeNeighbour(s, 'A');
+			expect(beside, 'precondition: a free tile beside A').not.toBeNull();
+			s.world.moveAvatar(s.enemyId, beside!.x, beside!.y);
+			// A world write reaches A's screen with the next turn: both wait one.
+			await A.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
+			await partnerWaits(A, B);
 			// Polled: right after boot the enemy may not have reached A's view yet. And the ROUTE's own
 			// test, which ignores the partner — KD's raw one would be true from the partner alone.
 			await expect.poll(() => A.evaluate(() => (window as any).__coop._inDanger()),
@@ -147,7 +156,7 @@ test.describe('KDM-310 — co-op click-to-move', () => {
 			const end = await pos(A);
 			const moved = Math.max(Math.abs(end.x - start0.x), Math.abs(end.y - start0.y));
 			expect(moved, 'exactly one step: the clicked one').toBe(1);
-		}, browser);
+		}, browser, { enemyType: 'Rat' });
 	});
 
 	test('#3 a second click while waiting for the partner replaces the first', async ({ browser }) => {

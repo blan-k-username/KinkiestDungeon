@@ -26,6 +26,7 @@
 import { describe, it, expect } from 'vitest';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { SwapSession } = require('../../tools/mp-server/swap-session');
+import { freeNeighbour } from '../helpers/session-tiles';
 
 const BOOT_TIMEOUT = 240_000;
 
@@ -35,7 +36,7 @@ const CHATTER = { kdType: 'setMoveDirection', data: { dir: { x: 0, y: -1 } } };
 const BUMP = { kdType: 'move', data: { dir: { x: 0, y: 1 }, delta: 1, AllowInteract: true } };
 
 function makeSession(seed: string) {
-	const s = new SwapSession({ requiredPlayers: 2, seed, seedInputKinds: true });
+	const s = new SwapSession({ requiredPlayers: 2, seed, seedInputKinds: true, enemyType: 'Rat' });
 	s.join('A');
 	s.join('B');
 	return s;
@@ -146,16 +147,19 @@ describe('KDM-163 — runtime demotion of a turn-consuming type', () => {
 		const s = makeSession('demotion-seed');
 		expect(s.inputKind.get('move'), 'seeded from the bundle: move can advance time').toBe('turn');
 
-		// Walk A into every direction until one is genuinely blocked (no position change, no advance) —
-		// exactly what mp-coop-demo does while hunting for an open tile.
-		let blocked = false;
-		for (const [dx, dy] of [[0, 1], [0, -1], [1, 0], [-1, 0], [1, 1], [-1, -1], [1, -1], [-1, 1]]) {
-			const before = s.posOf('A');
-			s.apply('A', { kdType: 'move', data: { dir: { x: dx, y: dy }, delta: 1, AllowInteract: true } });
-			s.apply('B', { kind: 'wait' });
-			const after = s.posOf('A');
-			if (before && after && before.x === after.x && before.y === after.y) { blocked = true; break; }
-		}
+		// Walk A into a genuinely blocked tile (no position change, no advance) — the ALLY blocking it,
+		// the case mp-coop-demo hits while hunting for an open tile. Built, not hunted for: which
+		// directions happen to be walls depends on where the party lands (KDM-309).
+		s._shuffle = () => ['A', 'B'];   // B's own turn must not move its avatar off the tile first
+		s.world.moveAvatar(s.avatars.get('B'), 0, 0);
+		const n = freeNeighbour(s, 'A');
+		expect(n, 'precondition: a free tile beside A').not.toBeNull();
+		s.world.moveAvatar(s.avatars.get('B'), n!.x, n!.y);
+		const before = s.posOf('A');
+		s.apply('A', { kdType: 'move', data: { dir: { x: n!.dx, y: n!.dy }, delta: 1, AllowInteract: true } });
+		s.apply('B', { kind: 'wait' });
+		const after = s.posOf('A');
+		const blocked = !!(before && after && before.x === after.x && before.y === after.y);
 		expect(blocked, 'the scenario needs at least one blocked direction to be meaningful').toBe(true);
 
 		expect(s.inputKind.get('move'),

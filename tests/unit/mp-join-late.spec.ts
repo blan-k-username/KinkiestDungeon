@@ -71,7 +71,7 @@ describe('KDM-235 — seating a latecomer into a live run', () => {
 	beforeAll(async () => {
 		// requiredPlayers: 1 — the session starts with the host ALONE, which is the situation this
 		// feature exists for. It is also the state KDM-253 leaves behind after "continue solo".
-		s = new SwapSession({ requiredPlayers: 1, seed: 'join-late', pvp: false });
+		s = new SwapSession({ requiredPlayers: 1, seed: 'join-late', pvp: false, enemyType: 'Rat' });
 		s.join('A');
 		await s.ready();
 

@@ -99,8 +99,10 @@ describe('KDM-160 · I3 — single-player parity oracle', () => {
 		const ref = new HeadlessHost({ id: 'ref' });
 		ref.boot();
 		ref.init({ seed: SEED });
-		const base = ref.findOpenTile();
-		ref.placePlayer(base.x, base.y);
+		// KDM-309: single player starts where map generation put the player — the reference no longer
+		// copies the co-op session's old `findOpenTile` spawn, it is the thing co-op must now match.
+		const p0 = ref.getPlayerPos();
+		const base = { x: p0.x, y: p0.y };
 
 		const sub = new SwapSession({ requiredPlayers: 1, seed: SEED });
 		sub.join('A');

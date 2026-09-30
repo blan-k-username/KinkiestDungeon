@@ -22,7 +22,7 @@ describe('apply/commit split (KDM-163 option A)', () => {
 	let s: any;
 
 	beforeAll(() => {
-		s = new SwapSession({ requiredPlayers: 2, seed: 'apply-commit-seed', seedInputKinds: true });
+		s = new SwapSession({ requiredPlayers: 2, seed: 'apply-commit-seed', seedInputKinds: true, enemyType: 'Rat' });
 		s.join('A');
 		s.join('B');
 	}, BOOT_TIMEOUT);

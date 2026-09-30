@@ -248,11 +248,11 @@ const dropInit = (c) => (c.init ? c.init() : []);
 const dropCollect = (c, held) => (c.collect ? c.collect(held) : held.slice());
 
 class SwapSession {
-	/** @param {object} opts { requiredPlayers=2, seed, enemyType='Rat' } */
+	/** @param {object} opts { requiredPlayers=2, seed, enemyType=null (KDM-309: a demo enemy, opt-in) } */
 	constructor(opts = {}) {
 		this.required = opts.requiredPlayers || 2;
 		this.seed = opts.seed || 'swap-session-seed';
-		this.enemyType = opts.enemyType || 'Rat';
+		this.enemyType = opts.enemyType || null;
 		this.maxLog = opts.maxLog || 100;
 		this.pvp = !!opts.pvp;        // global PvP toggle (KD-092) — OFF by default (co-op)
 		// KDM-227: the per-pair relationship, and the offer/answer handshake that changes it.
@@ -812,19 +812,23 @@ class SwapSession {
 			 */
 			this._templateOf.set(this._joined[0], this.world.capturePlayer());
 		}
-		// A3 §7 — on an imported run the party starts where the host's own run left off, not on a
-		// tile chosen by the map scan. `findOpenTile` remains the answer for a generated world.
-		const base = (hostSave && this.world.getPlayerPos()) || this.world.findOpenTile();
-		let i = 0;
-		for (const id of this._joined) {
-			// give each player a starting bundle at a distinct position
-			this._seatPlayer(id, { x: base.x + i, y: base.y });
-			i++;
+		/*
+		 * KDM-309 — the party lands where single player lands the player: KD put the player on the map's
+		 * start during generation (or, on an imported run, where the host's run left off — A3 §7), and
+		 * `landingTiles` answers "that tile, plus free neighbours" — the same rule as every later floor.
+		 * This used to be `findOpenTile()` (a map-wide scan for the most open tile, nowhere near KD's
+		 * start) with seat i at `base.x + i`, which could be a wall or occupied (owner UAT 2026-09-30).
+		 */
+		const seats = this.world.landingTiles(this._joined.length);
+		this._joined.forEach((id, i) => this._seatPlayer(id, seats[i]));
+		const base = seats[0];
+		// KDM-309: the early demo's shared enemy is OPT-IN (`enemyType`) — only specs that fight it ask.
+		if (this.enemyType) {
+			this.world.placePlayer(base.x, base.y);
+			const enemy = this.world.summonEnemy(base.x + this._joined.length, base.y, this.enemyType, { rad: 6 });
+			this.enemyId = enemy ? enemy.id : null;
 		}
-		// one shared enemy near the players; park the global player between turns
-		this.world.placePlayer(base.x, base.y);
-		const enemy = this.world.summonEnemy(base.x + this._joined.length, base.y, this.enemyType, { rad: 6 });
-		this.enemyId = enemy ? enemy.id : null;
+		// park the global player between turns
 		this.world.parkGlobalPlayer(PARK.x, PARK.y);
 		// KD-090: seed every player's personal log with the shared intro log; per-turn
 		// deltas are appended in _advanceTurn so each client sees only its own messages.

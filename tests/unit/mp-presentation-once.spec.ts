@@ -44,7 +44,7 @@ describe('KDM-196: consume-once presentation queues', () => {
 	let firstEvents: any[] = [];
 
 	beforeAll(() => {
-		s = new SwapSession({ requiredPlayers: 2, seed: 'diag-196b' });
+		s = new SwapSession({ requiredPlayers: 2, seed: 'diag-196b', enemyType: 'Rat' });
 		s.join('A');
 		s.join('B');
 		// Six real turns — the exact sequence the diagnostic measured six undrained shockwaves for.

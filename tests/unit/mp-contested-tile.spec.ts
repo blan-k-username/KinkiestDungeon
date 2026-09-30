@@ -15,28 +15,12 @@
  * of the two arms and call it proof.
  */
 import { describe, it, expect } from 'vitest';
+import { contestedTarget } from '../helpers/session-tiles';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { SwapSession } = require('../../tools/mp-server/swap-session');
 
 const BOOT_TIMEOUT = 240_000;
 
-/** A tile adjacent to BOTH players that the engine says is walkable and empty right now. */
-function contestedTarget(s: any) {
-	const a = s.posOf('A'), b = s.posOf('B');
-	const adj = (p: any, c: any) => Math.max(Math.abs(p.x - c.x), Math.abs(p.y - c.y)) === 1;
-	for (let dx = -1; dx <= 1; dx++) {
-		for (let dy = -1; dy <= 1; dy++) {
-			const c = { x: a.x + dx, y: a.y + dy };
-			if (!adj(a, c) || !adj(b, c)) continue;
-			const ok = s.world.eval(`(function(){
-				var t = KinkyDungeonMapGet(${c.x}, ${c.y});
-				return !!(KinkyDungeonMovableTilesEnemy.includes(t) && !KinkyDungeonEntityAt(${c.x}, ${c.y}));
-			})()`);
-			if (ok) return c;
-		}
-	}
-	return null;
-}
 
 const logOf = (s: any, id: string) => (s.logs.get(id) || []).map((m: any) => (m && m.text) || '').join('\n');
 

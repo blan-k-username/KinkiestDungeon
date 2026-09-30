@@ -24,7 +24,8 @@ import { describe, it, expect, beforeAll } from 'vitest';
 const { HeadlessHost } = require('../../tools/mp-server/headless-host');
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { SwapSession } = require('../../tools/mp-server/swap-session');
-import { bundleGiveMana, bundlePlayer, bundleHasBuff } from './helpers/bundle';
+import { bundleGiveMana, bundleHasBuff } from './helpers/bundle';
+import { freeNeighbour } from '../helpers/session-tiles';
 
 const BOOT_TIMEOUT = 240_000;
 
@@ -97,7 +98,7 @@ describe('Co-op spell casting over the live swap path (KD-089)', () => {
 	let s: any;
 
 	beforeAll(() => {
-		s = new SwapSession({ requiredPlayers: 2, seed: 'swap-spell-seed' });
+		s = new SwapSession({ requiredPlayers: 2, seed: 'swap-spell-seed', enemyType: 'Rat' });
 		s.join('A');
 		s.join('B'); // 2nd join starts the session (boots world, summons shared enemy)
 	}, BOOT_TIMEOUT);
@@ -109,8 +110,10 @@ describe('Co-op spell casting over the live swap path (KD-089)', () => {
 		// Deterministically park the shared enemy adjacent to A's cast origin so the cast is
 		// in-range regardless of the Rat's wandering AI (Firecracker range 3.99; AoE 1 tile
 		// still covers a 1-tile enemy step before detonation).
-		const pa0 = bundlePlayer(s.bundles.get('A'));
-		s.world.moveAvatar(s.enemyId, pa0.x + 1, pa0.y);
+		const pa0 = s.posOf('A');   // KDM-309: A may sit on the post-init tile, so the bundle need not carry it
+		const beside = freeNeighbour(s, 'A');
+		expect(beside, 'precondition: a free tile beside A').not.toBeNull();
+		s.world.moveAvatar(s.enemyId, beside!.x, beside!.y);
 		const enemy0 = s.enemyView();
 		expect(enemy0).toBeTruthy();
 		const hp0 = enemy0.hp;
@@ -154,7 +157,7 @@ describe('Co-op spell casting over the live swap path (KD-089)', () => {
 		bundleGiveMana(s.bundles.get('A'));
 
 		// Self-cast StoneSkin: target = A's own bundle position (selfCast in KinkyDungeonCastSpell).
-		const pa = bundlePlayer(s.bundles.get('A'));
+		const pa = s.posOf('A');
 		s.submit('A', {
 			kdType: 'tryCastSpell',
 			data: { tx: pa.x, ty: pa.y, spellname: 'StoneSkin', player: { __kdEnt: 'player' } },
