@@ -40,6 +40,8 @@
  */
 'use strict';
 
+const { ROUTED_HERE } = require('./kd-coop-routed');
+
 const KD_JOURNEY_CHOICE = `
 (function(){
 	var g = (typeof globalThis !== 'undefined') ? globalThis : this;
@@ -50,6 +52,8 @@ const KD_JOURNEY_CHOICE = `
 	// captured, shipped in the bundle, and the CLIENT's copy overwritten by the server's. Measured in
 	// KDM-264, where the browser's counters read back as the server's.
 	if (!g.__KDCoopJourneyStats) g.__KDCoopJourneyStats = { calls: 0, observed: 0, routed: 0, last: null };
+	// KDM-307 - route only when there is somewhere to route to (kd-coop-routed.js).
+${ROUTED_HERE}
 
 	/*
 	 * THE ROUTED INPUT. Registered here rather than in the session because a routed input must be
@@ -84,6 +88,8 @@ const KD_JOURNEY_CHOICE = `
 		};
 
 		var wrapped = function () {
+			// KDM-307 - a solo page keeps KD's own pick: nobody to route it to.
+			if (!routedHere('KDCoopJourneyPropose')) return _prev.apply(this, arguments);
 			var before = (typeof KDGameData !== 'undefined' && KDGameData) ? KDGameData.JourneyTarget : undefined;
 			g.__KDCoopJourneyStats.calls++;
 			var out = _prev.apply(this, arguments);

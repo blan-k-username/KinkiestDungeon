@@ -57,6 +57,8 @@
  */
 'use strict';
 
+const { ROUTED_HERE } = require('./kd-coop-routed');
+
 const KD_PERK_CHOICE = `
 (function(){
 	var g = (typeof globalThis !== 'undefined') ? globalThis : this;
@@ -69,6 +71,8 @@ const KD_PERK_CHOICE = `
 	if (!g.__KDCoopPerkStats) g.__KDCoopPerkStats = { calls: 0, acceptsSuppressed: 0, cursorMoves: 0, routed: 0, last: null };
 	// The PRIVATE card cursor. -1 is KD's own "nothing selected" (KinkyDungeonGame.ts:292).
 	if (typeof g.__KDCoopPerkCursor !== 'number') g.__KDCoopPerkCursor = -1;
+	// KDM-307 - route only when there is somewhere to route to (kd-coop-routed.js).
+${ROUTED_HERE}
 
 	/*
 	 * THE ROUTED INPUT. Registered here rather than in the session because a routed input must be
@@ -120,6 +124,8 @@ const KD_PERK_CHOICE = `
 		var _prev = KinkyDungeonDrawPerkOrb;
 
 		KinkyDungeonDrawPerkOrb = function () {
+			// KDM-307 - a solo page keeps KD's own card and Accept: nobody to route them to.
+			if (!routedHere('KDCoopPerkPropose')) return _prev.apply(this, arguments);
 			g.__KDCoopPerkStats.calls++;
 
 			// KD decides whether to draw an Accept button by comparing KDMapData.SelectedPerk to the

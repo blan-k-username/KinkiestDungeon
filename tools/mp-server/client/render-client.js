@@ -779,6 +779,15 @@
 		 * reverted in KD-085; the client is pure monkey-patch). The server is
 		 * authoritative; the client never resolves an action or advances a turn locally.
 		 */
+		/**
+		 * KDM-307 — read-only: is this page a co-op render client right now?
+		 *
+		 * The one question a routed wrap (`kd-perk-choice.js`, `kd-journey-choice.js`) has to ask before
+		 * it swaps what a click MEANS: a page that never entered a session is an ordinary solo game, and
+		 * rerouting its clicks to a server that is not there is how "Accept does nothing" shipped.
+		 */
+		isClientMode: function () { return clientMode; },
+
 		disableLocalSim: function () {
 			clientMode = true;
 			// Belt-and-suspenders (R1): block ALL local turn advance — nothing the player
