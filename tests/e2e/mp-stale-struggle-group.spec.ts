@@ -1,5 +1,5 @@
 /**
- * E2E (KDM-308): a struggle group with no worn item must not reach KD's HUD — in the real browser.
+ * E2E: a struggle group with no worn item must not reach KD's HUD — in the real browser.
  *
  * Owner's UAT crash (2026-09-30), every frame once it started:
  *
@@ -70,7 +70,7 @@ test('a struggle group whose restraint is not worn is dropped and reported, a wo
 	expect(result.hazard, 'precondition: the stale group really has no item (the crash input)').toBeNull();
 	expect(result.stale, 'the stale group never reaches the HUD').toEqual([]);
 	expect(result.count, 'counted').toBe(1);
-	expect(warnings.some((t) => t.includes('KDM-308') && t.includes('ItemBreast')),
+	expect(warnings.some((t) => t.includes('dropped stale struggle group') && t.includes('ItemBreast')),
 		'reported with the group, so the next occurrence names its cause').toBe(true);
 
 	expect(result.wornItem, 'precondition: the control group is worn').toBe(true);

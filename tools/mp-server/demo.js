@@ -1,9 +1,10 @@
 /**
- * tools/mp-server/demo.js  (KD-075)
+ * tools/mp-server/demo.js 
  *
  * The PoC integration capstone: ONE scripted end-to-end run that exercises every
- * pillar of the server-authoritative MP concept (epic KD-078) and prints a
- * human-readable report. Pure assembly of the pieces built in KD-079/081/080/082.
+ * pillar of the server-authoritative MP concept and prints a
+ * human-readable report. Pure assembly of the pieces built earlier (orchestrator, transport,
+ * PvP + server-side mods, real in-game integration).
  *
  * Run (in Docker, per project rules):
  *   docker run --rm -v "$PWD":/usr/src/app -w /usr/src/app node:23-slim \
@@ -21,7 +22,7 @@ async function main() {
 	const PLAYERS = ['A', 'B', 'C'];          // 3 players (the 2–4 range)
 	const MOD_ENEMY = 'AngrySkeleton';
 
-	hr(); log('  KD MULTIPLAYER PoC — INTEGRATION CAPSTONE (KD-075)'); hr();
+	hr(); log('  KD MULTIPLAYER PoC — INTEGRATION CAPSTONE'); hr();
 
 	const s = new IntegratedSession({ seed: 'capstone-seed' });
 

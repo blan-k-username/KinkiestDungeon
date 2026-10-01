@@ -1,9 +1,9 @@
 /**
- * E2E (KDM-256) — KD's OWN class screen is left exactly as KD's, and the declaration is read from it.
+ * E2E — KD's OWN class screen is left exactly as KD's, and the declaration is read from it.
  *
- * ⚠️ TRIMMED BY KDM-293. Two tests here covered the BORROW of `startQuick` / `startGameKinky` /
- * `startGame` — the mechanic that got a player back to a lobby menu of ours after KDM-256 had sent
- * them to `'Diff'`. KDM-293 reversed the direction of travel: the player arrives at `'Diff'` by KD's
+ * ⚠️ TRIMMED WHEN THE LOBBY MENU WAS DELETED. Two tests here covered the BORROW of `startQuick` / `startGameKinky` /
+ * `startGame` — the mechanic that got a player back to a lobby menu of ours after an earlier change had sent
+ * them to `'Diff'`. The lobby rework then reversed the direction of travel: the player arrives at `'Diff'` by KD's
  * own road and presses a co-op entry there, so those three buttons keep starting solo games, which is
  * the right answer for someone who changed their mind. Nothing is borrowed, so there is nothing to
  * test about borrowing. `mp-entry-diff.spec.ts` covers the entry.
@@ -40,7 +40,7 @@ async function onClassScreen(page: any, coopPick: boolean) {
 	await frames(page);
 }
 
-test.describe('KDM-256 — a character is built on KD\'s own screens, from the co-op lobby', () => {
+test.describe('a character is built on KD\'s own screens, from the co-op lobby', () => {
 
 	test('R2 — the screen is KD\'s: the class grid and its stock controls are still there', async ({ isolatedPage: page }) => {
 		await bootKD(page);

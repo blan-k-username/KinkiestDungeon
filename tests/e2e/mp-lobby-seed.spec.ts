@@ -1,7 +1,7 @@
 /**
- * E2E (KDM-259) — the host CHOOSES the run's seed, in the lobby, with the keyboard.
+ * E2E — the host CHOOSES the run's seed, in the lobby, with the keyboard.
  *
- * KDM-239 R5 made the seed a session property that rides the host's handshake and is reproducible
+ * The start ritual (R5) made the seed a session property that rides the host's handshake and is reproducible
  * from (`tests/unit/mp-start-ritual.spec.ts` R6). What it did not give anyone was a way to NAME one:
  * `worldSeed()` read a URL parameter and otherwise answered `''`. This spec is the missing half —
  * lobby field -> `join.world.seed` -> gate -> the value `_start` prefers over the server's own
@@ -21,7 +21,7 @@
  *  2. The asserted value is the TYPED STRING, not a count or a truthy check, so a field wired to the
  *     wrong state key (the name, say) fails here rather than passing.
  *  3. R3 reads the GUEST'S PAINTED SCREEN (`paintedText`), not lobby state — data arriving and
- *     nothing rendering it is the exact state KDM-249 sat in before KDM-257.
+ *     nothing rendering it is the exact state mod sync sat in before the lobby painted its notice.
  */
 import { test, expect } from '@playwright/test';
 import { press, openLobby, guestAsks, lobbyState, paintedText } from '../helpers/mp-lobby';
@@ -39,7 +39,7 @@ async function hostSeed(bridge: any) {
 	return bridge.gate.worldOf(bridge.gate.host).seed;
 }
 
-test.describe('KDM-259 — a host can name the seed', () => {
+test.describe('a host can name the seed', () => {
 
 	test('the host is asked for a seed at all, and what they type is what the session declares (R1, R3)', async ({ browser }) => {
 		test.setTimeout(MP_TEST_TIMEOUT);
@@ -51,7 +51,7 @@ test.describe('KDM-259 — a host can name the seed', () => {
 		try {
 			await openLobby(host, port);
 			// On the lobby ROOT, beside the name field — because `KDMPHost` connects straight from
-			// here and the world declaration is read at ask time (KDM-270). A field on the waiting
+			// here and the world declaration is read at ask time. A field on the waiting
 			// screen would be typed into after the declaration had already gone.
 			await expect(host.locator('#KDMPSeed'), 'the host must have somewhere to name the seed')
 				.toHaveCount(1);

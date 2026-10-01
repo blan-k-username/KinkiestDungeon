@@ -1,11 +1,11 @@
 /**
- * E2E (KDM-225) — the peace handshake through KD's REAL context menu, in two browsers.
+ * E2E — the peace handshake through KD's REAL context menu, in two browsers.
  *
  * The user-observable half of the feature, so `TESTING_POLICY.md` requires it. It drives the same
  * surface a player does — `KDGetContextActions.Game`, the builder a right-click runs — rather than a
  * synthetic action, which is the precedent set by `mp-pvp-menu-attack.spec.ts`.
  *
- * The design under test (KDM-225 D8): the offer and the answer both live on the player's OWN tile.
+ * The design under test: the offer and the answer both live on the player's OWN tile.
  * That is what makes this reachable at all — measured in `mp-peace-menu-gate-probe.spec.ts`, the
  * peer's menu is behind a hostility gate AND a vision gate, and the player's own menu is behind
  * neither (`KDContextMenu.ts:293`, the `entity == KDPlayer()` branch).
@@ -126,7 +126,7 @@ test('offer peace from your own menu; the peer accepts from theirs', async ({ br
 			'a refused action must NOT mark the client as having acted — that is the soft-lock')
 			.toBe(false);
 
-		// ---- 6. the offer arrives as KD's own modal DIALOGUE (KDM-230) ---------------------------
+		// ---- 6. the offer arrives as KD's own modal DIALOGUE ---------------------------
 		//
 		// Opened server-side on B's bundle, so it reaches the client as ordinary adopted state. A
 		// client-side dialogue would be erased by the very next snapshot — and the offer triggers one
@@ -168,7 +168,7 @@ test('offer peace from your own menu; the peer accepts from theirs', async ({ br
 			expect(String(v).length, `text key for "${k}" must not be empty`).toBeGreaterThan(0);
 		}
 
-		// …and the answer is NOT on the context menu any more (KDM-230 AC4).
+		// …and the answer is NOT on the context menu any more.
 		const bMenu = await ownMenu(B);
 		expect(bMenu.options, 'the submenu entries are gone — the dialogue owns the answer')
 			.not.toContain('PeaceAccept');
@@ -223,7 +223,7 @@ test('offer peace from your own menu; the peer accepts from theirs', async ({ br
 		expect(peerMenuAtPeace.entity!.hostile, 'and KD must not consider them hostile').toBe(false);
 		expect(peerMenuAtPeace.entity!.talkable,
 			'a peaceful peer must be talkable — that is what makes them a friendly NPC, and what the '
-			+ '"help me get free" interactions need (KDM-231 builds on exactly this)').toBe(true);
+			+ '"help me get free" interactions need (the untie feature builds on exactly this)').toBe(true);
 		expect(peerMenuAtPeace.options,
 			'attacking must take the deliberate sneak again, exactly as at the start of a co-op session')
 			.toContain('Aggro');

@@ -1,9 +1,9 @@
 /**
- * KDM-196 — in a REAL browser: presentation output is drawn once per game event, not once per snapshot.
+ * In a REAL browser: presentation output is drawn once per game event, not once per snapshot.
  *
  * UAT: *"when I move my mouse very often over Player A (on Player B's screen), I see spam of sound echo
  * animation."* Spam that scales with the SNAPSHOT RATE and not with game events is the signature of
- * one-shot presentation output being replicated as ordinary state — KDM-186's root pattern.
+ * one-shot presentation output being replicated as ordinary state — the root pattern of the earlier snapshot-spam bugs.
  *
  * The node spec (tests/unit/mp-presentation-once.spec.ts) proves the SERVER no longer replicates the
  * queues and delivers them as sequenced events instead. It proves nothing about the browser, which is
@@ -20,7 +20,7 @@
  * synchronous `evaluate` runs no animation frame in between — so the counts below are deterministic.
  *
  * ⚠️ The anti-deletion assertion is load-bearing: "no duplicates" must not be reachable by drawing
- * nothing at all (the trap KDM-186's REPRO 3 v1 fell into).
+ * nothing at all (the trap an earlier reproduction fell into).
  */
 import { test, expect } from '@playwright/test';
 import { bootCoopPair, MP_TEST_TIMEOUT } from './helpers/coop';
@@ -28,9 +28,9 @@ import { tilesAtRange } from '../helpers/session-tiles';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
 
-test('KDM-196: ripples draw once per event, and the SP bar keeps its animation', async ({ browser }) => {
+test('ripples draw once per event, and the SP bar keeps its animation', async ({ browser }) => {
 	test.setTimeout(MP_TEST_TIMEOUT);
-	const { server, bridge, port } = await start(0, { enemyType: 'Rat' });   // KDM-309: the ripples come from ENEMY noise, and the demo enemy is opt-in now
+	const { server, bridge, port } = await start(0, { enemyType: 'Rat' });   // the ripples come from ENEMY noise, and the demo enemy is opt-in now
 	const ctxA = await browser.newContext({ viewport: { width: 1280, height: 720 } });
 	const ctxB = await browser.newContext({ viewport: { width: 1280, height: 720 } });
 	const A = await ctxA.newPage();
@@ -73,7 +73,7 @@ test('KDM-196: ripples draw once per event, and the SP bar keeps its animation',
 
 		// Real turns until the world actually produces an off-screen noise (it is a random enemy
 		// behaviour, so drive turns until one lands rather than assuming a fixed count does it).
-		// KDM-309: KD draws an enemy's noise ripple only while the enemy is OUT OF SIGHT, and the party
+		// KD draws an enemy's noise ripple only while the enemy is OUT OF SIGHT, and the party
 		// now starts on KD's own start tile with the (opt-in) demo enemy summoned in view. So between
 		// turns that produced nothing, the enemy is moved to another spot 6-10 tiles off — some of them
 		// are behind a wall. The noise itself is still the game's own, from a real turn.

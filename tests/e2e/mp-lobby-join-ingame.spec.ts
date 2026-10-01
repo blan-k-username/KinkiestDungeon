@@ -1,5 +1,5 @@
 /**
- * E2E (KDM-297) — a friend knocks while the host is already playing, and the host is asked IN THE GAME.
+ * E2E — a friend knocks while the host is already playing, and the host is asked IN THE GAME.
  *
  * The owner's UAT: host pressed Host and was playing; the friend pressed Join and sat on "Waiting for
  * the host to let you in…" for ever, because the question went to the lobby and the host was not on
@@ -54,7 +54,7 @@ async function hostIsPlaying(host: any, port: number) {
 }
 
 for (const option of ['Accept', 'Decline'] as const) {
-	test(`KDM-297 — a host in the dungeon is asked in the game, and ${option} is honoured`, async ({ browser }) => {
+	test(`a host in the dungeon is asked in the game, and ${option} is honoured`, async ({ browser }) => {
 		test.setTimeout(MP_TEST_TIMEOUT);
 		// requiredPlayers: 1 — the host plays ALONE first, which is the whole join-late situation.
 		const { server, bridge, port } = await start(0, { requiredPlayers: 1 });
@@ -108,7 +108,7 @@ for (const option of ['Accept', 'Decline'] as const) {
 
 			const { real, ignored } = reportedPageErrors(crashes.slice(crashesBefore));
 			// eslint-disable-next-line no-console
-			if (ignored.length) console.log(`[KDM-297] ignored ${ignored.length} pre-existing asset error(s): ${ignored[0]}`);
+			if (ignored.length) console.log(`ignored ${ignored.length} pre-existing asset error(s): ${ignored[0]}`);
 			expect(real, 'answering the question must not trip KD\'s error handler').toEqual([]);
 		} finally {
 			await hostCtx.close().catch(() => {});

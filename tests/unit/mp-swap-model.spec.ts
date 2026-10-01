@@ -1,5 +1,5 @@
 /**
- * Node-layer (Vitest) tests for the per-player state-swap model — KD-085 foundation.
+ * Node-layer (Vitest) tests for the per-player state-swap model — the foundation.
  *
  * The uniform action architecture: ONE authoritative world; players are STATE
  * BUNDLES swapped in/out per turn; every action runs through KD's REAL dispatcher
@@ -13,7 +13,7 @@ const { HeadlessHost } = require('../../tools/mp-server/headless-host');
 
 const BOOT_TIMEOUT = 180_000;
 
-describe('swap model — per-player state bundle (KD-085)', () => {
+describe('swap model — per-player state bundle', () => {
 	let w: any;
 	let A: any;
 	let B: any;

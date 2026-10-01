@@ -1,7 +1,7 @@
 /**
- * KDM-300 — a gateway dialogue must not DESTROY the dialogue the player already had open.
+ * A gateway dialogue must not DESTROY the dialogue the player already had open.
  *
- * Every gateway-owned dialogue (peace offer, host-lost, peer-lost, the KDM-297 join ask) is opened by
+ * Every gateway-owned dialogue (peace offer, host-lost, peer-lost, the join ask) is opened by
  * `SwapSession._openOwnDialogue`, which calls `KDStartDialog` on the player's bundle unconditionally.
  * A host in the middle of a shop or an NPC conversation had it REPLACED: once our question was answered
  * the dialogue was simply gone. Now the displaced dialogue is set aside and comes back when ours closes
@@ -48,7 +48,7 @@ const answer = (option: string) => ({
 	kdType: 'dialogue', data: { dialogue: JOIN_ASK_DIALOGUE, dialogueStage: option, click: true },
 });
 
-describe('KDM-300 — our dialogue sets the player\'s own aside and gives it back', () => {
+describe('our dialogue sets the player\'s own aside and gives it back', () => {
 	let s: any = null;
 
 	beforeAll(async () => {
@@ -93,7 +93,7 @@ describe('KDM-300 — our dialogue sets the player\'s own aside and gives it bac
 	it('re-opening ours over ours does not bury theirs under a copy of ours', () => {
 		const theirs = dialogueState(s, 'A');
 		s.openJoinAskDialogue('A', 'Bee');
-		s.openJoinAskDialogue('A', 'Bee');           // a guest re-asking (KDM-298) re-opens it
+		s.openJoinAskDialogue('A', 'Bee');           // a guest re-asking re-opens it
 		s.apply('A', answer('Decline'));
 		expect(dialogueState(s, 'A'), 'one answer is enough to get back').toEqual(theirs);
 	}, BOOT_TIMEOUT);

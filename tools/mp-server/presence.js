@@ -1,5 +1,5 @@
 /**
- * tools/mp-server/presence.js  (KDM-250, epic mp-coop-features / KDM-226)
+ * tools/mp-server/presence.js  (co-op features)
  *
  * WHO IS STILL HERE.
  *
@@ -22,7 +22,7 @@
  * transport; one concern, one file.
  *
  * ⚠️ MP-SPECIFIC BY CONSTRUCTION. A one-player game has no peer to lose, no seat to hold and nobody
- * to tell (KDM-226's test), so the gateway is this feature's only possible home. It re-implements no
+ * to tell (the "would this exist in a one-player game?" test), so the gateway is this feature's only possible home. It re-implements no
  * game mechanic: it decides who is present and hands the answer back to the caller.
  *
  * `gone` IS TERMINAL. That is the whole point of E6. Once the survivor has decided to play on without
@@ -100,7 +100,7 @@ class Presence {
 		return s ? s.role : null;
 	}
 
-	/** KDM-303 — a promoted guest now holds the HOST role. The seat keeps its liveness state. */
+	/** A promoted guest now holds the HOST role. The seat keeps its liveness state. */
 	setRole(clientId, role) {
 		const s = this._seats.get(clientId);
 		if (!s || s.state === 'gone') return false;
@@ -109,7 +109,7 @@ class Presence {
 	}
 
 	/**
-	 * KDM-303 R5 — drop every record of a seat, so the id counts as a stranger again.
+	 * Drop every record of a seat, so the id counts as a stranger again.
 	 *
 	 * Deliberately NOT `remove`: `gone` is terminal (E6) because a guest the survivor dismissed must
 	 * not walk back into their old seat. A host who TIMED OUT is different — the owner's rule is that
@@ -159,7 +159,7 @@ class Presence {
 	 */
 	sweep(t) {
 		/*
-		 * KDM-251 — DO NOT BILL THE CLIENT FOR OUR OWN DOWNTIME.
+		 * DO NOT BILL THE CLIENT FOR OUR OWN DOWNTIME.
 		 *
 		 * Both halves of `t - lastSeen` are read on the SERVER, so when the server's own event loop
 		 * stalls — a GC pause, a blocking operation, a loaded host — every seat goes silent at once
@@ -167,8 +167,8 @@ class Presence {
 		 *
 		 * Measured, not theorised: the full unit suite stalled this loop 1.47 s
 		 * (`loopLag max=1469.6ms` in the mp-stats line), which blew a 200 ms window and paused a
-		 * session whose peers were both healthy. Under KDM-250 that cost a wrong overlay line; under
-		 * KDM-251 it stops the game.
+		 * session whose peers were both healthy. Once that cost only a wrong overlay line; now
+		 * it stops the game.
 		 *
 		 * So credit everyone with however late this sweep was. Not a skip: a genuinely dead peer is
 		 * still caught, it just takes `hbTimeoutMs + the stall` — which is the honest answer, because

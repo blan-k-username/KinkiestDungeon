@@ -1,8 +1,8 @@
 /**
  * tools/mp-server/orchestrator.js
  *
- * PoC orchestrator + global turn clock + minimal reconciler (KD-069 / KD-070
- * PoC scope). Steps one world instance and two player instances in lockstep over
+ * PoC orchestrator + global turn clock + minimal reconciler (PoC
+ * scope). Steps one world instance and two player instances in lockstep over
  * a single hardcoded scenario, keeping the shared enemy and the players' avatars
  * consistent across all three.
  *
@@ -16,7 +16,7 @@
  *
  * Transport is stubbed (in-process: the three HeadlessHosts are objects in one
  * Node process). This is throwaway — it proves instance consistency before the
- * feature pillars (KD-080). Production hardening = KD-069/070.
+ * feature pillars. Production hardening is out of its scope.
  */
 'use strict';
 

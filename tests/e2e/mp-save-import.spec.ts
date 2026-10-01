@@ -1,5 +1,5 @@
 /**
- * E2E (KDM-243) — a host continues their SINGLE-PLAYER save in co-op, and a friend joins it.
+ * E2E — a host continues their SINGLE-PLAYER save in co-op, and a friend joins it.
  *
  * ── WHY THIS SPEC EXISTS, GIVEN THE UNIT LAYER ────────────────────────────────────────────────────
  * `mp-save-import.spec.ts` (unit) proves the load works on a save this project GENERATED. It cannot
@@ -66,7 +66,7 @@ async function playSinglePlayerAndSave(page: any, port: number): Promise<string>
 }
 
 
-test.describe('KDM-243 — continue a single-player save in co-op', () => {
+test.describe('continue a single-player save in co-op', () => {
 	test('the host resumes their own saved run, and the guest arrives as a fresh character', async ({ browser }) => {
 		test.setTimeout(MP_TEST_TIMEOUT);
 		const { server, bridge, port } = await start(0);
@@ -95,7 +95,7 @@ test.describe('KDM-243 — continue a single-player save in co-op', () => {
 			 */
 			await settle(host);
 			await press(host, 'KDMPContinue');
-			// KDM-293 — 'waiting' alone is not proof it PROCEEDED: the phase is entered before the
+			// 'Waiting' alone is not proof it PROCEEDED: the phase is entered before the
 			// save is judged, so a refused save also lands here, just with an error beside it. Assert
 			// both, or a refusal reads as a successful host and the failure surfaces two minutes later
 			// as "the host should be prompted".

@@ -2,11 +2,11 @@
  * Reading the renderer's REAL surface from a test, and comparing two frames of it.
  *
  * `#MainCanvas` (index.html) is a DEAD 300x150 PLACEHOLDER. Nothing ever draws to
- * it — its 2D context reads as a single colour (KDM-169). PIXI builds its own
+ * it — its 2D context reads as a single colour. PIXI builds its own
  * 2000x1000 WebGL view and appends it to <body>; the renderer global is `PIXIapp`
  * and `PIXIapp.view` IS the render surface. **Never locate `#MainCanvas` in a test.**
  *
- * KDM-217 — `page.locator('#MainCanvas').screenshot()` *looks* like it works, and
+ * `Page.locator('#MainCanvas').screenshot()` *looks* like it works, and
  * that is the trap: Playwright's element screenshot captures the COMPOSITED PAGE
  * clipped to the element's box, not the element's own backing store. So those calls
  * really mean "the top-left 300x150 of the page", which incidentally overlaps the

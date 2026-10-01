@@ -1,12 +1,12 @@
 /**
- * Node-layer (Vitest) — KDM-263: two players agree the route out of the hub.
+ * Node-layer (Vitest) — two players agree the route out of the hub.
  *
  * ── WHAT WAS BROKEN ───────────────────────────────────────────────────────────────────────────────
  * `KDRenderJourneyMap` writes `KDGameData.JourneyTarget` INLINE, inside the DRAW function
  * (`KDJourney.ts:388-395` from the mouse, `:434-452` from the keyboard) — never through `KDSendInput`.
  * The co-op client forwards only what goes through `KDSendInput`, so a click moved the CLIENT's target
  * and nothing else. KD's own `KDCancelFilters.JourneyChoice` then refused the stairs forever and
- * re-opened the map, which since KDM-239 R7 both players actually see. A two-player party could not
+ * re-opened the map, which, now that the client adopts the server's screen, both players actually see. A two-player party could not
  * leave a `PerkRoom` at all.
  *
  * ── WHAT THIS SPEC IS CAREFUL ABOUT ───────────────────────────────────────────────────────────────
@@ -21,7 +21,7 @@
  * connection and "the other player picked a different slot" cannot be expressed on it.
  *
  * ── WHY THE WORLD-SCOPING HALF NEEDS A DIVERGENCE, NOT A COMPARISON ───────────────────────────────
- * Both players' `JourneyMap`s are byte-identical at boot (MEASURED, KDM-241 P2), so a test that
+ * Both players' `JourneyMap`s are byte-identical at boot (MEASURED), so a test that
  * compared two boot-time maps would pass on a completely unfixed build. The divergence is created by
  * a descent (`KDAdvanceLevel` prunes the departed slot's Connections), so this spec constructs it —
  * and pairs it with a CONTROL key on the same bundle, the `mp-room-world-state.spec.ts` rule: "the
@@ -72,7 +72,7 @@ function pick(s: any, who: string, slot: { x: number, y: number }) {
 	return s.apply(who, { kdType: 'KDCoopJourney', data: { x: slot.x, y: slot.y } });
 }
 
-describe('KDM-263 — the party agrees its route', () => {
+describe('the party agrees its route', () => {
 	describe('R9 — a choice made in the draw function is routed, never committed locally', () => {
 		let s: any;
 		beforeEach(async () => {
@@ -172,7 +172,7 @@ describe('KDM-263 — the party agrees its route', () => {
 			expect(out.sent).toEqual([]);
 		}, BOOT_TIMEOUT);
 
-		it('KDInputTypes.KDCoopJourney is registered once and survives a full turn (KDM-241 P1)', () => {
+		it('KDInputTypes.KDCoopJourney is registered once and survives a full turn', () => {
 			// A3 rests on this measurement. Pinned rather than trusted: if KDInputTypes ever became
 			// per-player state, the entry would vanish after the first swap and every proposal after the
 			// first would be an UNKNOWN input that did nothing — silently.

@@ -1,5 +1,5 @@
 /**
- * KDM-255 — there is ONE road into a session, and it goes through the gate.
+ * There is ONE road into a session, and it goes through the gate.
  *
  * `mp-join-gate.spec.ts` proves the gate's rules. `mp-join-approval.spec.ts` proves the protocol
  * that carries them. This spec proves the thing both of those quietly assumed and neither checked:
@@ -9,8 +9,8 @@
  * `'guest'`, and *anything else*. The third branch seated the client directly: no `claimHost`, no
  * `requestJoin`, no host asked, and `_roleFor` inventing a role from arrival order. Every gate rule
  * — `already_hosting`, `session_full`, `busy`, `build_mismatch` — was skipped on that road, and it
- * was the road `#coop=<id>` and eleven node-layer specs took. KDM-233 could not remove it because
- * the suite stood on it; KDM-255 is that removal.
+ * was the road `#coop=<id>` and eleven node-layer specs took. The join gate could not remove it when it shipped, because
+ * the suite stood on it; this spec pins that removal.
  *
  * WHY THESE ASSERTIONS AND NOT "a roleless join is refused" ALONE. A single refusal test is
  * satisfied by a bridge that refuses roleless joins and still admits role-carrying ones through some
@@ -18,7 +18,7 @@
  * subject to gate rules that the old road demonstrably ignored. Each one fails loudly if the branch
  * comes back.
  *
- * Requirement ids refer to the `## Requirements (EARS)` section of KDM-255.
+ * The requirement labels name the behaviours this spec pins.
  */
 import { describe, it, expect, afterEach } from 'vitest';
 import { MPClient, seatPair } from '../helpers/mp-ws-client';
@@ -30,7 +30,7 @@ const BUILD = 'one-road-build';
 const isJoined = (m: any) => m.type === 'joined';
 const isReject = (m: any) => m.type === 'reject';
 
-describe('KDM-255 — one road in', () => {
+describe('one road in', () => {
 	let bridge: any = null;
 	const open: MPClient[] = [];
 

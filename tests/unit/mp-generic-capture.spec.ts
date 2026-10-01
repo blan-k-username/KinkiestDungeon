@@ -1,13 +1,13 @@
 /**
- * Node-layer (Vitest) — KDM-161: generic per-player capture, no hand-written whitelist.
+ * Node-layer (Vitest) — generic per-player capture, no hand-written whitelist.
  *
  * capturePlayer named ~20 globals by hand; that list can only ever be as complete as our knowledge of
- * a 280-file moving target, and every KDM-156 bug was a hole in it. Replace the enumeration with a
+ * a 280-file moving target, and every per-player state bug we hit was a hole in it. Replace the enumeration with a
  * derived one:
  *
  *     PER_PLAYER = mutable(bundleGlobals ∪ globalThis) − GLOBAL_BLACKLIST
  *
- * Measured basis (KDM-161 probes 5–6): 2,381 top-level names exist, but only 43 CHANGE under a real
+ * Measured basis (probes run while designing this): 2,381 top-level names exist, but only 43 CHANGE under a real
  * action mix — so a ~15-entry category blacklist replaces a 2,381-name problem. A full fingerprint
  * pass costs 109 ms, hence classification happens at boot, never per swap.
  *
@@ -22,7 +22,7 @@ const { SwapSession } = require('../../tools/mp-server/swap-session');
 
 const BOOT_TIMEOUT = 240_000;
 
-describe('KDM-161 · deriving global names from the bundle', () => {
+describe('deriving global names from the bundle', () => {
 	it('finds the top-level declarations (measured: 2,381)', () => {
 		const names = deriveBundleGlobals();
 		expect(names.length).toBeGreaterThanOrEqual(MIN_EXPECTED_GLOBALS);
@@ -44,14 +44,14 @@ describe('KDM-161 · deriving global names from the bundle', () => {
 		// world + render categories are excluded …
 		expect(GLOBAL_BLACKLIST).toContain('KDMapData');
 		expect(GLOBAL_BLACKLIST).toContain('KDDrawUpdate');
-		// … but the state KDM-156 had to hand-patch must NOT be excluded: it is per-player, and
+		// … but the state that once had to be hand-patched must NOT be excluded: it is per-player, and
 		// the whole point is that the generic mechanism carries it without anyone naming it.
 		expect(GLOBAL_BLACKLIST).not.toContain('KinkyDungeonSlowLevel');
 		expect(GLOBAL_BLACKLIST).not.toContain('KinkyDungeonStruggleGroups');
 	});
 });
 
-describe('KDM-161 · generic capture carries state nobody enumerated', () => {
+describe('generic capture carries state nobody enumerated', () => {
 	let h: any;
 	beforeAll(() => {
 		h = new HeadlessHost({ id: 'generic-capture' });
@@ -79,7 +79,7 @@ describe('KDM-161 · generic capture carries state nobody enumerated', () => {
 	}, BOOT_TIMEOUT);
 });
 
-describe('KDM-161 · AC3 — a mod\'s new global is per-player with ZERO server changes', () => {
+describe('AC3 — a mod\'s new global is per-player with ZERO server changes', () => {
 	it('carries a mod-declared global across the swap, and keeps it private to its owner', () => {
 		const s = new SwapSession({ requiredPlayers: 2, seed: 'kdm161-mod' });
 		s.join('A');
@@ -105,7 +105,7 @@ describe('KDM-161 · AC3 — a mod\'s new global is per-player with ZERO server 
 });
 
 /**
- * KDM-161 AC1 — Map/Set are the last thing blocking deletion of the hand-written whitelist.
+ * Map/Set are the last thing blocking deletion of the hand-written whitelist.
  *
  * `JSON.stringify(new Map())` is `"{}"`, so a Map global is watched but can NEVER appear diverged
  * from baseline: KinkyDungeonInventory, KinkyDungeonFlags and KinkyDungeonStatsChoice are invisible
@@ -113,7 +113,7 @@ describe('KDM-161 · AC3 — a mod\'s new global is per-player with ZERO server 
  * slot (`bundle.globals`) on purpose — asserting on the bundle as a whole would pass today via the
  * named half and prove nothing.
  */
-describe('KDM-161 · the generic layer carries Map and Set', () => {
+describe('the generic layer carries Map and Set', () => {
 	let h: any;
 	beforeAll(() => {
 		h = new HeadlessHost({ id: 'generic-codec' });
@@ -178,13 +178,13 @@ describe('KDM-161 · the generic layer carries Map and Set', () => {
 });
 
 /**
- * KDM-161 AC1 — the hand-written whitelist is DELETED, not extended.
+ * The hand-written whitelist is DELETED, not extended.
  *
  * Structural, on purpose: the behavioural guarantees are I1/I2/I3 (mp-parity-oracle,
  * mp-noninterference), which are mechanism-agnostic. This one pins the mechanism, so the named list
  * cannot quietly come back as a "just this one field" exception.
  */
-describe('KDM-161 · AC1 — no hand-written player whitelist survives', () => {
+describe('AC1 — no hand-written player whitelist survives', () => {
 	let h: any;
 	beforeAll(() => {
 		h = new HeadlessHost({ id: 'ac1-shape' });
@@ -201,7 +201,7 @@ describe('KDM-161 · AC1 — no hand-written player whitelist survives', () => {
 });
 
 /**
- * KDM-161 AC4 — the size threshold must fail LOUDLY.
+ * The size threshold must fail LOUDLY.
  *
  * Globals whose serialised form exceeds BASELINE_MAX_LEN are dropped from the watch set on the theory
  * that they are static data tables (shared world data by definition). That is a classification, not a
@@ -209,7 +209,7 @@ describe('KDM-161 · AC1 — no hand-written player whitelist survives', () => {
  * so the drop is audited, on the same "report drift, never degrade quietly" contract as the
  * BUNDLE_PATCHES site counts.
  */
-describe('KDM-161 · AC4 — an oversize global that mutates is REPORTED, not silently dropped', () => {
+describe('AC4 — an oversize global that mutates is REPORTED, not silently dropped', () => {
 	let h: any;
 	beforeAll(() => {
 		h = new HeadlessHost({ id: 'oversize-audit' });

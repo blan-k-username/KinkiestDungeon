@@ -1,5 +1,5 @@
 /**
- * Node-layer (Vitest) tests for the PvP RENDER-STATE mappings (KD-098), kept after the KD-100
+ * Node-layer (Vitest) tests for the PvP RENDER-STATE mappings, kept after the
  * real-combat rework removed the synthetic feedback/bump/defeat path. Gameplay (real damage, real
  * messages, real defeat) is covered by `mp-pvp-realcombat.spec.ts`. Here we only assert the
  * render-state the client draws from:
@@ -12,7 +12,7 @@ const { SwapSession } = require('../../tools/mp-server/swap-session');
 
 const BOOT_TIMEOUT = 240_000;
 
-describe('PvP render-state mappings (KD-098)', () => {
+describe('PvP render-state mappings', () => {
 	let s: any;
 	beforeEach(() => {
 		s = new SwapSession({ requiredPlayers: 2, seed: 'pvp-render-seed', pvp: true });

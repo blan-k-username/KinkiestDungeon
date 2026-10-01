@@ -1,5 +1,5 @@
 /**
- * E2E (KDM-242) — two real browsers agree a perk, and BOTH of them get it, over the real wire.
+ * E2E — two real browsers agree a perk, and BOTH of them get it, over the real wire.
  *
  * The unit layer proves the arbitration and proves the wrap suppresses an Accept driven through KD's
  * own draw function. Neither of those runs in a browser, and the bug this slice fixes is a BROWSER
@@ -102,7 +102,7 @@ async function pagePerks(P: Page, perk: string) {
  * streams `setMoveDirection` as the mouse moves, and a headless page has no mouse.
  *
  * A single `ui` nudge is NOT enough — measured flaky across independent runs, one page's precondition
- * timing out at 30 s while the other's passed, in both directions. KDM-186 Rule 1 holds one
+ * timing out at 30 s while the other's passed, in both directions. Input Rule 1 holds one
  * unacknowledged send per stream type and supersedes duplicates, so most pumps never leave the page.
  * Sending from BOTH pages, and waiting on each, is what made it deterministic: three consecutive clean
  * runs at ~1.6 min against a 1-in-2 failure rate before.

@@ -1,5 +1,5 @@
 /**
- * KDM-281 — the drift guard for player-facing PROSE in the co-op client.
+ * The drift guard for player-facing PROSE in the co-op client.
  *
  * ── THE HOLE THIS FILLS ───────────────────────────────────────────────────────────────────────────
  * `coop-lobby.js` resolved its labels through a private `text(key, fallback)` reading KD's own
@@ -77,7 +77,7 @@ function loadText(): any {
  * R0 — load order
  * ═════════════════════════════════════════════════════════════════════════════════════════════════ */
 
-describe('KDM-281 R0 — the table is injected before the files that need it', () => {
+describe('the table is injected before the files that need it', () => {
 	it('coop-text.js precedes coop-bootstrap.js and coop-lobby.js in INJECT', () => {
 		// The REAL array, exported for exactly this (same source `mp-mod-inject-order.spec.ts` reads).
 		// A copy of the list here would be a second declaration free to go stale against the first.
@@ -108,7 +108,7 @@ describe('KDM-281 R0 — the table is injected before the files that need it', (
  * R1 — the table itself
  * ═════════════════════════════════════════════════════════════════════════════════════════════════ */
 
-describe('KDM-281 R1 — one frozen table of English source strings', () => {
+describe('one frozen table of English source strings', () => {
 	it('evaluates to a frozen key→string map on window.KDMPText', () => {
 		const T = loadText();
 		expect(T, 'coop-text.js must publish window.KDMPText').toBeTruthy();
@@ -217,7 +217,7 @@ function keysUsed(): Set<string> {
 	return out;
 }
 
-describe('KDM-281 R2 — asked-for keys and declared keys are the same set', () => {
+describe('asked-for keys and declared keys are the same set', () => {
 	it('SELF-CHECK: the reader finds the keys we know are there', () => {
 		const used = keysUsed();
 		expect(used.size, 'a reader finding nothing would make the guard vacuous').toBeGreaterThan(30);
@@ -285,7 +285,7 @@ const ALLOWED = new Set<string>([
 	'[NotFound] ',                   // KD's own missing-key marker, matched against
 ]);
 
-describe('KDM-281 R3 — a new hardcoded player-facing string is a red', () => {
+describe('a new hardcoded player-facing string is a red', () => {
 	it('SELF-CHECK: the scanner recognises prose, and does not flag an identifier', () => {
 		// The guard is a heuristic, so what it can and cannot see is itself asserted. Without this a
 		// scanner that had quietly stopped matching would read as "no hardcoded strings".
@@ -302,7 +302,7 @@ describe('KDM-281 R3 — a new hardcoded player-facing string is a red', () => {
 		expect(found,
 			'a player-facing string is written inline in coop-lobby.js. Move it to STRINGS in '
 			+ 'client/coop-text.js and call T(\'KDMPYourKey\') — otherwise this screen goes back to '
-			+ 'being half translatable (KDM-281).').toEqual([]);
+			+ 'being half translatable.').toEqual([]);
 	});
 
 	it('coop-bootstrap.js says nothing to the LOBBY that it did not take from the table', () => {
@@ -315,7 +315,7 @@ describe('KDM-281 R3 — a new hardcoded player-facing string is a red', () => {
 		const found = [...new Set(calls.flatMap(proseLiterals))].filter((s) => !ALLOWED.has(s));
 		expect(found,
 			'coop-bootstrap.js puts this English straight into a lobby field. That is the exact drift '
-			+ 'KDM-281 removed: the lobby screen resolves its own labels through the table, so a '
+			+ 'the single string table removed: the lobby screen resolves its own labels through the table, so a '
 			+ 'sentence painted between them must too.').toEqual([]);
 	});
 
@@ -363,10 +363,10 @@ function lobbySayCalls(src: string): string[] {
 }
 
 /* ══════════════════════════════════════════════════════════════════════════════════════════════════
- * KDM-289 — THE SEEDED TRANSLATIONS
+ * THE SEEDED TRANSLATIONS
  *
- * KDM-281 left the co-op client shipping English and nothing else. It is not what that task broke —
- * the lobby's `KDMP*` keys never had a translation — but it is what that task made fixable, by
+ * Moving every client string into one table left the co-op client shipping English and nothing else. It is not what that change broke —
+ * the lobby's `KDMP*` keys never had a translation — but it is what that change made fixable, by
  * putting every string in one table behind one helper. This block is the guard for the six language
  * tables that fill it.
  *
@@ -375,7 +375,7 @@ function lobbySayCalls(src: string): string[] {
  * .appendTranslation(lang, …)`. That is the MOD convention, and it does in fact work for keys nobody
  * registered (`Scripts/Text.ts:515` resolves `tagTranslationMap` BEFORE falling back to a source
  * string). It was rejected anyway: it would split the fallback chain across our `t()` and KD's
- * `getTextFromGroupStrict`, which is the exact two-owners shape KDM-281 spent a task removing, and it
+ * `getTextFromGroupStrict`, which is the exact two-owners shape the string table was built to remove, and it
  * would force this spec to build a fake `TextProvider` — a second implementation of the thing under
  * test, which is how a guard goes vacuous.
  *
@@ -395,7 +395,7 @@ const TARGETS = ['CN', 'DE', 'ES', 'JP', 'KR', 'RU'] as const;
 /**
  * Evaluate `coop-text.js` with a chosen set of page globals.
  *
- * `loadText()` above is deliberately left alone — it is what the KDM-281 guards run on, and this
+ * `loadText()` above is deliberately left alone — it is what the string-table guards run on, and this
  * task must not change their subject. This is the same evaluation with the globals the new branch
  * reads. Omitting `TranslationLanguage` from `extra` is meaningful: the binding is then genuinely
  * ABSENT, and a bare read of it throws — which is the case the resolver's `try` exists for.
@@ -407,7 +407,7 @@ function loadTextWith(extra: Record<string, any> = {}): any {
 	return ctx.window.KDMPText;
 }
 
-/** The same token reader the KDM-281 templating guard uses. A token is what `fill()` substitutes. */
+/** The same token reader the string-table templating guard uses. A token is what `fill()` substitutes. */
 const TOKENS = (s: string) => [...new Set(s.match(/\b([A-Z]{4,})\b/g) || [])].sort();
 
 /**
@@ -437,7 +437,7 @@ const SAME_AS_ENGLISH: Record<string, string[]> = {
 	RU: [],
 };
 
-describe('KDM-289 L1 — the six language tables exist and are named the way KD names them', () => {
+describe('the six language tables exist and are named the way KD names them', () => {
 	it('LANGS declares exactly the six targets', () => {
 		const T = loadTextWith();
 		expect(T.LANGS, 'coop-text.js must export the language tables').toBeTruthy();
@@ -464,7 +464,7 @@ describe('KDM-289 L1 — the six language tables exist and are named the way KD 
 	});
 });
 
-describe('KDM-289 L2 — coverage: a partial table fails a test rather than painting a mixed screen', () => {
+describe('coverage: a partial table fails a test rather than painting a mixed screen', () => {
 	it('every target covers every English key, and declares nothing it does not have', () => {
 		const T = loadTextWith();
 		const english = Object.keys(T.STRINGS);
@@ -520,7 +520,7 @@ describe('KDM-289 L2 — coverage: a partial table fails a test rather than pain
 	});
 });
 
-describe('KDM-289 L3 — token parity: a seed that drops a token deletes a value from a sentence', () => {
+describe('token parity: a seed that drops a token deletes a value from a sentence', () => {
 	it('every seed carries exactly the tokens its English source carries', () => {
 		const T = loadTextWith();
 		let checked = 0;
@@ -542,7 +542,7 @@ describe('KDM-289 L3 — token parity: a seed that drops a token deletes a value
 	});
 });
 
-describe('KDM-289 L4 — resolution: the active language wins, and English is still the floor', () => {
+describe('resolution: the active language wins, and English is still the floor', () => {
 	it('t() answers in the active language, for every target', () => {
 		for (const lang of TARGETS) {
 			const T = loadTextWith({ TranslationLanguage: lang });
@@ -591,7 +591,7 @@ describe('KDM-289 L4 — resolution: the active language wins, and English is st
 	});
 
 	it('an undeclared key still names itself, in every language', () => {
-		// The KDM-281 behaviour the new branch must not swallow: a blank line on the Host screen is
+		// The string-table behaviour the new branch must not swallow: a blank line on the Host screen is
 		// the failure that looks like a layout bug, and `KDMPTypo` on screen names its own cause.
 		for (const lang of TARGETS) {
 			const T = loadTextWith({ TranslationLanguage: lang });
@@ -617,7 +617,7 @@ describe('KDM-289 L4 — resolution: the active language wins, and English is st
 	});
 });
 
-describe('KDM-289 L5 — the seeds are marked machine-generated and unreviewed', () => {
+describe('the seeds are marked machine-generated and unreviewed', () => {
 	it('says so in the file, where a native reviewer will find it', () => {
 		// AC5. In the source rather than in a task file or a commit message: the reviewer is a
 		// translator reading coop-text.js, not someone with the git history open.

@@ -1,5 +1,5 @@
 /**
- * Node-layer (Vitest) tests for the richer routed action surface — KD-088.
+ * Node-layer (Vitest) tests for the richer routed action surface.
  *
  * The swap model replays ANY client action {kdType,data} through KD's REAL dispatcher
  * on the authoritative world (HeadlessHost.applyInput). These prove:
@@ -15,7 +15,7 @@ const { HeadlessHost } = require('../../tools/mp-server/headless-host');
 
 const BOOT_TIMEOUT = 240_000;
 
-describe('Richer routed actions via the real dispatcher (KD-088)', () => {
+describe('Richer routed actions via the real dispatcher', () => {
 	let h: any;
 
 	beforeAll(() => {

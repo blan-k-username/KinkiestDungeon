@@ -1,5 +1,5 @@
 /**
- * E2E (KDM-246) — two browsers, one real keyboard, one message.
+ * E2E — two browsers, one real keyboard, one message.
  *
  * The unit specs prove the SERVER carries a message and that the client script installs correctly
  * against a fake scope. Neither can see the three things that only exist in a real page:
@@ -148,7 +148,7 @@ test('a typed message reaches the partner, costs no turn, and does not eat WASD'
 		// The project-wide invariant, asserted while we happen to be recording.
 		expect(painted.unresolved, 'no unresolved text key may be painted').toEqual([]);
 
-		// ---- CHAT DRAWS ONLY CHAT (KDM-285) -----------------------------------------------------
+		// ---- CHAT DRAWS ONLY CHAT -----------------------------------------------------
 		//
 		// This used to assert `logDraws === ourLogDraws` — "chat is the only caller of the game's log
 		// draw" — because chat called `KinkyDungeonDrawMessages()` itself. That call was a symptom
@@ -229,7 +229,7 @@ async function P_installed(P: any): Promise<boolean> {
 }
 
 /**
- * E2E (KDM-247) — a quick reaction, and the digit KD gets back afterwards.
+ * E2E — a quick reaction, and the digit KD gets back afterwards.
  *
  * The unit specs prove the picker declares its buttons correctly against a fake scope, and that the
  * server carries the text. Two things live only in a real page:
@@ -360,8 +360,8 @@ test('a picked reaction reaches the partner, and the digits go back to casting s
 		expect(bAfter.filter((t: string) => t.indexOf(slot1) >= 0).length,
 			'a closed picker sends nothing').toBe(1);
 
-		// ---- KDM-246 REGRESSION — chat's own `Y` hotkey, pressed for real ----------------------
-		// It shipped broken and nothing saw it: KDM-246's e2e opens the field through
+		// ---- CHAT HOTKEY REGRESSION — chat's own `Y` hotkey, pressed for real ----------------------
+		// It shipped broken and nothing saw it: the chat feature's own e2e opens the field through
 		// `KDCoopChat.open()`, so no test at any layer ever pressed the key. Same root cause, same
 		// fix (KDKeyCheckers), and the lesson is that only a real keypress can assert a hotkey — so
 		// it is asserted here, on the pair this test has already booted.
@@ -371,7 +371,7 @@ test('a picked reaction reaches the partner, and the digits go back to casting s
 		await A.waitForTimeout(600);
 		await A.keyboard.up('y');
 		await A.waitForFunction(() => (window as any).KDCoopChat.isOpen(), null, { timeout: 15_000 })
-			.catch(() => { throw new Error('a real `Y` keypress did not open the chat field (KDM-246 regression)'); });
+			.catch(() => { throw new Error('a real `Y` keypress did not open the chat field (a regression of the chat hotkey)'); });
 		await A.evaluate(() => (window as any).KDCoopChat.close());
 
 		// ---- the project-wide invariants -------------------------------------------------------

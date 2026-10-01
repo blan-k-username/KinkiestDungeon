@@ -1,5 +1,5 @@
 /**
- * E2E — REAL user input through the co-op proxy (KDM-186, corrected by KDM-204 / KDM-211).
+ * E2E — REAL user input through the co-op proxy (corrected).
  *
  * ⚠️ THE COVERAGE HOLE THIS FILLS. Every other MP e2e drives the session through the test hooks
  * `__coop.sendMove()` / `__coop.sendAction()`, which BUILD a `{kdType,data}` action and hand it
@@ -10,7 +10,7 @@
  * So the suite can be fully green while a human cannot move at all — which is what the first
  * hands-on UAT reported (2026-08-16: "I cannot move any char or do any action", keyboard AND mouse).
  *
- * ⚠️ WHAT THIS FILE ONCE "PROVED", AND DID NOT (KDM-211). The keypress test below used to hold
+ * ⚠️ WHAT THIS FILE ONCE "PROVED", AND DID NOT. The keypress test below used to hold
  * `ArrowRight` and, when nothing happened, report it as a finding about the proxy: "a real keypress
  * produces no `move` input at all — the client only ever sends `setMoveDirection`". That reading was
  * wrong, and it became the founding fact of a chain of follow-up tickets. KD does not bind the arrow
@@ -96,7 +96,7 @@ test('a real keypress moves the character (the human input path, not the test ho
 
 
 /**
- * THE REGRESSION GUARD (KDM-186) — per-frame input must not produce per-frame full state.
+ * THE REGRESSION GUARD — per-frame input must not produce per-frame full state.
  *
  * This is the assertion that would have caught the UAT failure before a human ever saw it. It does
  * NOT depend on the frame rate, so unlike the keypress test above it is meaningful in a headless

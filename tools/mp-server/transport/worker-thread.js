@@ -1,5 +1,5 @@
 /**
- * tools/mp-server/transport/worker-thread.js  (KD-081)
+ * tools/mp-server/transport/worker-thread.js 
  *
  * Transport that runs each instance in its own worker_threads Worker — a separate
  * V8 isolate in the same process. Messages cross via postMessage (structured

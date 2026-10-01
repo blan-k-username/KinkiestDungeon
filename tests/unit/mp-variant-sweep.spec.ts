@@ -1,12 +1,12 @@
 /**
- * Node-layer (Vitest) — KDM-284: prune the shared variant registry against ALL seats, not one.
+ * Node-layer (Vitest) — prune the shared variant registry against ALL seats, not one.
  *
  * ── THE DEBT THIS PAYS OFF ──────────────────────────────────────────────────────────────────────
- * KDM-245 made the three item-variant registries world state, then discovered KD garbage-collects
+ * The variant-registry change made the three item-variant registries world state, then discovered KD garbage-collects
  * them: `KDPruneInventoryVariants` (`KinkyDungeonInventory.ts:3261`) deletes every variant it cannot
  * find in the LIVE player's inventory or the world's containers, and it runs as the first statement
  * of every descent (`KDStairActions.ts:32`). In the swap-session model exactly one seat is swapped in,
- * so a descent by A would delete everything only B is carrying. KDM-245 therefore suppressed the prune
+ * so a descent by A would delete everything only B is carrying. That change therefore suppressed the prune
  * outright while `__kdCoopManaged` is set — bounded, counted, and knowingly wrong.
  *
  * ── THE SHAPE (architecture C, "deferred sweep") ────────────────────────────────────────────────
@@ -22,7 +22,7 @@
  *
  * ── WHAT KEEPS THIS FROM BEING A VACUOUS GREEN ──────────────────────────────────────────────────
  * "The partner's variant survived" is an ABSENCE-of-deletion oracle, which a prune that was broken
- * outright would also satisfy — that is exactly the false green KDM-245's own spec had to guard. So
+ * outright would also satisfy — that is exactly the false green the variant-registry spec had to guard. So
  * every survival assertion here is PAIRED with a same-shape orphan that must DIE in the same breath.
  * If the orphan survives, the sweep did nothing and the case proved nothing.
  *
@@ -39,7 +39,7 @@ import { descend } from './helpers/world';
 const BOOT_TIMEOUT = 240_000;
 const SESSION_TIMEOUT = 300_000;
 
-describe('KDM-284 · the shared registry is swept against every seat', () => {
+describe('the shared registry is swept against every seat', () => {
 
 	/**
 	 * The decision half, tested WITHOUT a world: it is a pure function of (what the prune proposed to
@@ -96,7 +96,7 @@ describe('KDM-284 · the shared registry is swept against every seat', () => {
 
 		it('sweeps NOTHING when no seat state is available — the degraded path never loses data', () => {
 			// R6. "We could not ask the other seats" and "the other seats hold nothing" must not be the
-			// same answer: the first has to fall back to KDM-245's keep-everything, because the
+			// same answer: the first has to fall back to the earlier keep-everything, because the
 			// alternative is deleting a partner's gear on the strength of missing information.
 			const pending = { restraint: ['Something'], weapon: [], consumable: [] };
 
@@ -156,7 +156,7 @@ describe('KDM-284 · the shared registry is swept against every seat', () => {
 
 			h.eval('KDPruneInventoryVariants()');
 
-			// Unchanged from KDM-245: the world is never left short, whatever Node later decides.
+			// Unchanged from the earlier suppression: the world is never left short, whatever Node later decides.
 			expect(alive(name), 'a managed prune still deletes nothing in the world').toBe(true);
 			expect(h.eval('globalThis.__kdCoopVariantPrunesSkipped'),
 				'the withhold must be counted, never silent').toBe(1);
@@ -202,7 +202,7 @@ describe('KDM-284 · the shared registry is swept against every seat', () => {
 			expect(alive(partnerName),
 				"a variant only the swapped-out partner holds must survive A's descent").toBe(true);
 			// PAIRED CONTROL — same sweep, same call. If this is still alive the sweep is inert and the
-			// assertion above is the KDM-245 debt wearing a new name.
+			// assertion above is the old suppression debt wearing a new name.
 			expect(alive(orphanName),
 				'control: a variant NO seat references is finally collected again').toBe(false);
 		}, BOOT_TIMEOUT);

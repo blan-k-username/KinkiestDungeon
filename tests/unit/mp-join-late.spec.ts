@@ -1,19 +1,19 @@
 /**
- * KDM-235 — a friend joins a run that is already in progress.
+ * A friend joins a run that is already in progress.
  *
  * Co-op has always been all-or-nothing at boot: `_start` fires when `_joined.length >= required` and
  * `join()` throws for ever after. This is the other half of the owner's use case — *"single play,
- * then the friend decided to join to continue"* — and the mirror of KDM-253's `removePlayer`.
+ * then the friend decided to join to continue"* — and the mirror of `removePlayer` (continue solo).
  *
  * ⚠️ THE ORACLE THAT MATTERS IS "NOT A COPY", AND IT IS EASY TO WRITE VACUOUSLY. Mid-run, the global
  * player slot holds whoever last acted, so the obvious implementation hands the newcomer a full clone
  * of that player — and a test comparing the joiner against a DEFAULT character passes anyway,
  * because the host is usually still near defaults too. So the host is made provably distinctive
  * FIRST, and the joiner is then asserted to differ from the host *and* to match the template. Same
- * fingerprint-by-value discipline as KDM-252.
+ * fingerprint-by-value discipline as the reconnect specs.
  *
- * Requirement ids refer to the `## Requirements` section of KDM-235; J1/J2 are the owner's placement
- * decision recorded there.
+ * The requirement labels name the behaviours this spec pins; J1/J2 are the owner's placement
+ * decision.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { MPClient } from '../helpers/mp-ws-client';
@@ -62,7 +62,7 @@ function bundleHp(s: any, clientId: string) {
 	return s.world.eval('KinkyDungeonPlayerEntity.hp');
 }
 
-describe('KDM-235 — seating a latecomer into a live run', () => {
+describe('seating a latecomer into a live run', () => {
 	let s: any = null;
 	let before: any;
 	let enemyBefore: number | null;
@@ -70,7 +70,7 @@ describe('KDM-235 — seating a latecomer into a live run', () => {
 
 	beforeAll(async () => {
 		// requiredPlayers: 1 — the session starts with the host ALONE, which is the situation this
-		// feature exists for. It is also the state KDM-253 leaves behind after "continue solo".
+		// feature exists for. It is also the state removePlayer leaves behind after "continue solo".
 		s = new SwapSession({ requiredPlayers: 1, seed: 'join-late', pvp: false, enemyType: 'Rat' });
 		s.join('A');
 		await s.ready();
@@ -157,7 +157,7 @@ describe('KDM-235 — seating a latecomer into a live run', () => {
 	}, BOOT_TIMEOUT);
 });
 
-describe('KDM-235 J2 — the tile next door is taken', () => {
+describe('the tile next door is taken', () => {
 	let s: any = null;
 
 	beforeAll(async () => {
@@ -199,7 +199,7 @@ describe('KDM-235 J2 — the tile next door is taken', () => {
 	}, BOOT_TIMEOUT);
 });
 
-describe('KDM-235 R5 — an open turn is not disturbed', () => {
+describe('an open turn is not disturbed', () => {
 	let s: any = null;
 
 	beforeAll(async () => {
@@ -233,7 +233,7 @@ describe('KDM-235 R5 — an open turn is not disturbed', () => {
 	}, BOOT_TIMEOUT);
 });
 
-describe('KDM-235 R3 — over the wire, the joiner gets the LIVE world in full', () => {
+describe('over the wire, the joiner gets the LIVE world in full', () => {
 	let bridge: any = null;
 	let A: MPClient;
 	let B: MPClient;
@@ -242,7 +242,7 @@ describe('KDM-235 R3 — over the wire, the joiner gets the LIVE world in full',
 		bridge = new WSBridge({ requiredPlayers: 1, seed: 'join-late-wire', hbIntervalMs: 0 });
 		const port = await bridge.listen(0);
 		A = await MPClient.connect(port);
-		A.send({ type: 'join', clientId: 'A', role: 'host' });   // KDM-255: the gate is the road in
+		A.send({ type: 'join', clientId: 'A', role: 'host' });   // the gate is the road in
 		await A.next((m) => m.type === 'joined');
 		await A.next((m) => m.type === 'state');
 		// A turn resolves before anyone else arrives, so "the live world" is distinguishable from
@@ -261,7 +261,7 @@ describe('KDM-235 R3 — over the wire, the joiner gets the LIVE world in full',
 		expect(turnAt, 'precondition: the run is past turn 0').toBeGreaterThan(0);
 
 		B = await MPClient.connect(bridge.port);
-		// KDM-255 — joining LATE still goes through the gate: the friend who turned up mid-run is
+		// Joining LATE still goes through the gate: the friend who turned up mid-run is
 		// asking to be let in exactly like any other guest, and A answers.
 		B.send({ type: 'join', clientId: 'B', role: 'guest' });
 		await A.next((m) => m.type === 'join_pending' && m.clientId === 'B');
@@ -281,7 +281,7 @@ describe('KDM-235 R3 — over the wire, the joiner gets the LIVE world in full',
 		const hello = await A.next((m: any) => m.type === 'peer_joined', 5_000);
 		expect(hello.clientId).toBe('B');
 		/*
-		 * KDM-278 — `players` is the field the CLIENT rebuilds its roster from, so it is part of the
+		 * `Players` is the field the CLIENT rebuilds its roster from, so it is part of the
 		 * contract and not decoration. `coop-bootstrap.js` adopts this list wholesale rather than
 		 * appending `clientId` to what it already had, precisely so there is one source of truth for
 		 * who is seated; a payload carrying only the arrival would push it back to deriving its own.

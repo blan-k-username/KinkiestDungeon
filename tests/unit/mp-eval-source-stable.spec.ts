@@ -1,8 +1,8 @@
 /**
- * KDM-215 — the two full-set scans must eval a BYTE-IDENTICAL source string every call.
+ * The two full-set scans must eval a BYTE-IDENTICAL source string every call.
  *
  * `_captureGlobals` and `_restoreGlobals` each embed the whole `_watchNames` list (~48 KB) as a
- * literal in their eval source. That looks like an obvious per-pass waste, and KDM-215 carried a
+ * literal in their eval source. That looks like an obvious per-pass waste, and a performance pass carried a
  * candidate to remove it by passing the array over the vm context instead. Measured on a quiet host,
  * interleaved and both ways round, the candidate was NEUTRAL — 0.57 vs 0.58 ms/pass — and the reason
  * turned out to be the thing worth protecting:
@@ -30,7 +30,7 @@ const { SwapSession } = require('../../tools/mp-server/swap-session');
 
 const BOOT_TIMEOUT = 300_000;
 
-describe('KDM-215 — the hot-path eval sources are cacheable', () => {
+describe('the hot-path eval sources are cacheable', () => {
 	/** Run `fn` twice, returning the eval source strings each call passed to the bridge. */
 	function sourcesOverTwoCalls(world: any, fn: () => void): string[][] {
 		const real = world.eval.bind(world);

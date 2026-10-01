@@ -1,19 +1,19 @@
 /**
- * KDM-274 — the drift guard for the direction nothing used to watch: SERVER → CLIENT.
+ * The drift guard for the direction nothing used to watch: SERVER → CLIENT.
  *
  * ── THE HOLE THIS FILLS ───────────────────────────────────────────────────────────────────────────
- * KDM-260 declared the join handshake's fields (`HOST_JOIN_FIELDS`) and guards them from two sides:
+ * The join handshake declares its fields (`HOST_JOIN_FIELDS`) and guards them from two sides:
  * `mp-join-fields.spec.ts` reads the CLIENT's own source and fails when it sends a field no role
  * shape forwards, and drives a real message through `_handle` to assert what the gate received. It
- * exists because KDM-239 shipped a dropped field past a green 605-test suite, and it caught the same
- * class again on KDM-243.
+ * exists because a dropped field once shipped past a green 605-test suite, and it caught the same
+ * class again on the single-player save import.
  *
  * All of that watches the INBOUND half. A payload the server composes correctly and then fails to
  * send — or sends to the wrong socket — leaves the entire suite green while the feature does
  * nothing, because a session-level test asserts on what a method returned rather than on what left
  * the socket. `save_export` was the first field to travel that way and was guarded only by its own
  * per-feature spec (`mp-save-export-wire.spec.ts`), which protects the field whose author thought of
- * it and nothing else — exactly the pattern KDM-260 replaced on the way in.
+ * it and nothing else — exactly the pattern the join-field declaration replaced on the way in.
  *
  * ── THE THREE GUARDS, AND WHY THREE ───────────────────────────────────────────────────────────────
  * Each one fails on a drift the other two cannot see, so none of them is redundant:
@@ -25,7 +25,7 @@
  *      and a field that stops reaching the socket (a dropped `Object.assign`, a `JSON`-eliding
  *      `undefined`). This is the one the ACs ask for by name.
  *   3. CLIENT (R3) — every `m.<field>` `coop-bootstrap.js` reads for a kind is declared for that
- *      kind. Catches KDM-239 in reverse: a receiver depending on a field the sender quietly stopped
+ *      kind. Catches the dropped-field failure in reverse: a receiver depending on a field the sender quietly stopped
  *      sending. Note this direction is a SUBSET check only — the client not reading a field is not a
  *      fault (`save_export.version` is stored by nobody today), so guard 2 owns "is it still sent".
  *
@@ -63,7 +63,7 @@ function code(file: string): string {
  * R1 — the declaration itself
  * ═════════════════════════════════════════════════════════════════════════════════════════════════ */
 
-describe('KDM-274 R1 — the declared outbound shapes', () => {
+describe('the declared outbound shapes', () => {
 	it('is one frozen table, with a frozen field list per kind', () => {
 		expect(Object.isFrozen(OUTBOUND_MESSAGES)).toBe(true);
 		expect(KINDS.length, 'an empty table would make every guard below vacuous').toBeGreaterThan(10);
@@ -145,14 +145,14 @@ function bridgeLiterals(): Array<{ kind: string; fields: string[] }> {
 	return out;
 }
 
-describe('KDM-274 R2 — the bridge cannot send a field it did not declare', () => {
+describe('the bridge cannot send a field it did not declare', () => {
 	it('SELF-CHECK: the reader really finds the literals we know are there', () => {
 		// A source reader that has quietly stopped matching is a permanent false green, and this one
 		// decides whether the guard below means anything at all.
 		const lits = bridgeLiterals();
 		expect(lits.length, 'a reader finding nothing would make the guard vacuous').toBeGreaterThan(12);
 		const save = lits.find((l) => l.kind === 'save_export');
-		expect(save, 'the field KDM-244 added — the reason this task exists').toBeTruthy();
+		expect(save, 'the field the save export added — the reason this guard exists').toBeTruthy();
 		expect(save!.fields.sort()).toEqual(['reason', 'save', 'version']);
 		// A multi-key literal proves the key scanner, and `srv: this._srvStamp(applyMs)` proves that a
 		// CALL in a value position does not leak its arguments in as fields.
@@ -177,10 +177,10 @@ describe('KDM-274 R2 — the bridge cannot send a field it did not declare', () 
 		}
 		expect(undeclaredKinds,
 			'ws-bridge.js sends this message kind and OUTBOUND_MESSAGES does not declare it — add an '
-			+ 'entry (KDM-274 R1). An undeclared kind is guarded by nothing.').toEqual([]);
+			+ 'entry. An undeclared kind is guarded by nothing.').toEqual([]);
 		expect([...new Set(undeclaredFields)],
 			'ws-bridge.js puts this field on the wire and OUTBOUND_MESSAGES does not name it — add it '
-			+ 'to `required` (or to `optional` if only one branch carries it). This is how KDM-239 '
+			+ 'to `required` (or to `optional` if only one branch carries it). This is how one release '
 			+ 'shipped a dropped field past a green suite, in the other direction.').toEqual([]);
 	});
 });
@@ -218,7 +218,7 @@ function clientReadFields(): Record<string, string[]> {
 	return out;
 }
 
-describe('KDM-274 R3 — the client cannot depend on a field the server never sends', () => {
+describe('the client cannot depend on a field the server never sends', () => {
 	it('SELF-CHECK: the reader finds the blocks and the fields we know are there', () => {
 		const read = clientReadFields();
 		expect(Object.keys(read).length, 'a reader finding no blocks would be vacuous').toBeGreaterThan(10);
@@ -240,7 +240,7 @@ describe('KDM-274 R3 — the client cannot depend on a field the server never se
 		}
 		expect(orphans,
 			'the client reads this off a server message and OUTBOUND_MESSAGES does not promise it. '
-			+ 'Either the server stopped sending it — the KDM-239 failure, in the direction that used '
+			+ 'Either the server stopped sending it — the dropped-field failure, in the direction that used '
 			+ 'to have no guard — or the declaration is missing an entry.').toEqual([]);
 	});
 });
@@ -269,7 +269,7 @@ function recSock(id: string) {
  * A real `WSBridge` — its own `_send`, `_stateFrame`, `_handle`, presence and seat methods — with the
  * session, gate and presence replaced by stubs and the sockets replaced by recorders.
  *
- * `Object.create(WSBridge.prototype)` rather than `new`, for the reason KDM-260's rig gives: the
+ * `Object.create(WSBridge.prototype)` rather than `new`, for the reason the join-fields rig gives: the
  * constructor boots a whole `SwapSession` world, which is minutes. Nothing here needs a world; what
  * is under test is the wire, and the wire is the prototype's.
  *
@@ -329,7 +329,7 @@ function rig() {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-describe('KDM-274 — every declared message is exercised, and keeps its declaration on the wire', () => {
+describe('every declared message is exercised, and keeps its declaration on the wire', () => {
 	let bridge: any, A: any, B: any, G: any;
 
 	beforeAll(async () => {
@@ -339,7 +339,7 @@ describe('KDM-274 — every declared message is exercised, and keeps its declara
 		bridge._handle(G, { type: 'join', clientId: 'G', role: 'guest', name: 'Ada' }, null);
 		bridge.sockets.delete('G');           // asking is not joining — the seat map is untouched
 
-		// ── a refusal, in words (KDM-233 E6). The build-mismatch branch is the one with extras.
+		// ── a refusal, in words. The build-mismatch branch is the one with extras.
 		bridge._reject(recSock('X'), { reason: 'build_mismatch', hostBuild: '1.2.3', guestBuild: '1.2.4' });
 
 		// ── a UI input: applied to this player alone, and pushed to a peer it happened to affect.
@@ -350,7 +350,7 @@ describe('KDM-274 — every declared message is exercised, and keeps its declara
 		bridge.session.apply = () => ({ kind: 'ui', changed: false });
 		bridge._handle(A, { type: 'input', action: {} }, 'A');
 
-		// ── a refused action (KDM-225): NOT `waiting`, or the client locks itself out.
+		// ── a refused action: NOT `waiting`, or the client locks itself out.
 		bridge.session.apply = () => ({ kind: 'turn', blocked: 'peace-offer' });
 		bridge._handle(A, { type: 'input', action: {} }, 'A');
 
@@ -358,7 +358,7 @@ describe('KDM-274 — every declared message is exercised, and keeps its declara
 		bridge.session.apply = () => ({ kind: 'turn', advanced: false, waitingOn: ['B'] });
 		bridge._handle(A, { type: 'input', action: {} }, 'A');
 
-		// ── the turn resolves, and with it the automatic export (KDM-275) — through the real
+		// ── the turn resolves, and with it the automatic export — through the real
 		//    `_turnResolved`, so `save_export`'s addressing is decided by the code that ships.
 		bridge.session.apply = () => ({ kind: 'turn', advanced: true, exportDue: 'floor' });
 		bridge._handle(A, { type: 'input', action: {} }, 'A');
@@ -385,7 +385,7 @@ describe('KDM-274 — every declared message is exercised, and keeps its declara
 		await sleep(40);
 		clearInterval(bridge._hbTimer); bridge._hbTimer = null;
 
-		// ── KDM-303: the host seat, vacated by a timed-out host, is handed to a connected player. The
+		// ── The host seat, vacated by a timed-out host, is handed to a connected player. The
 		//    connected one is pinned to A (the rig's host) so the host-only `join_pending` that the
 		//    hand-over re-offers still lands on the host seat R4 below checks against.
 		const realState = bridge.presence.state;
@@ -438,7 +438,7 @@ describe('KDM-274 — every declared message is exercised, and keeps its declara
 		}
 		expect(missing,
 			'this field is declared `required` and did not reach the socket. A payload composed '
-			+ 'correctly and then not sent leaves every session-level test green (KDM-274).').toEqual([]);
+			+ 'correctly and then not sent leaves every session-level test green.').toEqual([]);
 	});
 
 	it('R2 — and no frame carries a field nobody declared', () => {
@@ -461,7 +461,7 @@ describe('KDM-274 — every declared message is exercised, and keeps its declara
 		// broadcast written where a unicast was meant, and `save_export` is the whole world.
 		expect(leaks,
 			'a host-only payload reached another seat — the broadcast-where-unicast-was-meant leak '
-			+ '(KDM-244 R11), and the one-word `_sendExport(clientId, …)` slip (KDM-275 R10).')
+			+ ', and the one-word `_sendExport(clientId, …)` slip.')
 			.toEqual([]);
 		// CONTROL: the check above would also read empty if no host-only payload had been sent AT
 		// ALL, which is the shape of a guard that has quietly stopped watching.
@@ -480,7 +480,7 @@ describe('KDM-274 — every declared message is exercised, and keeps its declara
 });
 
 /* ══════════════════════════════════════════════════════════════════════════════════════════════════
- * KDM-287 — `joined.lan`: the address a friend can type, and who is told it
+ * `Joined.lan`: the address a friend can type, and who is told it
  *
  * The exercise above reaches `joined` through `_joinLate`, which is the RUNNING-session road. The
  * field this task adds rides the PRE-START one, so it needs a rig whose session has not started —
@@ -490,7 +490,7 @@ describe('KDM-274 — every declared message is exercised, and keeps its declara
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { publicAddresses } = require('../../tools/mp-server/lan-address');
 
-describe('KDM-287 — the host is sent an address a friend can use', () => {
+describe('the host is sent an address a friend can use', () => {
 	/** The pre-start `join` road, on a socket that has a real `localPort`. */
 	function joinOn(role: 'host' | 'guest', localPort: number) {
 		const { bridge } = rig();

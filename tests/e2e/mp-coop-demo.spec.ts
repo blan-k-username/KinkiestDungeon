@@ -1,5 +1,5 @@
 /**
- * E2E (Playwright/Chromium): the hands-on co-op demo launcher — KD-071.
+ * E2E (Playwright/Chromium): the hands-on co-op demo launcher.
  *
  * Starts the real demo server (static game + WS bridge on one port) and drives TWO
  * independent browser windows against it, exactly as a human would:
@@ -21,7 +21,7 @@ test('two browser windows play one shared co-op dungeon via the demo server', as
 
 	const ctxA = await browser.newContext();
 	const ctxB = await browser.newContext();
-	// KDM-217: arm the render-surface reader on both contexts before either navigates.
+	// Arm the render-surface reader on both contexts before either navigates.
 	await installRenderSurfaceReader(ctxA);
 	await installRenderSurfaceReader(ctxB);
 	const A = await ctxA.newPage();
@@ -34,12 +34,12 @@ test('two browser windows play one shared co-op dungeon via the demo server', as
 		await bootCoopPair(A, B, port);
 
 		/*
-		 * KDM-255 R3 / KDM-302 — both windows got in THROUGH THE GATE, not around it.
+		 * Both windows got in THROUGH THE GATE, not around it.
 		 *
 		 * A roleless `join` used to be seated directly by `ws-bridge`, leaving `gate.slotOf` null for
 		 * both windows while the session ran perfectly well. This is the one assertion that can tell
 		 * a gated seat from a bypass, made in the spec that boots the real pair through the real
-		 * server. Since KDM-302 the pair joins through the lobby's own `__coopConnect` (no `#coop=`):
+		 * server. The pair joins through the lobby's own `__coopConnect` (no `#coop=`):
 		 * A asked for the host seat, B asked as the guest and A answered.
 		 */
 		expect(bridge.gate.slotOf('A'), 'A claimed the host seat').toBe(0);
@@ -77,14 +77,13 @@ test('two browser windows play one shared co-op dungeon via the demo server', as
 		expect(typeof ga).toBe('string');
 		expect(ga.length).toBeGreaterThan(0);
 		expect(ga).toBe(gb);
-		// render-only: the client marks itself render-only via KDRenderClient (KD-085 —
-		// the KDServerRole game-source flag was reverted; the client is pure monkey-patch).
+		// render-only: the client marks itself render-only via KDRenderClient (// the KDServerRole game-source flag was reverted; the client is pure monkey-patch).
 		expect(await A.evaluate(() => (window as any).KDRenderClient.isLocalSimDisabled())).toBe(true);
 
 
 		// --- true lockstep move (R8): turn advances only when BOTH act; B sees A move ---
 		// A starts adjacent to B's avatar (an ally blocks that tile) and walls block others, so not
-		// every direction is open — walk until one is. KDM-213: that walk is `coopMoveAnyDirection`,
+		// every direction is open — walk until one is. That walk is `coopMoveAnyDirection`,
 		// shared with `mp-input-matrix` / `mp-real-input`. This spec's EXTRA per-turn invariants (which
 		// are why the loop used to be inline) ride along in `onTurn` and are asserted here, on every
 		// iteration including the blocked ones:
@@ -105,15 +104,15 @@ test('two browser windows play one shared co-op dungeon via the demo server', as
 		});
 		expect(walk.moved).toBe(true);
 
-		// --- routed bump-attack (KD-085 swap model): A moves into the shared enemy →
+		// --- routed bump-attack (swap model): A moves into the shared enemy →
 		// the world's REAL dispatcher resolves it → both see the world enemy damaged ---
 		const session = bridge.session;          // SwapSession (one authoritative world)
-		// KDM-163: resolve THIS turn with A first. `_advanceTurn` applies players in random order (R9),
+		// Resolve THIS turn with A first. `_advanceTurn` applies players in random order (R9),
 		// and every applied action advances time — which runs enemy AI. So whenever B resolved first,
 		// the enemy took an AI step OFF the tile this test had just placed it on, and A's (0,1) "bump"
 		// landed on an empty tile as a plain move (`result: "move"`, enemy intact one tile over).
 		// Measured: ~1 run in 3 under load, three identical captures, with the client's input lists in
-		// place and the classifier seed OFF — i.e. this flake is NOT the KDM-163 client switch, which
+		// place and the classifier seed OFF — i.e. this flake is NOT the route-everything client switch, which
 		// it was twice blamed for (see the task's CORRECTION 1/2).
 		// R9's randomness is asserted elsewhere; pinning it here removes a variable this assertion is
 		// not about, rather than weakening what it checks.
@@ -130,9 +129,9 @@ test('two browser windows play one shared co-op dungeon via the demo server', as
 		await A.waitForFunction((prev) => (window as any).__coop.lastTick === prev + 1, tAtk, { timeout: 30_000 });
 		// the world's authoritative enemy took damage (HP dropped or it was killed)
 		const enemyAfter = session.enemyView();
-		// KDM-163: this assertion is INTERMITTENT (measured ~1 run in 3 on a quiet host, with the
+		// This assertion is INTERMITTENT (measured ~1 run in 3 on a quiet host, with the
 		// client's hardcoded input lists in place and the classifier seed OFF — i.e. it is NOT caused
-		// by the KDM-163 client switch, which it was twice blamed for). A bare `toBe(true)` gave the
+		// by the route-everything client switch, which it was twice blamed for). A bare `toBe(true)` gave the
 		// next reader nothing to work with, so carry the state that decides it: what the server
 		// actually applied that turn, where everyone ended up, and whether A's queued action was
 		// displaced before it could be applied.
@@ -163,7 +162,7 @@ test('two browser windows play one shared co-op dungeon via the demo server', as
 		await A.evaluate(() => { /* @ts-ignore bare let-global */ KinkyDungeonInDanger = function () { return false; }; });
 		// Probe KD's REAL pathfinder (wrapped to capture the path) for a reachable
 		// multi-step route from A; suppress sends while probing.
-		// KDM-310: a click now sends its first step even while an action is waiting (a new click
+		// A click now sends its first step even while an action is waiting (a new click
 		// REPLACES it), so `submitted = true` no longer suppresses anything. Block the wire with
 		// `started = false` instead, and trap the route the wrap captures BEFORE its first step is
 		// taken off it; then hand the whole path back for the deterministic kick below.
@@ -226,7 +225,7 @@ test('two browser windows play one shared co-op dungeon via the demo server', as
 
 		// Real rendered frames in both windows, read off each page's PIXIapp.view. These used
 		// to screenshot the dead #MainCanvas placeholder and assert a byte length, which a
-		// blank PNG also passes (KDM-217; see helpers/render-surface.ts).
+		// blank PNG also passes (see helpers/render-surface.ts).
 		for (const P of [A, B]) {
 			const frame = await readRenderSurface(P);
 			expect(frame.colors, 'both windows should paint a real frame').toBeGreaterThan(PAINTED_MIN_COLORS);

@@ -1,5 +1,5 @@
 /**
- * KDM-233 — the join gate (`tools/mp-server/join-gate.js`), on its own.
+ * The join gate (`tools/mp-server/join-gate.js`), on its own.
  *
  * WHO IS IN THE SESSION AND WHO IS STILL ASKING. This is the pure half of "host a game and let a
  * friend join": slot ownership, the pending request, and what each of the host's two answers does.
@@ -10,7 +10,7 @@
  * slot, a second request that silently displaces the first, a build mismatch the host is asked to
  * approve anyway.
  *
- * Requirement ids refer to the `## Requirements (EARS)` section of KDM-233.
+ * The requirement labels (R1, R2, …) name the behaviours this spec pins.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -18,7 +18,7 @@ const { JoinGate } = require('../../tools/mp-server/join-gate');
 
 const BUILD = 'kd-5.5.0-abc123';
 
-describe('KDM-233 — JoinGate', () => {
+describe('JoinGate', () => {
 	let g: any;
 	beforeEach(() => { g = new JoinGate({ build: BUILD }); });
 
@@ -211,7 +211,7 @@ describe('KDM-233 — JoinGate', () => {
 
 		it('the host leaving empties the session — a guest cannot inherit the host seat', () => {
 			g.release('H');
-			expect(g.host, 'no promotion: the world lives in the host process (KDM-244 C1/C3)').toBe(null);
+			expect(g.host, 'no promotion: the world lives in the host process').toBe(null);
 			expect(g.guest).toBe('G');
 			expect(g.requestJoin('G3', { name: 'Cy', build: BUILD })).toMatchObject({ reason: 'no_host' });
 		});
@@ -259,7 +259,7 @@ describe('KDM-233 — JoinGate', () => {
  * whoever claims the host seat. The second is what makes N1 work without the operator configuring
  * anything, and the "unset" case is the one that could silently disable the check.
  */
-describe('KDM-233 — JoinGate build ownership', () => {
+describe('JoinGate build ownership', () => {
 	it('adopts the HOST\'s build when it was not told one, and enforces it from then on', () => {
 		const g = new JoinGate({});
 		g.claimHost('H', { build: 'kd-9.9.9' });

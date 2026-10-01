@@ -1,10 +1,10 @@
 /**
- * tools/mp-server/input-classifier.js  (KDM-163, KDM-197)
+ * tools/mp-server/input-classifier.js 
  *
  * Decide, WITHOUT running anything, which of KD's input types consume a shared turn.
  *
  * This is the pre-seed for `SwapSession.inputKind`. It exists because both dynamic approaches were
- * implemented and rejected by measurement (probes are in the KDM-162 task folder):
+ * implemented and rejected by measurement (the probes were kept out of this tree):
  *
  *  - probes/probe11 — apply speculatively with `KinkyDungeonAdvanceTime` blocked, then roll back if it
  *    turned out to be turn-consuming. `doattack` damages the TARGET (hp 1 → -0.575) before reaching
@@ -22,7 +22,7 @@
  * So an unresolved callee counts as "might advance": a `ui` verdict means the entire resolved call
  * graph is clean AND nothing unresolved was called.
  *
- * KDM-197 — the verdict now ships with the STRENGTH of the evidence behind it, because the runtime
+ * The verdict now ships with the STRENGTH of the evidence behind it, because the runtime
  * repair below is only legitimate against a guess:
  *
  *   proven-turn   a concrete call path to the target exists through RESOLVED functions only. The type
@@ -70,7 +70,7 @@ const DEF_PATTERNS = [
 	/^(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*async\s*\([^)]*\)\s*=>\s*\{/gm,
 ];
 
-/** Kind + confidence for one analysed body (KDM-197). */
+/** Kind + confidence for one analysed body. */
 function verdict(may, proven) {
 	if (proven) return { kind: 'turn', confidence: 'proven-turn' };
 	if (may) return { kind: 'turn', confidence: 'assumed-turn' };
@@ -114,7 +114,7 @@ function classifyInputs(bundleSource) {
 	 * `assumeUnresolved` picks the reading of a callee whose body this analysis cannot see:
 	 *   true  — it MIGHT advance (the sound over-approximation; this produces the verdict)
 	 *   false — only resolved callees count (an under-approximation, so a `true` answer is a PROOF
-	 *           that a concrete call path to the target exists — KDM-197's `proven-turn`)
+	 *           that a concrete call path to the target exists — the `proven-turn` verdict)
 	 * One walk, two memo tables: the traversal is identical under both readings, so it must not be
 	 * written twice — the two copies drifting apart is exactly how a "proof" stops being one.
 	 */

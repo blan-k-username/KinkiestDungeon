@@ -1,10 +1,10 @@
 /**
- * KDM-250 — presence (`tools/mp-server/presence.js`), on its own.
+ * Presence (`tools/mp-server/presence.js`), on its own.
  *
  * WHO IS STILL HERE. This is the pure half of "a dropped connection must not freeze the game": the
  * three states a seat can be in, what moves it between them, and the two latches that stop the
  * machine from firing at the wrong moment. No socket, no world, no game global — same call as
- * `join-gate.js` and `peace.js` (KDM-234 A1), so every rule below is checked in milliseconds instead
+ * `join-gate.js` and `peace.js`, so every rule below is checked in milliseconds instead
  * of behind a ~30 s session boot.
  *
  * The rules here are the ones that are easy to get subtly wrong: a `gone` seat that a stale
@@ -16,7 +16,7 @@
  * already uses for latency (`ws-bridge.js` `now()`; never `Date.now()`, whose wall-clock jump would
  * corrupt every reading).
  *
- * Requirement ids refer to the `## Requirements` section of KDM-250 (EARS text in KDM-234).
+ * The requirement ids on the tests name the behaviours this spec pins.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -24,7 +24,7 @@ const { Presence } = require('../../tools/mp-server/presence');
 
 const TIMEOUT = 1000;
 
-describe('KDM-250 — Presence', () => {
+describe('Presence', () => {
 	let p: any;
 	beforeEach(() => { p = new Presence({ hbTimeoutMs: TIMEOUT }); });
 
@@ -83,7 +83,7 @@ describe('KDM-250 — Presence', () => {
 	});
 
 	/**
-	 * KDM-251 regression — do not bill the client for OUR OWN downtime.
+	 * Pause regression — do not bill the client for OUR OWN downtime.
 	 *
 	 * `sweep` measures silence as `now - lastSeen`, and both halves of that are read on the SERVER. So
 	 * when the server's own event loop stalls — a GC pause, a blocking operation, a loaded CI host —
@@ -92,13 +92,13 @@ describe('KDM-250 — Presence', () => {
 	 *
 	 * Caught for real: the full unit suite stalled the loop 1.47 s (`loopLag max=1469.6ms`), which
 	 * exceeded a 200 ms heartbeat window and paused a session in which both peers were perfectly
-	 * healthy. Under KDM-250 that cost a wrong overlay line; under KDM-251 it stops the game.
+	 * healthy. When presence only fed the overlay that cost a wrong overlay line; now that a lost peer pauses the session, it stops the game.
 	 *
 	 * The fix is a CREDIT, not a skip: however late this sweep was, give that time back to everyone.
 	 * A genuinely dead peer is still detected — it just takes `hbTimeout + the stall`, which is the
 	 * honest answer, because during the stall we had no evidence either way.
 	 */
-	describe('a stalled SERVER does not count as a silent client (KDM-251)', () => {
+	describe('a stalled SERVER does not count as a silent client', () => {
 		const INTERVAL = 100;
 		beforeEach(() => {
 			p = new Presence({ hbTimeoutMs: TIMEOUT, hbIntervalMs: INTERVAL });

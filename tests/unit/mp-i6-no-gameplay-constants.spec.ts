@@ -1,14 +1,14 @@
 /**
- * KDM-164 AC3 / epic invariant **I6** — the MP layer owns NO gameplay rules.
+ * Invariant **I6** — the MP layer owns NO gameplay rules.
  *
  * The gateway's job is to route a player's real action into the game and route the result back. Every
  * time it grew a number of its own — a defeat threshold, a recovery fraction, a damage gauge, a
  * "subdued at half Will" line — that number was a game rule invented in the wrong place, and it drifted
- * from KD's behaviour. KDM-156 (a downed player pinned at 0 Will, healing silently wiped) was caused by
+ * from KD's behaviour. One real bug (a downed player pinned at 0 Will, healing silently wiped) was caused by
  * exactly one of them.
  *
  * This guard is deliberately NAME-BLIND: it scans for the SHAPE of a gameplay constant rather than for
- * the specific names KDM-164 deleted, so re-introducing the same mistake under a new name still fails.
+ * the specific names once deleted, so re-introducing the same mistake under a new name still fails.
  *
  * What it must NOT flag (and why these are not gameplay rules):
  *   - protocol / transport / diagnostics sizes: log caps, buffer limits, ports, timeouts;
@@ -68,7 +68,7 @@ function identifierWords(name: string): string[] {
 
 const namesARule = (name: string) => identifierWords(name).some((w) => GAMEPLAY_WORDS.has(w));
 
-describe('I6: the MP layer contains no gameplay constants (KDM-164 AC3)', () => {
+describe('I6: the MP layer contains no gameplay constants', () => {
 	/**
 	 * The guard must be able to FAIL. A green that comes from matching nothing is worthless — and this
 	 * one greps source, which is exactly the kind of check that quietly stops working when a regex or a
@@ -126,8 +126,8 @@ describe('I6: the MP layer contains no gameplay constants (KDM-164 AC3)', () => 
 		expect(offenders, 'comparing a player stat to a number we chose IS a gameplay rule').toEqual([]);
 	});
 
-	/** The specific rules KDM-164 removed — kept as a named regression on top of the shape guard. */
-	it('the KDM-164 constants stay deleted', () => {
+	/** The specific rules once removed — kept as a named regression on top of the shape guard. */
+	it('the removed gameplay constants stay deleted', () => {
 		const all = mpSources().map((f: string) => codeOnly(fs.readFileSync(f, 'utf8'))).join('\n');
 		for (const name of ['DEFEAT_WILL', 'REVIVE_WILL_FRACTION', '_armHp', '_applyPvP']) {
 			expect(all, `${name} was an invented rule — it must not come back`).not.toMatch(new RegExp(`\\b${name}\\b`));

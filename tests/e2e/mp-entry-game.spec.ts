@@ -1,5 +1,5 @@
 /**
- * E2E (KDM-294) — host the run you are ALREADY PLAYING, from KD's own in-game menu.
+ * E2E — host the run you are ALREADY PLAYING, from KD's own in-game menu.
  *
  * The owner's brief: "let the Host start the game as usual SP, no difference". So a player who began
  * solo, and played, opens KD's in-game menu (`KinkyDungeonDrawState === 'Restart'`) and presses one
@@ -7,7 +7,7 @@
  *
  * ── WHY THESE ASSERTIONS AND NOT OTHERS ───────────────────────────────────────────────────────────
  *  1. #2 and #3 are a PAIR, and #3 is the one that matters. On the class screen every stock control is
- *     a cache button, so a geometry check was enough (KDM-293 #11). The in-game menu is different:
+ *     a cache button, so a geometry check was enough. The in-game menu is different:
  *     Save & Quit, Capture and Check Perks are hand-rolled `MouseIn` hit-tests
  *     (`KinkyDungeonHUD.ts`, Restart branch) that no `KDButtonsCache` read can see — and
  *     `KDProcessButtons()` runs before them and returns on a hit (`KinkyDungeon.ts:6421`). So #3
@@ -20,7 +20,7 @@
  *  3. #8 is the end-to-end claim: the guest arrives in THAT game. The guest is the control in the
  *     same session, as in `mp-save-import`.
  *
- * ⚠️ FAILS UNTIL KDM-294 IS IMPLEMENTED. Written first, per the project's Rule 1.
+ * ⚠️ FAILS UNTIL THE FEATURE IS IMPLEMENTED. Written first, per the project's Rule 1.
  */
 import { test, expect } from '../helpers/playwright-fixtures';
 import {
@@ -71,7 +71,7 @@ async function withSoloRun(page: any, body: (port: number) => Promise<void>) {
 	}
 }
 
-test.describe('KDM-294 — the host entry on KD\'s in-game menu', () => {
+test.describe('the host entry on KD\'s in-game menu', () => {
 	test.describe.configure({ timeout: 180_000 });
 
 	test('#1 the entry is on the in-game menu, and only there', async ({ isolatedPage: page }) => {
@@ -238,7 +238,7 @@ test.describe('KDM-294 — the host entry on KD\'s in-game menu', () => {
 	});
 });
 
-test.describe('KDM-294 — a friend joins the run in progress', () => {
+test.describe('a friend joins the run in progress', () => {
 	test('#8 the guest arrives in THAT game — the host keeps their run', async ({ browser }) => {
 		test.setTimeout(MP_TEST_TIMEOUT);
 		const { server, bridge, port } = await start(0);

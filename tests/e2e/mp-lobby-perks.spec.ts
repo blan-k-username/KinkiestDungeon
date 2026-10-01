@@ -1,11 +1,11 @@
 /**
- * E2E (KDM-238 R2) — KD's OWN perk screen is left exactly as KD's.
+ * E2E — KD's OWN perk screen is left exactly as KD's.
  *
- * ⚠️ MOST OF THIS FILE WAS DELETED BY KDM-293, and what it asserted did not go with it.
+ * ⚠️ MOST OF THIS FILE WAS DELETED WITH THE LOBBY MENU, and what it asserted did not go with it.
  *
- * KDM-238 sent the player from a lobby menu of ours TO `'Stats'`, which meant BORROWING
+ * An earlier design sent the player from a lobby menu of ours TO `'Stats'`, which meant BORROWING
  * `KDPerksStart` / `KDPerksBack` to get them back again — and three tests here covered that borrow.
- * KDM-293 deleted the lobby menu: the player now reaches the perk grid by KD's own road and leaves it
+ * The lobby menu is gone: the player now reaches the perk grid by KD's own road and leaves it
  * by KD's own buttons, so there is nothing to borrow and nothing to come back from. The entry-point
  * behaviour those tests guarded is now `mp-entry-diff.spec.ts`.
  *
@@ -39,7 +39,7 @@ async function onPerkScreen(page: any, coopPick: boolean) {
 	await frames(page);
 }
 
-test.describe('KDM-238 — perks are chosen on KD\'s own screen, from the co-op lobby', () => {
+test.describe('perks are chosen on KD\'s own screen, from the co-op lobby', () => {
 
 	test('R2 — the screen is KD\'s: the perk grid and its stock controls are all still there', async ({ isolatedPage: page }) => {
 		await bootKD(page);

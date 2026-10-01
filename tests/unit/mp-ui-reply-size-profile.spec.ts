@@ -1,9 +1,9 @@
 /**
- * Node-layer (Vitest): KDM-206 — WHERE are the bytes in a changed `ui` reply, and how much of it
+ * Node-layer (Vitest): WHERE are the bytes in a changed `ui` reply, and how much of it
  * actually changes between consecutive replies?
  *
  * `mp-real-input.spec.ts:112` ("idle per-frame input costs no state traffic") is red at 195-273 KB
- * against a 100 KB budget. KDM-203 established that KDM-186 RULE 2 works — an input that moves nothing
+ * against a 100 KB budget. An earlier investigation established that the latency RULE 2 works — an input that moves nothing
  * gets a bare ack (`tests/unit/mp-idle-chatter-cost.spec.ts` proves it) — so the 5-7 replies in that
  * test are LEGITIMATE: the real client's draw loop emits `setMoveDirection` carrying the live mouse
  * position, which genuinely moves state. The defect is what a legitimate reply COSTS:
@@ -67,7 +67,7 @@ function movedBytes(a: any, b: any, depth = 0): number {
 	return sum;
 }
 
-describe('KDM-206 — cost of one changed `ui` reply', () => {
+describe('cost of one changed `ui` reply', () => {
 	it('profiles reply size and how much of it is redundant between consecutive replies', () => {
 		const s: any = new SwapSession({ requiredPlayers: 2, seed: 'kdm206-reply-size', seedInputKinds: true });
 		s.join('A');
@@ -138,7 +138,7 @@ describe('KDM-206 — cost of one changed `ui` reply', () => {
 		}
 
 		// eslint-disable-next-line no-console
-		console.log('KDM-206 UI REPLY SIZE PROFILE\n' +
+		console.log('UI REPLY SIZE PROFILE\n' +
 			`  one reply = ${kb(total)} KB · changed=${JSON.stringify(changes)}\n` +
 			'  by key: ' + perKey.filter((p) => p.kb >= 0.1).map((p) => `${p.key} ${p.kb}KB`).join(' · ') + '\n' +
 			diffs.map((d) => `  step ${d.step}: reply ${d.totalKb}KB · ACTUALLY MOVED ${d.movedB}B ` +

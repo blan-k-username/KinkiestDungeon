@@ -1,5 +1,5 @@
 /**
- * E2E (KD-101) — applying a tie AFTER you've already acted this turn must still work.
+ * E2E — applying a tie AFTER you've already acted this turn must still work.
  *
  * Live symptom: the submenu apply emitted the correct addNPCRestraint, but it was dropped with
  * "submit BLOCKED … alreadySubmitted:true" because the attacker had already submitted an action this
@@ -44,7 +44,7 @@ test('a tie applied after already acting this turn still lands (manual re-submit
 
 		// B acts FIRST (uses up the turn under the old gate), THEN applies the tie — must still work
 		await B.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
-		// KDM-163: `submitted` is no longer set optimistically at send time — the client cannot tell a
+		// `Submitted` is no longer set optimistically at send time — the client cannot tell a
 		// turn-consuming input from KD's per-frame UI chatter, so it waits for the server to confirm the
 		// input entered lockstep. Same precondition, one round-trip later; the behaviour under test
 		// (a manual re-submit still overrides an already-queued action) is unchanged.

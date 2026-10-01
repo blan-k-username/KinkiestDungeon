@@ -1,11 +1,11 @@
 /**
- * Node-layer (Vitest) PoC + test for KD-089 — co-op targeted-spell casting headless.
+ * Node-layer (Vitest) PoC + test for co-op targeted-spell casting headless.
  *
  * Feasibility question this proves: a TARGETED DAMAGING SPELL routed through the real
  * dispatcher (HeadlessHost.applyInput → KDSendInput('tryCastSpell', ...)) actually lands
  * damage on a summoned enemy in the headless world, WITHOUT a browser frame loop.
  *
- * Why it can work (from the KD-089 assessment): the cast→damage path is pure turn-loop
+ * Why it can work (from the assessment): the cast→damage path is pure turn-loop
  * logic, NOT render-driven —
  *   KinkyDungeonCastSpell (Game/src/magic/KinkyDungeonMagic.ts:864)
  *     → KinkyDungeonLaunchBullet (Game/src/fight/KinkyDungeonFight.ts:3317) into KDMapData.Bullets
@@ -15,7 +15,7 @@
  * Bullets live in KDMapData.Bullets (WORLD state), so they survive player swaps and resolve
  * on the next KinkyDungeonAdvanceTime the host already pumps (step()).
  *
- * The client→server contract is KD-088's already-wired one: {kdType:'tryCastSpell', data:{
+ * The client→server contract is the already-wired one: {kdType:'tryCastSpell', data:{
  * tx,ty,spellname, player:{__kdEnt:'player'}}}; applyInput re-resolves {__kdEnt:'player'}
  * to THIS world's KinkyDungeonPlayerEntity before dispatch.
  */
@@ -37,7 +37,7 @@ function enemyById(h: any, id: number) {
 	})()`);
 }
 
-describe('Co-op targeted-spell casting headless (KD-089)', () => {
+describe('Co-op targeted-spell casting headless', () => {
 	let h: any;
 
 	beforeAll(() => {
@@ -89,12 +89,12 @@ describe('Co-op targeted-spell casting headless (KD-089)', () => {
 
 /**
  * Live-path coverage: the SAME action travels the production swap path. The client
- * forwards {kdType:'tryCastSpell', data} (KD-088 routing + {__kdEnt} sanitization);
+ * forwards {kdType:'tryCastSpell', data} (existing routing + {__kdEnt} sanitization);
  * SwapSession._toInput passes it straight through; _advanceTurn swaps the caster in,
  * runs it through the real dispatcher on the ONE authoritative world, swaps out. No new
  * wiring — this proves the cast lands and self-effects persist on the caster's bundle.
  */
-describe('Co-op spell casting over the live swap path (KD-089)', () => {
+describe('Co-op spell casting over the live swap path', () => {
 	let s: any;
 
 	beforeAll(() => {
@@ -110,7 +110,7 @@ describe('Co-op spell casting over the live swap path (KD-089)', () => {
 		// Deterministically park the shared enemy adjacent to A's cast origin so the cast is
 		// in-range regardless of the Rat's wandering AI (Firecracker range 3.99; AoE 1 tile
 		// still covers a 1-tile enemy step before detonation).
-		const pa0 = s.posOf('A');   // KDM-309: A may sit on the post-init tile, so the bundle need not carry it
+		const pa0 = s.posOf('A');   // A may sit on the post-init tile, so the bundle need not carry it
 		const beside = freeNeighbour(s, 'A');
 		expect(beside, 'precondition: a free tile beside A').not.toBeNull();
 		s.world.moveAvatar(s.enemyId, beside!.x, beside!.y);

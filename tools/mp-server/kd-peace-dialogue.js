@@ -1,5 +1,5 @@
 /**
- * tools/mp-server/kd-peace-dialogue.js  (KDM-230)
+ * tools/mp-server/kd-peace-dialogue.js 
  *
  * THE PEACE-OFFER DIALOGUE — one definition, both runtimes.
  *

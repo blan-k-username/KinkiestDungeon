@@ -1,15 +1,15 @@
 /**
- * tools/mp-server/client/coop-menu.js  (KDM-225, renamed KDM-276)
+ * tools/mp-server/client/coop-menu.js  (formerly coop-peace.js)
  *
  * THE CO-OP CONTEXT MENU — ONE wrap of `KDGetContextActions.Game`, N co-op entries on it.
  *
- * Today the entries are "Offer peace" (KDM-225; the ANSWER is a dialogue, KDM-230) and the host's
- * "Save this run for single player" (KDM-244). They share the wrap and nothing else.
+ * Today the entries are "Offer peace" (the ANSWER is a dialogue) and the host's
+ * "Save this run for single player". They share the wrap and nothing else.
  *
  * ⚠️ A NEW CO-OP MENU ENTRY BELONGS IN THIS FILE. `KDGetContextActions.Game` is one global and this
- * project allows it ONE wrap — a second file wrapping the same function is the duplication KDM-229
- * was raised for. This file was called `coop-peace.js` until its second entry landed, and that name
- * then argued for exactly the mistake it exists to prevent (KDM-276). It is named for the menu now:
+ * project allows it ONE wrap — a second file wrapping the same function is the duplication the one-wrap rule
+ * is meant to stop. This file was called `coop-peace.js` until its second entry landed, and that name
+ * then argued for exactly the mistake it exists to prevent. It is named for the menu now:
  * add your entry to `decorate()`, not to a new wrapper.
  *
  * Each entry carries its OWN preconditions. Nothing here is gated on being at war except the peace
@@ -37,7 +37,7 @@
 	'use strict';
 
 	var OFFER = 'Peace';
-	/** KDM-244 — the host's "take this run back to single player" entry. */
+	/** The host's "take this run back to single player" entry. */
 	var SAVE_RUN = 'CoopSaveRun';
 
 	function coopState() {
@@ -74,7 +74,7 @@
 		if (!targetingSelf()) return menu;
 
 		/*
-		 * KDM-244 — "save this run", the HOST's way to take the world back to single player.
+		 * "Save this run", the HOST's way to take the world back to single player.
 		 *
 		 * ⚠️ ADDED BEFORE THE PEACE GUARDS, DELIBERATELY. It was first written at the bottom of this
 		 * function and never appeared: everything below is gated on `coopState()`, which is the
@@ -84,10 +84,10 @@
 		 * is the only layer that can see a menu entry that is never painted.
 		 *
 		 * ⚠️ WHY IT SHARES A FILE WITH PEACE. `KDGetContextActions.Game` is ONE global and this
-		 * project allows it ONE wrap — the rule this file's header states, and the duplication KDM-229
-		 * was raised for. A `coop-export.js` adding a second wrapper of the same function is exactly
+		 * project allows it ONE wrap — the rule this file's header states, and the duplication the rule
+		 * exists to prevent. A `coop-export.js` adding a second wrapper of the same function is exactly
 		 * that mistake, so the entry goes where the wrap already is. This entry is why the file was
-		 * renamed from `coop-peace.js` to `coop-menu.js` (KDM-276): it is the co-op menu, not the
+		 * renamed from `coop-peace.js` to `coop-menu.js`: it is the co-op menu, not the
 		 * peace menu, and the old name told the next reader to go and write that second wrapper.
 		 *
 		 * Host-only in the UI (R1); the server re-checks in `_sendExport`, because a client can lie.
@@ -99,7 +99,7 @@
 		if (isHost) {
 			menu.options.push(SAVE_RUN);
 			/*
-			 * KDM-275 R7/AC4 — and say when it was last saved, right here.
+			 * And say when it was last saved, right here.
 			 *
 			 * The run now saves itself (every floor, plus a timer for Roguelike hosts) and does so
 			 * SILENTLY, because a toast per floor is noise. Something must therefore answer "is my run
@@ -133,7 +133,7 @@
 		var coop = coopState();
 		if (!coop) return menu;
 
-		// KDM-230: ANSWERING is no longer here. An offer arrives as KD's own modal dialogue, opened
+		// ANSWERING is no longer here. An offer arrives as KD's own modal dialogue, opened
 		// server-side on this player's bundle, with Accept / Refuse as its options — a submenu entry
 		// was the wrong place for a question you must answer (owner, UAT). Nothing is offered while
 		// one is open: you answer first.
@@ -171,7 +171,7 @@
 	}
 
 	/*
-	 * KDM-229: INSTALLED SYNCHRONOUSLY. This used to be two `setInterval`s — a 100 ms poll waiting
+	 * INSTALLED SYNCHRONOUSLY. This used to be two `setInterval`s — a 100 ms poll waiting
 	 * for `KDGetContextActions` to appear, and a 1 s re-check of the wrap. Both were unnecessary,
 	 * and both are gone.
 	 *

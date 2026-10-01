@@ -1,5 +1,5 @@
 /**
- * tools/mp-server/lan-address.js  (KDM-287)
+ * tools/mp-server/lan-address.js 
  *
  * THE ONE ANSWER TO "what address can my friend type?"
  *
@@ -79,7 +79,7 @@ function lanAddresses(port, ifaces) {
 }
 
 /**
- * KDM-287 — the address to publish, once the CONTAINER is taken into account.
+ * The address to publish, once the CONTAINER is taken into account.
  *
  * ⚠️ `lanAddresses` ALONE IS WRONG WHEN THE GATEWAY RUNS IN DOCKER, and quietly so. Published with
  * `-p <host port>:8090`, inside the container both halves of the

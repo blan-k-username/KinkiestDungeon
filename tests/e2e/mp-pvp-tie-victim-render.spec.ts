@@ -1,5 +1,5 @@
 /**
- * E2E (KD-101) — the bound peer must SEE the restraint on their own client.
+ * E2E — the bound peer must SEE the restraint on their own client.
  *
  * Live symptom: B ties A (B's log shows "You apply the Spellbound Thighs to Player A"), but A's screen
  * shows nothing. Root cause: the reconcile binds A's bundle server-side (and the render snapshot even
@@ -76,10 +76,10 @@ test('a tied peer sees the restraint on their own client', async ({ browser }) =
 		// DATA ONLY: the worn restraint reaches the Character.Appearance DATA structure. NOTE: this does
 		// NOT prove the restraint is RENDERED on the drawn sprite — the model registry updates but the
 		// composited PIXI texture + pose do not, so the character stays visually unchanged. The real
-		// visual render is tracked in KD-103 (see tests/e2e/mp-render-shot.spec.ts for the proof). Do
+		// visual render is tracked separately (see tests/e2e/mp-render-shot.spec.ts for the proof). Do
 		// NOT treat this assertion as a visual success.
 		const apAfter = await A.evaluate(() => /* @ts-ignore */ (typeof KinkyDungeonPlayer !== 'undefined' && KinkyDungeonPlayer && KinkyDungeonPlayer.Appearance ? KinkyDungeonPlayer.Appearance.length : -1));
-		expect(apAfter, `A's appearance DATA should include the restraint (was ${apBefore}, now ${apAfter}) — NOT a visual check (KD-103)`).toBeGreaterThan(apBefore);
+		expect(apAfter, `A's appearance DATA should include the restraint (was ${apBefore}, now ${apAfter}) — NOT a visual check`).toBeGreaterThan(apBefore);
 	} finally {
 		await ctxA.close();
 		await ctxB.close();

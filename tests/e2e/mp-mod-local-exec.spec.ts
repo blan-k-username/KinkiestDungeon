@@ -1,5 +1,5 @@
 /**
- * E2E (KDM-249 Phase A) — a co-op player's OWN mods actually execute.
+ * E2E (mod sync, Phase A) — a co-op player's OWN mods actually execute.
  *
  * ── THE BUG ───────────────────────────────────────────────────────────────────────────────────────
  * KD executes mods from exactly one place, `KDExecuteModsAndStart()` on the main-menu buttons
@@ -21,7 +21,7 @@
  *     value from a mod executed once — double-eval is what the `WRAP_CONVENTION` sentinels exist to
  *     survive and is a real risk of getting this wrong.
  *  4. BOTH `AutoLoadMods` REGIMES ARE PINNED. The default is `false`; a suite that only ran the
- *     default would never touch the latch path at all (KDM-249 Assessment, risk 3).
+ *     default would never touch the latch path at all (the mod-sync assessment, risk 3).
  *
  * ── WHY A SINGLE PAGE AND NOT A CO-OP PAIR ────────────────────────────────────────────────────────
  * Nothing here needs two players: the latch and the execution are per-client. A two-browser boot
@@ -78,7 +78,7 @@ async function installModZip(page: any, modname: string, marker: string, priorit
 const marker = (page: any, name: string) => page.evaluate((n: string) => (globalThis as any)[n], name);
 const modsState = (page: any) => page.evaluate(() => (window as any).__coopMods.state());
 
-test.describe('KDM-249 Phase A — mods execute on the co-op path', () => {
+test.describe('Mod sync Phase A — mods execute on the co-op path', () => {
 
 	for (const autoLoad of [false, true]) {
 		test(`a player's own mod executes, with AutoLoadMods ${autoLoad ? 'ON' : 'OFF (the default)'}`, async ({ browser }) => {

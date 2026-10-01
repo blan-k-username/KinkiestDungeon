@@ -1,5 +1,5 @@
 /**
- * KD-103 diagnostic (PROPERTY-level, NOT pixels).
+ * Worn-restraint render diagnostic (PROPERTY-level, NOT pixels).
  *
  * Question: which object/property drives the worn-restraint render on the player, and does the
  * thin-client "hand-rebuild" path (render-client.js:233-263) drive it the same way the REAL game

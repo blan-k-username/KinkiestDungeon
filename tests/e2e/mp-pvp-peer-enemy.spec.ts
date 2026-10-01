@@ -1,5 +1,5 @@
 /**
- * E2E (Playwright/Chromium) — light coverage for KD-094 (KD-073c).
+ * E2E (Playwright/Chromium) — light coverage for the peer-as-enemy PvP feature.
  *
  * Starts the demo server in PvP mode (KD_PVP=1) and joins two browsers. Asserts the heart of
  * the "peers-as-Enemy" design: in a PvP session each player sees the OTHER player's avatar as a
@@ -27,7 +27,7 @@ test('PvP session: each browser sees the peer avatar as Enemy faction', async ({
 		await bootCoopPair(A, B, port);
 
 		// In A's view, the single RemotePlayer avatar is B; the game must see it as Enemy.
-		// KDM-210: wait for the avatar, then look it up BY ID — the 'RemotePlayer' name pattern
+		// Wait for the avatar, then look it up BY ID — the 'RemotePlayer' name pattern
 		// lives only in `waitForPeerAvatar`, and the wait removes the null-deref race.
 		const peerA = await waitForPeerAvatar(A, { label: "A's view of the peer" });
 		const factionForA = await A.evaluate((id) => {

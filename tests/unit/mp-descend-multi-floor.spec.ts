@@ -1,7 +1,7 @@
 /**
- * Node-layer (Vitest) — KDM-265: a co-op party can actually descend more than one floor.
+ * Node-layer (Vitest) — a co-op party can actually descend more than one floor.
  *
- * Two defects, found while trying to write KDM-262's reachability test. Both are invisible to the
+ * Two defects, found while trying to write a floor-reachability test. Both are invisible to the
  * existing suite because `mp-party-lands-together.spec.ts` does exactly ONE descent, and that one
  * happens to take the instant branch.
  *
@@ -11,7 +11,7 @@
  * the work in `KDGenMapCallback` (`KDStairActions.ts:251-258`). The ONLY thing that ever runs it is
  * the draw loop: `if (KDGenMapCallback) setTimeout(RunGenMapCallback, 100)` (`KinkyDungeon.ts:2858`).
  * The server has no draw loop. Measured: four consecutive real descents left the callback set and the
- * session in `GenMap` with the map unchanged — and since KDM-239 R7 the client ADOPTS the server's
+ * session in `GenMap` with the map unchanged — and since the client ADOPTS the server's
  * screen, so both players would sit on a `GenMap` screen forever.
  *
  * ── B2: the party's floor is per-player ───────────────────────────────────────────────────────────
@@ -25,8 +25,8 @@
  * after the same turn, so they already agree. A test that does not first make the bundles DISAGREE
  * passes identically on a fixed and a broken build. So each case here plants a disagreement AND a
  * CONTROL key on the same bundle in the same breath — the control must come through, or "the world
- * key held its ground" is indistinguishable from "the restore did nothing at all". That pairing is
- * KDM-228's, and it is the only thing that makes these assertions mean anything.
+ * key held its ground" is indistinguishable from "the restore did nothing at all". That pairing comes from
+ * the world-key classification work, and it is the only thing that makes these assertions mean anything.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 /* eslint-disable @typescript-eslint/no-var-requires */
@@ -39,7 +39,7 @@ const BOOT_TIMEOUT = 300_000;
 /** A key no game code writes, so its arrival can only mean "this bundle really was restored". */
 const CONTROL_KEY = '__kdm265RestoreProbe';
 
-describe('KDM-265 — the party descends', () => {
+describe('the party descends', () => {
 	let s: any;
 	beforeEach(async () => {
 		s = new SwapSession({ requiredPlayers: 2, seed: 'descend-multi', pvp: false });
@@ -66,7 +66,7 @@ describe('KDM-265 — the party descends', () => {
 	/**
 	 * R1's oracle, and it is deliberately NOT "did the map change" — the map changes either way on the
 	 * instant branch, which is exactly how this hid. The question is whether any WORK WAS LEFT
-	 * PENDING. (The oracle KDM-240's notes already recommended.)
+	 * PENDING. (The oracle the capture-relocation notes already recommended.)
 	 */
 	it('R1: no descent leaves map generation pending', () => {
 		for (let i = 1; i <= 4; i++) {
@@ -104,7 +104,7 @@ describe('KDM-265 — the party descends', () => {
 	}, BOOT_TIMEOUT);
 
 	/**
-	 * KDM-240's lesson, pinned: a callback that THROWS must still be cleared, or it poisons every
+	 * The capture-relocation lesson, pinned: a callback that THROWS must still be cleared, or it poisons every
 	 * later turn. Clear-then-call is what buys that; call-then-clear would leave it armed.
 	 */
 	it('R1: a throwing callback is still cleared', () => {

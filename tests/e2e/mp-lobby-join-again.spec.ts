@@ -1,9 +1,9 @@
 /**
- * E2E (KDM-298) — pressing Join again from the SAME tab re-asks; it never locks the player out.
+ * E2E — pressing Join again from the SAME tab re-asks; it never locks the player out.
  *
  * The owner's UAT: a guest pressed Join, nothing seemed to happen, pressed it again — and got
  * `Refused: duplicate_id` on that and every later attempt. The tab was refusing ITSELF: each press
- * opened a new WebSocket without closing the last one, the server's KDM-280 guard saw the id's earlier
+ * opened a new WebSocket without closing the last one, the server's duplicate-id guard saw the id's earlier
  * socket still live, and the superseded socket then ignored the server's pings (its handlers bail on
  * `ws !== myWs` before the ping reply), so the server marked the player missing but never let go of
  * the id.
@@ -11,7 +11,7 @@
  * ⚠️ THE ORACLE IS THE SOCKET COUNT AS WELL AS THE ABSENCE OF A REFUSAL. "No `duplicate_id`" alone is
  * also what a page that silently stopped asking would show; one socket for the whole life of the
  * lobby, a question that is still pending, and a seat that is still held are what the fix claims.
- * The different-tab impostor refusal (KDM-280) is deliberately untouched and covered by its own specs.
+ * The different-tab impostor refusal is deliberately untouched and covered by its own specs.
  */
 import { test, expect } from '@playwright/test';
 import { press, openLobby, lobbyState, guestAsks } from '../helpers/mp-lobby';
@@ -33,7 +33,7 @@ function watchSockets(P: any) {
 	return seen;
 }
 
-test('KDM-298 — Join pressed again while waiting for the host re-asks on the same socket', async ({ browser }) => {
+test('Join pressed again while waiting for the host re-asks on the same socket', async ({ browser }) => {
 	test.setTimeout(MP_TEST_TIMEOUT);
 	const { server, bridge, port } = await start(0);
 	const hostCtx = await browser.newContext();
@@ -69,7 +69,7 @@ test('KDM-298 — Join pressed again while waiting for the host re-asks on the s
 	}
 });
 
-test('KDM-298 — Join pressed again after being let in keeps the seat instead of losing it', async ({ browser }) => {
+test('Join pressed again after being let in keeps the seat instead of losing it', async ({ browser }) => {
 	test.setTimeout(MP_TEST_TIMEOUT);
 	const { server, bridge, port } = await start(0);
 	const hostCtx = await browser.newContext();

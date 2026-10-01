@@ -1,7 +1,7 @@
 /**
- * E2E — WHY does real input not reach the proxy? A discriminating matrix (KDM-186).
+ * E2E — WHY does real input not reach the proxy? A discriminating matrix.
  *
- * ⚠️ KDM-204 — READ THIS BEFORE TRUSTING AN OLDER READING FROM THIS FILE.
+ * ⚠️ READ THIS BEFORE TRUSTING AN OLDER READING FROM THIS FILE.
  * The premise below used to be: "`mp-real-input.spec.ts` established the FACT that a real ArrowRight
  * produces no input at all". That was not a fact about the transport. KD binds movement to a
  * roguelike layout via `KinkyDungeonKeybindings` (`Game/src/base/KinkyDungeon.ts:162`) and the string
@@ -66,7 +66,7 @@ test('WHY real input is lost: control vs hold vs frame rate', async ({ browser }
 		out.sendsNoChatter = await sendsOf(A);
 
 		// ── CONTROL + HOLD ──────────────────────────────────────────────────────────────────────
-		// Both legs come from `coopRealKeyMove` (KDM-211), which owns the two corrections this arm used
+		// Both legs come from `coopRealKeyMove`, which owns the two corrections this arm used
 		// to carry inline — read the key from the live binding table rather than pressing an arrow KD
 		// never binds, and aim at a tile the control leg has just proved is open. `mp-real-input`
 		// asserts on the same primitive; keeping a second copy here is how the two would drift.
@@ -80,7 +80,7 @@ test('WHY real input is lost: control vs hold vs frame rate', async ({ browser }
 		out.holdMoved = real.moved;
 		out.holdSends = await sendsOf(A);
 
-		// KDM-204: the matrix is the POINT of this spec, and an assertion message is printed only when
+		// The matrix is the POINT of this spec, and an assertion message is printed only when
 		// the assertion FAILS — so a green run used to throw the reading away. Emit it unconditionally
 		// (and attach it, so it survives in the HTML report) before asserting.
 		console.log('INPUT MATRIX ' + JSON.stringify(out, null, 1));

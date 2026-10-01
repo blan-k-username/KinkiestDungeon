@@ -1,5 +1,5 @@
 /**
- * KDM-290 — no test may wait longer than the runner will let it run.
+ * No test may wait longer than the runner will let it run.
  *
  * ── THE BUG THIS ENDS ─────────────────────────────────────────────────────────────────────────────
  * `mp-join-one-road.spec.ts` R1 failed once in a full unit run with `Test timed out in 5000ms`, and
@@ -45,11 +45,11 @@ function testTimeout(): number {
 	const src = readFileSync(resolve(ROOT, 'vitest.config.ts'), 'utf8');
 	const m = /testTimeout:\s*([0-9_]+)/.exec(src);
 	expect(m, 'vitest.config.ts must set testTimeout explicitly — the 5 s default is what caused '
-		+ 'KDM-290, and inheriting it silently is how it would come back').toBeTruthy();
+		+ 'a past suite failure, and inheriting it silently is how it would come back').toBeTruthy();
 	return Number((m as RegExpExecArray)[1].replace(/_/g, ''));
 }
 
-describe('KDM-290 — the runner budget is larger than anything a test asks to wait for', () => {
+describe('the runner budget is larger than anything a test asks to wait for', () => {
 	it('vitest.config.ts sets a budget, and it is big enough for a real session start', () => {
 		const budget = testTimeout();
 		// A session start measured at ~1.25 s idle and ~2.4 s against one competing suite. The floor

@@ -1,5 +1,5 @@
 /**
- * KDM-167: booting the two-browser co-op pair — the ONE place that waits for a session to start.
+ * Booting the two-browser co-op pair — the ONE place that waits for a session to start.
  *
  * Every MP e2e opens two windows against the demo server and waits for `__coop.connected` then
  * `__coop.started` on each. That block was copy-pasted into 17 specs (51 `waitForFunction` sites), so
@@ -20,7 +20,7 @@ import { execSync } from 'child_process';
 /**
  * Boot timeout for one wait stage. Override with KD_COOP_BOOT_TIMEOUT (ms) rather than editing specs.
  *
- * RAISED 150 s → 240 s (KDM-167). Every boot timeout ever recorded on this suite sat right on the old
+ * RAISED 150 s → 240 s. Every boot timeout ever recorded on this suite sat right on the old
  * ceiling — 150 062 ms, 151 091 ms, 151 670 ms against a 150 000 ms limit. Not one failed by a wide
  * margin, which is the signature of a budget set too tight rather than a session that is genuinely
  * stuck: boot was still progressing and simply ran out of room.
@@ -101,7 +101,7 @@ async function waitForCoop(page: Page, label: string, stage: 'connected' | 'star
 		const elapsed = Date.now() - t0;
 		const died = state === 'unreadable' || elapsed < timeout * 0.5;
 		throw new Error(
-			`[KDM-167] co-op boot ${died ? 'ABORTED (page died)' : 'TIMEOUT'}: client ${label} never ` +
+			`co-op boot ${died ? 'ABORTED (page died)' : 'TIMEOUT'}: client ${label} never ` +
 			`reached "${stage}" after ${elapsed} ms (limit ${timeout} ms). Observed __coop = ${state}.\n` +
 			(died
 				? 'Failing this fast against that limit means the PAGE WENT AWAY (crash / context ' +
@@ -124,11 +124,11 @@ async function waitForCoop(page: Page, label: string, stage: 'connected' | 'star
 }
 
 /**
- * KDM-302 — put ONE page into the co-op session the way the lobby does. There is no other way in.
+ * Put ONE page into the co-op session the way the lobby does. There is no other way in.
  *
  * The `#coop=<id>` URL shortcut used to do this: the window claimed the host seat on load and
  * auto-answered every join request. It was removed because it was a second road that hid real bugs
- * (KDM-297: no human host was ever asked mid-run). This helper takes the lobby's OWN road —
+ * (no human host was ever asked mid-run). This helper takes the lobby's OWN road —
  * `window.__coopConnect`, which the Host/Join buttons call — and only skips the typing. `clientId` is
  * passed explicitly so specs keep their stable `A` / `B` ids.
  *
@@ -147,10 +147,10 @@ export async function coopJoinPage(
 }
 
 /**
- * KDM-302 — the HOST lets the waiting guest in, as a player would.
+ * The HOST lets the waiting guest in, as a player would.
  *
  * Before the session starts the question lands in the lobby (`KDMPLobby.pending`); once it is running
- * the server asks in the game (`KDCoopJoinAsk`, KDM-297). Either way the answer is the lobby's own
+ * the server asks in the game (`KDCoopJoinAsk`). Either way the answer is the lobby's own
  * `__coopAnswerJoin` — the server's `_answerJoin` is one method for both screens.
  */
 export async function coopAcceptPending(host: Page, timeout = COOP_BOOT_TIMEOUT): Promise<void> {
@@ -199,7 +199,7 @@ export async function coopPos(P: Page): Promise<{ x: number; y: number }> {
  * Move A by one tile, trying directions until one is actually OPEN, with B waiting so the turn can
  * resolve. Returns whether A ended up somewhere new.
  *
- * WHY this exists (KDM-204). A and B spawn ADJACENT, so the peer avatar — an ally under PvP-off —
+ * WHY this exists. A and B spawn ADJACENT, so the peer avatar — an ally under PvP-off —
  * blocks one neighbouring tile, and walls block others. A move into a blocked tile still RESOLVES a
  * turn (the input routed fine, lockstep worked, the tick advances) but the position does not change.
  * So a spec that hardcodes ONE direction and reads "did the position change?" is a map-dependent
@@ -217,12 +217,12 @@ export async function coopPos(P: Page): Promise<{ x: number; y: number }> {
  * primitive that throws cannot serve as a control. Callers that want a hard assertion make it in
  * `onTurn` — see below.
  *
- * ── onTurn: PER-ITERATION INVARIANTS STAY IN THE SPEC (KDM-213) ────────────────────────────────────
+ * ── onTurn: PER-ITERATION INVARIANTS STAY IN THE SPEC ────────────────────────────────────
  * `mp-coop-demo` kept its own copy of this walk because it asserts, on EVERY iteration including the
  * blocked ones, things this primitive deliberately does not: that the turn advanced by EXACTLY one
  * tick as observed by BOTH pages (strict lockstep), and that B's view of A matches A's own position.
  *
- * Folding those into the helper behind flags would make its contract conditional — the thing KDM-204
+ * Folding those into the helper behind flags would make its contract conditional — the thing an earlier fix
  * refused to do. A hook does not: the helper's behaviour is identical whether or not one is passed,
  * and the assertions live in the spec that cares about them, which is where assertions belong. The
  * hook is awaited, so throwing from it fails the test at that iteration.
@@ -256,11 +256,11 @@ export async function coopMoveAnyDirection(
 ): Promise<{ moved: boolean; advanced: boolean; dir: [number, number] | null; from: { x: number; y: number }; to: { x: number; y: number } }> {
 	const timeout = opts.timeout ?? 30_000;
 	const dirs = opts.dirs ?? ([[-1, 0], [0, -1], [0, 1], [1, 0], [-1, -1], [-1, 1]] as Array<[number, number]>);
-	// KDM-210: the peer avatar blocks one neighbouring tile, so which directions are open is only
+	// The peer avatar blocks one neighbouring tile, so which directions are open is only
 	// meaningful once it has arrived. Waiting here also means every caller of this walk inherits the
 	// arrival guarantee instead of racing it.
 	// Advisory, and deliberately NON-fatal with a short bound: this walk's contract is that it never
-	// throws (KDM-213 — mp-real-input uses it as a control leg). A session with no peer is already
+	// throws (mp-real-input uses it as a control leg). A session with no peer is already
 	// failing for other reasons; stalling the full 30 s here would only slow that red down.
 	await waitForPeerAvatar(B, { timeout: 15_000 }).catch(() => {});
 	const from = await coopPos(A);
@@ -304,7 +304,7 @@ export async function coopMoveAnyDirection(
 /**
  * The keyboard key the GAME is currently bound to for one movement direction, as a Playwright key.
  *
- * WHY read it instead of typing a key literal (KDM-204). KD's movement bindings are `KinkyDungeonKey`
+ * WHY read it instead of typing a key literal. KD's movement bindings are `KinkyDungeonKey`
  * / `KinkyDungeonKeybindings` — a roguelike layout, NOT the arrows (`Game/src/base/KinkyDungeon.ts:162`
  * defaults to W/A/S/D, and the string "ArrowRight" appears nowhere in the game source). Specs that
  * pressed `ArrowRight` were pressing a key the game never listens to, then recording "a real keypress
@@ -327,7 +327,7 @@ export async function coopMovementKey(P: Page, dir: 'Up' | 'Down' | 'Left' | 'Ri
 		throw new Error(
 			`the game exposes no movement binding for "${dir}" — KinkyDungeonKeybindings and ` +
 			'KinkyDungeonKey were both unreadable. Refusing to guess a key: guessing is what made the ' +
-			'"real input is lost" reading wrong in the first place (KDM-204).',
+			'"real input is lost" reading wrong in the first place.',
 		);
 	}
 	// KD stores either a bare letter ('D') or a KeyboardEvent.code ('KeyD'); Playwright wants the
@@ -340,7 +340,7 @@ export async function coopMovementKey(P: Page, dir: 'Up' | 'Down' | 'Left' | 'Ri
  * Move A by one tile using a REAL held keypress — the human input path, end to end, with no test hook
  * anywhere in the move itself.
  *
- * WHY it is shaped like this (KDM-204 / KDM-211). Two independent traps have to be dodged at once, and
+ * WHY it is shaped like this. Two independent traps have to be dodged at once, and
  * dodging only one of them produces a confident, wrong reading about the transport:
  *
  *  1. THE KEY. KD binds a roguelike layout (`KinkyDungeonKeybindings` / `KinkyDungeonKey`, defaulting
@@ -397,7 +397,7 @@ export async function coopRealKeyMove(
 	await A.mouse.click(200, 200);
 	await A.keyboard.down(key);
 	await A.waitForTimeout(opts.holdMs ?? 2000);
-	// KDM-313 — …and keep holding until the move has actually LEFT A (`submitted` = the server answered
+	// …and keep holding until the move has actually LEFT A (`submitted` = the server answered
 	// `waiting`; a moved tick also counts). KD reads a held key once per FRAME, and a loaded host was
 	// measured rendering one frame every 5-6 s: a 2 s press fell entirely between two frames, no move was
 	// ever sent, and the assertion blamed the session. A real player holds a key until something happens.
@@ -415,7 +415,7 @@ export async function coopRealKeyMove(
 /**
  * WAIT for this client's peer avatar to arrive in its entity list, then return it.
  *
- * WHY THIS IS A WAIT AND NOT A READ (KDM-210). Seventeen specs each carried their own copy of a
+ * WHY THIS IS A WAIT AND NOT A READ. Seventeen specs each carried their own copy of a
  * `peerOfB()` closure that FOUND the RemotePlayer entity and returned `{id,x,y}` or `null`, and
  * called it straight after `bootCoopPair` with no wait at all. The peer avatar is pushed by the
  * server shortly AFTER the session starts, so on a loaded host the entity is not there yet: the
@@ -424,7 +424,7 @@ export async function coopRealKeyMove(
  *
  *     page.evaluate: TypeError: Cannot read properties of null (reading 'x')
  *
- * Measured (KDM-204): `mp-pvp-tie-persist` failed BOTH attempts deep in a 28-spec run, yet passed
+ * Measured: `mp-pvp-tie-persist` failed BOTH attempts deep in a 28-spec run, yet passed
  * isolated in 117 s on a pristine tree and 69 s with changes applied — load/ordering sensitive, not
  * caused by any edit. Retries mask it as `flaky`, which per `TESTING_POLICY.md` rule 3 costs a full
  * 2-7 min retry and is indistinguishable at a glance from a real regression.
@@ -456,7 +456,7 @@ export async function waitForPeerAvatar(
 		}, undefined, { timeout });
 	} catch (err) {
 		throw new Error(
-			'[KDM-210] the peer avatar (a "RemotePlayer*" entity) never appeared in KDMapData.Entities ' +
+			'the peer avatar (a "RemotePlayer*" entity) never appeared in KDMapData.Entities ' +
 			`within ${timeout} ms${opts.label ? ` — ${opts.label}` : ''}. The session started but the ` +
 			'server had not yet pushed the peer, or never did. This is the race that used to surface as ' +
 			'"Cannot read properties of null (reading \'x\')" in whichever evaluate ran next.',
@@ -476,9 +476,9 @@ export interface CoopWireSend {
 }
 
 /**
- * KDM-198 — record what the client actually PUTS ON THE WIRE, in order.
+ * Record what the client actually PUTS ON THE WIRE, in order.
  *
- * Rule 1 (KDM-186) is a client-side sampling rule: it decides which inputs are sent, which are held
+ * Rule 1 is a client-side sampling rule: it decides which inputs are sent, which are held
  * as the newest-of-a-stream, and which are dropped in favour of a newer one. So the wire IS the
  * deciding layer, and the only honest oracle for it. Asserting on game state instead cannot
  * discriminate — `mp-uat-repro` REPRO 7 asserts on the reticule, which KD's own draw loop recomputes
@@ -492,7 +492,7 @@ export async function captureCoopWire(P: Page): Promise<void> {
 	await P.evaluate(() => {
 		const w = window as any;
 		const coop = w.__coop;
-		if (!coop || !coop.ws) throw new Error('[KDM-198] __coop.ws is not available — capture the wire AFTER bootCoopPair');
+		if (!coop || !coop.ws) throw new Error('__coop.ws is not available — capture the wire AFTER bootCoopPair');
 		if (w.__coopWire) return;                      // idempotent: never double-wrap a socket
 		const log: any[] = [];
 		w.__coopWire = log;
@@ -527,7 +527,7 @@ export async function clearCoopWire(P: Page): Promise<void> {
 }
 
 /**
- * KDM-220 — reading the client's floater state, with the CUMULATIVE count next to the queue depth.
+ * Reading the client's floater state, with the CUMULATIVE count next to the queue depth.
  *
  * `KinkyDungeonFloaters` is a DECAYING queue, not a record of what happened. The client makes a
  * floater from a server event with `KinkyDungeonSendFloater({x,y}, text, color, time)`, so `Amount`
@@ -535,7 +535,7 @@ export async function clearCoopWire(P: Page): Promise<void> {
  * floater at `1.5 * delta/1000` and drops it once `t >= lifetime` (KinkyDungeonDraw.ts:2603-2674).
  * ONE damage floater is therefore visible for about 0.67 s of wall clock.
  *
- * MEASURED (KDM-220, three separate invocations): a hit produced `created: 1` every time, but the
+ * MEASURED (three separate invocations): a hit produced `created: 1` every time, but the
  * queue read one evaluate later — tens of milliseconds — already showed `queue: 0` in 2 of 3 runs.
  * So a spec that samples the queue depth to ask "did the hit produce feedback?" is asking a question
  * whose answer expires while it is being asked. That is the whole of the REPRO 6 flake.
@@ -568,7 +568,7 @@ export async function coopFloaters(P: Page): Promise<CoopFloaterState> {
 	});
 	if (seen.created === null) {
 		throw new Error(
-			'[KDM-220] the co-op floater tracer (window.__coopFloaters) is not installed on this page, ' +
+			'the co-op floater tracer (window.__coopFloaters) is not installed on this page, ' +
 			'so floater OCCURRENCE cannot be observed. It is installed by installFloaterTrace() in ' +
 			'tools/mp-server/client/coop-bootstrap.js, which returns early if KinkyDungeonSendFloater ' +
 			'is not yet a function. Failing here rather than reporting 0 forever, which would make ' +
@@ -603,7 +603,7 @@ export async function waitForFloaterCreated(
 	} catch (err) {
 		const now = await coopFloaters(P).catch(() => null);
 		throw new Error(
-			`[KDM-220] no floater was created within ${timeout} ms of the drive` +
+			`no floater was created within ${timeout} ms of the drive` +
 			`${opts.label ? ` — ${opts.label}` : ''}. Cumulative created went ${since} -> ` +
 			`${now ? now.created : 'unreadable'} (queue now ${now ? now.queue : '?'}). The server ` +
 			'harvests damage feedback from KDDamageQueue and ships it as a sequenced `floater` event ' +
@@ -665,7 +665,7 @@ export async function contextMenuAt(P: Page, tile: { x: number; y: number }): Pr
 		KDContextX = mx; KDContextY = my;
 		// @ts-ignore
 		if (typeof KDGetContextActions === 'undefined' || !KDGetContextActions.Game) {
-			throw new Error('[KDM-231] KDGetContextActions.Game is not installed on this page — the '
+			throw new Error('KDGetContextActions.Game is not installed on this page — the '
 				+ 'context menu cannot be built, so nothing it reports would mean anything.');
 		}
 		// @ts-ignore
@@ -708,7 +708,7 @@ export async function pickMenuOption(P: Page, key: string): Promise<void> {
 		return { ok: true };
 	}, key);
 	if (!res.ok) {
-		throw new Error(`[KDM-231] could not pick context-menu option "${key}": ${res.why}. ` +
+		throw new Error(`could not pick context-menu option "${key}": ${res.why}. ` +
 			'Build the menu with contextMenuAt() immediately before picking from it — the callbacks ' +
 			'close over the tile that was aimed at when it was built.');
 	}
@@ -754,7 +754,7 @@ export async function recordDrawnText(P: Page, opts: { cap?: number } = {}): Pro
 		if (w.__coopDrawn) return;                       // idempotent — never double-wrap
 		// @ts-ignore bare let-global: this lives in the bundle's lexical scope, not on window
 		if (typeof DrawTextVisKD !== 'function') {
-			throw new Error('[KDM-231] DrawTextVisKD is not a function on this page, so painted text '
+			throw new Error('DrawTextVisKD is not a function on this page, so painted text '
 				+ 'cannot be observed. Failing here rather than reporting "nothing unresolved" forever.');
 		}
 		const seen: Record<string, true> = {};
@@ -785,7 +785,7 @@ export async function recordDrawnText(P: Page, opts: { cap?: number } = {}): Pro
 export async function readDrawnText(P: Page): Promise<CoopDrawnText> {
 	return P.evaluate(() => {
 		const s = (window as any).__coopDrawn;
-		if (!s) throw new Error('[KDM-231] recordDrawnText() was never armed on this page.');
+		if (!s) throw new Error('recordDrawnText() was never armed on this page.');
 		return {
 			texts: s.texts.slice(),
 			unresolved: s.texts.filter((t: string) => t.indexOf('[NotFound]') >= 0),
@@ -836,11 +836,11 @@ export interface CoopDrawnSprites {
 }
 
 /**
- * KDM-286 — record every SPRITE the page actually draws. The sibling of `recordDrawnText`, and it
+ * Record every SPRITE the page actually draws. The sibling of `recordDrawnText`, and it
  * exists for the same reason: a proxy can be green while the screen is blank.
  *
  * ── WHY A SECOND RECORDER AT ALL ──────────────────────────────────────────────────────────────────
- * `recordDrawnText` only sees text (`DrawTextVisKD`). KDM-285's audit found that a permanently-armed
+ * `recordDrawnText` only sees text (`DrawTextVisKD`). An audit found that a permanently-armed
  * `KinkyDungeonTargetingSpell` had been hiding TEN things from every co-op player, and most of the
  * survivors are sprites: the buff/debuff icons (`KDDrawBuffIcons` → `Buffs/<icon>.png`) and the quick
  * resource readout (`KinkyDungeonHUD.ts:1351` → `Items/Gold.png`). Those were covered only by
@@ -872,7 +872,7 @@ export async function recordDrawnSprites(
 		if (w.__coopSprites) return;                     // idempotent — never double-wrap
 		// @ts-ignore bare let-global: this lives in the bundle's lexical scope, not on window
 		if (typeof KDDraw !== 'function') {
-			throw new Error('[KDM-286] KDDraw is not a function on this page, so drawn sprites cannot '
+			throw new Error('KDDraw is not a function on this page, so drawn sprites cannot '
 				+ 'be observed. Failing here rather than reporting "nothing was drawn" forever.');
 		}
 		const re = match ? new RegExp(match) : null;
@@ -912,7 +912,7 @@ export async function recordDrawnSprites(
 export async function readDrawnSprites(P: Page): Promise<CoopDrawnSprites> {
 	return P.evaluate(() => {
 		const s = (window as any).__coopSprites;
-		if (!s) throw new Error('[KDM-286] recordDrawnSprites() was never armed on this page.');
+		if (!s) throw new Error('recordDrawnSprites() was never armed on this page.');
 		return { sprites: s.sprites.slice(), calls: s.calls, truncated: !!s.truncated };
 	});
 }
@@ -921,7 +921,7 @@ export async function readDrawnSprites(P: Page): Promise<CoopDrawnSprites> {
 export async function resetDrawnSprites(P: Page): Promise<void> {
 	await P.evaluate(() => {
 		const s = (window as any).__coopSprites;
-		if (!s) throw new Error('[KDM-286] recordDrawnSprites() was never armed on this page.');
+		if (!s) throw new Error('recordDrawnSprites() was never armed on this page.');
 		// `seen` is cleared TOO. A HUD sprite is drawn every frame of every window, so a reset that
 		// kept it would make the second window report the gold readout missing — an absence that
 		// means nothing but reads exactly like the defect this file exists to catch.
@@ -970,12 +970,12 @@ export function drewSprite(
 }
 
 /**
- * KDM-252 — kill a client's WebSocket from inside its own page, and SAY whether it may come back.
+ * Kill a client's WebSocket from inside its own page, and SAY whether it may come back.
  *
  * The socket is closed from inside the page rather than by closing the context: that is the real
  * shape of a lost connection, and it leaves the page alive so a failure is legible.
  *
- * ⚠️ THE `retry` ANSWER IS MANDATORY, and it is why this helper exists. Before KDM-252 a bare
+ * ⚠️ THE `retry` ANSWER IS MANDATORY, and it is why this helper exists. Before the client learned to reconnect, a bare
  * `ws.close()` meant "gone until the test ends", and three specs wrote it inline on that
  * understanding. It now means "gone for about a second" — the client retries with backoff and heals
  * itself — so every one of those specs was asserting against a premise that had quietly changed
@@ -1007,7 +1007,7 @@ export async function killCoopSocket(P: Page, opts: { retry: boolean }): Promise
  * ⚠️ Excluded BY NAME and REPORTED, never by widening the oracle to "ignore errors". A crash filter
  * nobody can see is how a crash oracle quietly stops working — see `reportedPageErrors`.
  *
- * KDM-240: hoisted here because it had been hand-copied into three specs with two different
+ * Hoisted here because it had been hand-copied into three specs with two different
  * spellings (`mp-join-late` carried the `: Event$` clause, `mp-disconnect-solo` did not), which is
  * the drift this helper file exists to prevent.
  */
@@ -1035,7 +1035,7 @@ export function reportedPageErrors(errs: string[]): { real: string[]; ignored: s
  * The in-game draw loop is dead in this harness (see `coop-lobby.js` `drawModWarning`), so there is
  * no button to press — this IS the press.
  *
- * KDM-297: hoisted here from `mp-disconnect-solo.spec.ts` when a second spec needed it.
+ * Hoisted here from `mp-disconnect-solo.spec.ts` when a second spec needed it.
  */
 export async function answerCoopDialogue(P: Page, dialogue: string, option: string): Promise<void> {
 	await P.evaluate(({ d, o }: any) => {

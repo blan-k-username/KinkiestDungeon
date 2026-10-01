@@ -1,13 +1,13 @@
 /**
- * KDM-227 — the between-floors hub resets PvP back to co-op.
+ * The between-floors hub resets PvP back to co-op.
  *
- * Split out of KDM-225: this slice delivers on its own ("finishing a level clears the slate") with no
+ * Split out of the peace-offer work: this slice delivers on its own ("finishing a level clears the slate") with no
  * UI, no handshake and no client work, and it exercises the shared enabler both slices need — the
  * relationship registry, the `_isPvP` override and the hostility clear.
  *
  * The trigger is `KDGameData.RoomType === "JourneyFloor"` (the mandatory hub, "Floor N: Journey
  * Selection") and NOT any non-empty room type — `Tunnel` / `PerkRoom` / `ShopStart` are the optional
- * detours a grudge is meant to survive (KDM-225 D6/D7).
+ * detours a grudge is meant to survive.
  *
  * ⚠️ SPEC CORRECTION, owner 2026-08-20. An earlier draft of this file booted the session with
  * `pvp: true` and demanded the hub beat that flag too. That was wrong, and two of its tests failed
@@ -24,7 +24,7 @@ import { readFileSync } from 'fs';
 
 const BOOT_TIMEOUT = 300_000;
 
-describe('KDM-227 — arriving at the between-floors hub ends every war', () => {
+describe('arriving at the between-floors hub ends every war', () => {
 	let s: any;
 	beforeEach(async () => {
 		// CO-OP, like the live server: war exists only because somebody attacked.
@@ -43,7 +43,7 @@ describe('KDM-227 — arriving at the between-floors hub ends every war', () => 
 	 * behaved like the boot room, `JourneyFloor`, so the "a side room does not reset" case passed for
 	 * the wrong reason.)
 	 *
-	 * KDM-228 classified `RoomType`/`MapMod` as world state — they are a copy of `KDMapData.RoomType`
+	 * `RoomType`/`MapMod` are classified as world state — they are a copy of `KDMapData.RoomType`
 	 * (`KinkyDungeonGame.ts:841`) — so the world write is now the whole story, exactly as it is in
 	 * real play.
 	 */
@@ -115,12 +115,12 @@ describe('KDM-227 — arriving at the between-floors hub ends every war', () => 
 	/**
 	 * D6: the optional detours are exactly what a grudge is supposed to survive.
 	 *
-	 * ⚠️ KDM-262 REMOVED `PerkRoom` FROM THIS LIST, on the owner's decision (2026-08-24). D6 called it
+	 * ⚠️ `PerkRoom` WAS REMOVED FROM THIS LIST, on the owner's decision (2026-08-24). D6 called it
 	 * an optional detour; it is not one. `KDAdvanceAmount['s']` (`KinkyDungeonTiles.ts:930-946`)
 	 * FORCES `roomType: "PerkRoom"` whenever you take the main stairs down from the deepest floor you
 	 * have reached, so a `PerkRoom` follows EACH main floor on the way down. D6 and the `JourneyFloor`
 	 * trigger were one false belief about which room is the hub, expressed twice. The arrival that fires
-	 * at the real hub is KDM-262, whose tests are parked until KDM-265 makes a multi-floor descent work.
+	 * at the real hub has its own tests, parked until a multi-floor descent works.
 	 *
 	 * The other three entries are untouched: they really are skippable (and `Tunnel` is marked
 	 * `// DEPRECATED DO NOT USE` upstream, `KinkyDungeonAlt.ts:340`).
@@ -177,16 +177,16 @@ describe('KDM-227 — arriving at the between-floors hub ends every war', () => 
 
 
 /**
- * KDM-262 — the reset fires at the room a real run actually reaches.
+ * The reset fires at the room a real run actually reaches.
  *
  * ── WHAT WAS WRONG ────────────────────────────────────────────────────────────────────────────────
- * KDM-227 matched `JourneyFloor`. That is the level-0 START room: it is assigned only at new-game boot
+ * The first version matched `JourneyFloor`. That is the level-0 START room: it is assigned only at new-game boot
  * (`KinkyDungeon.ts:6025`, `KinkyDungeonGame.ts:457`) and holds the five journey-TYPE portals
  * (`KDJourneyList`, `KinkyDungeonAlt.ts:1227`). No journey slot can carry it — the slot factories emit
  * `""` or `"ShopStart"` (`KDJourney.ts:47/124/142`). Meanwhile `_lastRoomType` is seeded from the
  * world at session start (`swap-session.js:349`), which IS that room, and the rule is
  * arrival-not-presence. So the reset could not fire from the only room it matched. Measured
- * (KDM-241 P3): a fresh two-player session reports `RoomType === 'JourneyFloor'` at level 0.
+ * in a probe: a fresh two-player session reports `RoomType === 'JourneyFloor'` at level 0.
  *
  * The between-floors room is `PerkRoom`: `KDAdvanceAmount['s']` (`KinkyDungeonTiles.ts:930-946`)
  * forces it whenever the main stairs are taken down from the deepest floor reached, so one follows
@@ -199,7 +199,7 @@ describe('KDM-227 — arriving at the between-floors hub ends every war', () => 
  * constructs its own trigger proves nothing about reachability.** So this block drives REAL descents
  * and lets the GAME choose the room — the fixture never names `PerkRoom` at all.
  */
-describe('KDM-262 — a real descent reaches the hub, and the hub ends the war', () => {
+describe('a real descent reaches the hub, and the hub ends the war', () => {
 	let s: any;
 	beforeEach(async () => {
 		s = new SwapSession({ requiredPlayers: 2, seed: 'hub-reachable', pvp: false });

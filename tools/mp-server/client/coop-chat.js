@@ -1,10 +1,10 @@
 /**
- * tools/mp-server/client/coop-chat.js  (KDM-246, KDM-247)
+ * tools/mp-server/client/coop-chat.js 
  *
  * THE CO-OP TALK SURFACE: every way a player sends a chat message. Two today —
  *
- *   · TYPE IT (KDM-246)  — a text field on `Y`, Enter to send.
- *   · PICK IT (KDM-247)  — a quick-emoji picker on `U`, one digit to send, with a recents list.
+ *   · TYPE IT  — a text field on `Y`, Enter to send.
+ *   · PICK IT  — a quick-emoji picker on `U`, one digit to send, with a recents list.
  *
  * Both build `{mp:'chat.say', text}` and hand it to the same `send()`. There is ONE message
  * pipeline, one server action and one renderer: the server writes the line into every player's log
@@ -14,12 +14,12 @@
  * INPUT METHOD for the same message. A separate file would need its own copy of `send()`, its own
  * `addOnce` reconnect guard, its own sentinel-gated `KinkyDungeonDrawGame` wrap and its own
  * `demo-server.js` entry — four duplications to serve one 60-line feature, which is the failure
- * KDM-229 was raised for. Compare `coop-menu.js`: one wrap of `KDGetContextActions.Game`, N entries.
+ * the one-wrap rule exists to prevent. Compare `coop-menu.js`: one wrap of `KDGetContextActions.Game`, N entries.
  *
- * ⚠️ RENAME TRIGGER (KDM-247 A1, on KDM-276's precedent). The name is honest only while everything
+ * ⚠️ RENAME TRIGGER (on the coop-menu.js precedent). The name is honest only while everything
  * here is a way to SEND A CHAT MESSAGE. The day something lands that is not — a co-op emote that
  * animates, a voice indicator, anything with its own action kind — rename the file then, rather than
- * letting it become the grab-bag `coop-peace.js` turned into before KDM-276 renamed it.
+ * letting it become the grab-bag `coop-peace.js` turned into before it was renamed coop-menu.js.
  *
  * EVERY MECHANISM HERE IS STOCK KD. That is the whole design, and it is what keeps the plugin rule
  * (never edit the game tree) cheap to honour:
@@ -67,7 +67,7 @@
 	var MAX_LEN = '200';          // matches the server's CHAT_MAX; a courtesy, never the control
 
 	/*
-	 * ── KDM-247: THE QUICK-EMOJI PICKER ───────────────────────────────────────────────────────────
+	 * ── THE QUICK-EMOJI PICKER ────────────────────────────────────────────────────────────────────
 	 *
 	 * A second way to send the SAME message. Both halves build `{mp:'chat.say', text}` and hand it to
 	 * the same `send()` below — there is one message pipeline, one renderer and one server action.
@@ -172,7 +172,7 @@
 	/**
 	 * ⚠️ THE KEYBOARD ROUTE IS `KDKeyCheckers`, NOT THE DRAWN BUTTONS' `hotkeyPress`. MEASURED.
 	 *
-	 * The obvious route — and the one KDM-247 was designed around — was to let each drawn button
+	 * The obvious route — and the one the picker was designed around — was to let each drawn button
 	 * carry its own hotkey, exactly as `coop-chat`'s opener already declared. `KDCheckCustomKeypress`
 	 * does iterate `KDButtonsCache` looking for `hotkeyPress`, so on paper that works.
 	 *
@@ -187,8 +187,8 @@
 	 * `KinkyDungeonDrawGame` — lands LATER in the frame than the key pump that consumes it. So a
 	 * button of ours is always exactly one phase too late to be hotkeyable.
 	 *
-	 * ⚠️ THIS ALSO MEANS CHAT'S `Y` HOTKEY HAS NEVER WORKED (KDM-246). `kdcoopchat` was equally
-	 * absent from `oursAtMatch`. It went unnoticed because the KDM-246 e2e opens the field through
+	 * ⚠️ THIS ALSO MEANS CHAT'S `Y` HOTKEY HAS NEVER WORKED. `kdcoopchat` was equally
+	 * absent from `oursAtMatch`. It went unnoticed because the chat e2e opens the field through
 	 * `KDCoopChat.open()` rather than by pressing the key, so no test ever exercised the hotkey. Both
 	 * keys are routed through this one checker now, and the e2e presses them for real.
 	 *
@@ -286,7 +286,7 @@
 				/* options */ { hotkey: HOTKEY, hotkeyPress: HOTKEY });
 		}
 		/*
-		 * KDM-285 — CHAT DOES NOT DRAW THE GAME'S LOG. It used to, and that was a symptom fix.
+		 * CHAT DOES NOT DRAW THE GAME'S LOG. It used to, and that was a symptom fix.
 		 *
 		 * The reasoning it rested on ("the block containing `KinkyDungeonDrawMessages` is gated on
 		 * `KinkyDungeonDrawState == 'Game'` and `KinkyDungeonIsPlayer()`, and a render client
@@ -301,7 +301,7 @@
 		 */
 
 		/*
-		 * KDM-247 — the picker's opener, beside chat's. Same 52px row: chat is at Left 1010, so this
+		 * The picker's opener, beside chat's. Same 52px row: chat is at Left 1010, so this
 		 * sits at 1066. `U` is the LAST letter KD leaves unbound (KinkyDungeonKey* at
 		 * KinkyDungeon.ts:162-176 take every other one, and chat took Y); `mp-chat-client.spec.ts`
 		 * re-derives that set from the game source and reds if upstream ever binds it.
@@ -409,7 +409,7 @@
 	}
 
 	/*
-	 * KDM-285 — the `logDraws` / `ourLogDraws` counter that used to sit here is GONE with the call it
+	 * The `logDraws` / `ourLogDraws` counter that used to sit here is GONE with the call it
 	 * policed. It existed to keep "chat is the only caller of the log draw" a measurement rather than
 	 * a belief; chat is now no caller at all, so the honest place to count KD's own log draws is the
 	 * spec that asserts they happen (`mp-coop-log-visible.spec.ts`), not this module.
@@ -457,7 +457,7 @@
 			open: function () { open = true; },
 			close: close,
 			isOpen: function () { return open; },
-			// KDM-247 — the picker half. `recents()` is exposed so the e2e can name the emoji it is
+			// The picker half. `recents()` is exposed so the e2e can name the emoji it is
 			// about to press, instead of hardcoding one and asserting against its own guess.
 			openPicker: function () { pickerOpen = true; },
 			closePicker: function () { pickerOpen = false; },

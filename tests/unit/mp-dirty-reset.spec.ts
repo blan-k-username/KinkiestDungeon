@@ -1,5 +1,5 @@
 /**
- * KDM-194 — the reset half of the swap resets the DIRTY names, not all 2284.
+ * The reset half of the swap resets the DIRTY names, not all 2284.
  *
  * `_restoreGlobals` was 50.3% of a 13.58 ms `ui` transaction, and almost all of that was proving
  * that names had NOT changed: 2284 `kdSer` + `hash` calls to find the ~23 that had. It now resets
@@ -10,7 +10,7 @@
  * next player inherits the previous player's value. That is the contamination bug class the whole
  * epic exists to remove, so these tests attack the set from the directions that could shrink it:
  *
- *   1. a global nobody enumerated, dirtied at RUNTIME after the baseline (KDM-194 AC2);
+ *   1. a global nobody enumerated, dirtied at RUNTIME after the baseline;
  *   2. a global dirtied with NO capture in between, so the cached set never saw it;
  *   3. repeated swaps, where an under-inclusive set would accumulate rather than show up once.
  *
@@ -24,7 +24,7 @@ const { HeadlessHost } = require('../../tools/mp-server/headless-host');
 const BOOT_TIMEOUT = 300_000;
 
 /**
- * KDM-223: how many carrier→bare swaps the accumulation leg below drives.
+ * How many carrier→bare swaps the accumulation leg below drives.
  *
  * This used to read `RESET_FULL_EVERY + 5`, destructured from `headless-host` — which never exported
  * that name and does not define it anywhere. `undefined + 5` is `NaN`, `i < NaN` is false on the
@@ -39,7 +39,7 @@ const BOOT_TIMEOUT = 300_000;
  */
 const ACCUMULATION_SWAPS = 12;
 
-describe('KDM-194 · the dirty-set reset cannot lose per-player state', () => {
+describe('the dirty-set reset cannot lose per-player state', () => {
 	let h: any;
 	beforeAll(() => {
 		h = new HeadlessHost({ id: 'kdm194-dirty' });
@@ -97,7 +97,7 @@ describe('KDM-194 · the dirty-set reset cannot lose per-player state', () => {
 				`the bare player inherited the carrier's value on swap ${i} — contamination`).not.toBe(7.5);
 			swaps++;
 		}
-		// KDM-223: the anti-vacuity guard. Every assertion above lives inside the loop, so a bound that
+		// The anti-vacuity guard. Every assertion above lives inside the loop, so a bound that
 		// silently evaluates to 0 (or NaN) makes this `it` green while testing nothing — which is how
 		// it shipped. Assert the work actually happened, outside the loop, where no bound can skip it.
 		expect(swaps, 'the accumulation loop did not run — this test asserted nothing')

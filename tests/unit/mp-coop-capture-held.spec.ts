@@ -1,10 +1,10 @@
 /**
- * KDM-261 — one player's capture must not drag the whole party into the jail map.
+ * One player's capture must not drag the whole party into the jail map.
  *
  * THE BUG. `KinkyDungeonDefeat(PutInJail = true)` calls `KinkyDungeonCreateMap`
  * (`Game/src/prison/KinkyDungeonJail.ts:1725`) and moves the player into a freshly generated jail
  * outpost. `KDMapData` is shared world state — there is exactly ONE world — so the partner who was
- * never captured is relocated with them. KDM-240 made that coherent (everybody lands, everybody keeps
+ * never captured is relocated with them. An earlier fix made that coherent (everybody lands, everybody keeps
  * an avatar, everybody is told) but did not stop it happening.
  *
  * THE RULE (owner decision, 2026-08-24). **Jail only when nobody is free.** While any partner is
@@ -18,7 +18,7 @@
  * It lives in the shared helper because its party-gate fence is load-bearing and fails GREEN when
  * wrong: `_advanceTurn` applies in NO fixed order (measured: **B** first), so an unfenced hook turns
  * "the partner did not move" into an assertion about the captured player. `true` = contain the
- * throw, so these tests can ask which BRANCH ran; KDM-267 passes `false` to ask a different question.
+ * throw, so these tests can ask which BRANCH ran; the defeat-autosave spec passes `false` to ask a different question.
  *
  * NON-VACUITY (memory `vacuous-oracle-divergence`), on two legs:
  *   - `timesJailed` proves the defeat body really ran in the held case, so "the map did not change"
@@ -57,7 +57,7 @@ function heldLines(s: any, cid: string): number {
 		.filter((t: string) => HELD.test(t)).length;
 }
 
-describe('KDM-261 — a capture jails the party only when nobody is left free', () => {
+describe('a capture jails the party only when nobody is left free', () => {
 	describe('two players', () => {
 		let s: any;
 		beforeEach(async () => {

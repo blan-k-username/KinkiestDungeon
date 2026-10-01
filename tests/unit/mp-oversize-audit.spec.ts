@@ -1,5 +1,5 @@
 /**
- * KDM-195 — the oversize audit: a deliberate classification, a bounded cost, an intact drift contract.
+ * The oversize audit: a deliberate classification, a bounded cost, an intact drift contract.
  *
  * `_auditOversize` re-hashes every global excluded from the watch set by `BASELINE_MAX_LEN`. Measured
  * 2026-08-17 that is 22 globals / 5.53 MB, one full pass costing 59-90 ms, and it fired
@@ -30,7 +30,7 @@ function session(seed: string) {
 	return s;
 }
 
-describe('KDM-195 · AC1 — KinkyDungeonEnemies is classified as shared world data', () => {
+describe('AC1 — KinkyDungeonEnemies is classified as shared world data', () => {
 	it('is blacklisted by name, so it is neither watched nor audited', () => {
 		expect(GLOBAL_BLACKLIST).toContain('KinkyDungeonEnemies');
 
@@ -83,7 +83,7 @@ describe('KDM-195 · AC1 — KinkyDungeonEnemies is classified as shared world d
 	}, BOOT_TIMEOUT);
 });
 
-describe('KDM-195 · AC2 — the audit does not stall the request path', () => {
+describe('AC2 — the audit does not stall the request path', () => {
 	it('audits a bounded slice per call and covers everything over a cycle', () => {
 		const s = session('oversize-ac2');
 		const world = s.world;
@@ -117,7 +117,7 @@ describe('KDM-195 · AC2 — the audit does not stall the request path', () => {
 		const sorted = [...sliceMs].sort((a, b) => a - b);
 		const cycle = sliceMs.reduce((a, b) => a + b, 0);
 		// eslint-disable-next-line no-console
-		console.log(`KDM-195 audit slices: n=${slices}  med ${sorted[sorted.length >> 1].toFixed(2)} ms  `
+		console.log(`oversize audit slices: n=${slices}  med ${sorted[sorted.length >> 1].toFixed(2)} ms  `
 			+ `max ${Math.max(...sliceMs).toFixed(2)} ms  sizes ${sliceSizes.join(',')}  ms ${sliceMs.map((x) => x.toFixed(1)).join(',')}  (full cycle ${cycle.toFixed(1)} ms, `
 			+ 'previously ONE unbounded 59-90 ms pass on the request path)');
 
@@ -128,7 +128,7 @@ describe('KDM-195 · AC2 — the audit does not stall the request path', () => {
 	}, BOOT_TIMEOUT);
 });
 
-describe('KDM-195 · AC3 — drift is still reported LOUDLY', () => {
+describe('AC3 — drift is still reported LOUDLY', () => {
 	it('names a mutating oversize global, and re-reports NEW drift but not the same one forever', () => {
 		const s = session('oversize-ac3');
 		const world = s.world;

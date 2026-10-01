@@ -1,9 +1,9 @@
 /**
- * KDM-297 — a guest who knocks on a RUNNING session is asked about IN THE GAME.
+ * A guest who knocks on a RUNNING session is asked about IN THE GAME.
  *
  * Before this, the host was only ever asked through the lobby: the server sent `join_pending`, the
  * host's page wrote it into the lobby object, and the lobby is painted only on the Multiplayer screen.
- * A host already in the dungeon — the whole join-late use case (KDM-235) — saw nothing, and the guest
+ * A host already in the dungeon — the whole join-late use case — saw nothing, and the guest
  * waited on "Waiting for the host to let you in…" for ever. The join-late suite never noticed because
  * it boots with `#coop=`, whose host answers by itself.
  *
@@ -12,7 +12,7 @@
  * reached the host" are the same observation only if it is read here. `MPClient.snapshot` is the
  * NEWEST state, never a buffered frame from before the dialogue opened.
  *
- * Requirement ids refer to the `## Requirements` section of KDM-297.
+ * The requirement labels name the behaviours this spec pins.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { MPClient } from '../helpers/mp-ws-client';
@@ -48,7 +48,7 @@ async function guestAsks(port: number, clientId: string, name: string) {
 	return g;
 }
 
-describe('KDM-297 — the dialogue definition', () => {
+describe('the dialogue definition', () => {
 	function registered() {
 		const scope: any = { KDDialogue: {}, keys: {} };
 		// eslint-disable-next-line no-new-func
@@ -78,7 +78,7 @@ describe('KDM-297 — the dialogue definition', () => {
 	});
 });
 
-describe('KDM-297 — a host who is already playing is asked in the game', () => {
+describe('a host who is already playing is asked in the game', () => {
 	let bridge: any = null;
 	let port = 0;
 	let A: MPClient;
@@ -148,7 +148,7 @@ describe('KDM-297 — a host who is already playing is asked in the game', () =>
 	}, BOOT_TIMEOUT);
 });
 
-describe('KDM-297 — before the game starts, the lobby still asks (unchanged)', () => {
+describe('before the game starts, the lobby still asks (unchanged)', () => {
 	let bridge: any = null;
 	let A: MPClient;
 	let g: MPClient;

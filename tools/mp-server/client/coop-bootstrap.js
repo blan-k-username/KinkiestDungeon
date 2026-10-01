@@ -1,10 +1,10 @@
 /**
- * tools/mp-server/client/coop-bootstrap.js  (KD-071 — hands-on UAT)
+ * tools/mp-server/client/coop-bootstrap.js  (hands-on UAT)
  *
  * Injected by demo-server.js into index.html (after out/main.js + render-client.js).
  * Turns a normal browser tab into a co-op thin client when the player joins through the
  * Multiplayer lobby (`__coopConnect`). Until then it does nothing — the page is the normal
- * single-player game. KDM-302: the lobby is the ONLY way in; the old `#coop=<id>` URL shortcut
+ * single-player game. The lobby is the ONLY way in; the old `#coop=<id>` URL shortcut
  * (which claimed a seat on load and auto-answered joins) is gone.
  *
  * It: waits for the bundle, brings up render structures, marks the tab render-only,
@@ -16,14 +16,14 @@
 (function () {
 	'use strict';
 
-	// KDM-281 — every string this file puts on the lobby screen comes from the shared table in
+	// Every string this file puts on the lobby screen comes from the shared table in
 	// `client/coop-text.js`, which is injected ahead of this file. The debug overlay `setStatus`
 	// paints (a fixed monospace box, not lobby UI) is deliberately NOT in scope and stays English.
 	var T = (typeof window !== 'undefined' ? window : globalThis).KDMPText.t;
 
 	// Who we say we are: set by `__coopConnect` (the lobby's Host/Join), never before.
 	var id = null;
-	// KDM-233: WHERE THE SOCKET GOES. The lobby's Join screen supplies a host ADDRESS — that is the
+	// WHERE THE SOCKET GOES. The lobby's Join screen supplies a host ADDRESS — that is the
 	// whole point of joining by address — so the endpoint cannot be `location.host` unconditionally.
 	//
 	// This module defines its API and boots NOTHING: everything between here and the bottom is
@@ -32,20 +32,20 @@
 	var endpoint = null;      // 'host:port' — null means same-origin
 	var role = null;          // 'host' | 'guest' — always set by the time we send a join
 	var playerName = '';      // what the host sees in their accept/decline prompt
-	// KDM-256 / KDM-279 — the character package this player built in the lobby, or null for KD's
+	// The character package this player built in the lobby, or null for KD's
 	// default. Carries class, outfit, style AND the perk keys picked on KD's own perk screen: perks
-	// travelled as their own `join.perks` field until KDM-279 folded them in, because both fields
+	// travelled as their own `join.perks` field until they were folded in here, because both fields
 	// were one lobby's answer, on one handshake, to "what character is this player playing".
 	var playerCharacter = null;
-	// KDM-243 R1 — the single-player save this HOST is continuing, or `''` for a new game. Set only
+	// The single-player save this HOST is continuing, or `''` for a new game. Set only
 	// by `__coopConnect({role:'host', save})`, i.e. only by the lobby's Continue button.
 	var savePayload = '';
-	// KDM-259 — the world seed this HOST named in the lobby, or `''` for "the server's own". Set only
+	// The world seed this HOST named in the lobby, or `''` for "the server's own". Set only
 	// by `__coopConnect({role:'host', seed})`, i.e. only by the lobby's host buttons; read by
 	// `worldSeed()`, which is read only when a HOST builds its `join.world`.
 	var seedChoice = '';
 
-	// KD-098 diagnostics: ON by default for the co-op demo (it's a debug harness). Logs to the
+	// Input diagnostics: ON by default for the co-op demo (it's a debug harness). Logs to the
 	// browser console: every KDSendInput classification (render-client) + every submit() here.
 	// Add `&nodebug` to the URL to silence. Watch the console while reproducing PvP attacks.
 	window.__KDMP_DEBUG = !/(?:[#&?])nodebug/.test(location.hash + '&' + location.search);
@@ -53,39 +53,39 @@
 	var coop = window.__coop = {
 		id: id, connected: false, started: false, submitted: false, blocked: null,
 		lastTick: null, peers: [], status: 'init', route: null,
-		// KDM-250: who has dropped, as {clientId, role} — null while everyone is here. Declared up
+		// Who has dropped, as {clientId, role} — null while everyone is here. Declared up
 		// front rather than sprung into existence on the first drop, so "nobody has left" is a value
 		// a test can assert on instead of an absent property.
 		peerMissing: null,
-		// KDM-258: what `KinkyDungeonStartNewGame` threw during `forceGameScreen`, or '' if it did
+		// What `KinkyDungeonStartNewGame` threw during `forceGameScreen`, or '' if it did
 		// not. Declared up front, like `peerMissing` above and for the same reason: "the game came up
 		// cleanly" must be a value a test can assert on, not an absent property. See forceGameScreen.
 		_startError: '',
-		// KDM-258: how many times a state frame asked to pin the Game screen before the game could be
+		// How many times a state frame asked to pin the Game screen before the game could be
 		// drawn. Counted rather than merely returned-from, so "we refused, and how often" is
 		// observable — a silent guard is how the original silent catch hid this for a whole epic.
 		_pinDeferred: 0,
-		// KDM-239 R7: the screen the SESSION says we are on, or '' for "the dungeon". Declared up
+		// The screen the SESSION says we are on, or '' for "the dungeon". Declared up
 		// front for the same reason as `peerMissing` and `_startError` above — "which screen does the
 		// session believe we are on" has to be a value a test can read, not an absent property that
 		// only exists once something has gone non-default. `pinGameScreen` reads it; the server sends
-		// it only when it is not 'Game', so an absent value keeps every pre-KDM-239 session identical.
+		// it only when it is not 'Game', so an absent value keeps every older session identical.
 		screen: '',
-		// KDM-252: the retry state. `total` is a LATCH — it counts every attempt ever made and is
+		// The retry state. `total` is a LATCH — it counts every attempt ever made and is
 		// never reset, because `connected === true` is not evidence of a reconnect (it is also what a
 		// socket that never dropped looks like). `attempts` is the backoff position and DOES reset on
 		// a successful join, so a second, later drop starts its own schedule at 1 s rather than
 		// inheriting a 30 s wait from an outage an hour ago.
 		reconnect: { attempts: 0, total: 0, nextDelayMs: null },
-		// KDM-163: route-ness of each in-flight send, in order (see submit()).
+		// Route-ness of each in-flight send, in order (see submit()).
 		_sentRoute: [],
-		// KDM-310: route-ness of OUR action that entered lockstep (set on `waiting`, read on `state`).
+		// Route-ness of OUR action that entered lockstep (set on `waiting`, read on `state`).
 		_waitRoute: undefined,
-		// KDM-186 RULE 1 state: types with an unacknowledged send, the types in flight in ORDER (so a
+		// RULE 1 state: types with an unacknowledged send, the types in flight in ORDER (so a
 		// reply frees the right one), and the latest superseded action per type awaiting a free slot.
-		// KDM-186 RULE 1 state: unacknowledged sends per type, the types + payload keys in flight in
+		// RULE 1 state: unacknowledged sends per type, the types + payload keys in flight in
 		// ORDER, and the server's proven no-op verdicts (cleared whenever a turn moves the world).
-		// KDM-186 Rule 1 v3: unacknowledged sends per type, the types in flight in ORDER, the newest
+		// Rule 1 v3: unacknowledged sends per type, the types in flight in ORDER, the newest
 		// superseded action per STREAM type awaiting a free slot, and what the SERVER said each type is
 		// ('ui' = presentation stream, anything else = command). Learned, never enumerated.
 		_inFlight: {}, _sentTypes: [], _pending: {}, _kindOf: {},
@@ -99,11 +99,11 @@
 
 
 	/* ────────────────────────────────────────────────────────────────────────────────────────────
-	 * UAT TELEMETRY — `window.__coopDiag` (KDM-186)
+	 * UAT TELEMETRY — `window.__coopDiag`
 	 *
 	 * Three UAT symptoms (peer avatar twitching, input not landing, hover lag) all point at ONE
 	 * suspect: KD's draw loop calls `KDSendInput('setMoveDirection', …)` every frame from the mouse
-	 * position, and since KDM-163 the client routes EVERY input. So each frame becomes a server
+	 * position, and the client routes EVERY input. So each frame becomes a server
 	 * round-trip whose reply is a FULL snapshot (`snapshotFor` = restorePlayer + serializeRenderState
 	 * + the whole player bundle), which the client applies and then forces a light-grid recompute.
 	 *
@@ -117,7 +117,7 @@
 	 *                                     JSON.stringify + console.log ~60×/s with debug on)
 	 *   __coopDiag.suppressHover(true)  → stop routing the per-frame `setMoveDirection`; compare the
 	 *                                     frame rate before and after to see whether that round-trip
-	 *                                     is what starves the loop (KDM-204). Diagnostic only.
+	 *                                     is what starves the loop. Diagnostic only.
 	 *   __coopDiag.reset()           → clear counters
 	 * ──────────────────────────────────────────────────────────────────────────────────────────── */
 	var diag = window.__coopDiag = (function () {
@@ -190,7 +190,7 @@
 		// 1 Hz rollup. One console line per second — readable while playing, and the ring buffer
 		// keeps two minutes of history for `dump()`.
 		/**
-		 * KDM-186: the on-screen diagnostic HUD (top-RIGHT, so it never covers the co-op status
+		 * The on-screen diagnostic HUD (top-RIGHT, so it never covers the co-op status
 		 * overlay top-left). Colour-coded because the whole question is "is the frame rate bad?":
 		 * green ≥ 30, amber ≥ 10, red below — a glance is enough, no DevTools, no JSON.
 		 */
@@ -227,7 +227,7 @@
 			w.kbPerS = Math.round(w.recvBytes / 1024);
 			d.rollups.push(w);
 			while (d.rollups.length > 120) d.rollups.shift();
-			// KDM-186: put the numbers ON SCREEN. Reading them meant opening DevTools and finding one
+			// Put the numbers ON SCREEN. Reading them meant opening DevTools and finding one
 			// line among the game's own logging — too much friction for the person doing UAT, and the
 			// frame rate is the single number this investigation turns on.
 			paintHud(w);
@@ -262,7 +262,7 @@
 		d.quiet = function (v) { d._quiet = v !== false; return d._quiet; };
 		d.verbose = function (v) { d._verbose = v !== false; return d._verbose; };
 		/**
-		 * KDM-204 — stop routing KD's per-frame `setMoveDirection` chatter, so the frame rate can be
+		 * Stop routing KD's per-frame `setMoveDirection` chatter, so the frame rate can be
 		 * read with the per-frame server round-trip ON and then OFF. Toggle only: it changes nothing
 		 * else, and turning it back off restores the normal path immediately.
 		 *
@@ -281,7 +281,7 @@
 		// Console budget per type per rollup second — keeps a high-rate type from flooding the log
 		// without the client knowing which type is high-rate. Generic by construction.
 		d._logCount = {};
-		// KDM-186: inputs skipped at the wire, by reason. Counted and shown, never silent (KDM-163).
+		// Inputs skipped at the wire, by reason. Counted and shown, never silent.
 		d.noteSkip = function (type, why) {
 			d._win.skips[why] = (d._win.skips[why] || 0) + 1;
 			d._win.skipTypes[type] = (d._win.skipTypes[type] || 0) + 1;
@@ -296,7 +296,7 @@
 	var overlay = null;
 
 	/**
-	 * KDM-186: the control hint, DERIVED from the game's live binding table.
+	 * The control hint, DERIVED from the game's live binding table.
 	 *
 	 * It used to be the hardcoded string "[arrows/WASD] move · [space] wait", and every part of that
 	 * was wrong except WASD: KD binds movement to W/A/S/D + Q/E/Z/C (`KinkyDungeonKey`, :162), Wait to
@@ -347,11 +347,11 @@
 	}
 
 	/**
-	 * KDM-186: time every snapshot adoption and sample entity positions from it. Wrapping `apply`
+	 * Time every snapshot adoption and sample entity positions from it. Wrapping `apply`
 	 * once here beats instrumenting its three call sites, and keeps the measurement in one place.
 	 */
 	/**
-	 * KDM-186 — TRACE THE KEY PATH, not the input path.
+	 * TRACE THE KEY PATH, not the input path.
 	 *
 	 * Measured 2026-08-16 in a REAL browser (owner's UAT screenshot): the client runs at 60-140 fps
 	 * and emits `setMoveDirection` every frame, yet a keypress produces NO input at all. So the loss
@@ -369,7 +369,7 @@
 	 * which points at game state (screen/mode), not at the transport.
 	 */
 	/**
-	 * KDM-186 — WHO creates the floating combat text, and how often?
+	 * WHO creates the floating combat text, and how often?
 	 *
 	 * Four reproduction attempts failed to trigger the owner's pile-up in the harness: it renders at
 	 * ~4 fps against a real browser's ~95, so it applies ~20x fewer snapshots and never reaches the
@@ -461,7 +461,7 @@
 		rc.apply.__kdDiagWrapped = true;
 	}
 
-	/** KDM-233: tell the lobby something, if a lobby is on screen. Fields are merged, not replaced. */
+	/** Tell the lobby something, if a lobby is on screen. Fields are merged, not replaced. */
 	function lobbySay(fields) {
 		var L = window.KDMPLobby;
 		if (!L) return;
@@ -469,7 +469,7 @@
 	}
 
 	/**
-	 * KDM-299 — say WHY the lobby is still up while `enterGame()` waits.
+	 * Say WHY the lobby is still up while `enterGame()` waits.
 	 *
 	 * The session has already started when this runs (the player is seated), but the page stays on the
 	 * lobby until assets load and — for a guest — the host's mods arrive, which can take up to the mod
@@ -483,7 +483,7 @@
 	}
 
 	/**
-	 * KDM-233: go render-only and hand the controls to the server.
+	 * Go render-only and hand the controls to the server.
 	 *
 	 * Never at connect time: a host waiting for a friend, or a guest waiting to be let in, is still on
 	 * the lobby screen. Both enter here only once the session actually starts. Idempotent — `joined`
@@ -502,13 +502,13 @@
 			if (!coop._enterQueued) { coop._enterQueued = true; setTimeout(function () { coop._enterQueued = false; enterGame(); }, 200); }
 			return;
 		}
-		// KDM-249 Phase A: the stock game executes mods when a GAME STARTS
+		// Mod sync, phase A: the stock game executes mods when a GAME STARTS
 		// (`KDExecuteModsAndStart`, KinkyDungeon.ts:1891) and this is the co-op Play button — the one
 		// place the co-op path bypasses. Same shape as the `loaded()` gate above: kick it off, come
 		// back in 200 ms. This cannot spin forever because `coop-mods.js` runs a watchdog that always
 		// settles a status, so `done()` is guaranteed to go true whatever the game's loader does.
 		if (window.__coopMods && !window.__coopMods.done()) {
-			// KDM-249 — a GUEST pulls the host's mods first; a host has no host mod set to reconcile
+			// A GUEST pulls the host's mods first; a host has no host mod set to reconcile
 			// against and only executes its own.
 			var pullsMods = role === 'guest';
 			sayEntering(pullsMods ? 'KDMPEnteringMods' : 'KDMPEnteringLoad');
@@ -541,7 +541,7 @@
 	}
 
 	/**
-	 * KD-101 UAT: give THIS client a carryable loose-restraint item (Items inventory). The name comes
+	 * Give THIS client a carryable loose-restraint item (Items inventory). The name comes
 	 * from the server (snapshot.startItem, driven by KD_START_RESTRAINT) or a URL override
 	 * (`#startitem=HingedCuffs`). The Items inventory is client-local (snapshots don't sync it),
 	 * so it must be added here to be visible; the server bundle has the same item so apply works too.
@@ -567,14 +567,14 @@
 	function ensureStartItem() { addStartItem(getParam('startitem')); }
 
 	/**
-	 * KDM-239 R3 — the WORLD-level game modes this host has set, read from KD's own globals.
+	 * The WORLD-level game modes this host has set, read from KD's own globals.
 	 *
 	 * These are the inputs `KDUpdatePlugSettings` derives `KinkyDungeonStatsChoice` from
 	 * (`KinkyDungeon.ts:6114-6127`). We read them rather than reading the derived keys because the
 	 * derived Map is also where perks live, and the host's perks are emphatically NOT the world's.
 	 *
 	 * Only the keys the server classifies as world-level appear here; the per-character ones
-	 * (`arousalMode` and the perk-difficulty pair) stay on KDM-238's per-player channel. The server
+	 * (`arousalMode` and the perk-difficulty pair) stay on the per-player channel. The server
 	 * re-validates against the same list, so this list being wrong degrades to "KD's default"
 	 * rather than to a world nobody asked for.
 	 */
@@ -615,7 +615,7 @@
 	}
 
 	/**
-	 * KDM-239 R5 / KDM-259 — the seed for this run: what the host TYPED in the lobby, else a URL
+	 * The seed for this run: what the host TYPED in the lobby, else a URL
 	 * override (`#seed=foo`), else ''.
 	 *
 	 * Empty means "use whatever the server was configured with" (`swap-session.js`:
@@ -629,7 +629,7 @@
 	function worldSeed() { return seedChoice || getParam('seed') || ''; }
 
 	/**
-	 * KD-101: pre-select the player's binding material as the quick-bind item (stock
+	 * Pre-select the player's binding material as the quick-bind item (stock
 	 * KinkyDungeonAttemptQuickRestraint). When "Tie Up" casts Bondage with a raw material
 	 * selected, the stock cast (KinkyDungeonMagicCode "Bondage") opens the bind submenu
 	 * already in the generic view with THAT material's category chosen. Without a selection
@@ -638,7 +638,7 @@
 	 * does nothing". We only select when the player has no selection of their own, and only a
 	 * generic raw binding material they actually own — pure stock data/selection, no patch.
 	 *
-	 * ⚠️ KDM-285 — DISARM THE SPELL AFTERWARDS, and never take that line out.
+	 * ⚠️ DISARM THE SPELL AFTERWARDS, and never take that line out.
 	 *
 	 * Stock `KinkyDungeonAttemptQuickRestraint` sets THREE things (KinkyDungeonInventory.ts:4304):
 	 * the item, the weapon, and `KinkyDungeonTargetingSpell = KDBondageSpell`. The third one is the
@@ -698,7 +698,7 @@
 			KinkyDungeonFastMovePath = [];               // stop KD's own per-frame drainer
 			coop.route = path.length ? path : null;
 			coop.routeFresh = !!coop.route;              // a NEW click — see stepRoute's danger rule
-			// KDM-310 — a NEW click is a new decision: its first step is sent even while an earlier
+			// A NEW click is a new decision: its first step is sent even while an earlier
 			// action is still waiting for the partner, and the server keeps only the latest
 			// (swap-session `submit`, last-wins). Auto-walk steps keep the one-per-turn gate.
 			stepRoute(true);
@@ -714,7 +714,7 @@
 	 * same via KinkyDungeonInDanger).
 	 */
 	function stepRoute(freshClick) {
-		// Already acted this turn — an AUTO-walk step must not replace it. A fresh click may (KDM-310).
+		// Already acted this turn — an AUTO-walk step must not replace it. A fresh click may.
 		if (coop.submitted && !freshClick) return;
 		if (!coop.route || !coop.route.length) { coop.route = null; return; }
 		/*
@@ -738,7 +738,7 @@
 	}
 
 	/**
-	 * KDM-310 — KD's OWN "is an enemy in view?" (`KinkyDungeonInDanger`), asked as a single player would
+	 * KD's OWN "is an enemy in view?" (`KinkyDungeonInDanger`), asked as a single player would
 	 * be asked it: the PARTNER is not an enemy.
 	 *
 	 * Owner UAT 2026-09-30: "the char doesn't remember the planned path". The route driver follows KD's
@@ -772,7 +772,7 @@
 	/**
 	 * Start a game ONCE to bring up dungeon structures, then pin to the Game screen.
 	 *
-	 * ⚠️ THIS CATCH USED TO BE SILENT, and that silence hid KDM-258. `KinkyDungeonStartNewGame` is
+	 * ⚠️ THIS CATCH USED TO BE SILENT, and that silence hid the frozen-render bug below. `KinkyDungeonStartNewGame` is
 	 * what reaches `KinkyDungeonInitialize` -> `KDInitCanvas()` (`KinkyDungeonGame.ts:568, :577`),
 	 * the ONLY place `KinkyDungeonContext` is ever assigned — it is `null` until then
 	 * (`KinkyDungeonGame.ts:95`). If this throws before that point we swallow it, `pinGameScreen()`
@@ -802,14 +802,14 @@
 	/**
 	 * Keep the dungeon on screen (don't regen the map).
 	 *
-	 * NOT per-frame, despite what this comment used to claim (KDM-205): the call sites are boot
+	 * NOT per-frame, despite what this comment used to claim: the call sites are boot
 	 * (`forceGameScreen`) and the two `ws.onmessage` state branches, so an UNPAIRED client runs it
 	 * exactly once. The stale wording cost a wrong hypothesis — that the `KinkyDungeonUpdateLightGrid`
 	 * flag below was forcing a vision recompute every frame and starving the loop. It is not.
 	 */
 	function pinGameScreen() {
 		/*
-		 * KDM-258 — NEVER PIN A SCREEN THE GAME CANNOT DRAW.
+		 * NEVER PIN A SCREEN THE GAME CANNOT DRAW.
 		 *
 		 * `KinkyDungeonContext` is the 2D context every map draw writes to. It is `null` until
 		 * `KDInitCanvas()` runs (`KinkyDungeonGame.ts:95, :577`), reachable only through
@@ -826,7 +826,7 @@
 		 * later, on `joined.started` — where it also defers on assets and on mod execution. A state frame
 		 * landing in that window pinned a screen that could not be drawn. The HOST is the usual victim;
 		 * it connects earliest. (The removed `#coop=` shortcut ran `enterGame()` before connecting, which
-		 * is why this only ever showed on the lobby road — KDM-302 made that the only road.)
+		 * is why this only ever showed on the lobby road — now the only road.)
 		 *
 		 * Refusing is strictly better than pinning: the player keeps looking at a live lobby for a few
 		 * hundred milliseconds until `enterGame()` catches up, instead of a dead canvas forever.
@@ -837,7 +837,7 @@
 			 * …and BRING THE GAME UP, because on the lobby path nothing else will.
 			 *
 			 * Apart from here, `enterGame()` is called only from the `joined.started` handler (the
-			 * `#coop=` shortcut's `boot()` was the other caller until KDM-302). The server sends that
+			 * `#coop=` shortcut's `boot()` was the other caller until it was removed). The server sends that
 			 * `joined` only to the GUEST when the
 			 * host accepts (`ws-bridge.js`, the accept branch) — the host is never told, in those
 			 * words, that its session has started. So a lobby HOST never ran `enterGame()` at all; it
@@ -857,7 +857,7 @@
 			return;
 		}
 		/*
-		 * KDM-239 R7 — ADOPT the session's screen; do not stamp one.
+		 * ADOPT the session's screen; do not stamp one.
 		 *
 		 * This used to be an unconditional `KinkyDungeonState = 'Game'`, re-applied on every state
 		 * frame. That is what made a co-op run a *pinned* game rather than a played one: any screen
@@ -884,7 +884,7 @@
 	}
 
 	/**
-	 * KDM-233: the build this client is running, so the server can refuse a skewed pair (N1).
+	 * The build this client is running, so the server can refuse a skewed pair (N1).
 	 *
 	 * The guest runs its OWN copy of the bundle and only repoints its socket, so two different builds
 	 * would desync. `KDVersionStr` is the bundle's own version string — the same thing the test
@@ -897,15 +897,15 @@
 	}
 
 	/**
-	 * KDM-252 A6 — the reconnect schedule: 1 / 2 / 4 / 8 / 16 s, capped at 30 s. `attempt` is 0-based.
+	 * The reconnect schedule: 1 / 2 / 4 / 8 / 16 s, capped at 30 s. `attempt` is 0-based.
 	 *
 	 * The POLICY is ported from `origin/feature/multiplayer`'s `MPResume.ts` (`KDMPBackoffDelay`);
-	 * that branch's transport is not (KDM-233 — its netcode is obsolete). Exponential rather than a
+	 * that branch's transport is not (its netcode is obsolete). Exponential rather than a
 	 * fixed interval because the two outages this must survive want opposite things: a blinked Wi-Fi
 	 * wants the FIRST retry to be almost immediate, and a host that is down for ten minutes must not
 	 * be hammered once a second for ten minutes.
 	 *
-	 * There is no attempt LIMIT, and that is deliberate (KDM-234 D7): the wait is bounded by the
+	 * There is no attempt LIMIT, and that is deliberate: the wait is bounded by the
 	 * survivor's patience, never by a clock of ours. Giving up after N tries would be a reconnect
 	 * deadline wearing a different hat.
 	 */
@@ -915,7 +915,7 @@
 	}
 
 	/**
-	 * KDM-252 — the identity a reconnect is RECOGNISED BY, stable across a page load.
+	 * The identity a reconnect is RECOGNISED BY, stable across a page load.
 	 *
 	 * The lobby generates one, and a value generated fresh on every load would make every reload look
 	 * like a stranger asking to join a full session — which is precisely the failure this slice exists
@@ -928,7 +928,7 @@
 	function stableId(forRole) {
 		var key = 'kdcoop.clientId';
 		/*
-		 * KDM-280 — ONE generator, and it does not name a seat.
+		 * ONE generator, and it does not name a seat.
 		 *
 		 * The host branch used to mint the literal string `'host'`, which broke the invariant this
 		 * file's README states outright: an id "must differ between two tabs because two tabs are two
@@ -957,10 +957,10 @@
 	coop._stableId = stableId;
 
 	/**
-	 * KDM-236 A — the address you last reached a host at.
+	 * The address you last reached a host at.
 	 *
 	 * `localStorage`, deliberately UNLIKE `stableId`'s `sessionStorage` two functions up. That
-	 * identity is per-TAB on purpose (two tabs on one machine are two players — KDM-252); an address
+	 * identity is per-TAB on purpose (two tabs on one machine are two players); an address
 	 * is a property of the MACHINE and has to outlive the tab, or "remembered" means "remembered
 	 * until you close the game", which is not what A1 asks for.
 	 *
@@ -976,7 +976,7 @@
 	window.__coopLastAddress = lastAddress;
 
 	/**
-	 * KDM-272 — whether this player has already been told how co-op differs.
+	 * Whether this player has already been told how co-op differs.
 	 *
 	 * Here rather than in `coop-lobby.js` for the reason `ADDR_KEY` gives just above: the lobby draws
 	 * screens and never touches storage, and one file owning every `kdcoop.` key is what stops a
@@ -987,7 +987,7 @@
 	 * mean the briefing returns every time the game is reopened, which is not "once".
 	 *
 	 * Both halves swallow their throw, so a storage-disabled browser reads `false` for ever and is
-	 * shown the briefing every time — degraded, never broken (KDM-272 AC3).
+	 * shown the briefing every time — degraded, never broken.
 	 */
 	var BRIEFING_KEY = 'kdcoop.briefingSeen';
 
@@ -1004,7 +1004,7 @@
 	window.__coopMarkBriefingSeen = markBriefingSeen;
 
 	/**
-	 * KDM-247 — where the quick-emoji picker's recents are kept.
+	 * Where the quick-emoji picker's recents are kept.
 	 *
 	 * The KEY and the try/catch live here for the reason `ADDR_KEY` gives above: one file owning
 	 * every `kdcoop.` key is what stops a second, differently-spelled copy appearing later, and a
@@ -1021,7 +1021,7 @@
 	 * time the game is reopened.
 	 *
 	 * Both halves swallow their throw, so a storage-disabled browser reads `null` for ever and the
-	 * picker falls back to its seed set every session — degraded, never broken (as KDM-272 AC3).
+	 * picker falls back to its seed set every session — degraded, never broken.
 	 */
 	var EMOJI_KEY = 'kdcoop.emojiRecents';
 	window.__coopEmojiStore = {
@@ -1048,7 +1048,7 @@
 	}
 
 	/**
-	 * KDM-236 F1 — the deadline on a JOIN attempt.
+	 * The deadline on a JOIN attempt.
 	 *
 	 * A browser asked for a socket to a peer that accepts the TCP connection and then says nothing
 	 * fires neither `open` nor `error`: the socket sits in CONNECTING and the join screen sits on
@@ -1074,7 +1074,7 @@
 			connectTimer = null;
 			if (ws !== sock || sock.readyState !== 0) return;   // opened, failed, or superseded
 			/*
-			 * KDM-306 — a deadline that runs LATE did not watch the server; the page was frozen.
+			 * A deadline that runs LATE did not watch the server; the page was frozen.
 			 *
 			 * Measured (probe runs 14, 25): the page dialled and then its own main thread stalled
 			 * 11-16 s (KD's work, not the network). The timer came due inside the freeze, ran first on
@@ -1092,7 +1092,7 @@
 	}
 
 	/**
-	 * KDM-236 T — leave, and leave nothing behind.
+	 * Leave, and leave nothing behind.
 	 *
 	 * Every way out of the lobby routes here (`coop-lobby.js` → `leave()`). `_closedForGood` is
 	 * latched FIRST: it is what stops `onclose` reaching `scheduleReconnect`, so T3 needs no new flag
@@ -1117,7 +1117,7 @@
 	};
 
 	/**
-	 * KDM-252 — retry the socket after a drop, with backoff. Never a reload: a reload throws away the
+	 * Retry the socket after a drop, with backoff. Never a reload: a reload throws away the
 	 * loaded bundle and everything the page had, to reach a state the server can restore anyway.
 	 *
 	 * Only a LIVE session retries. A socket that closes before `started` is a lobby failure — a
@@ -1139,7 +1139,7 @@
 	}
 
 	/**
-	 * KDM-249 — the HOST's http origin, which is where the mod payloads live.
+	 * The HOST's http origin, which is where the mod payloads live.
 	 *
 	 * The same `endpoint || location.host` pair `connect()` uses for the socket: a guest that typed an
 	 * address must fetch the mods from THAT machine, not from whichever server happened to serve its
@@ -1151,10 +1151,10 @@
 	}
 
 	/**
-	 * KDM-255 — every join names the seat it wants. There is no longer a roleless form: the bridge
+	 * Every join names the seat it wants. There is no longer a roleless form: the bridge
 	 * refuses one, because the gate is the only road in.
 	 *
-	 * KDM-270 — AND IT IS NOW SENT FROM TWO PLACES, so it is built in one.
+	 * AND IT IS NOW SENT FROM TWO PLACES, so it is built in one.
 	 *
 	 * A refusal that carries `retry` leaves the socket open and names another seat to ask for, and
 	 * that second ask must send THE SAME declaration as the first — the player is the same person,
@@ -1172,7 +1172,7 @@
 		// on KD's default terms", which is what keeps the legacy `Player <id>` label.
 		join.name = playerName;
 		join.build = buildId();
-		// KDM-249 R1 — this client's mod set rides on the handshake beside `build`.
+		// This client's mod set rides on the handshake beside `build`.
 		//
 		// If `prepare()` has not finished hashing yet, this is `[]` — and that is SAFE by
 		// design rather than a race worth guarding: an absent declaration means "needs
@@ -1180,7 +1180,7 @@
 		// offered mods it already has. The dangerous reading — absent as "nothing to do" —
 		// is the one that would leave it silently mod-less, and the gate refuses it.
 		try { join.mods = window.__coopMods ? window.__coopMods.declaration() : []; } catch (e) { join.mods = []; }
-		// KDM-256 R1 / KDM-279 — the character this player built: class, outfit, style and the
+		// The character this player built: class, outfit, style and the
 		// perks they picked on KD's own perk screen, as ONE declaration beside the name and the
 		// mods. Sent only when there is one: absence means "seat me as KD's default", which is
 		// the answer the server already had (R4). Both roles send
@@ -1191,7 +1191,7 @@
 		// opened those screens is seated on KD's default terms (R9), not refused.
 		if (playerCharacter) join.character = playerCharacter;
 		/*
-		 * KDM-239 R3/R5 — a HOST also declares the WORLD: the game-mode toggles that describe
+		 * A HOST also declares the WORLD: the game-mode toggles that describe
 		 * the run, and the seed.
 		 *
 		 * Host only, and the server drops a guest's copy anyway (join-gate). Both halves are
@@ -1203,13 +1203,13 @@
 		 * from — so whatever the player set on KD's own screens is what travels. We choose
 		 * nothing here; `worldModes()` is a read, not a policy.
 		 *
-		 * KDM-270 — read at ASK time, not at connect time, which matters now that a second ask can
+		 * Read at ASK time, not at connect time, which matters now that a second ask can
 		 * follow a refusal: a client refused the host seat asks again as a guest, and a guest must
 		 * not carry the world it was going to bring.
 		 */
 		if (role === 'host') join.world = { modes: worldModes(), seed: worldSeed() };
 		/*
-		 * KDM-243 R1 — and, if this host chose to CONTINUE a run, the save itself.
+		 * And, if this host chose to CONTINUE a run, the save itself.
 		 *
 		 * In the same `if` as the world above, so "only a host brings a world" is expressed once
 		 * on this side too. The value is whatever the player already has in KD's own current save
@@ -1223,7 +1223,7 @@
 	}
 
 	/**
-	 * KDM-270 — ask for a seat on the socket we already have.
+	 * Ask for a seat on the socket we already have.
 	 *
 	 * Called by `ws.onopen` for the first ask, and by the `reject` handler for the second one a
 	 * `retry` invites. There is no third caller and no second implementation: an ask is this
@@ -1236,7 +1236,7 @@
 		coop._mayAsk = null;
 		var mine = ws;
 		try { mine.send(JSON.stringify(joinFrame())); } catch (e) { return; }
-		// KDM-249 R6 — a HOST publishes its zips so a guest can fetch them, then re-states the
+		// A HOST publishes its zips so a guest can fetch them, then re-states the
 		// declaration: `join` above carried whatever had been hashed by the time the socket
 		// opened, which misses mods picked from the Mods menu just before hosting.
 		//
@@ -1254,7 +1254,7 @@
 	}
 
 	/**
-	 * KDM-270 — may we ask for `seat` on the socket we already hold?
+	 * May we ask for `seat` on the socket we already hold?
 	 *
 	 * True only when the server said so (`coop._mayAsk`, set by the last refusal), the socket is
 	 * genuinely open, and the address has not changed underneath us. That last clause is not
@@ -1280,14 +1280,14 @@
 	function connect() {
 		var proto = location.protocol === 'https:' ? 'wss' : 'ws';
 		var where = endpoint || location.host;
-		// KDM-270: a NEW socket carries no standing invitation, and `canAsk` compares against where
+		// A NEW socket carries no standing invitation, and `canAsk` compares against where
 		// this one actually goes rather than against whatever was last typed.
 		coop._mayAsk = null;
 		coop._at = where;
 		ws = new WebSocket(proto + '://' + where + '/');
 		coop.ws = ws;
 		/*
-		 * KDM-236 T3 — THIS socket, and no other.
+		 * THIS socket, and no other.
 		 *
 		 * Every handler below is gated on `ws === myWs`. Two things make that necessary: a player who
 		 * left the lobby (`__coopDisconnect` nulls `ws`) can still be sent the answer to the question
@@ -1298,13 +1298,13 @@
 		var myWs = ws;
 		armConnectDeadline(myWs, where);
 		/*
-		 * KDM-252 N4 — a NEW socket holds nothing.
+		 * A NEW socket holds nothing.
 		 *
 		 * The server restarts our state sequence and sends a full snapshot (`_resetDelta`), so the
 		 * base we were merging onto is dead; keeping it would risk merging the new stream onto the old
 		 * one. The in-flight bookkeeping goes with it for the same reason: every send waiting on a
 		 * reply is waiting on a socket that no longer exists, and a slot never freed is a type the
-		 * client would suppress for the rest of the session (the KDM-186 Rule-1 shape).
+		 * client would suppress for the rest of the session (the Rule-1 shape).
 		 */
 		coop._snapBase = null;
 		coop._snapSeq = 0;
@@ -1325,7 +1325,7 @@
 		ws.onerror = function () {
 			if (ws !== myWs) return;                    // T3
 			clearConnectDeadline();                     // F1 — it failed out loud; nothing left to time out
-			// KDM-252: only while we are still trying to GET IN. Once a session is live, a failed
+			// Only while we are still trying to GET IN. Once a session is live, a failed
 			// retry is not news the player can act on — `scheduleReconnect` already says what is
 			// happening and when the next attempt is — and routing it to the lobby would paint an
 			// error screen over a game that is merely waiting.
@@ -1337,7 +1337,7 @@
 			lobbySay({ error: T('KDMPCouldNotReach', { WHERE: where }), status: '' });
 		};
 		/**
-		 * KDM-206: resolve a state frame to a FULL snapshot.
+		 * Resolve a state frame to a FULL snapshot.
 		 *
 		 * The server sends `snapshot` on the first state and after a resync, and a `delta` thereafter
 		 * (measured 38.1 KB -> 115 B). We keep the last full snapshot and merge each delta onto it.
@@ -1347,7 +1347,7 @@
 		 * our copy away and ask for a full snapshot instead of guessing.
 		 */
 		/**
-		 * KDM-239 R7 — the screen the session says we are on, taken from the resolved snapshot.
+		 * The screen the session says we are on, taken from the resolved snapshot.
 		 *
 		 * Done HERE, in `resolveState`, rather than at the three `pinGameScreen()` call sites: every
 		 * state frame passes through this one function, and three copies of the same read is exactly
@@ -1385,23 +1385,23 @@
 		ws.onmessage = function (e) {
 			if (ws !== myWs) return;                    // T3 — see `myWs` above
 			var m; try { m = JSON.parse(e.data); } catch (_) { return; }
-			// ── KDM-250: the heartbeat ─────────────────────────────────────────────────────────
+			// ── the heartbeat ──────────────────────────────────────────────────────────────────
 			// Answered FIRST and cheaply: this handler runs on the page's own event loop, so a reply
 			// is proof that the loop is still turning — which is the whole point of an
 			// application-level ping rather than an RFC6455 opcode the network stack would answer on
-			// our behalf even with the renderer wedged (KDM-234 A2). It touches no game state and must
+			// our behalf even with the renderer wedged. It touches no game state and must
 			// never fall through to the input bookkeeping below.
 			if (m.type === 'ping') {
 				try { ws.send(JSON.stringify({ type: 'pong', t: m.t })); } catch (_e) { /* closing */ }
 				return;
 			}
 			if (m.type === 'peer_missing') {
-				// KDM-250 reports the drop; KDM-251 makes the session PAUSE on it. The in-game telling
+				// The heartbeat reports the drop; the session PAUSES on it. The in-game telling
 				// is a server-opened dialogue (S3) — this line is the ambient status, not the message.
-				// The wait/solo choice on a GUEST drop is KDM-253 and is not decided here.
+				// The wait/solo choice on a GUEST drop is handled elsewhere, not here.
 				coop.peerMissing = { clientId: m.clientId, role: m.role };
 				// A turn we already had in flight will never resolve now, so stop claiming we acted —
-				// otherwise the client keeps suppressing input as already-submitted (the KDM-225 shape).
+				// otherwise the client keeps suppressing input as already-submitted (the stuck-submitted shape).
 				coop.submitted = false;
 				setStatus('Co-op ' + id + ': ' + (m.role === 'host'
 					// D5/D6 — the guest is NOT offered a choice: it is the host's process that owns the
@@ -1412,42 +1412,42 @@
 					: 'your partner (' + m.clientId + ') has disconnected — the game is paused.'));
 				return;
 			}
-			// KDM-252: a `push` is a non-turn frame, like a `ui` one — the bucket separates frames that
+			// A `push` is a non-turn frame, like a `ui` one — the bucket separates frames that
 			// resolved a turn from frames that did not, and a server-started push resolved nothing.
 			if (m.type === 'state') diag.noteRecv((m.kind === 'ui' || m.kind === 'push') ? 'ui' : 'turn', (e.data && e.data.length) || 0);
 			else if (m.type === 'ack') diag.noteRecv('ack', (e.data && e.data.length) || 0);
-			// KDM-186: an ACK is a reply that carries no state — the server applied our input and this
+			// An ACK is a reply that carries no state — the server applied our input and this
 			// player's own state did not move. It still consumed exactly one send, so the in-order
 			// bookkeeping must unwind for it exactly like a 'ui' state reply; it just has nothing to apply.
 			if (m.type === 'ack') { unwindOne('ui'); return; }   // applied, no turn ⇒ stream
-			// ── KDM-233: the approval handshake ────────────────────────────────────────────────
+			// ── the approval handshake ─────────────────────────────────────────────────────────
 			// These arrive BEFORE the session exists, so none of them touch game state.
 			if (m.type === 'awaiting_approval') {
-				// KDM-257 R1 — the diff rides this message and used to be dropped here. The guest must be
+				// The diff rides this message and used to be dropped here. The guest must be
 				// able to SEE what it is about to load before the host answers, and this is the only
 				// moment it can: the session does not exist yet.
 				lobbySay({ status: T('KDMPWaitingApproval'), error: '', modDiff: m.modDiff || null,
-					// KDM-239 R4 — the WORLD rides the same message, for the same reason and at the same
+					// The WORLD rides the same message, for the same reason and at the same
 					// moment: this is the last point the guest can still walk away.
 					world: m.world || null });
 				return;
 			}
 			if (m.type === 'join_pending') {
-				// KDM-302: there is no auto-answer. A HUMAN host answers every join — in the lobby
-				// before the run starts, in the game after it (KDM-297). The `#coop=` shortcut's
+				// There is no auto-answer. A HUMAN host answers every join — in the lobby
+				// before the run starts, in the game after it. The `#coop=` shortcut's
 				// always-yes lived here and was removed.
-				// KDM-297/KDM-300 — a host already IN THE GAME is asked by the server-opened in-game
+				// A host already IN THE GAME is asked by the server-opened in-game
 				// dialogue instead. Writing the question into the hidden lobby too would leave a stale
 				// Accept/Decline there for a guest the dialogue has long since answered.
 				if (coop._entered) return;
 				// Someone is asking to join OUR game. The host answers this — it is the whole gate.
-				// KDM-257 R2 — same diff, other side: the host is agreeing to SEND these, so say so.
+				// Same diff, other side: the host is agreeing to SEND these, so say so.
 				lobbySay({ phase: 'waiting', pending: { clientId: m.clientId, name: m.name || T('KDMPSomeone') }, error: '', modDiff: m.modDiff || null });
 				return;
 			}
 			if (m.type === 'reject') {
 				/*
-				 * KDM-270 — A REFUSAL THAT NAMES ANOTHER SEAT IS NOT THE END OF THE CONVERSATION.
+				 * A REFUSAL THAT NAMES ANOTHER SEAT IS NOT THE END OF THE CONVERSATION.
 				 *
 				 * `m.retry` is the seat the server says we may ask for on THIS socket, and its
 				 * presence is also why the socket is still open (`ws-bridge._reject`). So the client
@@ -1459,7 +1459,7 @@
 				 */
 				coop._mayAsk = m.retry || null;
 				/*
-				 * KDM-303 R5 — a page that is already IN THE GAME and is told "ask as a guest" is a host
+				 * A page that is already IN THE GAME and is told "ask as a guest" is a host
 				 * whose seat was handed on while they were away (their tab reconnected claiming it).
 				 * There is no lobby on screen to offer anything in, and the player's intent — keep
 				 * playing — is unambiguous, so it asks as a guest at once; the current host answers.
@@ -1494,7 +1494,7 @@
 					}
 					return;
 				}
-				// KDM-281 — the reason CODE picks a key; the sentence lives in `coop-text.js`. Note the
+				// The reason CODE picks a key; the sentence lives in `coop-text.js`. Note the
 				// build-mismatch line is templated rather than concatenated: which version is named
 				// first is a matter of word order, and word order is the translator's business.
 				var why = m.reason === 'declined' ? T('KDMPRefusedDeclined')
@@ -1502,12 +1502,12 @@
 						{ HOSTBUILD: m.hostBuild || '?', GUESTBUILD: m.guestBuild || '?' })
 					: m.reason === 'session_full' ? T('KDMPRefusedFull')
 					: m.reason === 'busy' ? T('KDMPRefusedBusy')
-					// KDM-270 — `no_host` was here too, and is not any more: it now carries a `retry`
+					// `No_host` was here too, and is not any more: it now carries a `retry`
 					// and is answered above, with an offer to host instead. Leaving the line would be
 					// two different sentences for one refusal, one of which nobody can reach.
 					: T('KDMPRefusedOther', { REASON: m.reason });
-				// KDM-252: a refusal is an ANSWER, not an outage. `seat_gone` is the one that matters
-				// here — the survivor has played on without us (KDM-250 E6) — and retrying any of
+				// A refusal is an ANSWER, not an outage. `seat_gone` is the one that matters
+				// here — the survivor has played on without us — and retrying any of
 				// these would dial forever at a door that has been shut in words.
 				coop._closedForGood = true;
 				lobbySay({ error: why, status: '', pending: null });
@@ -1515,7 +1515,7 @@
 			}
 			if (m.type === 'host_changed') {
 				/*
-				 * KDM-303 R3 — the host timed out and the seat was handed on. For the page that got it,
+				 * The host timed out and the seat was handed on. For the page that got it,
 				 * `role` is what every host-only thing reads (`coop.isHost()` → the save-run menu entry,
 				 * the seat a reconnect claims, mod publishing), so setting it is the whole promotion on
 				 * this side; the "you are the host now" dialogue arrives in the state frame. Everyone
@@ -1530,7 +1530,7 @@
 				return;
 			}
 			if (m.type === 'peer_gone') {
-				// KDM-253: the other player is not coming back — either we chose to go on without
+				// The other player is not coming back — either we chose to go on without
 				// them, or they quit. Either way the waiting is over, so the page must stop saying it
 				// is waiting: a correct server and a status line still reading "the game is paused" is
 				// indistinguishable, to the player, from the freeze this whole epic exists to remove.
@@ -1545,7 +1545,7 @@
 			}
 			if (m.type === 'peer_joined') {
 				/*
-				 * KDM-278 — somebody has joined the run we are already in (`ws-bridge._joinLate`).
+				 * Somebody has joined the run we are already in (`ws-bridge._joinLate`).
 				 *
 				 * This branch did not exist. The server sent the message, the unit spec asserted it on
 				 * the wire, and NO client read it — so `coop.peers`, set once from `joined.players`,
@@ -1569,7 +1569,7 @@
 				return;
 			}
 			if (m.type === 'peer_back') {
-				// KDM-252 E4: the mirror of `peer_missing`. The MODAL is closed server-side and reaches
+				// The mirror of `peer_missing`. The MODAL is closed server-side and reaches
 				// us as the state frame that follows this message; this clears the ambient status the
 				// drop left behind, so the player is not left reading "the game is paused" while it runs.
 				coop.peerMissing = null;
@@ -1580,7 +1580,7 @@
 			}
 			if (m.type === 'joined') {
 				coop.peers = m.players || [];
-				// KDM-252: we are in. The backoff position resets so a LATER drop starts its own
+				// We are in. The backoff position resets so a LATER drop starts its own
 				// schedule at 1 s; `reconnect.total` deliberately does not, so "did this session ever
 				// have to reconnect?" stays answerable.
 				coop.reconnect.attempts = 0;
@@ -1588,7 +1588,7 @@
 				// The session is live once BOTH are in — that is the moment the host's game becomes
 				// multiplayer, and the moment either side stops being a lobby screen.
 				if (m.started) { lobbySay({ pending: null, status: '' }); enterGame(); }
-				// KDM-287 — `m.lan` rides in with the host's own `joined`, which is the frame that
+				// `M.lan` rides in with the host's own `joined`, which is the frame that
 				// opens this screen: the address to share and the screen that shows it arrive
 				// together, so there is no window in which the host is looking at a stale one. It is
 				// carried, not interpreted — what to DO with it is the lobby's decision (`shareLines`),
@@ -1596,7 +1596,7 @@
 				else if (role === 'host') lobbySay({ phase: 'waiting', status: '', share: m.lan || [] });
 			}
 			else if (m.type === 'state' && m.kind === 'push') {
-				// KDM-252: a state frame the SERVER started — nothing of ours is being answered. Adopt
+				// A state frame the SERVER started — nothing of ours is being answered. Adopt
 				// it and touch NO bookkeeping: `_sentRoute` / `_inFlight` track replies to inputs WE
 				// sent, and unwinding a slot here would free one that no reply ever filled. Nor is it a
 				// turn: `lastTick`, `submitted` and the route are all left exactly as they were.
@@ -1605,13 +1605,13 @@
 				pinGameScreen();
 			}
 			else if (m.type === 'state' && m.kind === 'ui') {
-				// KDM-163: a UI input of OURS was applied — no turn resolved. Adopt the fresh state so
+				// A UI input of OURS was applied — no turn resolved. Adopt the fresh state so
 				// the menu responds (R6), and touch NOTHING that is per-turn. Treating this as a turn
 				// is what used to kill click-to-move: with every input routed, KD's draw loop sends
 				// `setMoveDirection` each frame, so this branch runs ~60×/s.
 				coop.started = true;
-				unwindOne('ui');                  // KDM-186: applied without consuming a turn ⇒ presentation
-				// KDM-206: the per-frame path now carries a delta; resolve it against our copy. A null
+				unwindOne('ui');                  // applied without consuming a turn ⇒ presentation
+				// The per-frame path now carries a delta; resolve it against our copy. A null
 				// means we asked for a resync — apply nothing rather than render a half-merged state.
 				var uiSnap = resolveState(m);
 				if (uiSnap) window.KDRenderClient.apply(uiSnap);
@@ -1627,7 +1627,7 @@
 				// consumes a turn at all, and per-frame UI chatter would cancel every route.
 				// An empty queue means this turn was resolved by the PEER while we sent nothing.
 				//
-				// KDM-310 — and only THIS frame's own reply is unwound. The bridge tags `reply` on the frame
+				// And only THIS frame's own reply is unwound. The bridge tags `reply` on the frame
 				// that answers the input which resolved the turn; any other turn frame was resolved by the
 				// PEER and answers none of our sends. This used to wipe the whole queue instead ("the bridge
 				// has answered everything that preceded it"), which is only true of the reply: when the
@@ -1640,21 +1640,21 @@
 				if (ours === false) coop.route = null;
 				coop.lastTick = m.tick;
 				if (window.__KDMP_DEBUG && m.serverLog && m.serverLog.length) {
-					// KD-098: echo the server's per-turn diagnostics into THIS browser console
+					// Echo the server's per-turn diagnostics into THIS browser console
 					// (so one screenshot has both client + server logs — no Docker terminal needed).
 					for (var li = 0; li < m.serverLog.length; li++) {
 						try { console.log('[mp-server] ' + m.serverLog[li]); } catch (e) { /* ignore */ }
 					}
 				}
-				// KDM-206: turn states are delta-encoded too (same composer as the ui path, so the
+				// Turn states are delta-encoded too (same composer as the ui path, so the
 				// base stays in step). Resolve first, then everything below sees a full snapshot.
 				var turnSnap = resolveState(m);
 				if (!turnSnap) return;             // resync requested — do not render a partial state
-				coop._lastSnapshot = turnSnap;     // KDM-186: kept so a test can re-apply it verbatim
+				coop._lastSnapshot = turnSnap;     // kept so a test can re-apply it verbatim
 				window.KDRenderClient.apply(turnSnap);
-				// KD-101 UAT: seed the server-configured carryable restraint item once (the Items inventory
+				// Seed the server-configured carryable restraint item once (the Items inventory
 				// is client-local, so it must be added here even though the server bundle already has it).
-				// KDM-206: read from the RESOLVED snapshot — with delta encoding `m.snapshot` is absent
+				// Read from the RESOLVED snapshot — with delta encoding `m.snapshot` is absent
 				// on all but the first frame, so keying off it here would silently stop seeding the item.
 				if (!coop._startItemAdded && turnSnap.startItem) {
 					addStartItem(turnSnap.startItem);
@@ -1664,12 +1664,12 @@
 				if (coop.route) stepRoute();   // advance a click-to-move route by one tile this turn
 				setStatus('Co-op ' + id + '  turn ' + m.tick + controlHint());
 			} else if (m.type === 'waiting') {
-				// KDM-163: the server has confirmed our input entered LOCKSTEP — that, and not the act
+				// The server has confirmed our input entered LOCKSTEP — that, and not the act
 				// of sending, is what means "I have acted this turn".
 				coop.submitted = true;
-				// a MANUAL action (not a route step) cancels an in-progress route. KDM-310: and remember
+				// a MANUAL action (not a route step) cancels an in-progress route. And remember
 				// which kind WAITED — the turn that resolves it is answered by the peer (see `state`).
-				// KDM-186: it entered lockstep ⇒ a command, never sampled.
+				// It entered lockstep ⇒ a command, never sampled.
 				coop._waitRoute = unwindOne('turn');
 				if (coop._waitRoute === false) coop.route = null;
 				setStatus('Co-op ' + id + ': submitted, waiting for ' + (m.waitingOn || []).join(', ') + '…');
@@ -1678,15 +1678,15 @@
 				var g = m.graceMs ? ' (auto-pass in ' + (Math.round(m.graceMs / 100) / 10) + 's)' : '';
 				setStatus('Co-op ' + id + ': your move — others ready' + g + controlHint());
 			} else if (m.type === 'blocked') {
-				// KDM-225: the server REFUSED this action — it never entered lockstep. Crucially the
+				// The server REFUSED this action — it never entered lockstep. Crucially the
 				// opposite of `waiting`: leave `submitted` false so the client keeps accepting input,
 				// or the player is locked out of the very action that would unblock them.
 				coop.submitted = false;
 				coop.blocked = m.reason || 'blocked';
-				unwindOne();                      // KDM-310: a refusal still answers the input — free its slot
+				unwindOne();                      // a refusal still answers the input — free its slot
 				setStatus('Co-op ' + id + ': ' + (m.reason === 'peace-offer'
 					? 'a peace offer is waiting — RIGHT-CLICK YOURSELF to accept or refuse'
-					// KDM-251 D6: a refused move must not read as a hang. Name the cause every time,
+					// A refused move must not read as a hang. Name the cause every time,
 					// because this is the reason the player will see most often while paused.
 					: m.reason === 'peer-missing'
 						? 'the game is paused — ' + (coop.peerMissing && coop.peerMissing.role === 'host'
@@ -1695,16 +1695,16 @@
 						: 'action refused (' + m.reason + ')'));
 			} else if (m.type === 'save_export') {
 				/*
-				 * KDM-244 — the run has come back as a single-player save. See `writeExportedSave`.
+				 * The run has come back as a single-player save. See `writeExportedSave`.
 				 *
-				 * KDM-275 A5 — …and now it arrives unbidden, so WHO ASKED decides what the player is
-				 * told. `reason` is `requested` / `solo` for the two explicit moments KDM-244 built, and
-				 * `floor` / `timer` for the automatic ones this task added.
+				 * …and now it arrives unbidden, so WHO ASKED decides what the player is
+				 * told. `reason` is `requested` / `solo` for the two explicit moments built first, and
+				 * `floor` / `timer` for the automatic ones added later.
 				 *
 				 * QUIET ON SUCCESS, LOUD ON FAILURE. A line every floor is noise the player learns to
 				 * ignore, which is worse than useless — but suppressing the FAILURE too would break the
 				 * promise the whole feature rests on, that a silent success and a silent failure are
-				 * indistinguishable until you close the tab and find out (KDM-244 A6). The automatic
+				 * indistinguishable until you close the tab and find out. The automatic
 				 * path is the one nobody is watching, so its failures are the ones that most need
 				 * saying.
 				 *
@@ -1723,7 +1723,7 @@
 						: 'COULD NOT SAVE THE RUN — ' + w.err + ' (your previous save is untouched)'));
 				}
 			} else if (m.type === 'error') {
-				if (m.reply) unwindOne();         // KDM-310: an input that threw is still answered
+				if (m.reply) unwindOne();         // an input that threw is still answered
 				setStatus('Co-op ' + id + ': error — ' + m.error);
 			}
 		};
@@ -1732,7 +1732,7 @@
 			clearConnectDeadline();
 			coop.connected = false;
 			setStatus('Co-op ' + id + ': disconnected');
-			// KDM-252 A6: and then it puts itself back together, rather than leaving the player with a
+			// And then it puts itself back together, rather than leaving the player with a
 			// dead tab and a status line. Everything about WHETHER to retry lives in one place.
 			scheduleReconnect();
 		};
@@ -1743,7 +1743,7 @@
 		// the peer): the server keeps only the latest pending action and the turn waits for the peer
 		// regardless, so e.g. opening "Tie Up" / applying a restraint after you've already moved still
 		// works instead of being silently dropped. Route auto-steps still respect the one-per-turn gate —
-		// except the first step of a NEW click (`replace`, KDM-310), which is a new decision like a key.
+		// except the first step of a NEW click (`replace`), which is a new decision like a key.
 		var blocked = !ws || ws.readyState !== 1 || !coop.started || (coop.submitted && !!fromRoute && !replace);
 		if (blocked) {
 			if (window.__KDMP_DEBUG) {
@@ -1754,7 +1754,7 @@
 			}
 			return;
 		}
-		// KDM-163: do NOT decide "I have acted" or "cancel the route" here. Once the client routes every
+		// Do NOT decide "I have acted" or "cancel the route" here. Once the client routes every
 		// input it cannot tell a turn-consuming action from KD's per-frame `setMoveDirection`, and
 		// guessing at send time cancelled every route within one frame.
 		//
@@ -1765,7 +1765,7 @@
 		// after a route step would overwrite it and cancel the route when the turn resolved.
 		var _dtype = diag.noteSend(action);
 		/*
-		 * KDM-186 RULE 1 (v3) — STREAMS may be sampled; COMMANDS may not be touched.
+		 * RULE 1 (v3) — STREAMS may be sampled; COMMANDS may not be touched.
 		 *
 		 * Two kinds of input share this wire and they need opposite handling:
 		 *   a STREAM  (KD's draw loop emits the move direction every frame) may be sampled down to the
@@ -1802,7 +1802,7 @@
 	function rawSend(type, action, fromRoute) {
 		coop._inFlight[type] = (coop._inFlight[type] || 0) + 1;
 		coop._sentTypes.push(type);
-		// KDM-163: queue this send's route-ness. The bridge replies to each input EXACTLY once and in
+		// Queue this send's route-ness. The bridge replies to each input EXACTLY once and in
 		// order, so shifting on each reply tells us the route-ness of the input the server acted on.
 		coop._sentRoute.push(!!fromRoute);
 		while (coop._sentRoute.length > 64) { coop._sentRoute.shift(); coop._sentTypes.shift(); }
@@ -1816,7 +1816,7 @@
 	}
 
 	/**
-	 * KDM-310 — the ONE unwind for a reply: it answers the oldest unanswered send, so pop that send's
+	 * The ONE unwind for a reply: it answers the oldest unanswered send, so pop that send's
 	 * route-ness (returned) and free its type's slot. Every reply to an input comes through here —
 	 * ack, ui state, `waiting`, the turn frame tagged `reply`, `blocked`, an input `error` — and
 	 * nothing else does, so the queue can never drift from the wire the way the per-turn wipe made it.
@@ -1837,7 +1837,7 @@
 		var t = coop._sentTypes.shift();
 		if (!t) return;
 		coop._inFlight[t] = Math.max(0, (coop._inFlight[t] || 1) - 1);
-		// KDM-186 v3: the server just told us what this type IS. 'ui' means it was applied without
+		// Rule 1 v3: the server just told us what this type IS. 'ui' means it was applied without
 		// consuming a turn — presentation, safe to sample. Anything else is a command: deliver it all.
 		if (kind) coop._kindOf[t] = kind;
 		// Flush the newest value a stream accumulated while the slot was busy, so it converges on its
@@ -1847,7 +1847,7 @@
 	}
 
 	/**
-	 * KDM-233 — the lobby's way in. `coop-lobby.js` calls this; nothing else does.
+	 * The lobby's way in. `coop-lobby.js` calls this; nothing else does.
 	 *
 	 *   { role:'host' }                                  claim slot 0 on this machine's server
 	 *   { role:'host', save:'<b64>' }                    …continuing that save instead of a new game
@@ -1856,7 +1856,7 @@
 	 * It does NOT enter the game: that happens on `joined.started`, once the host has said yes.
 	 */
 	/**
-	 * KDM-244 — write the exported run into KD's own save slot, without ever leaving it broken.
+	 * Write the exported run into KD's own save slot, without ever leaving it broken.
 	 *
 	 * ⚠️ WHY THIS DOES NOT USE KD'S OWN SAVE PATH. The elegant version pushes the save object onto
 	 * `KDSaveQueue` and lets `KinkyDungeonRun` compress and store it (`KinkyDungeon.ts:1520-1538`) —
@@ -1918,7 +1918,7 @@
 	window.__coopWriteExportedSave = writeExportedSave;
 
 	/**
-	 * KDM-244 — is this page the host?
+	 * Is this page the host?
 	 *
 	 * A function rather than a mirrored `coop.role` field, because `role` is assigned in more than one
 	 * place (the join, and the host→guest fallback at the retry) and a copy would have to be updated
@@ -1926,7 +1926,7 @@
 	 */
 	coop.isHost = function () { return role === 'host'; };
 
-	/** KDM-244 — ask the server for the run as a single-player save (host only; the server re-checks). */
+	/** Ask the server for the run as a single-player save (host only; the server re-checks). */
 	window.__coopRequestExport = function () {
 		try { coop.ws.send(JSON.stringify({ type: 'export_request' })); return true; }
 		catch (e) { return false; }
@@ -1936,21 +1936,21 @@
 		opts = opts || {};
 		role = opts.role || 'guest';
 		playerName = String(opts.name || '');
-		// KDM-256 R1 / KDM-279 — and the character, perks included (the lobby merges its two screens
+		// And the character, perks included (the lobby merges its two screens
 		// in `playerCharacter()`). Cleared on every connect for the reason `savePayload` is: a player
 		// who backs out and reconnects must not carry a stale declaration in silently.
 		playerCharacter = (opts.character && typeof opts.character === 'object') ? opts.character : null;
-		// KDM-243 — the save to continue, if the lobby's Continue button supplied one. Cleared on
+		// The save to continue, if the lobby's Continue button supplied one. Cleared on
 		// every connect, so a host who backs out and presses Host instead starts a new game.
 		savePayload = (opts.role === 'host' && typeof opts.save === 'string') ? opts.save : '';
-		// KDM-259 — and the seed, on exactly the same terms as the save: host-only, and CLEARED on
+		// And the seed, on exactly the same terms as the save: host-only, and CLEARED on
 		// every connect. The clear is the load-bearing half — a player who is refused the host seat
-		// comes back as a guest (KDM-270), and a guest must not carry the world it was going to bring.
+		// comes back as a guest, and a guest must not carry the world it was going to bring.
 		seedChoice = (opts.role === 'host' && typeof opts.seed === 'string') ? opts.seed : '';
 		endpoint = opts.address ? String(opts.address).replace(/^wss?:\/\//, '').replace(/\/+$/, '') : null;
 		// Identity is ours to pick and must be stable for a reconnect to be recognised (S2). It is not
-		// a credential — there is nothing to authenticate against (KDM-226, LAN-only).
-		// KDM-252: "must be stable" is now ENFORCED rather than merely noted — see `stableId`.
+		// a credential — there is nothing to authenticate against (LAN-only).
+		// "Must be stable" is now ENFORCED rather than merely noted — see `stableId`.
 		id = opts.clientId || stableId(role);
 		coop.id = id;
 		coop._entered = false;
@@ -1958,7 +1958,7 @@
 		// Only `ready()` — see `enterGame()` for why asset loading must not gate the handshake.
 		if (!ready()) { setTimeout(function () { window.__coopConnect(opts); }, 150); return coop; }
 		/*
-		 * KDM-270 — if the last refusal invited exactly this ask, make it on the socket we still
+		 * If the last refusal invited exactly this ask, make it on the socket we still
 		 * have instead of opening a second one.
 		 *
 		 * Deliberately inside `__coopConnect` rather than beside it: the lobby has ONE way to ask for
@@ -1972,10 +1972,10 @@
 		 */
 		if (canAsk(role, opts.address)) { ask(role); return coop; }
 		/*
-		 * KDM-298 — ONE SOCKET PER TAB. A second press of Join must not dial a second socket.
+		 * ONE SOCKET PER TAB. A second press of Join must not dial a second socket.
 		 *
 		 * It used to: `connect()` below opened a fresh WebSocket and left the previous one open. The
-		 * server's KDM-280 guard then saw this id's earlier socket still live and refused the new one
+		 * server's duplicate-id guard then saw this id's earlier socket still live and refused the new one
 		 * `duplicate_id` — the tab refusing ITSELF — and the abandoned socket, whose handlers all bail
 		 * on `ws !== myWs` before answering a ping, went silent without closing, so the id stayed held
 		 * and every later press was refused too. A player whose screen seemed stuck pressed Join again
@@ -2012,6 +2012,6 @@
 		lobbySay({ pending: null, status: accept ? T('KDMPStarting') : '' });
 	};
 
-	// KDM-302: nothing boots here. The `#coop=<id>` URL shortcut that used to (claim a seat on load,
+	// Nothing boots here. The `#coop=<id>` URL shortcut that used to (claim a seat on load,
 	// auto-answer joins) is gone; a page becomes a co-op client only through `__coopConnect`.
 })();

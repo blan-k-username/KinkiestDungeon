@@ -1,7 +1,7 @@
 /**
- * E2E (KDM-257) — the co-op lobby SHOWS the host's mods, and names what is missing.
+ * E2E — the co-op lobby SHOWS the host's mods, and names what is missing.
  *
- * [[KDM-249]] shipped the whole mod-sync mechanism AND all of its data — `modDiff` rides both
+ * Mod sync shipped the whole mechanism AND all of its data — `modDiff` rides both
  * approval messages and `__coopMods.state()` carries `status`/`missing` — but nothing rendered any
  * of it. Its R5 ("the guest SHALL be shown, in words, which mods the host is loading and which of
  * them it is missing — BEFORE it commits") and R9 ("a degraded sync SHALL be visible, not
@@ -10,7 +10,7 @@
  * ── WHY THE ORACLE IS `DrawTextKD`, NOT LOBBY STATE ───────────────────────────────────────────────
  * The lobby paints to a canvas; there is no DOM node to assert on, and `lobbyState` exposes only
  * view/pending/error/status. Asserting that `lobby.modDiff` holds the right value would prove the
- * data ARRIVED, which is precisely what KDM-249 already proves and precisely what this task is NOT
+ * data ARRIVED, which is precisely what the mod-sync specs already prove and precisely what this task is NOT
  * about. `paintedText()` records what actually reached the screen for one frame, so the assertion is
  * about the thing that was missing.
  *
@@ -35,7 +35,7 @@ const MARKER = '__kdm257HostModRan';
 /** Every string painted this frame, joined — the screen as one searchable blob. */
 const screenText = async (page: any) => (await paintedText(page)).join(' │ ');
 
-test.describe('KDM-257 — the lobby names the host\'s mods', () => {
+test.describe('the lobby names the host\'s mods', () => {
 	test('R1/R2 — a host-only mod is named on BOTH screens before anyone commits', async ({ browser }) => {
 		test.setTimeout(MP_TEST_TIMEOUT);
 		const { server, port } = await start(0);
@@ -52,7 +52,7 @@ test.describe('KDM-257 — the lobby names the host\'s mods', () => {
 			await guestAsks(guest, port, 'Nyx');
 			// Both sides are parked on the approval handshake and neither has committed to anything,
 			// which is the whole point of R1. WAIT ON WHAT EXISTS TODAY — `status` and `pending` are
-			// KDM-233's own fields. Waiting on `modDiff` (the field this task ADDS) would make the
+			// the original lobby's own fields. Waiting on `modDiff` (the field this task ADDS) would make the
 			// pre-implementation run hang for the full timeout instead of failing its assertion, and
 			// a tests-first red that costs ten minutes teaches nothing.
 			await guest.waitForFunction(
@@ -91,7 +91,7 @@ test.describe('KDM-257 — the lobby names the host\'s mods', () => {
 			 * in `coop-lobby.js`: all of them say "mod" or "mods" as a word.
 			 *
 			 * ⚠️ IT WAS `.not.toContain('mod')`, AND THAT WAS OVER-BROAD. A bare substring also
-			 * matches the ordinary English word "mode", so this control failed the moment KDM-283 made
+			 * matches the ordinary English word "mode", so this control failed the moment a later change made
 			 * the WORLD banner (a different feature entirely) paint "Progression Mode: Key Hunt".
 			 * Nothing about mods had changed. A control that fires on an unrelated feature's wording
 			 * is not protecting this requirement, it is only reporting that the screen changed.
@@ -122,7 +122,7 @@ test.describe('KDM-257 — the lobby names the host\'s mods', () => {
 	 *
 	 * What this test therefore proves: the notice RENDERS the right thing for the right state, and is
 	 * silent otherwise. What it does NOT prove: that the wrap's `Game` branch reaches it during real
-	 * play. That gap is real, is written down in KDM-257, and has a follow-up task — it is not
+	 * play. That gap is real, is written down, and has a follow-up task — it is not
 	 * papered over here.
 	 */
 	test('R3/R4 — the notice names a degraded sync and is silent for a clean one', async ({ browser }) => {

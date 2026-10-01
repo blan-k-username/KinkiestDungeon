@@ -1,5 +1,5 @@
 /**
- * tools/mp-server/kd-coop-routed.js  (KDM-307)
+ * tools/mp-server/kd-coop-routed.js 
  *
  * ROUTE ONLY WHEN THERE IS SOMEWHERE TO ROUTE TO — the one rule, shared by every routed wrap.
  *

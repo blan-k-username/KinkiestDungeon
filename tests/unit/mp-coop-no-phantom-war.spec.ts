@@ -1,8 +1,8 @@
 /**
- * KDM-311 — plain co-op must not declare war between the players on turn 1, with nobody attacking.
+ * Plain co-op must not declare war between the players on turn 1, with nobody attacking.
  *
- * Found while diagnosing KDM-310: the server log read `WAR A <-> B (KD aggro on the avatar:
- * hostile=9997)` after one ordinary move. The war detector (`_reconcilePeers`, KDM-225) reads KD's own
+ * Found while diagnosing an unrelated bug: the server log read `WAR A <-> B (KD aggro on the avatar:
+ * hostile=9997)` after one ordinary move. The war detector (`_reconcilePeers`) reads KD's own
  * aggro on an avatar — `hostile`/`rage` — as "an attack happened". But the same function restores each
  * avatar's hp every turn through `setAvatarEnemy`, which ALSO stamps `hostile = 9999`; the next turn the
  * detector read our own stamp (counted down to 9997) as an attack. So every co-op session went to war.
@@ -23,7 +23,7 @@ function coop(seed: string) {
 	return s;
 }
 
-describe('KDM-311 — no phantom war in plain co-op', () => {
+describe('no phantom war in plain co-op', () => {
 	it('players who only wait and move stay at peace', () => {
 		const s = coop('kdm311-quiet');
 		expect(s.started, 'precondition: the session started').toBe(true);

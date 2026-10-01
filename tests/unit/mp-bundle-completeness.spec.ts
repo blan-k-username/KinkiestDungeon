@@ -1,10 +1,10 @@
 /**
- * Node-layer (Vitest) test for KD-091 — bundle completeness.
+ * Node-layer (Vitest) test for bundle completeness.
  *
  * capturePlayer/restorePlayer previously omitted some NON-self-healing per-player state (spell
  * instances, temporary status counters, per-turn KDGameData). The restraint-DERIVED locks
  * (slow/blind/tags) intentionally stay omitted — they self-heal from the captured inventory each
- * turn (KD-073 §B). This test proves the newly-captured fields round-trip through a swap.
+ * turn. This test proves the newly-captured fields round-trip through a swap.
  */
 import { describe, it, expect, beforeAll } from 'vitest';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -12,7 +12,7 @@ const { HeadlessHost } = require('../../tools/mp-server/headless-host');
 
 const BOOT_TIMEOUT = 240_000;
 
-describe('Bundle completeness round-trip (KD-091)', () => {
+describe('Bundle completeness round-trip', () => {
 	let h: any;
 	beforeAll(() => {
 		h = new HeadlessHost({ id: 'bundle-complete' });

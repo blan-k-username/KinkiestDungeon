@@ -1,5 +1,5 @@
 /**
- * tools/mp-server/kd-perk-choice.js  (KDM-242 A3/A4)
+ * tools/mp-server/kd-perk-choice.js 
  *
  * THE PERK-ROOM CHOICE, ROUTED — one definition, both runtimes.
  *
@@ -11,7 +11,7 @@
  *                                wipe of all three altars                                (:955-975)
  *
  * The co-op client is render-only and forwards only what goes through `KDSendInput`, so neither
- * reached the world. And it is worse than a lost click: MEASURED (KDM-242 POC P2) `KDMapData` is world
+ * reached the world. And it is worse than a lost click: MEASURED (in a proof of concept) `KDMapData` is world
  * state the client adopts WHOLESALE (`render-client.js:509`), so the cursor a player sets is
  * overwritten by the next snapshot with the server's value — `-1`, because nothing server-side ever
  * wrote it. The Accept button renders only while `SelectedPerk == i` (:950). **In co-op it was
@@ -41,15 +41,15 @@
  * WHY IT IS SOURCE TEXT, like `kd-journey-choice.js`, `kd-shop-buy.js` and `kd-peace-dialogue.js`: two
  * consumers that must not drift. The BROWSER is served it as a script (demo-server INJECT) and is
  * where the wrap actually fires; the SERVER evals the identical text, which is where
- * `KDInputTypes.KDCoopPerk` has to exist because that is where a routed input is dispatched. KDM-241
- * P1 measured that `KDInputTypes` is in no player's captured globals and a planted entry survives a
+ * `KDInputTypes.KDCoopPerk` has to exist because that is where a routed input is dispatched. It was
+ * measured that `KDInputTypes` is in no player's captured globals and a planted entry survives a
  * full turn, so it is registered ONCE with no re-assert loop — and the spec pins that survival rather
  * than assuming it.
  *
  * TEXT-COUPLED, SO IT COUNTS. `__KDCoopPerkStats.acceptsSuppressed` rises for every Accept callback it
  * had to replace, and the spec drives a real click through KD's own code path with a CONTROL that
  * invokes the UNWRAPPED original and demands it still grants the perk. Silence in that control is the
- * drift alarm (KDM-241 R-b, the plugin rule).
+ * drift alarm (the plugin rule).
  *
  * Follows WRAP_CONVENTION: sentinel-gate, capture `_prev` in the closure, call `_prev` first (the
  * substitution is installed around it and removed in a `finally`, so nothing outside the perk modal
@@ -66,12 +66,12 @@ const KD_PERK_CHOICE = `
 	// Drift + diagnostics. THE __KD PREFIX IS LOAD-BEARING, not a naming style: _candidateGlobals
 	// (headless-host.js) unions the bundle's own bindings with Object.keys(globalThis) and skips only
 	// names starting with __KD, so a plain globalThis.X a mod creates IS a per-player state candidate —
-	// captured, shipped in the bundle, and the CLIENT's copy overwritten by the server's. Measured in
-	// KDM-264, where the browser's counters read back as the server's.
+	// captured, shipped in the bundle, and the CLIENT's copy overwritten by the server's. Measured
+	// once, when the browser's counters read back as the server's.
 	if (!g.__KDCoopPerkStats) g.__KDCoopPerkStats = { calls: 0, acceptsSuppressed: 0, cursorMoves: 0, routed: 0, last: null };
 	// The PRIVATE card cursor. -1 is KD's own "nothing selected" (KinkyDungeonGame.ts:292).
 	if (typeof g.__KDCoopPerkCursor !== 'number') g.__KDCoopPerkCursor = -1;
-	// KDM-307 - route only when there is somewhere to route to (kd-coop-routed.js).
+	// Route only when there is somewhere to route to (kd-coop-routed.js).
 ${ROUTED_HERE}
 
 	/*
@@ -124,7 +124,7 @@ ${ROUTED_HERE}
 		var _prev = KinkyDungeonDrawPerkOrb;
 
 		KinkyDungeonDrawPerkOrb = function () {
-			// KDM-307 - a solo page keeps KD's own card and Accept: nobody to route them to.
+			// A solo page keeps KD's own card and Accept: nobody to route them to.
 			if (!routedHere('KDCoopPerkPropose')) return _prev.apply(this, arguments);
 			g.__KDCoopPerkStats.calls++;
 

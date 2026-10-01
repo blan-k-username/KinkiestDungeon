@@ -1,17 +1,17 @@
 /**
- * KDM-256 — each player builds their OWN character, and gets it.
+ * Each player builds their OWN character, and gets it.
  *
  * ── THE PROBLEM ───────────────────────────────────────────────────────────────────────────────────
  * Both players are clones of one default new-game character. `_start` captures `_newPlayerTemplate`
  * from a single `KinkyDungeonStartNewGame`, and every seat is a restore of it — so two players can
- * tell each other apart by NAME (KDM-237) and by nothing else.
+ * tell each other apart by NAME and by nothing else.
  *
  * ── THE MECHANISM UNDER TEST, AND WHY IT IS NOT `_templateOf` ─────────────────────────────────────
- * `_seatPlayer` is a restore → mutate → capture window. `setPlayerName` (KDM-237) and `applyPerks`
- * (KDM-238) already live inside it, and a character package is a third mutation of exactly that
+ * `_seatPlayer` is a restore → mutate → capture window. `setPlayerName` and `applyPerks`
+ * already live inside it, and a character package is a third mutation of exactly that
  * kind: it belongs beside them, NOT in `_templateOf`.
  *
- * `_templateOf` is KDM-243's, and it answers a different question — "this seat resumes an entire
+ * `_templateOf` belongs to save resume, and it answers a different question — "this seat resumes an entire
  * saved run". Its `imported` flag does DOUBLE DUTY: it also means "skip every new-game operation",
  * because a character resumed at floor 9 must not be handed a second starting collar by
  * `KDInitPerks()`. Put a package there and a packaged player silently loses their perks, their modes
@@ -58,7 +58,7 @@ const CHAR_A = { class: 'ClassOne', outfit: 'OutfitOne', style: 'StyleOne' };
  * The pure half — no socket, no world, milliseconds.
  * ═════════════════════════════════════════════════════════════════════════════════════════════════ */
 
-describe('KDM-256 R3 — sanitizeCharacter', () => {
+describe('sanitizeCharacter', () => {
 	it('answers null for anything that is not an object of declarable fields', () => {
 		for (const junk of [undefined, null, '', 'a string', 42, [], [1, 2], true, {}]) {
 			expect(sanitizeCharacter(junk as any), `${JSON.stringify(junk)} is not a character`).toBeNull();
@@ -66,7 +66,7 @@ describe('KDM-256 R3 — sanitizeCharacter', () => {
 	});
 
 	it('keeps the declared fields and drops everything else', () => {
-		// ⚠️ `perks` USED TO BE ONE OF THE REJECTED KEYS IN THIS TEST. KDM-279 folded the former
+		// ⚠️ `perks` USED TO BE ONE OF THE REJECTED KEYS IN THIS TEST. A later change folded the former
 		// `join.perks` wire field into the package, so it is now declarable and is asserted below as
 		// one of the things that SURVIVES. Left as an explicit note because the inverted assertion is
 		// exactly what a reader would otherwise take for a mistake.
@@ -81,7 +81,7 @@ describe('KDM-256 R3 — sanitizeCharacter', () => {
 		expect(out).toHaveProperty('outfit', 'OutfitOne');
 	});
 
-	// KDM-279 — the perk declaration is part of the package now, and goes through the perk rules.
+	// The perk declaration is part of the package now, and goes through the perk rules.
 	it('carries perks, through sanitizePerks and not a second copy of its rules', () => {
 		const out = sanitizeCharacter({
 			...CHAR_A,
@@ -116,7 +116,7 @@ describe('KDM-256 R3 — sanitizeCharacter', () => {
 		/*
 		 * ⚠️ THE REGRESSION THIS EXISTS FOR. `sanitizeCharacter` REFUSES rather than truncates, on a
 		 * size cap. Perks are capped at 64 keys × 64 chars ≈ 4 KB of keys before JSON quoting — so
-		 * with the pre-KDM-279 cap of 4 KB, a perk list that is entirely legal by its own limits
+		 * with the earlier cap of 4 KB, a perk list that is entirely legal by its own limits
 		 * would have pushed the package over the line and had the WHOLE thing refused, class and
 		 * outfit included, with no error anywhere and KD's default seated instead.
 		 */
@@ -160,10 +160,10 @@ describe('KDM-256 R3 — sanitizeCharacter', () => {
 	});
 });
 
-describe('KDM-256 R1 — the declaration travels the perks road', () => {
+describe('the declaration travels the perks road', () => {
 	it('is a field on the join handshake for BOTH roles', () => {
 		// Unlike `world`/`save`, a character is not host-only: it is the one thing a guest most needs
-		// to bring. KDM-260's drift guard fails the build if the client sends it and this is missing.
+		// to bring. The join-field drift guard fails the build if the client sends it and this is missing.
 		expect(HOST_JOIN_FIELDS).toContain('character');
 		expect(GUEST_JOIN_FIELDS, 'a guest brings a character — that is the whole feature')
 			.toContain('character');
@@ -191,7 +191,7 @@ describe('KDM-256 R1 — the declaration travels the perks road', () => {
  * One boot, both cases, and the join-late path exercised as a bonus.
  * ═════════════════════════════════════════════════════════════════════════════════════════════════ */
 
-describe('KDM-256 — a declared character, against a world that has one', () => {
+describe('a declared character, against a world that has one', () => {
 	let s: any;
 	let real: any;
 
@@ -244,7 +244,7 @@ describe('KDM-256 — a declared character, against a world that has one', () =>
 
 		const c = declaredIn('C');
 		// eslint-disable-next-line no-console
-		console.log('\nKDM-256 — C declared ' + JSON.stringify({ cls: real.cls, dress: real.dress })
+		console.log('\nC declared ' + JSON.stringify({ cls: real.cls, dress: real.dress })
 			+ '\n           C seated as ' + JSON.stringify(c)
 			+ '\n           A (undeclared) ' + JSON.stringify(declaredIn('A')) + '\n');
 		expect(c.cls, 'C chose this class').toBe(real.cls);
@@ -271,7 +271,7 @@ describe('KDM-256 — a declared character, against a world that has one', () =>
 		const peer = ents.find((e: any) => e.id === s.avatars.get('C'));
 		expect(peer, 'precondition: C\'s avatar must be in A\'s snapshot').toBeTruthy();
 		// eslint-disable-next-line no-console
-		console.log('\nKDM-256 peer avatar on the wire: ' + JSON.stringify(
+		console.log('\npeer avatar on the wire: ' + JSON.stringify(
 			{ style: peer.style, outfit: peer.outfit, CustomName: peer.CustomName }) + '\n');
 		expect(peer.style, 'C chose this look; A must be able to see it').toBe('StyleC');
 		expect(peer.outfit).toBe(real.dress);
@@ -286,7 +286,7 @@ describe('KDM-256 — a declared character, against a world that has one', () =>
 });
 
 
-describe('KDM-256 — the gateway still owns no gameplay names', () => {
+describe('the gateway still owns no gameplay names', () => {
 	it('this feature adds no outfit / style / class list to tools/mp-server', () => {
 		// The same guard `mp-perk-choice.spec.ts` keeps over perk names, aimed at the three tables
 		// this feature is closest to accidentally importing. `sanitizeCharacter` must stay

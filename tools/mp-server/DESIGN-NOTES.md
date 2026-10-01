@@ -7,10 +7,10 @@ behaviour that forced a design, a bug that already happened once, a rule a test 
 Read [`README.md`](README.md) first. It explains the architecture, the request flow and every file;
 this document assumes you know those and goes deeper on one area at a time.
 
-> **About the `KDM-nnn` / `KD-nnn` tags** you will see here and in code comments: they are the
-> author's own task numbers. They mark *when* and *why* a decision was taken and work as stable
-> search anchors (`grep -rn KDM-264` finds the code, the tests and the note for one feature). They
-> do not refer to any public tracker.
+> **About the `KDM-nnn` / `KD-nnn` tags** in the headings and text below: they are the author's own
+> task numbers, kept here only as labels for when a decision was taken. They do not refer to any
+> public tracker, and the code does not carry them — search the code by the function, file or test
+> names each section quotes.
 
 ## Contents
 

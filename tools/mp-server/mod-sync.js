@@ -1,5 +1,5 @@
 /**
- * tools/mp-server/mod-sync.js  (KDM-249)
+ * tools/mp-server/mod-sync.js 
  *
  * WHICH MODS DOES THE GUEST NOT HAVE, AND WHERE ARE THE BYTES.
  *
@@ -12,7 +12,7 @@
  * (`tests/unit/mp-mod-sync.spec.ts`) instead of behind a two-browser session boot.
  *
  * ⚠️ MP-SPECIFIC BY CONSTRUCTION. A one-player game holds one mod set and has nothing to reconcile
- * (KDM-226's test). This re-implements no game mechanic — installing and executing a mod stays
+ * (the "would this exist in a one-player game?" test). This re-implements no game mechanic — installing and executing a mod stays
  * `KDLoadMod` / `KDExecuteMods`, untouched, in the browser.
  *
  * IDENTITY IS THE CONTENT HASH, NEVER THE NAME. Two players may hold the same mod under different

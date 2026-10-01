@@ -1,10 +1,10 @@
 /**
- * KDM-246 — `client/coop-chat.js`: the browser half of co-op chat.
+ * `Client/coop-chat.js`: the browser half of co-op chat.
  *
  * The real file is loaded, not a copy. It is a classic (non-module) script that reads bundle globals
  * by bare name, which is exactly what a `vm` context models: bare identifiers resolve to context
  * properties, so a hand-built context IS the bundle's global scope as the script sees it. Same
- * harness and same reasoning as `mp-peace-install.spec.ts` (KDM-229).
+ * harness and same reasoning as `mp-peace-install.spec.ts`.
  *
  * WHAT ONLY A UNIT SPEC CAN SEE HERE:
  *
@@ -30,7 +30,7 @@ const KD_KEYS_SRC = resolve(__dirname, '../../Game/src/base/KinkyDungeon.ts');
  * Chat's own open button, BY NAME.
  *
  * These cases used to reach for `buttons[buttons.length - 1]` — "the last one drawn" — which was
- * true only while chat was the sole thing this file drew. KDM-247 added the emoji opener after it
+ * true only while chat was the sole thing this file drew. The emoji picker added its opener after it
  * and every one of them silently started clicking the wrong button. Selecting by name is what they
  * always meant, and it cannot drift again when a third button appears.
  */
@@ -61,7 +61,7 @@ function loadChat(opts: { sendAction?: (a: any) => void; stored?: string | null;
 	const listeners: Record<string, (e: any) => void> = {};
 
 	/**
-	 * KDM-247 A3' — the recents STORE, faked at the boundary `coop-bootstrap.js` owns.
+	 * The emoji picker's recents STORE, faked at the boundary `coop-bootstrap.js` owns.
 	 *
 	 * The picker never sees `localStorage` or the `kdcoop.` key string; it sees these two functions.
 	 * That split is what makes the MRU and seeding logic testable here at all — see the block at the
@@ -106,13 +106,13 @@ function loadChat(opts: { sendAction?: (a: any) => void; stored?: string | null;
 			name: string, fn: any, _enabled: any, _left: any, _top: any, _w: any, _h: any,
 			_label: any, _color: any, _image: any, _hover: any, _disabled: any, _noBorder: any,
 			_fill: any, _fontSize: any, _shiftText: any, options: any,
-			// `enabled` and `label` are recorded for KDM-247: KDClickButton refuses a button whose
+			// `enabled` and `label` are recorded for the emoji picker: KDClickButton refuses a button whose
 			// `enabled` is falsy (KinkyDungeon.ts:4365), and the picker's label IS the emoji it sends.
 		) => { buttons.push({ name, fn, options, shiftText: _shiftText, enabled: _enabled, label: _label }); return true; },
 		addTextKey: (k: string, v: string) => { textKeys[k] = v; },
 		TextGet: (k: string) => textKeys[k] || k,
 		KinkyDungeonRootDirectory: '',
-		// KDM-247 — the KEYBOARD seam. `KDKeyCheckers` is KD's own registry of `() => boolean`
+		// The KEYBOARD seam. `KDKeyCheckers` is KD's own registry of `() => boolean`
 		// checkers, run by KDCheckCustomKeypress AFTER the drawn-button loop
 		// (KinkyDungeonGame.ts:2258-2273). It is the route the picker actually uses; the buttons'
 		// `hotkeyPress` is the mouse label only. `KDCoopChatToggles` is a stand-in for one of KD's
@@ -131,8 +131,8 @@ function loadChat(opts: { sendAction?: (a: any) => void; stored?: string | null;
 	return { ctx, armed, sent, buttons, fields, textKeys, listeners, element, store, writes, read: () => cell };
 }
 
-describe('KDM-246 — coop-chat.js installs synchronously and cooperatively', () => {
-	it('arms no timer at all (KDM-229 rule, still)', () => {
+describe('coop-chat.js installs synchronously and cooperatively', () => {
+	it('arms no timer at all (the original chat rule, still)', () => {
 		const { armed } = loadChat();
 		expect(armed, `coop-chat.js armed: ${armed.join(', ')}`).toEqual([]);
 	});
@@ -154,7 +154,7 @@ describe('KDM-246 — coop-chat.js installs synchronously and cooperatively', ()
 	});
 });
 
-describe('KDM-246 — registration is idempotent across a reconnect re-eval', () => {
+describe('registration is idempotent across a reconnect re-eval', () => {
 	it('"Chat" joins KDLogFilters exactly once, however many times the file is evaluated', () => {
 		const { ctx } = loadChat();
 		expect(ctx.KDLogFilters).toContain('Chat');
@@ -188,7 +188,7 @@ describe('KDM-246 — registration is idempotent across a reconnect re-eval', ()
 	});
 });
 
-describe('KDM-246 — opening, typing and sending', () => {
+describe('opening, typing and sending', () => {
 	it('a hotkeyed button opens it, and the field is only drawn once open', () => {
 		const { ctx, buttons, fields } = loadChat();
 		ctx.KinkyDungeonDrawGame(false, 0);
@@ -210,7 +210,7 @@ describe('KDM-246 — opening, typing and sending', () => {
 
 		element.value = 'behind you';
 		listeners.keydown({ key: 'Enter', preventDefault: () => {}, stopPropagation: () => {} });
-		expect(sent, 'one message, in the shape KDM-247 will reuse').toEqual([{ mp: 'chat.say', text: 'behind you' }]);
+		expect(sent, 'one message, in the shape the emoji picker reuses').toEqual([{ mp: 'chat.say', text: 'behind you' }]);
 
 		const drawn = fields.length;
 		ctx.KinkyDungeonDrawGame(false, 0);
@@ -235,7 +235,7 @@ describe('KDM-246 — opening, typing and sending', () => {
 	});
 });
 
-describe('KDM-246 — the chat hotkey is genuinely unbound in KD (drift guard)', () => {
+describe('the chat hotkey is genuinely unbound in KD (drift guard)', () => {
 	/**
 	 * TEXT-COUPLED to the game source, which the plugin rule allows only with loud drift reporting —
 	 * hence the explicit "found N declarations" assertion. A key that upstream later binds would
@@ -274,14 +274,14 @@ describe('KDM-246 — the chat hotkey is genuinely unbound in KD (drift guard)',
 });
 
 /* ══════════════════════════════════════════════════════════════════════════════════════════════
- * KDM-247 — the quick-emoji picker, which lives in this same file.
+ * The quick-emoji picker, which lives in this same file.
  *
  * WHY IT IS IN `coop-chat.js` AND NOT A FILE OF ITS OWN (architecture A1). The picker is not a
  * second concern; it is a SECOND INPUT METHOD FOR THE SAME MESSAGE. Both halves build a
  * `{mp:'chat.say', text}` and hand it to the same `send()`. A separate `coop-emoji.js` would need
  * its own copy of `send()`, its own `addOnce`, its own sentinel-gated `KinkyDungeonDrawGame` wrap
  * and its own `demo-server.js` entry — four duplications to serve one 60-line feature, which is
- * exactly the DRY failure KDM-229 was raised for.
+ * exactly the DRY failure the chat design was meant to avoid.
  *
  * WHY THE MRU LOGIC IS HERE AND NOT IN `coop-bootstrap.js` (architecture A3'). Assessment A3 first
  * put the whole recents accessor in the bootstrap, because that file owns every `kdcoop.` storage
@@ -357,7 +357,7 @@ function openPicker(h: any) {
 	return frame(h);
 }
 
-describe('KDM-247 — the picker opens on its own hotkey (R1)', () => {
+describe('the picker opens on its own hotkey (R1)', () => {
 	it('draws an open button every frame, carrying options in the 17th slot', () => {
 		const h = loadChat();
 		const f = frame(h);
@@ -419,9 +419,9 @@ describe('KDM-247 — the picker opens on its own hotkey (R1)', () => {
 			'closed again, by the same key that opened it').toEqual(['kdcoopemoji']);
 	});
 
-	it('KDM-246 REGRESSION — Y opens the chat field, which it never did before KDM-247', () => {
-		// The `Y` hotkey shipped broken and no test saw it: KDM-246's e2e opens the field through
-		// `KDCoopChat.open()`, not by pressing the key. The cause was the same one KDM-247 hit —
+	it('REGRESSION — Y opens the chat field, which it never did before the emoji picker landed', () => {
+		// The `Y` hotkey shipped broken and no test saw it: the chat e2e opens the field through
+		// `KDCoopChat.open()`, not by pressing the key. The cause was the same one the emoji picker hit —
 		// our drawn buttons are absent from KDButtonsCache when KDCheckCustomKeypress matches
 		// hotkeys — and routing both keys through KDKeyCheckers fixes both at once.
 		const h = loadChat();
@@ -459,7 +459,7 @@ describe('KDM-247 — the picker opens on its own hotkey (R1)', () => {
 	});
 });
 
-describe('KDM-247 — an open picker offers one keypress per emoji (R1, F1)', () => {
+describe('an open picker offers one keypress per emoji (R1, F1)', () => {
 	it('every entry is enabled and carries a digit hotkey in the 17th slot', () => {
 		const h = loadChat();
 		const entries = drawn(openPicker(h), 'kdcoopemoji').filter((b: any) => /kdcoopemoji\d+$/.test(b.name));
@@ -585,7 +585,7 @@ describe('KDM-247 — an open picker offers one keypress per emoji (R1, F1)', ()
 	});
 });
 
-describe('KDM-247 — recents are seeded, ordered and persisted (R2, R3, R4)', () => {
+describe('recents are seeded, ordered and persisted (R2, R3, R4)', () => {
 	/**
 	 * The emoji an OPEN picker is offering, slot order (slot 1 first).
 	 *
@@ -645,7 +645,7 @@ describe('KDM-247 — recents are seeded, ordered and persisted (R2, R3, R4)', (
 	it('R4 — corrupt, hostile or absent storage degrades to the seed set, never throws', () => {
 		// The stored value is untrusted: a hand-edited key must not break the picker, and must not
 		// let an arbitrary string reach send(). Same "degraded, never broken" contract as
-		// `briefingSeen` (KDM-272 AC3).
+		// `briefingSeen`.
 		const seed = (() => { const h = loadChat({ stored: null }); press(frame(h), 'kdcoopemoji'); return offered(h); })();
 		for (const bad of ['', 'not json', '{}', '[]', 'null', '[1,2,3]', '["ok",{"a":1}]', '"a string"']) {
 			const h = loadChat({ stored: bad });
@@ -685,7 +685,7 @@ describe('KDM-247 — recents are seeded, ordered and persisted (R2, R3, R4)', (
 	});
 });
 
-describe('KDM-247 — the picker survives a reconnect re-eval, like everything else here', () => {
+describe('the picker survives a reconnect re-eval, like everything else here', () => {
 	it('re-evaluating the file does not double the drawn buttons', () => {
 		// This file is re-evaluated on reconnect. The existing cases prove the ARRAY pushes are
 		// guarded; this proves the new draw code is too — a second wrap would draw every button

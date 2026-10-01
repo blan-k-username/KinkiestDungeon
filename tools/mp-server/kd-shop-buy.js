@@ -1,5 +1,5 @@
 /**
- * tools/mp-server/kd-shop-buy.js  (KDM-264)
+ * tools/mp-server/kd-shop-buy.js 
  *
  * BUYING BY IDENTITY, NOT BY INDEX — one definition, both runtimes.
  *
@@ -31,7 +31,7 @@
  *    the whole purchase — cost, discount, inventory, splice, reward program — exactly as it always
  *    does. If the item is gone, it REFUSES with a message instead of buying the neighbour (R14).
  *
- * ── 3. CLIENT, BETWEEN FRAMES: THE CURSOR'S DISPLAY (KDM-266) ────────────────────────────────────
+ * ── 3. CLIENT, BETWEEN FRAMES: THE CURSOR'S DISPLAY ────────────────────────────────────
  * R14's other half — a selection left open while the stock changes keeps DENOTING the same item.
  * Section 3 below, and its own header explains the ordering it rests on. It took three attempts, and
  * the two that failed were both right about the feature and wrong about WHERE to read the identity:
@@ -135,7 +135,7 @@ const KD_SHOP_BUY = `
 	// peace dialogue registers its own - a missing key prints "[NotFound] ..." straight at the player.
 	if (typeof addTextKey === 'function') {
 		addTextKey('KDCoopShopItemGone', 'That item has already been sold.');
-		// KDM-266 — the DISPLAY sibling of the refusal above. Not "your click was rejected" but "the
+		// The DISPLAY sibling of the refusal above. Not "your click was rejected" but "the
 		// thing you were looking at is no longer on the shelf", said to a player who never clicked.
 		addTextKey('KDCoopShopItemSold', 'The item you were looking at has been sold.');
 	}
@@ -152,7 +152,7 @@ const KD_SHOP_BUY = `
 					var id = idOf(KDMapData.ShopItems[action.data.shopIndex]);
 					if (id) {
 						g.__KDCoopShopStats.tagged++;
-						// KDM-266: remembered so the cursor half below can tell "the partner sold it"
+						// Remembered so the cursor half below can tell "the partner sold it"
 						// from "you bought it". Without this the buyer is told their OWN purchase has
 						// been sold, every time they clear the last of a line.
 						_ownBuyId = id;
@@ -170,7 +170,7 @@ const KD_SHOP_BUY = `
 			rc.sendInput = wrappedSend;
 		}
 
-		/* ── 3. CLIENT: the CURSOR'S DISPLAY — KDM-266 ────────────────────────────────────────────
+		/* ── 3. CLIENT: the CURSOR'S DISPLAY ─────────────────────────────────────────────────────
 		 *
 		 * The half above makes sure you BUY what you were shown. This one makes sure you are still
 		 * being shown it. B points at row 2, A buys row 0, the stock shrinks, and row 2 is now a
@@ -229,11 +229,11 @@ const KD_SHOP_BUY = `
 		 * KinkyDungeonMessageLog is a SERVER-REPLICATED channel: every apply overwrites it wholesale
 		 * with the server's copy (render-client.js:641), so a line this
 		 * browser pushes on its own is gone on the next frame — measured, as an empty log in
-		 * mp-shop-identity.spec.ts. The refusal message KDM-264 sends does not have this problem
+		 * mp-shop-identity.spec.ts. The shop's refusal message does not have this problem
 		 * because it is emitted SERVER-side and replicated like any other line; this notice cannot be,
 		 * because only the client knows where its own cursor was pointing.
 		 *
-		 * So it is re-asserted after each adopt, in the shape KDM-196 already uses for client-owned
+		 * So it is re-asserted after each adopt, in the shape already used elsewhere for client-owned
 		 * state carried across a wholesale replace — pushed only when it is not already the newest
 		 * line, so the log never accumulates copies of it.
 		 *

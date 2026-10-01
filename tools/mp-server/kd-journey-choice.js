@@ -1,5 +1,5 @@
 /**
- * tools/mp-server/kd-journey-choice.js  (KDM-263)
+ * tools/mp-server/kd-journey-choice.js 
  *
  * THE JOURNEY-MAP CHOICE, ROUTED — one definition, both runtimes.
  *
@@ -8,8 +8,8 @@
  * `KinkyDungeonKeybindingCurrentKey` — inside the DRAW function, never through `KDSendInput`. The
  * co-op client is render-only and forwards only what goes through `KDSendInput`, so a click moved the
  * CLIENT's target and nothing else; the server's stayed null. KD's own `KDCancelFilters.JourneyChoice`
- * (KinkyDungeonTiles.ts:13-21) then refused the stairs forever and re-opened the map, which since
- * KDM-239 R7 both players actually see. A two-player party could not leave a PerkRoom at all.
+ * (KinkyDungeonTiles.ts:13-21) then refused the stairs forever and re-opened the map, which
+ * both players actually see. A two-player party could not leave a PerkRoom at all.
  *
  * THE SHAPE OF THE FIX. `_prev` FIRST — KD keeps owning what a legal slot is, what a connection is and
  * which key picks which branch; none of that is re-implemented here. Then, if the call changed
@@ -25,7 +25,7 @@
  * WHY IT IS SOURCE TEXT, like `kd-peace-dialogue.js` and `kd-codec.js`: it has TWO consumers that must
  * not drift. The BROWSER is served it as a script (demo-server INJECT) and is where the wrap actually
  * fires; the SERVER evals the identical text, which is where `KDInputTypes.KDCoopJourney` has to exist
- * because that is where a routed input is dispatched. Measured in KDM-241 (P1): `KDInputTypes` is in
+ * because that is where a routed input is dispatched. Measured: `KDInputTypes` is in
  * no player's captured globals and a planted entry survives a full turn, so it is registered ONCE and
  * needs no re-assert loop — `mp-journey-agreement.spec.ts` pins that survival rather than assuming it.
  *
@@ -49,10 +49,10 @@ const KD_JOURNEY_CHOICE = `
 	// Drift + diagnostics. THE __KD PREFIX IS LOAD-BEARING, not a naming style: _candidateGlobals
 	// (headless-host.js) unions the bundle's own bindings with Object.keys(globalThis) and skips only
 	// names starting with __KD, so a plain globalThis.X a mod creates IS a per-player state candidate -
-	// captured, shipped in the bundle, and the CLIENT's copy overwritten by the server's. Measured in
-	// KDM-264, where the browser's counters read back as the server's.
+	// captured, shipped in the bundle, and the CLIENT's copy overwritten by the server's. Measured
+	// once, when the browser's counters read back as the server's.
 	if (!g.__KDCoopJourneyStats) g.__KDCoopJourneyStats = { calls: 0, observed: 0, routed: 0, last: null };
-	// KDM-307 - route only when there is somewhere to route to (kd-coop-routed.js).
+	// Route only when there is somewhere to route to (kd-coop-routed.js).
 ${ROUTED_HERE}
 
 	/*
@@ -88,7 +88,7 @@ ${ROUTED_HERE}
 		};
 
 		var wrapped = function () {
-			// KDM-307 - a solo page keeps KD's own pick: nobody to route it to.
+			// A solo page keeps KD's own pick: nobody to route it to.
 			if (!routedHere('KDCoopJourneyPropose')) return _prev.apply(this, arguments);
 			var before = (typeof KDGameData !== 'undefined' && KDGameData) ? KDGameData.JourneyTarget : undefined;
 			g.__KDCoopJourneyStats.calls++;

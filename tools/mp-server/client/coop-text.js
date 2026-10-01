@@ -1,5 +1,5 @@
 /**
- * KDM-281 — every player-facing string the co-op client can put on screen, in one table, behind one
+ * Every player-facing string the co-op client can put on screen, in one table, behind one
  * helper.
  *
  * ── THE DRIFT THIS ENDS ───────────────────────────────────────────────────────────────────────────
@@ -47,12 +47,12 @@
  * knows `KDMPBack` wins and one that does not is unchanged. That is the whole integration: this file
  * registers nothing and overrides nothing.
  *
- * KDM-289 added the middle step. `LANGS` below carries the same keys in the six languages KD
+ * The middle step was added later. `LANGS` below carries the same keys in the six languages KD
  * supports, and `t()` consults the active one between KD's answer and the English. It is still true
  * that this file registers nothing with KD: it reads `TranslationLanguage` and resolves its own
  * table, rather than injecting into `TextProvider` the way a MOD would — the co-op client is an
  * injected `<script src>`, not a mod, and splitting the fallback chain across two owners is the
- * shape KDM-281 existed to remove. See `activeLanguage()` for why the bare read works at all.
+ * shape that moving these strings here existed to remove. See `activeLanguage()` for why the bare read works at all.
  */
 (function () {
 	'use strict';
@@ -68,9 +68,9 @@
 		KDMPLobbyTitle:      'Multiplayer',
 		KDMPHostGame:        'Host Game',
 		KDMPContinueSave:    'Continue Save',
-		// KDM-294 — on KD's in-game menu: the run in progress becomes the co-op session.
+		// On KD's in-game menu: the run in progress becomes the co-op session.
 		KDMPHostRun:         'Host this game',
-		// KDM-295 — on KD's save-slot screen. What travels is the owner's decision: the character, not
+		// On KD's save-slot screen. What travels is the owner's decision: the character, not
 		// the run — and the second line says so before the player asks to join.
 		KDMPJoinSave:        'Join with this character',
 		KDMPSaveCharacterOnly: 'You join as NAME — only the character comes along.',
@@ -120,7 +120,7 @@
 
 		// ── OUR name for a world mode, used only when KD has none ─────────────────────────────────
 		// `modeLabel` (coop-lobby.js) asks KD for its OWN word first — these are the fallback, and a
-		// mode KD cannot name must never be shown to a guest as a raw identifier (KDM-283).
+		// mode KD cannot name must never be shown to a guest as a raw identifier.
 		KDMPModeRandom:          'Spell Choice: Random Spells',
 		KDMPModeHard:            'Hard Mode',
 		KDMPModeExtreme:         'Extreme Mode',
@@ -135,7 +135,7 @@
 		KDMPModeProgKey:         'Progression Mode: Key Hunt',
 		KDMPModeProgRandom:      'Progression Mode: Random',
 
-		// ── KDM-281: what the CONNECTION says, previously plain English in coop-bootstrap.js ──────
+		// ── what the CONNECTION says, previously plain English in coop-bootstrap.js ────────────────
 		// These land in `lobby.status` / `lobby.error`, i.e. on the screens above, which is why they
 		// belong in the same table rather than in a second one next to their sender.
 		KDMPWaitingApproval: 'Waiting for the host to let you in…',
@@ -144,7 +144,7 @@
 		KDMPEnteringMods:    'You are in! Getting the host’s mods…',
 		KDMPNoAnswer:        'No answer from WHERE — is the game hosting there?',
 		KDMPCouldNotReach:   'Could not reach WHERE',
-		// KDM-270 — a refusal that names another seat is an OFFER, not the end of the conversation.
+		// A refusal that names another seat is an OFFER, not the end of the conversation.
 		KDMPAlreadyHosting:  'Somebody is already hosting there — join them instead.',
 		KDMPNobodyHosting:   'Nobody is hosting there yet — you can host it yourself.',
 		// …and the refusals that really are final.
@@ -156,7 +156,7 @@
 	};
 
 	/**
-	 * KDM-289 — the same keys, in the six languages KD supports.
+	 * The same keys, in the six languages KD supports.
 	 *
 	 * ⚠️ MACHINE-GENERATED SEEDS, UNREVIEWED. Every string below was produced by an AI translator and
 	 * has NOT been checked by a native speaker. That is the repo's standing convention for a first
@@ -167,7 +167,7 @@
 	 * ── TWO RULES WHEN EDITING ────────────────────────────────────────────────────────────────────
 	 *  1. TOKENS ARE SUBSTITUTED BY NAME. `SEED`, `NAME`, `COUNT`, `WHERE`, `MODS`, `MORE`, `REASON`,
 	 *     `HOSTBUILD`, `GUESTBUILD` may be MOVED anywhere in the sentence — that freedom is the whole
-	 *     reason KDM-281 replaced concatenation with templating — but one that is dropped silently
+	 *     reason concatenation was replaced with templating — but one that is dropped silently
 	 *     deletes a seed, a player's name or a build number, and the result still reads as a finished
 	 *     sentence. `mp-client-strings.spec.ts` asserts token parity against the English for exactly
 	 *     this.
@@ -625,7 +625,7 @@
 	}
 
 	/**
-	 * KDM-289 — the language KD is running in, or `''` for "use the English source".
+	 * The language KD is running in, or `''` for "use the English source".
 	 *
 	 * ── WHY THIS IS A BARE READ AND NOT A LOOKUP ──────────────────────────────────────────────────
 	 * `TranslationLanguage` is a bundle `let` (`out/main.js`, from `Scripts/Translation.ts:1`). Top-
@@ -677,7 +677,7 @@
 	 *   1. `kdText(key)`   — KD's OWN word, if a build ever learns our keys. It wins over our seeds
 	 *                        deliberately: a localisation shipped by the game is better than ours, and
 	 *                        this is the hook that lets one replace them without touching this file.
-	 *   2. `langText(key)` — KDM-289: our seed for the language KD is running in.
+	 *   2. `langText(key)` — our seed for the language KD is running in.
 	 *   3. `STRINGS[key]`  — the English source. Every language falls back here, per key, so a gap in
 	 *                        one seed is one English sentence and never a blank.
 	 *   4. `key`           — an undeclared key answers with the key itself rather than `''`: a blank
@@ -711,7 +711,7 @@
 
 	var api = {
 		t: t, fill: fill, kdText: kdText,
-		// KDM-289 — exported so the spec can assert on each STEP of the chain in `t` rather than only
+		// Exported so the spec can assert on each STEP of the chain in `t` rather than only
 		// on its outcome. A guard that can only see the end cannot tell "the seed won" from "the
 		// English won and happens to match".
 		langText: langText, activeLanguage: activeLanguage,

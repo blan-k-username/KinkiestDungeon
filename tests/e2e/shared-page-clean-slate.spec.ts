@@ -1,5 +1,5 @@
 /**
- * KDM-216 — the worker-scoped shared page really is a clean slate.
+ * The worker-scoped shared page really is a clean slate.
  *
  * `kdPage` hands every integration spec and some e2e specs the SAME Page for the
  * whole worker, reset between tests by `resetKDState()`. That contract only holds

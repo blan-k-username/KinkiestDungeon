@@ -1,9 +1,9 @@
 /**
- * KD-092 PvP policy, re-expressed on the REAL pipeline (KDM-164).
+ * PvP policy, re-expressed on the REAL pipeline.
  *
  * This file used to drive `{kind:'pvpAttack'}` — a synthetic primitive that computed its own attack
  * and wrote the result onto the target's bundle, bypassing the game. That primitive is deleted: it was
- * a second, parallel combat model kept alive for tests, and the whole point of KDM-164 is that there is
+ * a second, parallel combat model kept alive for tests, and the whole point of the real-pipeline rework is that there is
  * exactly ONE combat model, KD's.
  *
  * What survives, because nothing else covers it and it is legitimately server-side (the task's own
@@ -37,7 +37,7 @@ function realAttack(s: any) {
 	s.submit('B', { kind: 'wait' });
 }
 
-describe('PvP policy on the real pipeline (KD-092 / KDM-164)', () => {
+describe('PvP policy on the real pipeline', () => {
 	let s: any;
 	beforeEach(() => { s = freshSession(); }, BOOT_TIMEOUT);
 

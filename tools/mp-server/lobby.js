@@ -1,13 +1,13 @@
 /**
- * tools/mp-server/lobby.js  (KD-080)
+ * tools/mp-server/lobby.js 
  *
- * Generalized N-player session (the KD-079/081 reconciler, but for 2–4 players)
+ * Generalized N-player session (the orchestrator's reconciler, but for 2–4 players)
  * plus the three concept pillars: a lobby join flow, a PvP interaction, and
  * server-side mod loading. Transport-agnostic — built on the same
- * `makeTransport(role)` factory + protocol as KD-081, so it runs over in-process,
+ * `makeTransport(role)` factory + protocol as mp-session.js, so it runs over in-process,
  * worker, or socket transports unchanged.
  *
- * `orchestrator.js` (KD-079) and `mp-session.js` (KD-081) stay as the fixed
+ * `orchestrator.js` and `mp-session.js` stay as the fixed
  * 2-player baselines; this is the generalized feature build.
  *
  * Pillars:

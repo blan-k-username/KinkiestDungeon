@@ -1,5 +1,5 @@
 /**
- * KDM-270 — a refusal that NAMES ANOTHER SEAT does not close the socket.
+ * A refusal that NAMES ANOTHER SEAT does not close the socket.
  *
  * ── WHAT WAS WRONG ────────────────────────────────────────────────────────────────────────────────
  * `ws-bridge._reject` ended every refusal with `socket.end()`. That is right for a refusal there is
@@ -29,7 +29,7 @@
  * the same `closedWithin` primitive, in the same file. Remove the pairing and this spec proves
  * nothing about `_reject` — only that `_reject` exists.
  *
- * Requirement ids refer to the `## Requirements` section of KDM-270.
+ * The requirement ids on the tests name the behaviours this spec pins.
  */
 import { describe, it, expect, afterEach } from 'vitest';
 import { MPClient, seatPair } from '../helpers/mp-ws-client';
@@ -52,7 +52,7 @@ const SOCKET_TEST_TIMEOUT = 20_000;
 const isReject = (m: any) => m.type === 'reject';
 const isJoined = (m: any) => m.type === 'joined';
 
-describe('KDM-270 — a non-terminal refusal', () => {
+describe('a non-terminal refusal', () => {
 	let bridge: any = null;
 	const open: MPClient[] = [];
 
@@ -82,7 +82,7 @@ describe('KDM-270 — a non-terminal refusal', () => {
 
 	it('R1 — `retry` is a declared field of the reject frame', () => {
 		const dec = OUTBOUND_MESSAGES.reject;
-		// The outbound drift guard (KDM-274) only checks fields it has been told about, so a field
+		// The outbound drift guard only checks fields it has been told about, so a field
 		// travelling undeclared is invisible to it — which is the hole this line closes.
 		expect([...(dec.optional || [])], 'retry rides the refusal it belongs to').toContain('retry');
 		expect([...dec.required], 'and only ever optionally — a terminal refusal carries none')

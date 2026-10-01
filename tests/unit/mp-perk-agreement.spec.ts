@@ -1,5 +1,5 @@
 /**
- * KDM-242 — the party agrees which perk it takes, and BOTH players get it.
+ * The party agrees which perk it takes, and BOTH players get it.
  *
  * ── WHAT IS BROKEN WITHOUT THIS ───────────────────────────────────────────────────────────────────
  * `KinkyDungeonDrawPerkOrb` (KinkyDungeonShrine.ts:916-1038) contains no `KDSendInput` at all. Both of
@@ -8,7 +8,7 @@
  * of all three altars). The co-op client is render-only and forwards only what goes through
  * `KDSendInput`, so neither reached the world.
  *
- * Worse than a race, and MEASURED (KDM-242 POC P2): `KDMapData` is world state adopted WHOLESALE by
+ * Worse than a race, and MEASURED (POC P2): `KDMapData` is world state adopted WHOLESALE by
  * the client (`render-client.js:509`), so the cursor a player sets is overwritten by the next snapshot
  * with the server's value — `-1`, since nothing server-side ever wrote it. The Accept button renders
  * only while `SelectedPerk == i`, so in co-op **it was unreachable**. The party could not take a perk.
@@ -23,7 +23,7 @@
  * ── WHY THIS FILE IS NOT A VACUOUS GREEN ──────────────────────────────────────────────────────────
  *  1. The routing test runs UPSTREAM's own draw function and pairs the wrapped call with a CONTROL
  *     that calls the unwrapped original and DEMANDS it still mutates. If upstream moves the Accept
- *     click, the control goes red — silence there is the drift alarm (KDM-241 R-b, the plugin rule).
+ *     click, the control goes red — silence there is the drift alarm (the plugin rule).
  *  2. The fan-out (R1) is asserted on BOTH bundles from the SAME session, so "everybody got it" and
  *     "nobody got it" are distinguishable — and it is paired with a control perk that nobody was
  *     granted, so the assertion cannot pass by the Map simply being full.
@@ -96,7 +96,7 @@ function heldBy(s: any, id: string, perk: string): boolean {
 	return !!readPlayer(s, id, `!!KinkyDungeonStatsChoice.get(${JSON.stringify(perk)})`);
 }
 
-describe('KDM-242 — the party agrees its perk', () => {
+describe('the party agrees its perk', () => {
 	describe('R9 — the Accept click is routed, never applied locally', () => {
 		let s: any;
 		beforeEach(async () => { s = session(["A", "B"]); await s.ready(); }, BOOT_TIMEOUT);
@@ -196,7 +196,7 @@ describe('KDM-242 — the party agrees its perk', () => {
 				+ 'snapshots, so a cursor living there is either shared or erased on the next frame').toBe(-1);
 		}, BOOT_TIMEOUT);
 
-		it('KDInputTypes.KDCoopPerk is registered once and survives a full turn (KDM-241 P1)', () => {
+		it('KDInputTypes.KDCoopPerk is registered once and survives a full turn', () => {
 			const before = s.world.eval('(function(){ return typeof KDInputTypes.KDCoopPerk; })()');
 			s.submit('A', { kind: 'wait' });
 			s.submit('B', { kind: 'wait' });

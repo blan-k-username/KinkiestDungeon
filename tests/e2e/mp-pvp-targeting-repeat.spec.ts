@@ -1,5 +1,5 @@
 /**
- * E2E (Playwright/Chromium) — KD-098: repeatable PvP targeting in the browser.
+ * E2E (Playwright/Chromium) — repeatable PvP targeting in the browser.
  *
  * Hands-on UAT bug: the FIRST PvP attack lands, but follow-up attacks "do nothing".
  * The server is proven correct across many turns (node repro). So the browser stops
@@ -31,7 +31,7 @@ test('PvP: A can attack the peer every turn (context-menu visibility holds)', as
 	const B = await ctxB.newPage();
 	// What A's context menu sees for the peer avatar: the same gate KDContextMenu applies
 	// before it will offer (and send) an Attack/Aggro on the entity.
-	// KDM-210: the avatar is WAITED for by `waitForPeerAvatar`, which also owns the sole
+	// The avatar is WAITED for by `waitForPeerAvatar`, which also owns the sole
 	// 'RemotePlayer' name pattern; this only computes the gate, looking the entity up by that id.
 	const peerGateA = async () => {
 		const found = await waitForPeerAvatar(A, { label: "A's context-menu gate" });
@@ -56,7 +56,7 @@ test('PvP: A can attack the peer every turn (context-menu visibility holds)', as
 
 		for (let t = 1; t <= TURNS; t++) {
 			const peer = await peerGateA();
-			// KDM-210: waitForPeerAvatar throws a named error if the avatar never arrives, so this
+			// WaitForPeerAvatar throws a named error if the avatar never arrives, so this
 			// null check is retired. peerGateA still returns null if the id vanished mid-turn.
 
 			// Mimic the UI exactly: only send the attack if the context-menu gate allows it;

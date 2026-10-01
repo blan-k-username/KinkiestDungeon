@@ -1,5 +1,5 @@
 /**
- * E2E (KDM-295) — join a host with a character from a SAVE SLOT, from KD's own save-slot screen.
+ * E2E — join a host with a character from a SAVE SLOT, from KD's own save-slot screen.
  *
  * The owner's second option, and the more useful one: bring a character you already made. A button
  * beside KD's "Play Slot N" (`KinkyDungeonState === 'LoadSlots'`), live exactly when KD's own is.
@@ -18,7 +18,7 @@
  *  3. #8 asserts on the SEAT the server holds (`gate.characterOf`), the deciding record — as
  *     `mp-entry-diff` #5 does, for the reason written there.
  *
- * ⚠️ FAILS UNTIL KDM-295 IS IMPLEMENTED. Written first, per the project's Rule 1.
+ * ⚠️ FAILS UNTIL THE FEATURE IS IMPLEMENTED. Written first, per the project's Rule 1.
  */
 import { test, expect } from '../helpers/playwright-fixtures';
 import {
@@ -56,7 +56,7 @@ async function withSelectedSave(page: any, body: (s: { port: number; code: strin
 	}
 }
 
-test.describe('KDM-295 — the join entry on KD\'s save-slot screen', () => {
+test.describe('the join entry on KD\'s save-slot screen', () => {
 	test.describe.configure({ timeout: 180_000 });
 
 	test('#1 the entry sits beside Play Slot, enabled exactly when KD\'s own is', async ({ isolatedPage: page }) => {
@@ -176,7 +176,7 @@ test.describe('KDM-295 — the join entry on KD\'s save-slot screen', () => {
 	});
 });
 
-test.describe('KDM-295 — a guest arrives as the save\'s character', () => {
+test.describe('a guest arrives as the save\'s character', () => {
 	test('#8 the host seats the save\'s class and hears the save\'s name', async ({ browser }) => {
 		test.setTimeout(MP_TEST_TIMEOUT);
 		const { server, bridge, port } = await start(0);

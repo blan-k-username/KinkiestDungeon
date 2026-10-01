@@ -1,9 +1,9 @@
 /**
- * tools/mp-server/kd-variant-registry.js  (KDM-245, swept by KDM-284)
+ * tools/mp-server/kd-variant-registry.js  — the deferred variant sweep
  *
  * THE ITEM VARIANT REGISTRIES ARE SHARED, SO NOBODY MAY GARBAGE-COLLECT THEM ALONE.
  *
- * THE PROBLEM. KDM-245 made `KinkyDungeonRestraintVariants` / `…WeaponVariants` /
+ * THE PROBLEM. An earlier fix made `KinkyDungeonRestraintVariants` / `…WeaponVariants` /
  * `…ConsumableVariants` world state (GLOBAL_BLACKLIST, headless-host.js), because a dropped item
  * records only a NAME and those tables are what turn that name back into an item. But KD prunes them:
  * `KDPruneInventoryVariants` (`KinkyDungeonInventory.ts:3261`) walks the live player's worn / loose /
@@ -15,18 +15,18 @@
  * carrying, and B's enchanted gear would resolve to `undefined` on the next floor. The prune is
  * correct single-player and unsound the moment the table is shared.
  *
- * ── KDM-245's ANSWER, AND WHY IT WAS DEBT ───────────────────────────────────────────────────────
- * KDM-245 suppressed the prune outright in a managed session: bounded (one small record per item ever
+ * ── THE FIRST ANSWER, AND WHY IT WAS DEBT ───────────────────────────────────────────────────────
+ * The first answer suppressed the prune outright in a managed session: bounded (one small record per item ever
  * enchanted), counted, never silent — but the registry then only ever grew, for the length of a run.
  *
- * ── KDM-284's ANSWER: THE DEFERRED SWEEP ────────────────────────────────────────────────────────
+ * ── THE CURRENT ANSWER: THE DEFERRED SWEEP ──────────────────────────────────────────────────────
  * The wrap CANNOT decide this by itself, and that constraint is what dictates the shape:
  *
  *   · the other seats' state lives in `SwapSession.bundles`, in NODE, and the prune fires inside the
  *     engine as the first statement of a descent — Node is not in the loop at that instant; and
  *   · KD offers no "what WOULD you delete?" query. `KDPruneInventoryVariants` takes eight booleans and
  *     nothing else, building its `found` set from live globals. Handing it a keep-set — which is what
- *     KDM-284 was originally written to do — would mean editing the game tree.
+ *     this sweep was originally planned to do — would mean editing the game tree.
  *
  * So the work is split at the only seam that exists. THE WRAP runs the STOCK prune against a snapshot,
  * records every name it deleted into `__kdCoopVariantPending`, and puts them all back. NODE drains that
@@ -40,9 +40,9 @@
  *
  * AND THE DEGRADED PATH IS THE OLD BEHAVIOUR. If Node never drains (contract absent, sweep not wired,
  * a path that reaches a descent without one), the pending list simply grows and nothing is deleted —
- * exactly KDM-245, counted, never a new regression.
+ * exactly the first answer, counted, never a new regression.
  *
- * WHY THIS IS NOT A GAME MECHANIC IN THE GATEWAY (KDM-159). Nothing here decides what an item is or
+ * WHY THIS IS NOT A GAME MECHANIC IN THE GATEWAY. Nothing here decides what an item is or
  * does. The wrap answers one question — "is this world managed by a session with more than one
  * player's state in flight?" — which is a question that only exists because there are two players.
  *
@@ -68,7 +68,7 @@ function emptyPending() {
 }
 
 /**
- * KDM-284 — decide which withheld names may finally go.
+ * Decide which withheld names may finally go.
  *
  * PURE, and in Node on purpose: it is a function of (what stock KD proposed to delete, what each
  * swapped-out seat is holding), and neither half is knowable from inside the engine.
@@ -88,8 +88,8 @@ function emptyPending() {
  *
  * So the test is "does `"<name>"` occur in this seat's JSON", which knows nothing about KD's shapes
  * and cannot be broken by upstream moving them. Its only failure mode is a FALSE POSITIVE — some
- * unrelated string that happens to equal the name — which over-keeps, degrading toward KDM-245's
- * behaviour rather than toward loss.
+ * unrelated string that happens to equal the name — which over-keeps, degrading toward the first
+ * answer's behaviour rather than toward loss.
  *
  * The quoting is not decoration. Variant names are `prefix + template + ID + curse`
  * (`KinkyDungeonInventory.ts:3634`), so `Rope1` is a genuine prefix of `Rope12`: a bare

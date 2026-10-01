@@ -1,5 +1,5 @@
 /**
- * KDM-163 AC1 + AC3 + AC5 (browser) — the client routes EVERYTHING, and an input the authoritative
+ * AC1 + AC3 + AC5 (browser) — the client routes EVERYTHING, and an input the authoritative
  * world cannot dispatch is REPORTED rather than silently dropped.
  *
  * `render-client.js` used to classify with two hardcoded lists and end with a bare `return ''` for

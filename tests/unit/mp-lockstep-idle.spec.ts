@@ -1,5 +1,5 @@
 /**
- * Node-layer (Vitest) test for humane lockstep — KD-087.
+ * Node-layer (Vitest) test for humane lockstep.
  *
  * Strict lockstep deadlocks when one player is idle/finished (e.g. their click-to-move
  * route ended) while a partner is still acting. The bridge's idle-grace auto-"wait"s
@@ -15,7 +15,7 @@ const BOOT_TIMEOUT = 240_000;
 import { MPClient as Client, seatPair } from '../helpers/mp-ws-client';
 
 
-// KDM-255: seated through the join gate, which is now the only road in. The four frames this used to
+// Seated through the join gate, which is now the only road in. The four frames this used to
 // send by hand live in `seatPair` — one copy, shared with every other node-layer spec.
 async function joinBoth(bridge: any): Promise<{ A: Client; B: Client }> {
 	const port = await bridge.listen(0);
@@ -25,7 +25,7 @@ async function joinBoth(bridge: any): Promise<{ A: Client; B: Client }> {
 	return { A, B };
 }
 
-describe('Humane lockstep — idle grace (KD-087)', () => {
+describe('Humane lockstep — idle grace', () => {
 	let bridge: any;
 	let A: Client;
 	let B: Client;

@@ -1,5 +1,5 @@
 /**
- * tools/mp-server/game-modes.js — KDM-239 A4: which of KD's game-mode toggles describe the RUN and
+ * tools/mp-server/game-modes.js — which of KD's game-mode toggles describe the RUN and
  * which describe a CHARACTER.
  *
  * ── WHY THIS FILE EXISTS ──────────────────────────────────────────────────────────────────────────
@@ -14,7 +14,7 @@
  * In single-player that is fine — one player, one map, no question to answer. In co-op the same Map
  * is captured PER PLAYER, so each of these keys has to be classified: a key that describes the world
  * must be identical for both players or they are not in the same game, while a key that describes a
- * character must be that character's own. This is the KDM-228 pattern (`KDGameData.RoomType`),
+ * character must be that character's own. This is the same pattern as `KDGameData.RoomType`,
  * applied to the one Map KD uses for two different jobs.
  *
  * ── ⚠️ THESE ARE NOT PERKS, AND THAT IS THE WHOLE TRAP ────────────────────────────────────────────
@@ -28,7 +28,7 @@
  * lightweight `join-gate.js` can validate a declaration without loading the whole engine host.
  *
  * ── NO GAMEPLAY CONSTANTS ─────────────────────────────────────────────────────────────────────────
- * Epic AC2 (KDM-159) forbids gameplay constants here. These are not values — they are the NAMES of
+ * Epic AC2 forbids gameplay constants here. These are not values — they are the NAMES of
  * KD's own keys, used to decide who owns which. No difficulty number, threshold or effect is
  * expressed anywhere in this file; what each mode DOES remains entirely KD's business.
  */
@@ -47,15 +47,15 @@ const MODE_WORLD_KEYS = Object.freeze([
 	// Run difficulty and the rescue rule — one world cannot be easy for one player and not the other.
 	'easyMode', 'norescueMode',
 	// How perks are GAINED during the run. Two players under different progression rules are not
-	// playing the same game. (KDM-242 arbitrates perks gained mid-run; it may revisit this line, and
+	// playing the same game. (The perk-agreement feature arbitrates perks gained mid-run; it may revisit this line, and
 	// should say so if it does.)
 	'noperks', 'perksmandatory', 'perksdebuff',
-	// How the dungeon is escaped — the level goal itself, which is KDM-240's subject.
+	// How the dungeon is escaped — the level goal itself, which is handled separately.
 	'escapekey', 'escaperandom',
 ]);
 
 /**
- * Modes that describe a CHARACTER. These stay on the per-player channel KDM-238 built and are never
+ * Modes that describe a CHARACTER. These stay on the per-player channel and are never
  * taken from the host — the comment in `swap-session.js` that the MP layer must not choose a
  * player's perks covers these for the same reason.
  *
@@ -72,13 +72,13 @@ const MODE_PLAYER_KEYS = Object.freeze([
 	// Third value of the same `KinkyDungeonPerkBondageMode` dial as `perkBondage`/`perkNoBondage`
 	// (`== 3`: shrines may offer bondage with no perk). Keys derived from one dial classify together.
 	'perkBondageOnly',
-	// The character's class. KDM-256 owns choosing it; it is listed here so the drift guard is
+	// The character's class. The character package owns choosing it; it is listed here so the drift guard is
 	// satisfied and so nobody later mistakes it for a world property.
 	'classMode',
 ]);
 
 /**
- * KDM-239 R3 — the SOURCE global each world key is derived from, and the value that produces it.
+ * The SOURCE global each world key is derived from, and the value that produces it.
  *
  * `KDUpdatePlugSettings` is a one-way derivation: nine-ish source globals in, twenty-two
  * `KinkyDungeonStatsChoice` keys out. Two sides of this feature need that mapping — the host CLIENT

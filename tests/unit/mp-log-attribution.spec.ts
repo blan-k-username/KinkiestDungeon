@@ -1,5 +1,5 @@
 /**
- * KDM-165 — message routing WITHOUT inspecting message text.
+ * Message routing WITHOUT inspecting message text.
  *
  * `_isPersonalMessage` decided who saw a line by running `/^you\b|^your\b|^you'/i` over the rendered
  * text. Two defects:
@@ -29,7 +29,7 @@ const BOOT_TIMEOUT = 240_000;
 const logTexts = (s: any, id: string): string[] =>
 	(s.snapshotFor(id).messages.log || []).map((m: any) => (m && m.text) != null ? m.text : String(m));
 
-describe('KDM-165 — log attribution comes from the swap window, not from the text', () => {
+describe('log attribution comes from the swap window, not from the text', () => {
 	let s: any;
 
 	beforeAll(() => {

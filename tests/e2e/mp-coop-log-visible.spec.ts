@@ -1,5 +1,5 @@
 /**
- * E2E (KDM-285) — a co-op player can actually SEE the game's message log.
+ * E2E — a co-op player can actually SEE the game's message log.
  *
  * ⚠️ READ THIS BEFORE "SIMPLIFYING" THE FIX. The defect this locks down was reported as
  * "`KinkyDungeonDrawMessages` is gated on `KinkyDungeonDrawState == 'Game'` and
@@ -9,7 +9,7 @@
  * every frame; `KinkyDungeonIsPlayer()` is `return true` unconditionally
  * (`Game/src/base/KinkyDungeon.ts:1358`).
  *
- * The real cause was OURS: `coop-bootstrap.js` → `ensureQuickBind()` (KD-101) pre-selects a binding
+ * The real cause was OURS: `coop-bootstrap.js` → `ensureQuickBind()` pre-selects a binding
  * material through stock `KinkyDungeonAttemptQuickRestraint`, which also arms
  * `KinkyDungeonTargetingSpell = KDBondageSpell` — and nothing in a non-simulating client ever clears
  * it. So every co-op client has been sitting in permanent spell-targeting mode since boot, and stock
@@ -33,7 +33,7 @@ async function targetingState(P: any) {
 	return P.evaluate(() => ({
 		// @ts-ignore bare let-global
 		spell: (KinkyDungeonTargetingSpell && KinkyDungeonTargetingSpell.name) || null,
-		// CONTROL — KD-101's material pre-selection must SURVIVE the fix. Without this, deleting
+		// CONTROL — the Tie Up fix's material pre-selection must SURVIVE the fix. Without this, deleting
 		// `ensureQuickBind()` outright would make `spell === null` pass while breaking "Tie Up".
 		// @ts-ignore
 		item: !!KinkyDungeonTargetingSpellItem,
@@ -82,7 +82,7 @@ test('a co-op client is not stuck targeting, so KD paints its own message log', 
 				+ 'so anything KD hides while aiming stays hidden for the whole session '
 				+ '(log, buff icons, quick resources, the move helper)').toBe(null);
 			expect(t.item,
-				`${label}: KD-101's binding-material pre-selection must still be in place — this is the `
+				`${label}: the Tie Up fix's binding-material pre-selection must still be in place — this is the `
 				+ 'control that separates "we stopped arming the spell" from "we deleted the feature"')
 				.toBe(true);
 			expect(t.resourcesQuick, `${label}: KD's own quick-resource predicate`).toBe(true);
@@ -105,7 +105,7 @@ test('a co-op client is not stuck targeting, so KD paints its own message log', 
 		const drew = (await B.evaluate(() => (window as any).__kdLogDraws.n)) - before;
 		expect(drew,
 			'KD must call KinkyDungeonDrawMessages itself every frame. Zero here with the marker still '
-			+ 'in KinkyDungeonMessageLog is exactly the KDM-285 defect: correct on the wire, invisible '
+			+ 'in KinkyDungeonMessageLog is exactly the armed-targeting defect: correct on the wire, invisible '
 			+ 'on screen.').toBeGreaterThan(0);
 
 		// ---- R4 — a PAINT assertion, because a data one passed throughout the whole defect -----

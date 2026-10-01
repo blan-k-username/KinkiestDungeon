@@ -1,8 +1,8 @@
 /**
- * tools/mp-server/kd-disconnect-dialogue.js  (KDM-251)
+ * tools/mp-server/kd-disconnect-dialogue.js 
  *
  * WHAT THE SURVIVOR IS TOLD WHEN THE OTHER PLAYER GOES AWAY — one definition, both runtimes.
- * (KDM-297: and what the host is ASKED when somebody wants to come in mid-run — the same presence
+ * (and what the host is ASKED when somebody wants to come in mid-run — the same presence
  * change in the other direction, with the same two consumers. See `JOIN_ASK_DIALOGUE`.)
  *
  * Exported as SOURCE TEXT for the same reason as `kd-codec.js`, `kd-delta.js` and
@@ -10,19 +10,19 @@
  * authoritative world (that is where an option's `clickFunction` actually runs); the BROWSER is
  * served the identical text as a script so it can DRAW the dialogue and its buttons.
  *
- * WHY A DIALOGUE AND NOT A BANNER. KDM-234 S3 — the survivor must be told *in the game*. A corner
+ * WHY A DIALOGUE AND NOT A BANNER. The survivor must be told *in the game*. A corner
  * overlay is what the co-op harness already had, and it is exactly what a player does not read while
- * wondering why their keys stopped working. It is also opened SERVER-SIDE, for the reason KDM-230
- * measured: `KDStartDialog` writes `KDGameData.CurrentDialog`, which is per-player state the client
+ * wondering why their keys stopped working. It is also opened SERVER-SIDE, for the reason the peace
+ * offer measured: `KDStartDialog` writes `KDGameData.CurrentDialog`, which is per-player state the client
  * re-adopts from every snapshot — so a dialogue opened on the client is erased by the next state
  * frame, and a disconnect triggers one immediately.
  *
- * ⚠️ THE TWO ROLES ARE NOT SYMMETRIC (KDM-234 D5/D7), which is why there are two definitions here
+ * ⚠️ THE TWO ROLES ARE NOT SYMMETRIC, which is why there are two definitions here
  * and not one parameterised dialogue:
  *   - a GUEST who loses the host gets ONE option, quit. Never "continue" — with the host gone there
- *     is no world to continue (KDM-244 C3);
+ *     is no world to continue;
  *   - a HOST who loses a guest gets TWO, wait or solo. The world is theirs, so the run is theirs to
- *     keep (KDM-253 S4/D1).
+ *     keep.
  * Neither has a timeout: D7 makes the wait unbounded and bounded only by the deciding player's own
  * patience.
  *
@@ -41,11 +41,11 @@ const HOST_LOST_DIALOGUE = 'KDCoopHostLost';
 const PEER_LOST_DIALOGUE = 'KDCoopPeerLost';
 
 /**
- * KDM-297 — the HOST's dialogue when somebody ASKS TO JOIN a game that is already running.
+ * The HOST's dialogue when somebody ASKS TO JOIN a game that is already running.
  *
  * The mirror image of the two above: presence changing in the other direction. It lives in this
  * module because it has the same two consumers and the same reason to be opened server-side — a host
- * who is playing is not on the lobby screen, so the lobby's Accept/Decline (KDM-233) never reaches
+ * who is playing is not on the lobby screen, so the lobby's Accept/Decline never reaches
  * them, and a guest waited on "Waiting for the host…" for ever.
  *
  * Who is asking is not known until run time, so the body carries a `GUESTNAME` token that KD fills
@@ -56,7 +56,7 @@ const PEER_LOST_DIALOGUE = 'KDCoopPeerLost';
 const JOIN_ASK_DIALOGUE = 'KDCoopJoinAsk';
 
 /**
- * KDM-303 — told to the guest who has just been made the host, because the old host did not come back
+ * Told to the guest who has just been made the host, because the old host did not come back
  * within the grace period. One option: it is news, not a question.
  */
 const NOW_HOST_DIALOGUE = 'KDCoopNowHost';
@@ -67,10 +67,10 @@ const KD_DISCONNECT_DIALOGUE = `
 	if (KDDialogue.${HOST_LOST_DIALOGUE}) return;             // idempotent: served once, eval'd once
 
 	/*
-	 * KDM-253 S4/D1 — the HOST's choice. Two options and no third: the run is theirs to continue, so
+	 * The HOST's choice. Two options and no third: the run is theirs to continue, so
 	 * they may keep the seat open indefinitely or give it up, and nothing else may decide for them.
 	 *
-	 * NO TIMEOUT, deliberately (KDM-234 D7). A dialogue that resolved itself after N minutes would be
+	 * NO TIMEOUT, deliberately. A dialogue that resolved itself after N minutes would be
 	 * a reconnect deadline in disguise, and would end somebody's co-op run while they were away from
 	 * the keyboard.
 	 *
@@ -93,7 +93,7 @@ const KD_DISCONNECT_DIALOGUE = `
 	};
 
 	/*
-	 * KDM-297 — let a friend into the run, or not. Two options, both ANSWERS: the question stays open
+	 * Let a friend into the run, or not. Two options, both ANSWERS: the question stays open
 	 * until the host picks one or the guest withdraws (the server closes it then).
 	 */
 	KDDialogue.${JOIN_ASK_DIALOGUE} = {
@@ -111,7 +111,7 @@ const KD_DISCONNECT_DIALOGUE = `
 	};
 
 	/*
-	 * KDM-303 — the new host is TOLD. One option: nothing is being asked.
+	 * The new host is TOLD. One option: nothing is being asked.
 	 */
 	KDDialogue.${NOW_HOST_DIALOGUE} = {
 		response: '${NOW_HOST_DIALOGUE}',
@@ -123,7 +123,7 @@ const KD_DISCONNECT_DIALOGUE = `
 	KDDialogue.${HOST_LOST_DIALOGUE} = {
 		response: '${HOST_LOST_DIALOGUE}',
 		options: {
-			// ONE option: leave. KDM-303 — the countdown in the body is what replaced "wait for ever";
+			// ONE option: leave. The countdown in the body is what replaced "wait for ever";
 			// when it runs out a guest becomes the host, so there is still no "continue" to offer here.
 			Quit: { exitDialogue: true, clickFunction: function () {
 				if (typeof KDCoopSessionQuit === 'function') KDCoopSessionQuit();
@@ -136,7 +136,7 @@ const KD_DISCONNECT_DIALOGUE = `
 	// (KinkyDungeonDialogue.ts:132/176). A missing entry prints "[NotFound] …" straight at the
 	// player — the failure this epic has already shipped twice.
 	if (typeof addTextKey === 'function') {
-		// KDM-303 — TIME is the remaining grace as m:ss, written by the SERVER every second
+		// TIME is the remaining grace as m:ss, written by the SERVER every second
 		// (CurrentDialogMsgData), so every guest counts down to the same moment.
 		addTextKey('r${HOST_LOST_DIALOGUE}',
 			'You have lost contact with the host.|The game is paused. If they come back, you carry on where you stopped.|If they are not back in TIME, you become the host and the run goes on.');

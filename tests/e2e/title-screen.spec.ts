@@ -8,7 +8,7 @@
  * No state-mutation assertions — this is a pure "did the bundle bring up a
  * usable game?" smoke test.
  *
- * KDM-169 — this spec used to reuse the worker-scoped `kdPage`/`sharedPage`
+ * This spec used to reuse the worker-scoped `kdPage`/`sharedPage`
  * fixture and assert a committed PNG baseline. Both were wrong:
  *
  *  1. ORDER DEPENDENCE. `sharedPage` is one Page for the whole worker, and
@@ -17,7 +17,7 @@
  *     KDRenderClient.disableLocalSim(), neither of which resetKDState() undoes,
  *     so this spec screenshotted a live dungeon: 737k px / ratio 0.81 different.
  *     It "passed on retry" only because a retry gets a fresh worker, hence a
- *     fresh page. (KDM-216 has since moved those two specs off the shared page
+ *     fresh page. (Those two specs have since been moved off the shared page
  *     as well, but this spec stays isolated on its own merits — it asserts a
  *     COLD BOOT, which a reset-in-place shared page cannot give it.)
  *  2. A MEANINGLESS BASELINE. The committed title-screen.png was not a title

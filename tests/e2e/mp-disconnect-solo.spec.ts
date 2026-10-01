@@ -1,5 +1,5 @@
 /**
- * E2E (KDM-253) — the whole story, in two real browsers: a partner drops, the host is asked, the
+ * E2E — the whole story, in two real browsers: a partner drops, the host is asked, the
  * host chooses to go on alone, and the run keeps going.
  *
  * The node spec proves each teardown step in isolation. This proves the thing it structurally
@@ -10,7 +10,7 @@
  *
  * ⚠️ THE HOST CLICKS. The choice is answered through KD's own dialogue input, exactly as a player
  * makes it — not by calling `removePlayer` from the test. A teardown driven directly would skip the
- * one path a human can actually take, which is where the KDM-230 ordering bug lived.
+ * one path a human can actually take, which is where an earlier ordering bug lived.
  *
  * TWO INVARIANTS RIDE ALONG, per TESTING_POLICY: no crash handler fires, and nothing paints an
  * unresolved text key. A disconnect teardown is exactly the kind of change that trips both, and both
@@ -61,7 +61,7 @@ test('a host whose partner drops can choose to go on alone, and the run keeps wo
 		 * so it is excluded BY NAME rather than by widening the oracle — and what was excluded is
 		 * printed, because a filter nobody can see is how a crash oracle quietly stops working.
 		 */
-		const ASSET_NOISE = PAGE_ERROR_NOISE;   // KDM-240: one definition, in the shared helper
+		const ASSET_NOISE = PAGE_ERROR_NOISE;   // one definition, in the shared helper
 
 		try {
 			await bootCoopPair(A, B, port);
@@ -105,7 +105,7 @@ test('a host whose partner drops can choose to go on alone, and the run keeps wo
 			expect(asked.body, 'the question is readable').not.toMatch(/NotFound/);
 			for (const label of asked.labels) expect(label, 'each button is readable').not.toMatch(/NotFound/);
 
-			// ---- S2 (KDM-251, still true): until they answer, the game is paused ---------------------
+			// ---- S2 (still true): until they answer, the game is paused ---------------------
 			await A.evaluate(() => (window as any).__coop.sendMove(1, 0));
 			await A.waitForFunction(
 				() => (window as any).__coop && (window as any).__coop.blocked === 'peer-missing',
@@ -159,7 +159,7 @@ test('a host whose partner drops can choose to go on alone, and the run keeps wo
 			const sinceDrop = crashes.slice(crashesBefore);
 			const dropped = sinceDrop.filter((c) => ASSET_NOISE.test(c));
 			// eslint-disable-next-line no-console
-			if (dropped.length) console.log(`[KDM-253] ignored ${dropped.length} pre-existing asset error(s): ${dropped[0]}`);
+			if (dropped.length) console.log(`ignored ${dropped.length} pre-existing asset error(s): ${dropped[0]}`);
 			expect(sinceDrop.filter((c) => !ASSET_NOISE.test(c)),
 				'a teardown that trips KD\'s error handler is not graceful').toEqual([]);
 		} finally {

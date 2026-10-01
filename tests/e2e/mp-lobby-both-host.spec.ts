@@ -1,5 +1,5 @@
 /**
- * E2E (KDM-270) — two people on one LAN both press **Host**.
+ * E2E — two people on one LAN both press **Host**.
  *
  * The second one is refused `already_hosting`, which does not mean "go away" — it means the OTHER
  * seat is free. Before this, `_reject` closed their socket: the lobby printed an error and the
@@ -36,7 +36,7 @@ const socketState = (page: any) => page.evaluate(() => ({
 	closedForGood: !!(window.__coop && window.__coop._closedForGood),
 }));
 
-test.describe('KDM-270 — the second Host press', () => {
+test.describe('the second Host press', () => {
 	test('lands on the join view and joins on the SAME socket (R6)', async ({ browser }) => {
 		test.setTimeout(MP_TEST_TIMEOUT);
 		const { server, bridge, port } = await start(0);
@@ -50,7 +50,7 @@ test.describe('KDM-270 — the second Host press', () => {
 			expect((await lobbyState(A)).phase).toBe('waiting');
 
 			/*
-			 * KDM-280 — B used to be handed a client id here, because `stableId` minted the literal
+			 * B used to be handed a client id here, because `stableId` minted the literal
 			 * `'host'` for everyone and the two tabs collided before they could ever reach the
 			 * refusal this spec is about. That seeding is gone, which is the regression test: if the
 			 * id generator ever goes back to naming a seat, this spec fails at the poll below rather
@@ -60,7 +60,7 @@ test.describe('KDM-270 — the second Host press', () => {
 			await press(B, 'KDMPHost');
 
 			/*
-			 * KDM-280 R1 — the two tabs really did mint DIFFERENT ids.
+			 * The two tabs really did mint DIFFERENT ids.
 			 *
 			 * Asserted here rather than in a spec of its own because this is the only place two real
 			 * browser contexts, each with its own `sessionStorage`, ask for the same seat — which is
@@ -71,7 +71,7 @@ test.describe('KDM-270 — the second Host press', () => {
 			const idB = await B.evaluate(() => (window as any).__coop.id);
 			expect(idA, 'both tabs have an identity').toBeTruthy();
 			expect(idB).toBeTruthy();
-			expect(idB, 'two tabs are two players — README, and the invariant KDM-280 restored')
+			expect(idB, 'two tabs are two players — README, and the invariant the per-tab id restored')
 				.not.toBe(idA);
 
 			// ── the refusal moves it, and does not hang up ──────────────────────────────────

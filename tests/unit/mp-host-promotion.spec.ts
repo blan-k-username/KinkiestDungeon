@@ -1,16 +1,16 @@
 /**
- * KDM-303 — when the host has been gone for the grace period, a guest becomes the host and the run
+ * When the host has been gone for the grace period, a guest becomes the host and the run
  * goes on.
  *
- * Before this, a host who left a running game held the host seat for ever: the guest could only quit
- * (KDM-251/253), and anyone pressing Host was refused `already_hosting` until the server restarted
- * (owner UAT, KDM-301). The world lives in the gateway, so the host ROLE can move.
+ * Before this, a host who left a running game held the host seat for ever: the guest could only quit,
+ * and anyone pressing Host was refused `already_hosting` until the server restarted
+ * (owner UAT). The world lives in the gateway, so the host ROLE can move.
  *
  * Driven through the real `WSBridge` over real sockets, with `hostGraceMs` shortened — the owner's
  * default is 2 minutes and a spec must never sleep that long. Every "did not happen" assertion waits
  * PAST the deadline, so it cannot pass merely by looking too early.
  *
- * Requirement ids refer to the `## Requirements` section of KDM-303.
+ * The requirement labels name the behaviours this spec pins.
  */
 import { describe, it, expect, afterEach } from 'vitest';
 import { MPClient, seatPair } from '../helpers/mp-ws-client';
@@ -58,7 +58,7 @@ async function joinAs(port: number, clientId: string, role: 'host' | 'guest') {
 	return c;
 }
 
-describe('KDM-303 — the host is gone: wait, then hand the seat on', () => {
+describe('the host is gone: wait, then hand the seat on', () => {
 	it('R1 — the guest is told the host is gone, with a countdown that the SERVER runs', async () => {
 		const { B, A } = await pair();
 		A.close();
@@ -125,7 +125,7 @@ describe('KDM-303 — the host is gone: wait, then hand the seat on', () => {
 		const { port, A, B } = await pair();
 		const turn = bridge.session.turn;
 		// The host drops; the guest does not wait — they press LEAVE on the countdown screen, which
-		// gives their seat up (a guest who merely disconnects keeps it held for their return, KDM-252).
+		// gives their seat up (a guest who merely disconnects keeps it held for their return).
 		A.close();
 		await B.next((m) => m.type === 'peer_missing');
 		await until(() => gd(B).CurrentDialog === HOST_LOST_DIALOGUE, 'the countdown screen');

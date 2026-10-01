@@ -16,7 +16,7 @@
  * the same two snapshots must still go stale — i.e. it reproduces the old behaviour on demand. If
  * the rule ever stops being wired up, the fixed half fails while the control still passes.
  *
- * KDM-216 — `isolatedPage`, not `kdPage`: this spec injects render-client.js, whose wrappers a
+ * `IsolatedPage`, not `kdPage`: this spec injects render-client.js, whose wrappers a
  * resetKDState() cannot undo.
  */
 import { test, expect } from '../helpers/playwright-fixtures';
@@ -59,7 +59,7 @@ test('a global dropped from the bundle goes back to its default (and the stale g
 
 		const pristine = read();
 
-		// KDM-308 added a SECOND guard against this exact state: after every apply the client drops a
+		// There is a SECOND guard against this exact state: after every apply the client drops a
 		// struggle group whose restraint is not worn (`mp-stale-struggle-group.spec.ts`). Nothing is
 		// worn in these snapshots, so that guard alone would empty the list and this spec could no
 		// longer see whether THIS rule works. Make every group read as worn while the rule is measured.

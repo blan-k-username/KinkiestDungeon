@@ -1,5 +1,5 @@
 /**
- * tests/helpers/mp-ws-client.ts  (extracted KDM-233)
+ * tests/helpers/mp-ws-client.ts
  *
  * ONE test-side WebSocket client for the mp-server bridge, shared by every node-layer spec that
  * drives `tools/mp-server/ws-bridge.js`.
@@ -11,7 +11,7 @@
  * whose client does not merge deltas asserts against a stale base and goes quietly, wrongly green.
  *
  * IT MERGES LIKE THE BROWSER DOES. The bridge sends a full `snapshot` on the first state and a
- * `delta` thereafter (KDM-206). This client merges with the SAME `kdMerge` the browser uses, not a
+ * `delta` thereafter. This client merges with the SAME `kdMerge` the browser uses, not a
  * second implementation that could drift from it, and re-exposes the merged result as `m.snapshot`
  * so assertions read the property they always read.
  */
@@ -19,9 +19,9 @@
 const { kdMerge } = require('../../tools/mp-server/kd-delta');
 
 /**
- * KDM-290 — how long a wait for one frame may last.
+ * How long a wait for one frame may last.
  *
- * MUST stay below `testTimeout` in `vitest.config.ts`, and the reason is the whole of KDM-290: when
+ * MUST stay below `testTimeout` in `vitest.config.ts`, and the reason is this: when
  * a frame never arrives, whichever clock expires FIRST is the one that writes the error message.
  * This helper knows what it was waiting for; the runner only knows how long the test ran. For the
  * life of this suite the order was inverted — a 20 s default and four specs asking 30-60 s, all
@@ -41,7 +41,7 @@ export class MPClient {
 	private _closed = false;
 
 	/**
-	 * KDM-250: IT ANSWERS THE HEARTBEAT, like a live browser does.
+	 * IT ANSWERS THE HEARTBEAT, like a live browser does.
 	 *
 	 * The server now pings periodically and marks a silent seat `missing`. A test client that did not
 	 * answer would be declared dead partway through every OTHER spec in the suite — so answering is
@@ -59,7 +59,7 @@ export class MPClient {
 			c.buf.push(c._resolve(m));
 			c._pump();
 		});
-		// KDM-270: recorded from the moment the socket exists, so a close that lands before anyone
+		// Recorded from the moment the socket exists, so a close that lands before anyone
 		// asks is not missed — `closedWithin` reads state, it does not start listening.
 		c.ws.addEventListener('close', () => { c._closed = true; });
 		await new Promise<void>((res) => c.ws.addEventListener('open', () => res()));
@@ -69,7 +69,7 @@ export class MPClient {
 	/** Play dead without closing the socket — the failure a socket-close handler cannot see. */
 	stopPong() { this._pong = false; }
 
-	/** KDM-313 — and come back to life on the SAME socket, as a page that was merely frozen does. */
+	/** And come back to life on the SAME socket, as a page that was merely frozen does. */
 	resumePong() { this._pong = true; }
 
 	send(obj: any) { this.ws.send(JSON.stringify(obj)); }
@@ -102,7 +102,7 @@ export class MPClient {
 	}
 
 	/**
-	 * KDM-270 — did the SERVER close this socket within `ms`?
+	 * Did the SERVER close this socket within `ms`?
 	 *
 	 * The client could always hang up (`close()`); it could never observe being hung up on, and
 	 * "the socket is still open" is the entire claim of a non-terminal refusal.
@@ -125,7 +125,7 @@ export class MPClient {
 	close() { try { this.ws.close(); } catch (e) { /* noop */ } }
 
 	/**
-	 * KDM-297 — the LATEST resolved snapshot, whatever frames are still buffered.
+	 * The LATEST resolved snapshot, whatever frames are still buffered.
 	 *
 	 * `next(pred)` scans the buffer oldest-first, so asking it "is the dialogue closed now?" can be
 	 * answered by a frame from BEFORE the dialogue ever opened — a green that proves nothing. The merged
@@ -157,13 +157,13 @@ export class MPClient {
 }
 
 /**
- * KDM-255 — seat a host/guest PAIR through the join gate, which is now the only road in.
+ * Seat a host/guest PAIR through the join gate, which is now the only road in.
  *
  * WHY IT EXISTS. Eleven node-layer specs used to open their clients with a bare
  * `{ type: 'join', clientId: 'A' }`. That frame took the roleless branch of `ws-bridge._handle`,
  * which seated a client by ARRIVAL ORDER without ever consulting `join-gate.js` — a second
- * implementation of joining that existed only because the tests depended on it. KDM-255 removed the
- * branch, so every spec has to go through the gate, and hand-editing eleven copies of the four-frame
+ * implementation of joining that existed only because the tests depended on it. That
+ * branch is gone, so every spec has to go through the gate, and hand-editing eleven copies of the four-frame
  * handshake is exactly the duplication `MPClient` itself was extracted to stop (see this file's
  * header).
  *

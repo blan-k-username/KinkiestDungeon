@@ -1,11 +1,11 @@
 /**
- * Node-layer (Vitest) — KDM-277 slice 1: three render dirty flags that belong to an ALREADY decided
+ * Node-layer (Vitest) — three render dirty flags that belong to an ALREADY decided
  * category and were not in it.
  *
  * `GLOBAL_BLACKLIST` has a section headed "render / dirty flags: the server has no screen", holding
  * `KDDrawUpdate`, `KDVisionUpdate`, `KDUpdateChokes` and `KDAlertCD`. These three are the same
  * category and were absent from it — an inconsistency inside a decided category, not a new judgement
- * call. Found by KDM-273's transition-write audit, which flagged them because a map generation
+ * call. Found by the transition-write audit, which flagged them because a map generation
  * writes all three.
  *
  * ── THE EVIDENCE, NOT THE INTUITION ───────────────────────────────────────────────────────────────
@@ -23,7 +23,7 @@
  *                                (KinkyDungeonTiles.ts:392-393). Presentation, not state.
  *
  * ── WHY IT MATTERS THAT THE SERVER HAS NO DRAW LOOP ───────────────────────────────────────────────
- * Same argument as `KDDamageQueue` (KDM-186) and the consume-once queues (KDM-202): the clearing code
+ * Same argument as `KDDamageQueue` and the consume-once queues: the clearing code
  * never runs here, so these never return to their baseline and are captured as diverged per-player
  * state on every bundle. A dirty flag is not authoritative state and has no per-player meaning —
  * replicating one just lets the acting player's stale "please redraw" land on the world.
@@ -32,7 +32,7 @@
  * Every assertion here is "absent from the bundle", which a broken capture layer satisfies just as
  * happily as a correct blacklist. So each flag is paired with a CONTROL GLOBAL OF THE SAME SHAPE —
  * boolean, number, plain object — diverged from its baseline in the same session and required to be
- * present. Shape matters: a single array control (as KDM-202 used, correctly, for two arrays) would
+ * present. Shape matters: a single array control (as an earlier fix used, correctly, for two arrays) would
  * not prove the capture layer handles a bare boolean.
  *
  * Imports the harness under tools/mp-server/** only — never Game/src/** or Scripts/**.
@@ -50,7 +50,7 @@ const CONTROL_FOR: Record<string, string> = {
 	KDTileModes: 'KinkyDungeonRescued',                        // Record<string, …>
 };
 
-describe('KDM-277 · the render dirty flags are named in the blacklist', () => {
+describe('the render dirty flags are named in the blacklist', () => {
 	it('all three are declared world/render state', () => {
 		for (const flag of Object.keys(CONTROL_FOR)) {
 			expect(GLOBAL_BLACKLIST, `${flag} is a draw-path dirty flag`).toContain(flag);
@@ -72,7 +72,7 @@ describe('KDM-277 · the render dirty flags are named in the blacklist', () => {
 	});
 });
 
-describe('KDM-277 · a dirty render flag does not reach the wire', () => {
+describe('a dirty render flag does not reach the wire', () => {
 	let h: any;
 	const FLAGS = Object.keys(CONTROL_FOR);
 

@@ -1,5 +1,5 @@
 /**
- * KDM-239 — a co-op run starts like a real game.
+ * A co-op run starts like a real game.
  *
  * ── WHAT IS ACTUALLY BROKEN ───────────────────────────────────────────────────────────────────────
  * Less than the task title suggests, and the difference matters. `headless-host.js:611` already calls
@@ -23,7 +23,7 @@
  * game-mode defaults the headless bundle happens to boot with — never the host's.
  *
  * ── THE TRAP THIS SPEC EXISTS TO PIN DOWN (A3) ────────────────────────────────────────────────────
- * The obvious fix — hand the mode keys to `applyPerks` and let KDM-238's per-player channel carry
+ * The obvious fix — hand the mode keys to `applyPerks` and let the per-player perk channel carry
  * them — FAILS SILENTLY. `applyPerks` (`headless-host.js:1324-1339`) does
  * `KinkyDungeonStatsChoice = new Map()` and then re-adds a key only `if (KinkyDungeonStatsPresets[k])`
  * — and NOT ONE of the nine mode keys is in that table (`KinkyDungeonPerks.ts:256`); they are written
@@ -65,7 +65,7 @@ const GAME_SRC = path.resolve(__dirname, '../../Game/src/base/KinkyDungeon.ts');
 // ---------------------------------------------------------------------------------------------
 // A4 — the classification, checked against upstream rather than against itself.
 // ---------------------------------------------------------------------------------------------
-describe('KDM-239 — world vs player game-mode keys (R3, A4)', () => {
+describe('world vs player game-mode keys (R3, A4)', () => {
 	/** Every key `KDUpdatePlugSettings` writes, read out of the GAME SOURCE. */
 	function keysUpstreamWrites(): string[] {
 		const src = fs.readFileSync(GAME_SRC, 'utf8');
@@ -113,7 +113,7 @@ describe('KDM-239 — world vs player game-mode keys (R3, A4)', () => {
 		].sort());
 	});
 
-	it('leaves the per-character modes on KDM-238\'s per-player channel', () => {
+	it('leaves the per-character modes on the per-player perk channel', () => {
 		expect([...HH.MODE_PLAYER_KEYS].sort()).toEqual([
 			'arousalMode', 'classMode', 'hardperksMode', 'hideperkbondage', 'partialhideperkbondage',
 			'perkBondage', 'perkBondageOnly', 'perkNoBondage', 'perksMode', 'vhardperksMode',
@@ -129,7 +129,7 @@ describe('KDM-239 — world vs player game-mode keys (R3, A4)', () => {
 		const classified = new Set([...HH.MODE_WORLD_KEYS, ...HH.MODE_PLAYER_KEYS]);
 		const unowned = keysUpstreamWrites().filter((k) => !classified.has(k));
 		expect(unowned,
-			'upstream added a game-mode key — classify it as world or player (KDM-239 A4) rather than '
+			'upstream added a game-mode key — classify it as world or player rather than '
 			+ 'letting it silently take the headless default').toEqual([]);
 	});
 });
@@ -137,7 +137,7 @@ describe('KDM-239 — world vs player game-mode keys (R3, A4)', () => {
 // ---------------------------------------------------------------------------------------------
 // The gate half: the HOST declares the world, and only the host.
 // ---------------------------------------------------------------------------------------------
-describe('KDM-239 — the world declaration rides the host\'s seat (R3, R5, A5)', () => {
+describe('the world declaration rides the host\'s seat (R3, R5, A5)', () => {
 	it('a host declares the world modes and the seed with its claim', () => {
 		const g = new JoinGate({ build: BUILD });
 		g.claimHost('H', { build: BUILD, world: { modes: ['randomMode'], seed: 'run-42' } });
@@ -174,14 +174,14 @@ describe('KDM-239 — the world declaration rides the host\'s seat (R3, R5, A5)'
 	});
 
 	/**
-	 * KDM-259 R2 — a seed the host TYPED but left blank is still "the server's default".
+	 * A seed the host TYPED but left blank is still "the server's default".
 	 *
 	 * The lobby field always sends a string, so `''` and `'   '` are now reachable from a player
 	 * rather than only from a hand-edited URL. Both must land on the same `''` that
 	 * `swap-session.js:495` reads as "fall back to the operator's seed" — the alternative reading
 	 * ("this run's seed is three spaces") is a different world, silently.
 	 */
-	it('KDM-259 R2 — a blank or whitespace-only seed means the server default, not an empty seed', () => {
+	it('a blank or whitespace-only seed means the server default, not an empty seed', () => {
 		const g = new JoinGate({ build: BUILD });
 		g.claimHost('H', { build: BUILD, world: { seed: '   ' } });
 		expect(g.worldOf('H').seed).toBe('');
@@ -214,7 +214,7 @@ describe('KDM-239 — the world declaration rides the host\'s seat (R3, R5, A5)'
 // ---------------------------------------------------------------------------------------------
 // The session half, on ONE real booted world carrying both players.
 // ---------------------------------------------------------------------------------------------
-describe('KDM-239 — the start ritual runs, and the world modes survive seating (R1, R2, R3, R6)', () => {
+describe('the start ritual runs, and the world modes survive seating (R1, R2, R3, R6)', () => {
 	let s: any = null;
 
 	beforeAll(async () => {
@@ -314,7 +314,7 @@ describe('KDM-239 — the start ritual runs, and the world modes survive seating
 // ---------------------------------------------------------------------------------------------
 // R2 / R7 as SOURCE guards — the decisions that are only visible in the code.
 // ---------------------------------------------------------------------------------------------
-describe('KDM-239 — the deliberate decisions are recorded where they are made (R2, R7)', () => {
+describe('the deliberate decisions are recorded where they are made (R2, R7)', () => {
 	const MP_DIR = path.resolve(__dirname, '../../tools/mp-server');
 	const read = (p: string) => fs.readFileSync(path.join(MP_DIR, p), 'utf8');
 
@@ -344,10 +344,10 @@ describe('KDM-239 — the deliberate decisions are recorded where they are made 
 		expect(fn![0], 'R7 — the screen must come from the session').toMatch(/coop\.screen/);
 	});
 
-	it('R8 — but the KDM-258 context guard and its error reporting are KEPT', () => {
+	it('R8 — but the start context guard and its error reporting are KEPT', () => {
 		const src = read('client/coop-bootstrap.js');
 		expect(src, 'the null-context refusal is what stops a permanently frozen frame')
 			.toMatch(/KinkyDungeonContext/);
-		expect(src, 'the start error must stay visible — its silence hid KDM-258').toMatch(/_startError/);
+		expect(src, 'the start error must stay visible — its silence once hid a start failure').toMatch(/_startError/);
 	});
 });

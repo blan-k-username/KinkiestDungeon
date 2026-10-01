@@ -1,5 +1,5 @@
 /**
- * KDM-161: reading and poking a player-state bundle in tests.
+ * Reading and poking a player-state bundle in tests.
  *
  * A bundle used to have a hand-written shape (`bundle.stats.mana`, `bundle.player.x`, `bundle.buffs`)
  * because `capturePlayer` named ~20 globals by hand. That list is deleted: a bundle is now
@@ -16,7 +16,7 @@ export function bundleGet(bundle: any, name: string): any {
 	const g = bundle && bundle.globals;
 	if (!g || !Object.prototype.hasOwnProperty.call(g, name)) {
 		throw new Error(
-			`[bundle] ${name} is not in this bundle. Under KDM-161 a global is carried only once it ` +
+			`[bundle] ${name} is not in this bundle. Under generic capture a global is carried only once it ` +
 			'DIVERGES from the post-init baseline, so this means the player never changed it. Drive the ' +
 			'state first, or use bundleSet() to force a value.');
 	}

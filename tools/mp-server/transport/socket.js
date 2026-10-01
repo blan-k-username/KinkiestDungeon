@@ -1,5 +1,5 @@
 /**
- * tools/mp-server/transport/socket.js  (KD-081)
+ * tools/mp-server/transport/socket.js 
  *
  * Transport that runs each instance in a SEPARATE OS process (child_process) and
  * talks to it over a real TCP socket (127.0.0.1, newline-delimited JSON). This is

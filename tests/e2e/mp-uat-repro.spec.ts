@@ -1,5 +1,5 @@
 /**
- * E2E — REPRODUCTIONS for the two symptoms still open after the KDM-186 fix.
+ * E2E — REPRODUCTIONS for the two symptoms still open after the input-rules fix.
  *
  * Written BEFORE any fix, per the branch's TDD rule: a symptom that cannot be reproduced by a test
  * must not be "fixed", because there is then nothing to prove the fix worked or to stop it returning.
@@ -76,9 +76,9 @@ test('the co-op overlay names keys the game is actually bound to', async ({ brow
  *
  * UAT (2026-08-16) reported a duplicated damage message and a duplicated cast animation after a
  * single attack. Two candidate causes, and this test does not care which:
- *   - the client's superseded-input REPLAY (KDM-186 Rule 1 v1) firing a held duplicate late — since
+ *   - the client's superseded-input REPLAY (input Rule 1 v1) firing a held duplicate late — since
  *     removed, so this may already be green;
- *   - `_reconcilePeers` replaying a recorded hit through the victim's own pipeline (KDM-164), which
+ *   - `_reconcilePeers` replaying a recorded hit through the victim's own pipeline, which
  *     would be pre-existing and merely invisible while nobody could act at all.
  *
  * GREEN here does NOT prove the symptom is gone — it proves this drive does not reproduce it. Said
@@ -123,7 +123,7 @@ test('a single attack logs its damage message exactly once', async ({ browser })
 });
 
 /**
- * REPRO 3 — floating combat text must not ACCUMULATE across turns (KDM-186, UAT round 3).
+ * REPRO 3 — floating combat text must not ACCUMULATE across turns (UAT round 3).
  *
  * Reported with screenshots: after PvP attacks, B's screen fills with dozens of stacked
  * "16 Arcane dmg" floaters and persistent ripple animations — "more and more with each attack" —
@@ -145,7 +145,7 @@ test('a single attack logs its damage message exactly once', async ({ browser })
  */
 
 /**
- * REPRO 3 (v2) — floating combat text must not ACCUMULATE across PvP attacks (KDM-186, UAT round 3).
+ * REPRO 3 (v2) — floating combat text must not ACCUMULATE across PvP attacks (UAT round 3).
  *
  * Reported with screenshots: after PvP attacks, B's screen fills with dozens of stacked
  * "16 Arcane dmg" floaters and ripple animations that never clear — "more and more with each attack"
@@ -198,7 +198,7 @@ test('floating combat text does not accumulate across PvP attacks', async ({ bro
 		// PRECONDITION — if no floater was ever CREATED, this test is measuring nothing (v1's mistake).
 		// Judged on the cumulative creation counter, not the queue peak: the queue decays, and at
 		// upstream 5.5's 2.0x default render scale a floater can be born and expire between two samples
-		// (KDM-220's rule, which this precondition had missed). `peak` stays the accumulation baseline.
+		// (the floater-sampling rule, which this precondition had missed). `peak` stays the accumulation baseline.
 		const after = await coopFloaters(B);
 		const created = after.created - start0.created;
 		console.log(`[mp-uat-repro] floaters created=${created} peakQueue=${peak} texts=${JSON.stringify(after.texts)}`);
@@ -246,7 +246,7 @@ test('re-applying an identical snapshot is idempotent (no effect is replayed)', 
 		await bootCoopPair(A, B, port);
 
 		// Land one real PvP hit so the snapshot in flight carries a combat effect.
-		// KDM-210: waits for the avatar instead of reading-then-asserting. The null check that used
+		// Waits for the avatar instead of reading-then-asserting. The null check that used
 		// to follow is retired — it can no longer fail, because the helper throws a named error first.
 		const peer = await waitForPeerAvatar(B, { label: 'B sees no peer avatar — cannot exercise the combat-effect path' });
 		const t0 = await B.evaluate(() => (window as any).__coop.lastTick);
@@ -281,7 +281,7 @@ test('re-applying an identical snapshot is idempotent (no effect is replayed)', 
 });
 
 /**
- * REPRO 5 — the floater queue must DRAIN when nothing is creating floaters (KDM-186).
+ * REPRO 5 — the floater queue must DRAIN when nothing is creating floaters.
  *
  * MEASURED IN THE OWNER'S BROWSER (2026-08-16 HUD): `floaters 0/s   q=84`.
  * Creation rate ZERO, queue depth 84 and holding. So the pile-up is not duplicate CREATION — each
@@ -312,7 +312,7 @@ test('the floater queue drains once nothing is creating floaters', async ({ brow
 		await bootCoopPair(A, B, port);
 
 		// Make floaters the way the game does — many, so the queue is unmistakably non-empty.
-		// The peak is read in the SAME task that creates them (KDM-312). KD's floater draw ages at most
+		// The peak is read in the SAME task that creates them. KD's floater draw ages at most
 		// 42 floaters per frame by the time since the last floater draw, so a frame landing between two
 		// evaluates after one of this page's multi-second stalls expired 42 of the 60 at once — and the
 		// precondition read exactly 60 - 42 = 18. That measured the page's frame timing, not the drain.
@@ -373,14 +373,14 @@ test('snapshots delivered after a hit do not re-create its floaters', async ({ b
 		await bootCoopPair(A, B, port);
 
 		// 1. Land one real PvP hit, so there is a combat event to be replayed.
-		// KDM-210: waits for the avatar instead of reading-then-asserting. The null check that used
+		// Waits for the avatar instead of reading-then-asserting. The null check that used
 		// to follow is retired — it can no longer fail, because the helper throws a named error first.
 		const peer = await waitForPeerAvatar(B, { label: 'B sees no peer avatar — cannot land a PvP hit' });
 		const before = await coopFloaters(B);
 		await B.evaluate((p) => (window as any).__coop.sendAction(
 			{ kdType: 'doattack', data: { tx: p.x, ty: p.y, id: p.id, attackCost: 1 } }), peer);
 		await A.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
-		// KDM-220 — WAIT FOR THE FEEDBACK, DO NOT SAMPLE THE QUEUE AFTER A PROXY.
+		// WAIT FOR THE FEEDBACK, DO NOT SAMPLE THE QUEUE AFTER A PROXY.
 		//
 		// This used to wait for the TICK to advance and then read `KinkyDungeonFloaters.length`. The
 		// tick is not the event, and the queue is not a record of it: one damage floater is aged out
@@ -413,7 +413,7 @@ test('snapshots delivered after a hit do not re-create its floaters', async ({ b
 		await B.waitForTimeout(500);
 		const afterMoving = await coopFloaters(B);
 
-		// KDM-220 — assert on CREATION, not on queue depth. Queue depth was only ever a proxy, and a
+		// Assert on CREATION, not on queue depth. Queue depth was only ever a proxy, and a
 		// leaky one in both directions: it expires (the flake) and it could also hide a live bug that
 		// re-created floaters at roughly the rate they age out. Creation is the defect itself — "each
 		// delivered snapshot replays the last event's visuals" is a statement about how many floaters
@@ -433,7 +433,7 @@ test('snapshots delivered after a hit do not re-create its floaters', async ({ b
 });
 
 /**
- * REPRO 7 — the move reticule must FOLLOW THE MOUSE (KDM-186, UAT round 4).
+ * REPRO 7 — the move reticule must FOLLOW THE MOUSE (UAT round 4).
  *
  * Reported: "the red square (mouse hover of the next move) is stuck and doesn't rely on the mouse
  * position."
@@ -444,7 +444,7 @@ test('snapshots delivered after a hit do not re-create its floaters', async ({ b
  * (Reproduced: reticule {1,0} while the last direction sent was {-1,1}.) v3 keeps the newest and
  * sends it when the slot frees, so a stream converges; commands are still never sampled.
  *
- * ⚠️ THIS TEST DOES NOT GUARD RULE 1 — that is `tests/e2e/mp-input-rule1.spec.ts` (KDM-198).
+ * ⚠️ THIS TEST DOES NOT GUARD RULE 1 — that is `tests/e2e/mp-input-rule1.spec.ts`.
  * Measured, not assumed: reverting Rule 1 to v2 (drop the superseded send instead of holding the
  * newest) leaves this test GREEN, while `mp-input-rule1`'s stream test goes red on both attempts.
  * The reason is structural — `KinkyDungeonMoveDirection` is recomputed by KD's own draw loop from the
@@ -495,7 +495,7 @@ test('the move reticule follows the mouse', async ({ browser }) => {
 });
 
 /**
- * REPRO 8 — a presentation input must round-trip fast enough to feel immediate (KDM-186, UAT r4).
+ * REPRO 8 — a presentation input must round-trip fast enough to feel immediate (UAT r4).
  *
  * Reported: the move reticule "follows, but with delay, ~half a second" at ~100 fps. That is not a
  * sampling problem (Rule 1 v3 already converges on the newest value) — it is the COST of the round
@@ -510,11 +510,11 @@ test('the move reticule follows the mouse', async ({ browser }) => {
  * harness renders at ~4 fps against a real browser's ~95 — anything whose trigger is input RATE
  * cannot be reproduced here by playing. Latency is not rate-dependent: one input, one measurement.
  *
- * ── THE ORACLE IS IN FRAMES, NOT MILLISECONDS (KDM-214) ────────────────────────────────────────
+ * ── THE ORACLE IS IN FRAMES, NOT MILLISECONDS ────────────────────────────────────────
  * This test asserted `median < 120 ms` and was red at 716–755 ms. That budget was the WRONG UNIT,
- * and [[KDM-206]] proved it while investigating this exact number: server CPU per transaction is
+ * and a later measurement proved it while investigating this exact number: server CPU per transaction is
  * ~22 ms, which cannot produce a ~750 ms median, and the samples are quantised in ~250 ms steps
- * (clusters ~245 / ~550 / ~750 / ~950) that match the ~227 ms client frame period [[KDM-205]]
+ * (clusters ~245 / ~550 / ~750 / ~950) that match the ~227 ms client frame period
  * measured (`coopFps 4.4`). The page is single-threaded: a reply cannot be dispatched into a draw
  * loop that is mid-frame, so the round-trip is CLIENT-FRAME-BOUND, not payload-bound. 120 ms of
  * wall clock is below one frame of this harness — it asserted the headless frame rate, which is not
@@ -529,8 +529,8 @@ test('the move reticule follows the mouse', async ({ browser }) => {
  * client too and so inflates the very unit the budget is denominated in. The wire cost of the same
  * window is therefore asserted directly alongside it — in reply KINDS and in bytes, both
  * frame-rate-independent by construction. See the payload guard below for what that does and does
- * not cover; the short version is that these inputs move no state, so this window guards KDM-186's
- * "state on CHANGE, not on input" rule, not KDM-206's delta encoding.
+ * not cover; the short version is that these inputs move no state, so this window guards the
+ * "state on CHANGE, not on input" rule, not the delta encoding.
  */
 test('a presentation input round-trips quickly', async ({ browser }) => {
 	test.setTimeout(MP_TEST_TIMEOUT);
@@ -575,7 +575,7 @@ test('a presentation input round-trips quickly', async ({ browser }) => {
 
 		/**
 		 * TWO READS, ON PURPOSE — they want different windows, and conflating them was wrong in both
-		 * directions before this was measured (KDM-214):
+		 * directions before this was measured:
 		 *
 		 *   LATENCY is read at the end of the send loop, because KD's draw loop keeps emitting chatter
 		 *   while we wait. Every extra second of waiting deepens the queue those samples are drawn
@@ -626,8 +626,8 @@ test('a presentation input round-trips quickly', async ({ browser }) => {
 		const inFrames = lat.median / framePeriod;
 
 		// Printed on green too: these are the numbers that justify the unit, and the next person to
-		// question this budget should not have to re-instrument the spec to see them (KDM-214).
-		console.log(`[KDM-214] round-trip median ${lat.median} ms = ${inFrames.toFixed(2)} client ` +
+		// question this budget should not have to re-instrument the spec to see them.
+		console.log(`round-trip median ${lat.median} ms = ${inFrames.toFixed(2)} client ` +
 			`frames (period ${framePeriod.toFixed(0)} ms from ${lat.frames} frames / ${lat.seconds}s); ` +
 			`${win.bytes} B over ${win.replies} replies ${JSON.stringify(win.byKind)}; samples ${JSON.stringify(lat.samples)}`);
 
@@ -643,23 +643,23 @@ test('a presentation input round-trips quickly', async ({ browser }) => {
 		expect(inFrames, `a presentation input takes ${lat.median} ms to round-trip = ` +
 			`${inFrames.toFixed(2)} client frame periods (frame period ${framePeriod.toFixed(0)} ms, ` +
 			`measured in this same run). Samples ${JSON.stringify(lat.samples)}. The transaction is ` +
-			`no longer merely frame-bound — it has acquired a cost of its own. See KDM-205/206/214 ` +
-			`for why this is asserted in frames and not in wall-clock ms.`)
+			`no longer merely frame-bound — it has acquired a cost of its own. (Headless frame rates vary, ` +
+			`which is why this is asserted in frames and not in wall-clock ms.)`)
 			.toBeLessThan(BUDGET_FRAMES);
 
 		// THE PAYLOAD GUARD — and the assertion that carries this test's regression duty, since the
 		// frames budget above cannot. That is measured, not assumed: forcing `_stateFrame` to answer
-		// with full snapshots (KDM-214) put the round-trip at 6.4 frames on one attempt and 5.9 —
+		// with full snapshots put the round-trip at 6.4 frames on one attempt and 5.9 —
 		// green — on the retry, because a payload blow-up slows the CLIENT too and inflates the very
 		// frame period the budget is denominated in. A frames-only oracle partly cancels the
 		// regression out. Bytes and reply KINDS do not cancel.
 		//
-		// WHAT THIS WINDOW ACTUALLY EXERCISES (KDM-214, measured — this was assumed wrong twice). Almost
+		// WHAT THIS WINDOW ACTUALLY EXERCISES (measured — this was assumed wrong twice). Almost
 		// every reply here is a bare `ack`: KD's draw loop emits a direction every frame, those move no
-		// captured state, and KDM-186 RULE 2 answers an input that changed nothing with an ack. Measured
+		// captured state, and input RULE 2 answers an input that changed nothing with an ack. Measured
 		// `{"ui":2,"turn":0,"ack":19}` and `{"ui":4,"turn":0,"ack":37}` — and `{"ui":0,...,"ack":20}` on
 		// runs where the client's supersede rule swallowed all five deliberate updates. So `_stateFrame`
-		// — and with it KDM-206's delta encoding — is barely reached on this path, and a delta-encoding
+		// — and with it the delta encoding — is barely reached on this path, and a delta-encoding
 		// regression is NOT reliably visible here. It has a guard of its own in
 		// `tests/unit/mp-delta-codec.spec.ts` (38.1 KB -> 115 B); this is not that guard, and pretending
 		// otherwise would be a vacuous assertion that can only ever pass.
@@ -684,7 +684,7 @@ test('a presentation input round-trips quickly', async ({ browser }) => {
 		expect(stateShare, `${win.byKind.ui || 0} of ${win.replies} presentation inputs were answered ` +
 			`with a STATE frame (${JSON.stringify(win.byKind)}) — ${(stateShare * 100).toFixed(0)}%. ` +
 			`KD's draw loop emits an input every frame and almost none of them move state, so almost ` +
-			`all of these must be bare acks: KDM-186 RULE 2, "state on CHANGE, not on input". ` +
+			`all of these must be bare acks: input RULE 2, "state on CHANGE, not on input". ` +
 			`State-per-input is what pegged the server and stalled lockstep entirely.`)
 			.toBeLessThan(0.5);
 
@@ -692,7 +692,7 @@ test('a presentation input round-trips quickly', async ({ browser }) => {
 		expect(bytesPerReply, `each reply to a presentation input carries ` +
 			`${Math.round(bytesPerReply)} B (${win.bytes} B over ${win.replies} replies, ` +
 			`${JSON.stringify(win.byKind)}) — this window measures ~110 B/reply green, and ~40 KB was ` +
-			`the pre-KDM-186 cost of answering every input with a full snapshot. A reply this size ` +
+			`the original cost of answering every input with a full snapshot. A reply this size ` +
 			`means state is riding along with the chatter again.`)
 			.toBeLessThan(2000);
 	} finally {

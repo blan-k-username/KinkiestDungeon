@@ -1,15 +1,15 @@
 /**
- * KD-093 / KD-073 §B — a bind STICKS across swaps.
+ * A bind STICKS across swaps.
  *
  * This file used to drive `{kind:'pvpBind'}`, the synthetic PvP primitive that wrote a restraint onto
- * the target's bundle outside the game. KDM-164 deleted that primitive — there is one combat model now
+ * the target's bundle outside the game. The real-pipeline rework deleted that primitive — there is one combat model now
  * — so the bind here is applied through KD's own player path (`KinkyDungeonAddRestraint`, with the
  * victim swapped in), which is exactly what `_reconcilePeers` uses in real play.
  *
  * What this file uniquely covers, and why it is not redundant with `mp-pvp-bind-reconcile.spec.ts`
  * (which covers the real tie GATE — who may be tied and when): **persistence**. A restraint is worn
  * state, and the derived consequences of wearing it (slow level) are NOT carried in the bundle — they
- * self-heal from the captured inventory on the victim's next turn. That is the KD-073 §B finding, and
+ * self-heal from the captured inventory on the victim's next turn. That is an earlier assessment's finding, and
  * a swap model can silently lose it.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -37,7 +37,7 @@ function bindB(s: any) {
 	return r;
 }
 
-describe('PvP binding persists across swaps (KD-093 / KD-073 §B)', () => {
+describe('PvP binding persists across swaps', () => {
 	let s: any;
 	beforeEach(() => { s = freshSession(); }, BOOT_TIMEOUT);
 

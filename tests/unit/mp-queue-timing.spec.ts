@@ -1,5 +1,5 @@
 /**
- * KDM-186 — the ws-bridge queue-timing instrumentation must actually MEASURE, not just exist.
+ * The ws-bridge queue-timing instrumentation must actually MEASURE, not just exist.
  *
  * The 2026-08-17 profile put a `ui` transaction at ~16-20 ms of server CPU against the owner's
  * measured 1067 ms round-trip. The wait is therefore not the work, and the instrumentation added to
@@ -48,7 +48,7 @@ function connect(port: number): Promise<any> {
 	});
 }
 
-describe('KDM-186 — ws-bridge queue-timing instrumentation', () => {
+describe('ws-bridge queue-timing instrumentation', () => {
 	it('populates every latency field from real traffic over a real socket', async () => {
 		// Strict lockstep + idleGraceMs 0 — the DEMO's configuration, and the one under which a turn can
 		// stall indefinitely waiting on a human. That stall is what the barrier line must report.
@@ -59,7 +59,7 @@ describe('KDM-186 — ws-bridge queue-timing instrumentation', () => {
 			const b = await connect(port);
 			a.on('data', () => {}); b.on('data', () => {});
 			/*
-			 * KDM-255 — through the join gate, which is now the only road in. This spec reads nothing
+			 * Through the join gate, which is now the only road in. This spec reads nothing
 			 * off its sockets on purpose (it is timing the raw wire, not the protocol), so the host's
 			 * answer is written blind after a short settle rather than on seeing `join_pending`. The
 			 * `session.started` precondition two lines down is what proves the handshake completed —
@@ -93,7 +93,7 @@ describe('KDM-186 — ws-bridge queue-timing instrumentation', () => {
 			expect(lines.length, "the ticker must have emitted lines for the browser").toBeGreaterThan(0);
 			const all = lines.join("\n");
 			// eslint-disable-next-line no-console
-			console.log("\nKDM-186 [mp-stats] as the owner will see it:\n  " + lines.join("\n  ") + "\n");
+			console.log("\n[mp-stats] as the owner will see it:\n  " + lines.join("\n  ") + "\n");
 
 			for (const field of ["apply p50=", "wait p95=", "batched=", "loopLag", "writes=", "maxSocketBacklog="]) {
 				expect(all, "the emitted line must report " + field).toContain(field);

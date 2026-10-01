@@ -1,9 +1,9 @@
 /**
- * KDM-237 — a player's chosen NAME, from the seat that owns it to the bundle that carries it.
+ * A player's chosen NAME, from the seat that owns it to the bundle that carries it.
  *
  * Both players are the same default character today, and both are labelled `Player <id>`. This slice
- * gives each of them the name they already typed into the lobby (KDM-233 collects it for the host's
- * accept prompt and then throws it away).
+ * gives each of them the name they already typed into the lobby (it is collected for the host's
+ * accept prompt and then thrown away).
  *
  * ── WHY THE GATE, AND NOT THE SOCKET ──────────────────────────────────────────────────────────────
  * A reconnecting player does not re-seat — `ws-bridge.js` answers a known id at a running session
@@ -34,7 +34,7 @@ const BUILD = 'kd-5.5.0-abc123';
 // ---------------------------------------------------------------------------------------------
 // The pure half: who is named, and what happens to that name. No socket, no world — milliseconds.
 // ---------------------------------------------------------------------------------------------
-describe('KDM-237 — sanitizeName (N4)', () => {
+describe('sanitizeName (N4)', () => {
 	it('trims, and answers empty for a name that is only whitespace', () => {
 		expect(sanitizeName('  Ada  ')).toBe('Ada');
 		expect(sanitizeName('   ')).toBe('');
@@ -59,12 +59,12 @@ describe('KDM-237 — sanitizeName (N4)', () => {
 	});
 
 	it('is not an identity — two players may choose the same name', () => {
-		// N4: `clientId` is the identity (KDM-252). A name grants nothing and collides freely.
+		// N4: `clientId` is the identity. A name grants nothing and collides freely.
 		expect(sanitizeName('Ada')).toBe(sanitizeName('Ada'));
 	});
 });
 
-describe('KDM-237 — JoinGate carries the name on the SEAT', () => {
+describe('JoinGate carries the name on the SEAT', () => {
 	let g: any;
 	beforeEach(() => { g = new JoinGate({ build: BUILD }); });
 
@@ -125,7 +125,7 @@ describe('KDM-237 — JoinGate carries the name on the SEAT', () => {
 // The session half, on a real booted world. One boot carries BOTH the named and the unnamed player,
 // so the feature and its fallback are measured against each other rather than in separate runs.
 // ---------------------------------------------------------------------------------------------
-describe('KDM-237 — the name reaches the world (S1, S2, N3)', () => {
+describe('the name reaches the world (S1, S2, N3)', () => {
 	let s: any = null;
 
 	beforeAll(async () => {
@@ -202,7 +202,7 @@ describe('KDM-237 — the name reaches the world (S1, S2, N3)', () => {
 	});
 
 	it('P3 — a late arrival is named on the same terms', () => {
-		// `_seatPlayer` is shared by `_start` and `joinInProgress` (KDM-235), so this costs nothing
+		// `_seatPlayer` is shared by `_start` and `joinInProgress`, so this costs nothing
 		// to support — but "costs nothing" is a claim, and an unasserted claim is how it breaks.
 		s.setPlayerName('C', 'Cy');
 		const res = s.joinInProgress('C');
@@ -214,7 +214,7 @@ describe('KDM-237 — the name reaches the world (S1, S2, N3)', () => {
 	});
 
 	// -----------------------------------------------------------------------------------------
-	// KDM-282 — and what an unnamed player is actually CALLED.
+	// And what an unnamed player is actually CALLED.
 	//
 	// Nested inside this describe on purpose: it shares the one booted session, so the new SEAT
 	// label and the legacy `Player <id>` fallback are measured against each other in the same run
@@ -226,7 +226,7 @@ describe('KDM-237 — the name reaches the world (S1, S2, N3)', () => {
 	// SwapSession in this suite, `mp-pvp-realcombat` included — must keep the byte-identical legacy
 	// string. The seat label is a MIDDLE tier under the chosen name, not a replacement for either.
 	// -----------------------------------------------------------------------------------------
-	describe('KDM-282 — an unnamed player is labelled by SEAT, not by their raw id', () => {
+	describe('an unnamed player is labelled by SEAT, not by their raw id', () => {
 		it('the host seat reads as Player 1, the guest seat as Player 2', () => {
 			// Ids deliberately id-SHAPED rather than friendly: the whole defect is that a real
 			// clientId is an opaque random string, so 'H'/'G' here would hide what is being fixed.

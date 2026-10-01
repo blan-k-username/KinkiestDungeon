@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# KDM-167: run the e2e layer as ONE CONTAINER PER SPEC instead of one long run.
+# Run the e2e layer as ONE CONTAINER PER SPEC instead of one long run.
 #
 # Usage:
 #   tools/run-e2e-isolated.sh              # every tests/e2e/*.spec.ts
@@ -107,7 +107,7 @@ for spec in "${SPECS[@]}"; do
 	# `browserType.launch: … has been closed` was the miss that mattered most: the browser died
 	# BEFORE the test body, so it produced a 0 ms failure with none of the in-test signatures, and
 	# the summary cheerfully said "contention signatures: NONE" for a pure resource death.
-	if grep -qE '^\s+Error: (\[KDM-167\] co-op boot (TIMEOUT|ABORTED)|page\.evaluate: Target crashed|browserType\.launch:|.*Target (page|crashed)|.*context or browser has been closed)' "$log"; then
+	if grep -qE '^\s+Error: (co-op boot (TIMEOUT|ABORTED)|page\.evaluate: Target crashed|browserType\.launch:|.*Target (page|crashed)|.*context or browser has been closed)' "$log"; then
 		CONTENDED+=("$name")
 	fi
 

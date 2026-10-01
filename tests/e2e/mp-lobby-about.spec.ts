@@ -1,5 +1,5 @@
 /**
- * E2E (KDM-272) — co-op's divergences are stated ONCE, in our own lobby, before the player makes
+ * E2E — co-op's divergences are stated ONCE, in our own lobby, before the player makes
  * any of the declarations they diverge from.
  *
  * ── WHY THE BRIEFING IS AT `lobby.open()` AND NOT "AFTER APPROVAL" ────────────────────────────────
@@ -67,7 +67,7 @@ function assertBriefingPainted(seen: string[]) {
 }
 
 /**
- * KDM-293 — the briefing is shown on the first co-op ENTRY, not on arriving at a menu.
+ * The briefing is shown on the first co-op ENTRY, not on arriving at a menu.
  *
  * There is no Multiplayer menu any more: `openLobby` now parks on KD's own class screen, and the
  * briefing is what a first-ever player sees when they press Host or Join. So every test here that
@@ -79,7 +79,7 @@ async function openAndEnter(page: any, port: number) {
 	await press(page, 'KDMPJoin');
 }
 
-test.describe('KDM-272 — how co-op differs, said once, before the run', () => {
+test.describe('how co-op differs, said once, before the run', () => {
 
 	test('a first-ever co-op entry lands on the briefing, before anything is declared (AC1)',
 		async ({ browser }) => {

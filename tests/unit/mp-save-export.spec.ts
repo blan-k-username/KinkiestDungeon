@@ -1,7 +1,7 @@
 /**
- * Node-layer (Vitest) — KDM-244: leave co-op and continue the run alone (MP → SP).
+ * Node-layer (Vitest) — leave co-op and continue the run alone (MP → SP).
  *
- * The mirror of KDM-243. There the host brought a world IN; here the host takes it back OUT, as a
+ * The mirror of the save import. There the host brought a world IN; here the host takes it back OUT, as a
  * save the stock game can open. Three layers, same split as the import:
  *
  *   the world   `HeadlessHost.exportSave(excludeIds)` — KD's own generator, driven headless (R2, R5)
@@ -116,7 +116,7 @@ function coopSession(seed: string): any {
 	return Object.assign(s, { _hostPos: pos });
 }
 
-describe('KDM-244 — the world: KD\'s own generator, driven headless', () => {
+describe('the world: KD\'s own generator, driven headless', () => {
 	let s: any, exported = '', save: any;
 
 	beforeAll(() => {
@@ -155,7 +155,7 @@ describe('KDM-244 — the world: KD\'s own generator, driven headless', () => {
 	}, BOOT);
 });
 
-describe('KDM-244 — the export LOADS, and an un-stripped one does not', () => {
+describe('the export LOADS, and an un-stripped one does not', () => {
 	let s: any, exported = '';
 
 	beforeAll(() => {
@@ -222,7 +222,7 @@ describe('KDM-244 — the export LOADS, and an un-stripped one does not', () => 
 	}, BOOT);
 });
 
-describe('KDM-244 — A2a: a stripped avatar takes its bondage record with it', () => {
+describe('A2a: a stripped avatar takes its bondage record with it', () => {
 	let s: any, save: any, tiedId = 0;
 
 	beforeAll(() => {
@@ -261,7 +261,7 @@ describe('KDM-244 — A2a: a stripped avatar takes its bondage record with it', 
 	}, BOOT);
 });
 
-describe('KDM-244 — R10: exporting does not disturb the live session', () => {
+describe('R10: exporting does not disturb the live session', () => {
 	let s: any;
 
 	beforeAll(() => { s = coopSession('kdm244-readonly'); }, BOOT);
@@ -300,7 +300,7 @@ describe('KDM-244 — R10: exporting does not disturb the live session', () => {
 	}, BOOT);
 });
 
-describe('KDM-244 — R1/R11: the world is the host\'s, and only the host\'s', () => {
+describe('R1/R11: the world is the host\'s, and only the host\'s', () => {
 	let s: any;
 
 	beforeAll(() => { s = coopSession('kdm244-hostonly'); }, BOOT);
@@ -326,7 +326,7 @@ describe('KDM-244 — R1/R11: the world is the host\'s, and only the host\'s', (
 	}, BOOT);
 });
 
-describe('KDM-244 — R13: a session that never exports is unchanged', () => {
+describe('R13: a session that never exports is unchanged', () => {
 	it('R13 — the regression guard for the whole existing MP suite', () => {
 		/*
 		 * Every co-op e2e runs on this path. The claim is narrow on purpose: constructing and playing

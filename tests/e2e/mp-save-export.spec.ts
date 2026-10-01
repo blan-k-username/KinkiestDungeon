@@ -1,5 +1,5 @@
 /**
- * E2E (KDM-244) — the co-op run comes back out as a save a STOCK game can open.
+ * E2E — the co-op run comes back out as a save a STOCK game can open.
  *
  * ── WHY THIS SPEC EXISTS, GIVEN THE UNIT LAYER ────────────────────────────────────────────────────
  * `mp-save-export.spec.ts` (unit) proves the export loads — into OUR headless host, on OUR build,
@@ -145,7 +145,7 @@ function markHost(bridge: any, gold: number): string {
 	return hostId;
 }
 
-test.describe('KDM-244 — leave co-op and continue the run alone', () => {
+test.describe('leave co-op and continue the run alone', () => {
 	test('the exported run opens in a STOCK game, and replaces the pre-co-op save', async ({ browser }) => {
 		test.setTimeout(MP_TEST_TIMEOUT);
 		const { server, bridge, port } = await start(0);

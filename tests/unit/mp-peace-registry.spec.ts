@@ -1,18 +1,18 @@
 /**
- * KDM-225 — the peace/war relationship machine (`tools/mp-server/peace.js`), on its own.
+ * The peace/war relationship machine (`tools/mp-server/peace.js`), on its own.
  *
  * This is the pure half of the feature: who is at war with whom, who owes whom an answer, and what
  * each answer does. It touches no game and boots no world, which is why it lives apart from
  * `swap-session.js` (architecture A1) — every rule below is checked in milliseconds instead of behind
  * a 30-second session boot, and these are the rules that are easiest to get subtly wrong.
  *
- * Requirement ids refer to the `## Requirements (EARS)` section of KDM-225.
+ * The requirement ids on the tests name the behaviours this spec pins.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { PeaceRegistry } = require('../../tools/mp-server/peace');
 
-describe('KDM-225 — PeaceRegistry', () => {
+describe('PeaceRegistry', () => {
 	let r: any;
 	beforeEach(() => { r = new PeaceRegistry(); });
 

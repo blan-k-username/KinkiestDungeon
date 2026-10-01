@@ -1,10 +1,10 @@
 /**
- * E2E (KDM-293) — co-op is reached from KD's OWN class/start screen, not from a menu of ours.
+ * E2E — co-op is reached from KD's OWN class/start screen, not from a menu of ours.
  *
  * ── WHAT THIS SLICE INVERTS ───────────────────────────────────────────────────────────────────────
  * Until now the road was: main menu -> OUR Multiplayer menu -> "Character" -> KD's 'Diff' screen ->
  * commit -> back to OUR menu -> Host/Join. The lobby SENT you to KD's screen and had to BORROW three
- * of its buttons to get you back (borrowButtons, KDM-256).
+ * of its buttons to get you back (borrowButtons).
  *
  * Now the player is simply on 'Diff' — KD's own road, Menu -> Name -> Diff — builds a character the
  * way they always would, and Host / Continue Save / Join are right there. Nothing is borrowed,
@@ -28,12 +28,12 @@
  *     (join-gate.js:223) and by applyModes running after it (headless-host.js:1793).
  *     It therefore asserts the HOST'S WORLD, never the wire — the key on the wire is EXPECTED, and a
  *     test asserting its absence would go green for the wrong reason.
- *  3. #8 is #7's twin from the other side: the world controls must stay LIVE. KDM-291 decided against
+ *  3. #8 is #7's twin from the other side: the world controls must stay LIVE. It was decided against
  *     suppressing them, so a future "helpful" enabled = false is a regression nothing else notices.
  *  4. #10 is what keeps the de-duplication claim honest. Without it "we deleted the root menu" is
  *     asserted nowhere, and a half-done deletion passes every other test in this file.
  *
- * ⚠️ FAILS UNTIL KDM-293 IS IMPLEMENTED. Written first, per the project's Rule 1.
+ * ⚠️ FAILS UNTIL THE FEATURE IS IMPLEMENTED. Written first, per the project's Rule 1.
  */
 import { test, expect } from '../helpers/playwright-fixtures';
 import { bootKD } from '../helpers/bundle';
@@ -65,7 +65,7 @@ async function pickClass(page: any, index: number) {
 /**
  * Press a co-op entry, and dismiss the briefing if this page has never seen it.
  *
- * KDM-272's briefing is shown on a first-ever co-op entry, and a bundle-only test page never has
+ * The co-op briefing is shown on a first-ever co-op entry, and a bundle-only test page never has
  * `__coopBriefingSeen`, so it is shown EVERY time here. `openLobby` in the shared helper takes the
  * same line for the same reason: every spec but the one that is about the briefing wants what comes
  * after it. #12 below is that one spec, and it opts out by not using this.
@@ -76,7 +76,7 @@ async function enter(page: any, button: string) {
 	if (phase === 'about') await press(page, 'KDMPBack');
 }
 
-test.describe('KDM-293 — the co-op entries live on KD\'s class screen', () => {
+test.describe('the co-op entries live on KD\'s class screen', () => {
 
 	test('#1 the entries are on the class screen, and the screen is still KD\'s', async ({ isolatedPage: page }) => {
 		await bootKD(page);
@@ -167,7 +167,7 @@ test.describe('KDM-293 — the co-op entries live on KD\'s class screen', () => 
 	});
 
 	/**
-	 * KDM-272's invariant, re-established (KDM-293 R4.5).
+	 * The briefing's invariant, re-established.
 	 *
 	 * The briefing's first line is about start perks being the PARTY's — a choice the player cannot
 	 * take back. It used to be guaranteed upstream of every declaration by sitting on the root menu,
@@ -213,11 +213,11 @@ test.describe('KDM-293 — the co-op entries live on KD\'s class screen', () => 
 		await injectLobby(page);
 		await onClassScreen(page);
 
-		// KDM-291 / KDM-293 R6: the server partitions world keys from player keys, so these are
+		// The server partitions world keys from player keys, so these are
 		// misleading at worst, never harmful — and the answer is a sentence on the handshake screen,
 		// not dead controls. This fails the moment somebody adds suppression.
 		//
-		// ⚠️ FOUR controls, not the seven KDM-293's assessment claimed. The three
+		// ⚠️ FOUR controls, not the seven the original assessment claimed. The three
 		// KinkyDungeonProgressionMode* buttons sit inside a BLOCK COMMENT in KD
 		// (KinkyDungeon.ts:2662-2698, "now its all handled in the logic for the roguelike map
 		// selector"), so a grep for DrawButtonKDEx( counted them and the running game does not.
@@ -265,7 +265,7 @@ test.describe('KDM-293 — the co-op entries live on KD\'s class screen', () => 
 	});
 });
 
-test.describe('KDM-293 — a character built on KD\'s screen reaches the host', () => {
+test.describe('a character built on KD\'s screen reaches the host', () => {
 
 	test('#5 the guest arrives as the character they built', async ({ browser }) => {
 		test.setTimeout(MP_TEST_TIMEOUT);

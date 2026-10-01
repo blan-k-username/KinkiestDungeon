@@ -1,5 +1,5 @@
 /**
- * E2E (KDM-233) — the Multiplayer entry lives in KD's OWN main menu, installed from the injection
+ * E2E — the Multiplayer entry lives in KD's OWN main menu, installed from the injection
  * layer, with no edit to the game tree.
  *
  * ── WHY THIS CAN WORK AT ALL ──────────────────────────────────────────────────────────────────────
@@ -39,11 +39,11 @@ const buttonNames = (page: any) => page.evaluate(() => {
 	return Object.keys(KDButtonsCache);
 });
 
-test.describe('KDM-233/293 — the co-op entries, installed from outside the game tree', () => {
+test.describe('the co-op entries, installed from outside the game tree', () => {
 	test('the entries are absent until injected, then live (E1 entry point)', async ({ isolatedPage: page }) => {
 		await bootKD(page);
 
-		// KDM-293 — the entries moved from KD's main menu to its class/start screen, and the claim
+		// The entries moved from KD's main menu to its class/start screen, and the claim
 		// this test makes moved with them: they are installed from OUTSIDE the game tree, so a stock
 		// page must not have them. `mp-entry-diff` asserts they are present and behave; only this one
 		// asserts they are ABSENT beforehand, which is what proves the wrapper put them there.
@@ -68,7 +68,7 @@ test.describe('KDM-233/293 — the co-op entries, installed from outside the gam
 			return { screen: KinkyDungeonState, phase: window.KDMPLobby && window.KDMPLobby.phase };
 		});
 		expect(state.screen).toBe('Multiplayer');
-		// KDM-272 — a player who has never been told how co-op differs lands on the BRIEFING. This
+		// A player who has never been told how co-op differs lands on the BRIEFING. This
 		// page injects the lobby script alone, with no `coop-bootstrap.js` to remember anything, so it
 		// is a first-ever entry every time — the degraded reading the lobby is specified to take
 		// (`briefingSeen()` answers false when it cannot know).
@@ -83,7 +83,7 @@ test.describe('KDM-233/293 — the co-op entries, installed from outside the gam
 
 		const names = await buttonNames(page);
 		expect(names.sort(), 'exactly our own buttons — a stock fallthrough would add more')
-			// KDM-293 — the root menu is gone; what is left is the connect form. `KDMPAbout` is the
+			// The root menu is gone; what is left is the connect form. `KDMPAbout` is the
 			// way back into the briefing, which used to hang off the root and now hangs off this.
 			.toEqual(['KDMPAbout', 'KDMPBack', 'KDMPConnect']);
 	});

@@ -1,10 +1,10 @@
 /**
- * E2E (KDM-233) — the whole join, driven the way a player drives it.
+ * E2E — the whole join, driven the way a player drives it.
  *
  * Two browser contexts against a real demo server: the host clicks Host Game, the guest types the
  * host's address and clicks Join, and **nothing happens to the session until the host clicks
  * Accept**. That last clause is the feature — approval-only is the entire gate (R2; there is no code
- * and no password, per the LAN-only posture in KDM-226), so a guest who gets in without the host
+ * and no password, per the LAN-only posture), so a guest who gets in without the host
  * answering is the failure that matters most.
  *
  * `mp-join-approval.spec.ts` proves the protocol at the socket, in milliseconds. This proves the two
@@ -26,7 +26,7 @@ const { start } = require('../../tools/mp-server/demo-server');
 
 const MP_TEST_TIMEOUT = Number(process.env.KD_MP_TEST_TIMEOUT || 600_000);
 
-test.describe('KDM-233 — hosting and joining, end to end', () => {
+test.describe('hosting and joining, end to end', () => {
 	test('the host is ASKED, and only their Accept starts the session (E1, E2)', async ({ browser }) => {
 		test.setTimeout(MP_TEST_TIMEOUT);
 		const { server, bridge, port } = await start(0);
@@ -46,7 +46,7 @@ test.describe('KDM-233 — hosting and joining, end to end', () => {
 				{ timeout: 30_000, message: 'the host should be prompted' }).toBe('Ada');
 
 			// …and until they answer, the guest is in nobody's session.
-			// KDM-280: the host's id is generated per tab, so name the SEAT, not a literal.
+			// The host's id is generated per tab, so name the SEAT, not a literal.
 			expect(bridge.session.players, 'asking is not joining').toEqual([bridge.gate.host]);
 
 			await press(host, 'KDMPAccept');

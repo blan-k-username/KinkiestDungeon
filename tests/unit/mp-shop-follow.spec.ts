@@ -1,7 +1,7 @@
 /**
- * Node-layer (Vitest) — KDM-266: the shop HIGHLIGHT follows its item when a partner buys.
+ * Node-layer (Vitest) — the shop HIGHLIGHT follows its item when a partner buys.
  *
- * KDM-264 shipped the half that costs money (a purchase is tagged with the item the buyer's browser
+ * The shop identity fix shipped the half that costs money (a purchase is tagged with the item the buyer's browser
  * was showing, and the server re-finds it by identity). This is the DISPLAY half: B points at row 2,
  * A buys row 0, the stock shrinks, and row 2 is now a different potion. B's next click still buys the
  * right thing — the tag saves them — but for one turn they are looking at a lie.
@@ -146,7 +146,7 @@ function noticeCount(ctx: Ctx): number {
 	return logText(ctx).filter((t) => t === ctx.__keys.KDCoopShopItemSold).length;
 }
 
-describe('KDM-266 — the shop cursor follows its item across a partner\'s purchase', () => {
+describe('the shop cursor follows its item across a partner\'s purchase', () => {
 	let ctx: Ctx;
 	beforeEach(() => { ctx = makeClient(); });
 

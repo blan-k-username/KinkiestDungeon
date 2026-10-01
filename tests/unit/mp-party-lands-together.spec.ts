@@ -1,5 +1,5 @@
 /**
- * KDM-240 A3/R4-R6 — when the world's map changes, the whole party lands together, keeps its
+ * A3/R4-R6 — when the world's map changes, the whole party lands together, keeps its
  * avatars, and is told once.
  *
  * Three defects are pinned here, all of them shipping today (measured 2026-08-24):
@@ -23,7 +23,7 @@ import { mapId as worldMapId, descend as worldDescend } from './helpers/world';
 
 const BOOT_TIMEOUT = 300_000;
 
-describe('KDM-240 — a map change lands the whole party together', () => {
+describe('a map change lands the whole party together', () => {
 	let s: any;
 	beforeEach(async () => {
 		s = new SwapSession({ requiredPlayers: 2, seed: 'lands-together', pvp: false });
@@ -77,7 +77,7 @@ describe('KDM-240 — a map change lands the whole party together', () => {
 
 	/**
 	 * A real descent. The implementation — and the vacuous-pass warning that goes with it — lives in
-	 * `./helpers/world`, shared with every spec that needs a real transition (KDM-262).
+	 * `./helpers/world`, shared with every spec that needs a real transition.
 	 */
 	function descend() { return worldDescend(s, 'A'); }
 

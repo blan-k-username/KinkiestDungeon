@@ -1,9 +1,9 @@
 /**
- * Node-layer (Vitest) — KDM-228: the room the party is in is WORLD state, not per-player.
+ * Node-layer (Vitest) — the room the party is in is WORLD state, not per-player.
  *
  * `KDGameData.RoomType` / `.MapMod` say WHICH MAP everyone is on — "" for a dungeon floor,
  * `JourneyFloor` for the between-floors hub, `Tunnel`/`PerkRoom`/`ShopStart` for the side rooms. The
- * session has one world and one map, and a floor change moves the whole party (KDM-165).
+ * session has one world and one map, and a floor change moves the whole party.
  *
  * They were nonetheless absent from `KDGAMEDATA_WORLD_KEYS`, so `restorePlayer` re-installed them
  * from the acting player's captured bundle at the top of that player's slice of every turn
@@ -50,7 +50,7 @@ const BOOT_TIMEOUT = 240_000;
 /** A key no game code writes, so its arrival can only mean "this bundle was restored". */
 const CONTROL_KEY = '__kdm228RestoreProbe';
 
-describe('KDM-228 — the party\'s room is world state', () => {
+describe('the party\'s room is world state', () => {
 	let s: any;
 	beforeEach(async () => {
 		s = new SwapSession({ requiredPlayers: 2, seed: 'room-classification', pvp: false });

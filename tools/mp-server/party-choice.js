@@ -1,11 +1,11 @@
 /**
- * tools/mp-server/party-choice.js  (KDM-242 A1)
+ * tools/mp-server/party-choice.js 
  *
  * PROPOSE + CONFIRM, ONCE — the rule two players use to agree on one thing.
  *
- * WHY IT EXISTS. KDM-263 built this for the journey route: either player proposes, the other agrees,
- * a disagreement re-opens the question rather than deadlocking. KDM-242 needs the identical rule for
- * the perk card, and its Notes make that an explicit DRY obligation — build the arbitration once and
+ * WHY IT EXISTS. It was built first for the journey route: either player proposes, the other agrees,
+ * a disagreement re-opens the question rather than deadlocking. The perk agreement needs the identical rule for
+ * the perk card, and that is an explicit DRY obligation — build the arbitration once and
  * reuse it, or say why not. Comparing the two showed only five things differ, so those five are hooks
  * and everything else lives here.
  *

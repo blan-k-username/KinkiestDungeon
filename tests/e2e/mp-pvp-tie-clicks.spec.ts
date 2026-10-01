@@ -1,5 +1,5 @@
 /**
- * E2E (KD-101) — "Tie Up" via the REAL submenu BUTTONS, reproducing and pinning the live root cause.
+ * E2E — "Tie Up" via the REAL submenu BUTTONS, reproducing and pinning the live root cause.
  *
  * Server + reconcile bind A whenever addNPCRestraint fires (see mp-pvp-tie.spec.ts). The live "Tie Up
  * does nothing" is a UI-path issue: the generic-bind submenu defaults its selected material to the

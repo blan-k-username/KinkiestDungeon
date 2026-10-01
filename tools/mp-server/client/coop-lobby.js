@@ -1,11 +1,11 @@
 /**
- * tools/mp-server/client/coop-lobby.js  (KDM-233)
+ * tools/mp-server/client/coop-lobby.js 
  *
  * THE MULTIPLAYER ENTRY — Host / Continue / Join on KD's own class screen, "Host this game" on KD's
- * own in-game menu (KDM-294), "Join with this character" on KD's own save-slot screen (KDM-295), and
+ * own in-game menu, "Join with this character" on KD's own save-slot screen, and
  * the handshake screen behind them.
  *
- * ── KDM-293: WHY THERE IS NO MULTIPLAYER MENU ─────────────────────────────────────────────────────
+ * ── WHY THERE IS NO MULTIPLAYER MENU ──────────────────────────────────────────────────────────────
  * There was one, and it was the problem. It duplicated KD's own screens and — worse — a player who
  * had just built a character had to abandon it to reach co-op. The three ACTIONS now sit on `'Diff'`,
  * where the player already is; the two ROUTERS that used to send them to `'Stats'` and `'Diff'` are
@@ -37,7 +37,7 @@
  * set in that state is EXACTLY ours, which is what would catch a fallthrough painting the game
  * underneath the panel.
  *
- * ⚠️ MP-SPECIFIC (KDM-226's one-player test): a solo game has no lobby, no host and nobody to join.
+ * ⚠️ MP-SPECIFIC (by the one-player test): a solo game has no lobby, no host and nobody to join.
  */
 (function () {
 	'use strict';
@@ -48,7 +48,7 @@
 	var W = 1000, MID = W - 350 / 2;
 
 	var lobby = {
-		// KDM-293 — 'connect' (address + name) | 'waiting' (a request is out, or we are hosting) |
+		// 'Connect' (address + name) | 'waiting' (a request is out, or we are hosting) |
 		// 'about' (the briefing). The host's approval prompt is not a fourth phase: `drawHost` already
 		// branches on `lobby.pending`, so "somebody is asking" is data, not navigation.
 		phase: 'connect',
@@ -61,7 +61,7 @@
 		_drawCount: 0,           // observed by the double-wrap test
 		pending: null,           // { clientId, name } — someone asking to join OUR game
 		/**
-		 * KDM-257 — `{hostOnly, guestOnly, conflict}` from KDM-249's `diffDeclarations`, as it arrives
+		 * `{hostOnly, guestOnly, conflict}` from the mod-sync `diffDeclarations`, as it arrives
 		 * on `awaiting_approval` (guest) and `join_pending` (host). Null until one of those lands.
 		 *
 		 * Read-only here: this task RENDERS the diff and changes nothing about how it is computed or
@@ -69,11 +69,11 @@
 		 * scope had drifted.
 		 */
 		modDiff: null,
-		// KDM-239 R4 — the host's world declaration (`{ modes, seed }`), shown to a guest that is
+		// The host's world declaration (`{ modes, seed }`), shown to a guest that is
 		// waiting for approval. null = not told / nothing declared, which paints nothing.
 		world: null,
 		/**
-		 * KDM-287 — the addresses the SERVER says a friend could type, as they arrive on the host's
+		 * The addresses the SERVER says a friend could type, as they arrive on the host's
 		 * own `joined` (`coop-bootstrap.js`). Empty until then, and empty forever on a machine that
 		 * has only loopback — which is a real answer, not a missing one (see `shareLines`).
 		 *
@@ -86,7 +86,7 @@
 			return el ? String(el.value || '') : '';
 		},
 		/**
-		 * KDM-237 — the name this player will be known by, cached from the field every frame it is
+		 * The name this player will be known by, cached from the field every frame it is
 		 * drawn.
 		 *
 		 * ⚠️ CACHED, not read on demand. `KDCullTempElements` destroys any field not drawn this
@@ -98,7 +98,7 @@
 		name: '',
 		playerName: function () { return lobby.name; },
 		/**
-		 * KDM-259 — the world seed this host is naming, cached from the field on the same terms as
+		 * The world seed this host is naming, cached from the field on the same terms as
 		 * `name` above (and destroyed/re-created by `KDCullTempElements` for the same reason).
 		 *
 		 * ⚠️ `''` IS NOT "an empty seed" — it is "whatever the server was configured with", which is
@@ -107,11 +107,11 @@
 		 * own: the only two states are "the host named one" and "the host named nothing".
 		 *
 		 * Host-only by construction — it is passed by `hostConnect` and by nothing else, and the gate
-		 * drops a guest's copy anyway (KDM-239 A5).
+		 * drops a guest's copy anyway.
 		 */
 		seed: '',
 		/**
-		 * KDM-293 — the ONE declaration this lobby sends: class, outfit and perks, read from KD's own
+		 * The ONE declaration this lobby sends: class, outfit and perks, read from KD's own
 		 * globals at the moment of declaring.
 		 *
 		 * ⚠️ THERE IS NOTHING TO CACHE ANY MORE, and that is the whole shape of this slice. The lobby
@@ -141,7 +141,7 @@
 			} catch (e) { return null; }
 		},
 		/**
-		 * KDM-295 — `{character, name}` extracted from the save a player chose on KD's save-slot
+		 * `{character, name}` extracted from the save a player chose on KD's save-slot
 		 * screen, or `null` for every other entry. Set by `open()`'s third argument and RESET by every
 		 * `open()`, so it is per-entry and can never go stale: a player who backs out of a save-slot
 		 * join and then joins from the class screen declares the class screen's character (R7).
@@ -152,10 +152,10 @@
 			return lobby.fromSave ? lobby.fromSave.character : lobby.playerCharacter();
 		},
 		/**
-		 * KDM-293 — open the handshake screen, remembering the screen we came from.
+		 * Open the handshake screen, remembering the screen we came from.
 		 *
 		 * `returnTo` is what makes Back a real route back rather than a dead end, and it is what lets
-		 * KDM-272's briefing keep meaning something: the player can always return to the class grid
+		 * the co-op briefing keep meaning something: the player can always return to the class grid
 		 * and revise a choice they made before they were told the co-op rules. The old road showed the
 		 * briefing once, upstream of the perk grid; that ordering is gone with the root menu, and this
 		 * is what replaces it.
@@ -168,7 +168,7 @@
 		 * ⚠️ `action` RUNS AFTER THE BRIEFING, NEVER BEHIND IT. Host and Continue ask for a seat the
 		 * moment they are pressed, and a first-ever player is shown the briefing on the way in — so
 		 * passing the connect as a callback is what stops us advertising a session while the player is
-		 * still reading the rules that govern it. KDM-272 put the briefing upstream of every
+		 * still reading the rules that govern it. The briefing sits upstream of every
 		 * declaration; the root menu used to guarantee that by being upstream of the buttons, and this
 		 * is what guarantees it now that the buttons are on KD's screen.
 		 */
@@ -192,7 +192,7 @@
 		/** Back to the screen the player came from. Never to a menu of ours — there isn't one. */
 		close: function () { lobby.leave(); KinkyDungeonState = lobby.returnTo || 'Menu'; },
 		/**
-		 * KDM-236 T — the ONE way back to the lobby root.
+		 * The ONE way back to the lobby root.
 		 *
 		 * The Host view's Cancel, the Join view's Back and the root's own Back all come here. Three
 		 * copies of "drop the socket, clear the screen" is exactly the duplication to avoid, and the
@@ -210,8 +210,8 @@
 			lobby.status = '';
 			lobby.error = '';
 			lobby.modDiff = null;
-			lobby.world = null;   // KDM-239 R4 — cleared with the diff; both describe one join attempt
-			// KDM-287 — cleared for the same reason: it describes the session we just left, and the
+			lobby.world = null;   // cleared with the diff; both describe one join attempt
+			// Cleared for the same reason: it describes the session we just left, and the
 			// next one may be on a different port. A stale list would be a plausible-looking address
 			// nobody is listening on, which is worse than the honest fallback.
 			lobby.share = [];
@@ -233,7 +233,7 @@
 	}
 
 	/**
-	 * KDM-272 — the two questions the briefing asks of storage, both answered by the bootstrap.
+	 * The two questions the briefing asks of storage, both answered by the bootstrap.
 	 *
 	 * Bridged here for the same reason `connect()` is bridged above: the lobby is a screen, and the
 	 * one file that owns `kdcoop.` keys is `coop-bootstrap.js`. Absent — a bundle-only test page that
@@ -251,7 +251,7 @@
 	}
 
 	/**
-	 * KDM-281 — the one text helper, shared with `coop-bootstrap.js`.
+	 * The one text helper, shared with `coop-bootstrap.js`.
 	 *
 	 * `T(key[, params])` is KD's translation for `key` where it has one, else the English source in
 	 * `client/coop-text.js`. `kdText(key)` is the raw ask, `''` when KD has no word — `modeLabel`
@@ -275,7 +275,7 @@
 	// ---- the entries on KD's own class/start screen -----------------------------------------
 
 	/**
-	 * KDM-293 — Host / Continue Save / Join, on the screen the player is already standing on.
+	 * Host / Continue Save / Join, on the screen the player is already standing on.
 	 *
 	 * ── WHY HERE AND NOT ON A MENU OF OURS ────────────────────────────────────────────────────────
 	 * The root menu these three used to live on duplicated KD's own screens and, worse, forced a
@@ -311,7 +311,7 @@
 			return true;
 		}, true, COL, 650, COLW, 64, T('KDMPHostGame'), '#ffffff', '');
 
-		// KDM-243 A5 — hosting a run that is ALREADY IN PROGRESS. Drawn only when there is a save to
+		// Hosting a run that is ALREADY IN PROGRESS. Drawn only when there is a save to
 		// continue, so a player who has never played is not offered a button that can only disappoint
 		// them. The save is read at the PRESS, not at draw time — they may have been playing seconds
 		// ago, and the freshest save is the one they mean.
@@ -332,7 +332,7 @@
 	// ---- the entry on KD's in-game menu -----------------------------------------------------
 
 	/**
-	 * KDM-294 — "Host this game": the run the player is ALREADY PLAYING becomes the session.
+	 * "Host this game": the run the player is ALREADY PLAYING becomes the session.
 	 *
 	 * The owner's brief was "let the Host start the game as usual SP, no difference", so hosting is
 	 * reached from inside a solo game, on KD's own in-game menu (`KinkyDungeonDrawState === 'Restart'`),
@@ -366,7 +366,7 @@
 	}
 
 	/**
-	 * KDM-294 D294-2 — the run as it is RIGHT NOW, in the form KD itself saves it.
+	 * The run as it is RIGHT NOW, in the form KD itself saves it.
 	 *
 	 * KD's own recipe, verbatim from its "Get save code" (`KinkyDungeonHUD.ts`, Restart branch):
 	 * `KinkyDungeonSaveGame(true)` + `LZString.compressToBase64`. `true` means "to a string only" —
@@ -381,7 +381,7 @@
 	}
 
 	/**
-	 * KDM-243 A6 / KDM-294 D294-3 — host with a save, or refuse it in words and do NOT connect.
+	 * Host with a save, or refuse it in words and do NOT connect.
 	 *
 	 * The ONE judge-then-host, shared by Continue Save (the stored save) and Host this game (the live
 	 * run): they differ only in where the string comes from.
@@ -395,8 +395,8 @@
 	}
 
 	/**
-	 * KDM-294 R7 — a player who typed no name is known by their character's, never by a blank.
-	 * A name they DID type always wins. Shared with KDM-295, which takes it from a save slot.
+	 * A player who typed no name is known by their character's, never by a blank.
+	 * A name they DID type always wins. Shared with the entry that takes it from a save slot.
 	 */
 	function nameDefault(n) {
 		if (!lobby.name && n) lobby.name = String(n);
@@ -405,7 +405,7 @@
 	// ---- the entry on KD's save-slot screen -------------------------------------------------
 
 	/**
-	 * KDM-295 — "Join with this character": bring a character you already made, from a save slot.
+	 * "Join with this character": bring a character you already made, from a save slot.
 	 *
 	 * ── WHAT TRAVELS (owner's decision, 2026-09-29) ───────────────────────────────────────────────
 	 * The CHARACTER: class, outfit, perk choices, and its name as the default name. NOT the run —
@@ -433,7 +433,7 @@
 	}
 
 	/**
-	 * KDM-295 — a save string → `{character, name}`, or `null` if it cannot be read.
+	 * A save string → `{character, name}`, or `null` if it cannot be read.
 	 *
 	 * The three fields are the SAME three globals `playerCharacter()` reads live, as KD's own
 	 * `KinkyDungeonGenerateSaveData` stored them: `startingClass` ← `KinkyDungeonClassMode`, `dress`
@@ -454,7 +454,7 @@
 	}
 
 	/**
-	 * KDM-295 D295-1 — the ONE character package: `{class?, outfit?, perks?}`, or `null` for "declared
+	 * The ONE character package: `{class?, outfit?, perks?}`, or `null` for "declared
 	 * nothing" (never `{}` — see `playerCharacter`'s note on what `null` means downstream).
 	 * `entries` are `[key, on]` pairs, which is what both `Array.from(KinkyDungeonStatsChoice)` and a
 	 * save's `statchoice` are.
@@ -484,9 +484,9 @@
 	}
 
 	/**
-	 * KDM-295 — keep KD's save-slot paste box off OUR screen.
+	 * Keep KD's save-slot paste box off OUR screen.
 	 *
-	 * ⚠️ A dedicated screen does NOT hide every stock field for free (a correction to KDM-291 §2).
+	 * ⚠️ A dedicated screen does NOT hide every stock field for free (a correction to an earlier design note).
 	 * `saveInputField` is made by `ElementCreateTextArea`, not the per-frame `KDTextField`, so
 	 * `KDCullTempElements` never removes it; KD removes it by hand in each of its own exits from
 	 * `LoadSlots`, and ours is not one of them. Hidden, not removed: `ElementPosition` sets
@@ -498,7 +498,7 @@
 		if (el && el.style.display !== 'none') el.style.display = 'none';
 	}
 
-	// ---- KDM-272: how co-op differs, said once ---------------------------------------------
+	// ---- how co-op differs, said once ------------------------------------------------------
 
 	/**
 	 * The six rules a co-op player cannot learn by dying.
@@ -507,7 +507,7 @@
 	 * seventh rule should cost one line here and nothing else. Order is the Content list's: the perk
 	 * rule first, because it is the only one that changes a decision the player cannot take back.
 	 *
-	 * ⚠️ RULES, NOT VALUES (epic AC2 / KDM-272 AC5). No perk is named, no cost, no floor count, no
+	 * ⚠️ RULES, NOT VALUES. No perk is named, no cost, no floor count, no
 	 * threshold — nothing that would put a gameplay constant in `tools/mp-server/**` or that would
 	 * quietly go stale when the game rebalances. "Everyone's apply to everyone" stays true whatever
 	 * the perk list is.
@@ -518,7 +518,7 @@
 	];
 
 	/**
-	 * KDM-272 A2 — the briefing itself.
+	 * The briefing itself.
 	 *
 	 * A VIEW, not an overlay. It replaces the root rather than painting over it, which is the whole
 	 * point: an overlay would leave `KDMPPerks` registered in `KDButtonsCache` underneath, and a
@@ -550,7 +550,7 @@
 	}
 
 	/**
-	 * KDM-237 N1 — "Your name", drawn by KD's class screen AND the connect phase from one function.
+	 * "Your name", drawn by KD's class screen AND the connect phase from one function.
 	 *
 	 * Two call sites, one field: the host is asked on `'Diff'` (they connect straight from there, so
 	 * the field has to exist before Host is pressed), and the guest keeps theirs beside the address
@@ -564,14 +564,14 @@
 	function drawNameField(y) { drawField('KDMPName', T('KDMPYourName'), 'name', y); }
 
 	/**
-	 * KDM-259 — a labelled text field whose value lives in `lobby[key]`.
+	 * A labelled text field whose value lives in `lobby[key]`.
 	 *
 	 * One function because the name field and the seed field are the same widget with a different
 	 * label: both are drawn on a screen the player leaves and comes back to, both are therefore
 	 * destroyed by `KDCullTempElements`, and both survive only because of the cache-back on the last
 	 * line. Writing that mechanic twice is how the second copy would forget it.
 	 *
-	 * KDM-293 — `x`/`w` default to the handshake screen's centred column; `drawDiffEntries` passes
+	 * `X`/`w` default to the handshake screen's centred column; `drawDiffEntries` passes
 	 * its own so the same widget can sit in the right-hand column on KD's class screen.
 	 */
 	function drawField(id, label, key, y, x, w) {
@@ -584,12 +584,12 @@
 	}
 
 	/**
-	 * KDM-259 — the ONE way this lobby asks for the host seat.
+	 * The ONE way this lobby asks for the host seat.
 	 *
 	 * Host and Continue Save differ by exactly one argument (the save) and were already two copies of
 	 * the same declaration; the seed would have been the third field to keep in step across both.
 	 * `save` is passed only when there is one, so pressing Host still starts a new game for a player
-	 * who has a save sitting right there — the e2e control that KDM-243 pinned.
+	 * who has a save sitting right there — the case an e2e control pins.
 	 */
 	function hostConnect(save) {
 		var opts = {
@@ -603,7 +603,7 @@
 	}
 
 	/**
-	 * KDM-243 D1 — the save this player would continue: KD's own current slot, and nothing else.
+	 * The save this player would continue: KD's own current slot, and nothing else.
 	 *
 	 * One read of the one key KD's async save loop writes (`KinkyDungeon.ts:1520-1525`). No slot
 	 * picker and no `KinkyDungeonDBSave`/indexedDB path — "continue the run I was playing" is the
@@ -615,7 +615,7 @@
 	}
 
 	/**
-	 * KDM-243 A6 — the courtesy check, run before the host advertises a session at all.
+	 * The courtesy check, run before the host advertises a session at all.
 	 *
 	 * Applies KD's OWN acceptance rule (`KinkyDungeon.ts:7079-7086`: a save is usable only if all
 	 * seven of these are present) rather than a rule of our own, so this cannot refuse something the
@@ -646,7 +646,7 @@
 	var LOOPBACK = /^(localhost|127(\.\d{1,3}){3}|::1|0\.0\.0\.0)$/i;
 
 	/**
-	 * KDM-287 — WHAT THE HOST SHOULD BE TOLD TO SHARE. The whole decision, in one pure function.
+	 * WHAT THE HOST SHOULD BE TOLD TO SHARE. The whole decision, in one pure function.
 	 *
 	 * The screen used to paint `location.host` unconditionally, under a comment that was candid about
 	 * its assumption: "where THIS page came from … is exactly the thing to share", true only if the
@@ -690,7 +690,7 @@
 	}
 
 	function drawHost() {
-		// KDM-287 — the address a friend types, which is NOT necessarily where this page came from.
+		// The address a friend types, which is NOT necessarily where this page came from.
 		// See `shareLines` for which of the three it is; everything below moves down by `drop` so a
 		// second and third line have somewhere to go, and `drop` is 0 for the one-line case this
 		// screen has always had.
@@ -708,7 +708,7 @@
 		if (lobby.pending) {
 			DrawTextKD(T('KDMPWantsToJoin', { NAME: lobby.pending.name || T('KDMPSomeone') }),
 				W, 410 + drop, '#ffffff', '#000000', 30);
-			// KDM-257 R2 — what the host is agreeing to SEND. Between the question and the buttons,
+			// What the host is agreeing to SEND. Between the question and the buttons,
 			// because it is part of the question. The buttons move down by whatever it painted, so a
 			// long list never lands on top of Accept.
 			var below = drawModDiff(455 + drop, 'KDMPModsToSend');
@@ -733,7 +733,7 @@
 	}
 
 	/**
-	 * KDM-236 A1/A3 — what the address field is pre-filled with.
+	 * What the address field is pre-filled with.
 	 *
 	 * The address you last actually reached a host at, else this page's own origin. The memory lives
 	 * in the bootstrap (`__coopLastAddress`), which is the only place that knows an address WORKED;
@@ -753,7 +753,7 @@
 	}
 
 	function drawJoin() {
-		// KDM-295 R4 — said BEFORE Connect, every frame this phase is up: joining from a save brings
+		// Said BEFORE Connect, every frame this phase is up: joining from a save brings
 		// the character and leaves the run in the slot. Between the title (120) and the address (250).
 		if (lobby.fromSave) {
 			// Two lines, not one: a single sentence long enough to say both halves ran into KD's art
@@ -769,11 +769,11 @@
 		if (lobby.error) DrawTextKD(lobby.error, W, 480, '#ff8080', '#000000', 24);
 		else if (lobby.status) DrawTextKD(lobby.status, W, 480, '#ffffff', '#000000', 24);
 
-		// KDM-257 R1 — what this guest is about to load, named BEFORE it is in. The diff only exists
+		// What this guest is about to load, named BEFORE it is in. The diff only exists
 		// once the host has been asked, so in practice this paints while the "waiting for the host"
 		// status is up — which is exactly the window in which the guest can still walk away.
 		var below = drawModDiff(510, 'KDMPModsToGet');
-		// KDM-239 R4 — and the WORLD, under the mods, in the same window and for the same reason.
+		// And the WORLD, under the mods, in the same window and for the same reason.
 		// Laid out from whatever the mod list left behind so the two stack instead of overlapping,
 		// and each is independently silent when it has nothing to say.
 		below = drawWorldSummary(below ? below + 12 : 510) || below;
@@ -790,7 +790,7 @@
 			true, MID, joinY + 80, 350, 64, T('KDMPBack'), '#ffffff', '');
 
 		/*
-		 * KDM-272 A3 / KDM-293 R4.5 — the way back INTO the briefing, so it is not lost after the
+		 * The way back INTO the briefing, so it is not lost after the
 		 * first run. It used to live on the lobby root; when that was deleted this button went with
 		 * it and nothing noticed, because every screen still painted and every e2e still passed.
 		 *
@@ -809,13 +809,13 @@
 		}, true, MID, joinY + 160, 350, 64, T('KDMPAboutBtn'), '#ffffff', '');
 	}
 
-	// ---- KDM-257: what the two sides are about to exchange, in words -----------------------
+	// ---- what the two sides are about to exchange, in words --------------------------------
 
 	/** How many mods to name before collapsing the rest into a count. Screen space, not policy. */
 	var MODLIST_SHOWN = 4;
 
 	/**
-	 * KDM-283 — KD's OWN name for each world mode.
+	 * KD's OWN name for each world mode.
 	 *
 	 * ── WHY A TABLE AND NOT A PREFIX ────────────────────────────────────────────────────────────
 	 * This used to be `kdText('KinkyDungeonStat' + key)`. That prefix is wrong for EVERY one of the
@@ -882,7 +882,7 @@
 	}
 
 	/**
-	 * KDM-257 R1/R2/R6 — the host-only mod list, painted from ONE function for BOTH sides.
+	 * The host-only mod list, painted from ONE function for BOTH sides.
 	 *
 	 * The guest and the host are looking at the same list from opposite ends: these are the mods the
 	 * guest lacks, which is identical to the mods the host will send. Only the sentence above the
@@ -902,7 +902,7 @@
 	 * under it when there is something, and keeps its own stock layout byte-for-byte when there is not.
 	 */
 	/**
-	 * KDM-239 R4 — the world the guest is about to join, in words, before it commits.
+	 * The world the guest is about to join, in words, before it commits.
 	 *
 	 * Deliberately built on `drawModDiff`'s shape rather than beside it: same "silence is the correct
 	 * output for nothing to say" contract (return 0, caller keeps its stock layout byte-for-byte),
@@ -920,7 +920,7 @@
 		if (!w) return 0;
 		var modes = Array.isArray(w.modes) ? w.modes : [];
 		var seed = w.seed || '';
-		// KDM-283: resolve to WORDS first, because an unnameable mode is not painted at all — so
+		// Resolve to WORDS first, because an unnameable mode is not painted at all — so
 		// "is there anything worth a banner?" and the `…and N more` count must both be asked of the
 		// nameable list, not of the raw declaration. Asking the raw list is what put a bullet on
 		// screen with a developer string in it.
@@ -957,7 +957,7 @@
 		if (diff && Array.isArray(diff.conflict)) {
 			for (var c = 0; c < diff.conflict.length; c++) conflicts[diff.conflict[c].hash] = true;
 		}
-		// KDM-281 — the COUNT is filled HERE, where the number is known, so the key travels rather than
+		// The COUNT is filled HERE, where the number is known, so the key travels rather than
 		// a half-resolved sentence. A caller that resolved it first would be a second templating road.
 		DrawTextKD(T(leadKey, { COUNT: rows.length }), W, y, '#ffd98a', '#000000', 24);
 		var shown = Math.min(rows.length, MODLIST_SHOWN);
@@ -978,16 +978,16 @@
 	}
 
 	/**
-	 * KDM-257 R3 — a degraded mod sync, named while the game runs.
+	 * A degraded mod sync, named while the game runs.
 	 *
 	 * The owner's 2026-08-23 decision is that a degraded sync PROCEEDS rather than refusing the
-	 * session; this notice is what keeps that honest, and it is KDM-249's R9 ("a degraded or refused
+	 * session; this notice is what keeps that honest, and it is the mod-sync requirement ("a degraded or refused
 	 * sync SHALL be visible, not mysterious") finally reaching a screen.
 	 *
 	 * ⚠️ IT LIVES ON THIS FILE'S WRAP, NOT A NEW ONE. The notice paints during `KinkyDungeonState ===
 	 * 'Game'`, which is a fourth branch of the SINGLE `KinkyDungeonRun` wrap at the bottom of this
-	 * file — a second wrap of the same global from another client script is the bug [[KDM-229]] was
-	 * raised for. One global, one wrap.
+	 * file — a second wrap of the same global from another client script is a bug this code
+	 * has already had once. One global, one wrap.
 	 *
 	 * Persistent BY CONSTRUCTION: it re-reads live state every frame, so it lasts exactly as long as
 	 * the condition does and needs no dismissal, no timer and no latch. And it is silent for every
@@ -999,8 +999,8 @@
 	 * exist there) and that kills the PIXI ticker: MEASURED on both the host and the guest page of a
 	 * real started co-op session, `KinkyDungeonRun` runs 388 times and then zero, from the frame
 	 * `KinkyDungeonState` becomes `'Game'`. So the FRAME PATH into this function cannot be exercised
-	 * by any e2e in this repo today, and the spec calls it directly instead. See KDM-257's task notes
-	 * and the follow-up filed there.
+	 * by any e2e in this repo today, and the spec calls it directly instead. This gap is known;
+	 * a follow-up to close it is filed.
 	 */
 	function drawModWarning() {
 		if (!window.__coopMods || typeof window.__coopMods.state !== 'function') return;
@@ -1026,17 +1026,17 @@
 		// would be erased and our button would paint but never click.
 		var r = _prev.apply(this, arguments);
 		try {
-			// KDM-293 — the co-op entries live on KD's class/start screen. Nothing is drawn on 'Menu'
+			// The co-op entries live on KD's class/start screen. Nothing is drawn on 'Menu'
 			// and nothing is borrowed on 'Stats' any more: the player reaches both by KD's own road,
 			// so there is no journey of ours to send them on and none to bring them back from.
 			if (KinkyDungeonState === 'Diff') drawDiffEntries();
-			// KDM-295 — "Join with this character" beside KD's own "Play Slot".
+			// "Join with this character" beside KD's own "Play Slot".
 			else if (KinkyDungeonState === 'LoadSlots') drawSlotsEntry();
 			else if (KinkyDungeonState === 'Multiplayer') drawLobby();
-			// KDM-257 R3 — the degraded-sync notice, on THIS wrap. A second wrap of KinkyDungeonRun
-			// from another client script is the duplication [[KDM-229]] was raised for; one global,
+			// The degraded-sync notice, on THIS wrap. A second wrap of KinkyDungeonRun
+			// from another client script is a duplication this code has already removed once; one global,
 			// one wrap, and the branch that needs it lives here with the others.
-			// KDM-294 — and "Host this game" on KD's in-game menu, on the same branch for the same reason.
+			// And "Host this game" on KD's in-game menu, on the same branch for the same reason.
 			else if (KinkyDungeonState === 'Game') { drawModWarning(); drawGameEntry(); }
 		} catch (e) {
 			if (window.__KDMP_DEBUG) { try { console.error('[coop lobby]', e); } catch (_) { /* noop */ } }
@@ -1045,9 +1045,9 @@
 	};
 	KinkyDungeonRun._kdmp_lobby_wrapped = true;
 	KinkyDungeonRun._kdmp_lobby_original = _prev;
-	// KDM-257 — the test seam for the notice; see drawModWarning's own note for why it exists.
+	// The test seam for the notice; see drawModWarning's own note for why it exists.
 	lobby.drawModWarning = drawModWarning;
-	// KDM-244 — KD's own seven-field save rule, shared with the EXPORT direction's guarded write in
+	// KD's own seven-field save rule, shared with the EXPORT direction's guarded write in
 	// coop-bootstrap.js. One definition of "is this save loadable", used on the way in and the way
 	// out; a second copy over there would be the one that drifts from upstream.
 	lobby.saveIsUsable = saveIsUsable;

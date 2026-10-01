@@ -1,5 +1,5 @@
 /**
- * PROBE (KDM-230) — can the gateway open a KD DIALOGUE on a peer's bundle, and does it survive?
+ * PROBE — can the gateway open a KD DIALOGUE on a peer's bundle, and does it survive?
  *
  * The owner wants the peace offer to arrive as KD's modal dialogue rather than an entry on the
  * peer's own context menu. `KDStartDialog` stores the open dialogue in `KDGameData.CurrentDialog`,

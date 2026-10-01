@@ -13,7 +13,7 @@
  *
  * Use `test`/`expect` from this module in every integration/e2e spec.
  *
- * KDM-216 — WHICH ONE DO I WANT? Default to `kdPage`; it is the cheap one.
+ * WHICH ONE DO I WANT? Default to `kdPage`; it is the cheap one.
  * Reach for `isolatedPage` when your spec leaves something behind that
  * `resetKDState()` cannot undo — a monkey-patched global, an injected script tag,
  * an open socket. That helper re-runs KD's init functions; it does not restore

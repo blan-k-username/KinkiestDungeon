@@ -1,5 +1,5 @@
 /**
- * KDM-197 — an input type's kind must be backed by EVIDENCE, not by one observation.
+ * An input type's kind must be backed by EVIDENCE, not by one observation.
  *
  * `SwapSession` learns, per input type, whether it consumes a shared turn. Before this task the rule
  * was `seen = obs.advanced > 0 ? 'turn' : 'ui'`: ONE non-advancing occurrence demoted a type to `ui`
@@ -11,7 +11,7 @@
  * into it takes KD's `KinkyDungeonLaunchAttack` branch, which does nothing to an ally and never calls
  * `KinkyDungeonAdvanceTime`: `{advanced: 0, result: "nomove"}`. So the very first bump into your
  * co-op partner used to take `move` out of lockstep for the whole session. That is the third known
- * producer of a non-advancing move, after the KDM-208 contested-tile veto and any early-returning
+ * producer of a non-advancing move, after the contested-tile veto and any early-returning
  * handler — which is why the fix here is a rule, not a fourth special case:
  *
  *   1. a `turn` verdict the CLASSIFIER PROVED (AdvanceTime reachable through resolved callees only)
@@ -29,7 +29,7 @@ const { loadSources } = require('../../tools/mp-server/headless-host');
 
 const BOOT_TIMEOUT = 240_000;
 
-describe('KDM-197 static confidence', () => {
+describe('static confidence', () => {
 	it('separates a PROVEN turn-consuming type from a conservatively-guessed one', () => {
 		const { kinds, confidence, report } = classifyInputs(loadSources().bundle);
 
@@ -60,11 +60,11 @@ describe('KDM-197 static confidence', () => {
 
 /**
  * `seedInputKinds` gates whether the classifier's VERDICTS are applied — a client-routing decision
- * (KDM-163 § CORRECTION 2), still off by default. Its CONFIDENCE is a different question, and every
+ * (a later correction to the apply/commit split design), still off by default. Its CONFIDENCE is a different question, and every
  * session needs it: without it, a default-configured session has no static evidence for any type and
  * `move` becomes demotable again by the same bump this task is about.
  */
-describe('KDM-197 protection does not depend on the seeding opt-in', () => {
+describe('protection does not depend on the seeding opt-in', () => {
 	it('a session with seedInputKinds OFF still knows move is proven turn-consuming', async () => {
 		const s = new SwapSession({ requiredPlayers: 2, seed: 'apply-commit-seed' });
 		s.join('A');
@@ -84,7 +84,7 @@ describe('KDM-197 protection does not depend on the seeding opt-in', () => {
 	}, BOOT_TIMEOUT);
 });
 
-describe('KDM-197 runtime learning', () => {
+describe('runtime learning', () => {
 	let s: any;
 
 	beforeAll(async () => {
@@ -113,7 +113,7 @@ describe('KDM-197 runtime learning', () => {
 		// it really was a no-op — otherwise there is nothing to learn from and the test is vacuous
 		expect(s.posOf('A'), 'A did not move: the ally blocks and KD returns "nomove"').toEqual(a0);
 		expect(s.cancelledMoveReport().length,
-			'and it was NOT the KDM-208 veto — that guard is already covered elsewhere').toBe(0);
+			'and it was NOT the contested-tile veto — that guard is already covered elsewhere').toBe(0);
 
 		expect(s.inputKind.get('move'),
 			'ONE non-advancing bump must not demote the type that KD proves can advance').toBe('turn');
@@ -130,7 +130,7 @@ describe('KDM-197 runtime learning', () => {
 	/**
 	 * The learning RULE, isolated from the game. `applyInputObserved` is stubbed for one synthetic
 	 * type so the observation sequence is exact — a mod-registered handler cannot be used here,
-	 * because KDM-161's divergence capture restores any global it mutates, so the "later calls do
+	 * because the generic divergence capture restores any global it mutates, so the "later calls do
 	 * nothing" arm would silently reset itself and pass for the wrong reason.
 	 */
 	function observations(type: string, advancedSeq: number[]) {

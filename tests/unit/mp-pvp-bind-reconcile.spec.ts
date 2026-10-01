@@ -1,5 +1,5 @@
 /**
- * Node-layer (Vitest) tests for KD-101 — the server half of real "tie": a restraint tied onto a
+ * Node-layer (Vitest) tests for the server half of real "tie": a restraint tied onto a
  * peer's AVATAR (the real addNPCRestraint apply, replayed server-side) is reconciled onto the
  * VICTIM's real player bundle via the game's real KinkyDungeonAddRestraint.
  *
@@ -15,7 +15,7 @@ const { SwapSession } = require('../../tools/mp-server/swap-session');
 const BOOT_TIMEOUT = 240_000;
 const BIND = 'DuctTapeFeet';
 
-describe('PvP real tie — avatar restraint reconciles to the victim (KD-101)', () => {
+describe('PvP real tie — avatar restraint reconciles to the victim', () => {
 	let s: any;
 	beforeEach(() => {
 		s = new SwapSession({ requiredPlayers: 2, seed: 'pvp-bind-reconcile-seed', pvp: true });
@@ -59,12 +59,12 @@ describe('PvP real tie — avatar restraint reconciles to the victim (KD-101)', 
 		sess._armPeerEnemies(actor);
 		const snap = sess.snapshotFor(actor);
 		const ent = ((snap.map && snap.map.Entities) || []).find((e: any) => e.id === sess.avatars.get(id));
-		// KDM-224: this used to `return null`, which every caller then compared against true/false —
+		// This used to `return null`, which every caller then compared against true/false —
 		// so an avatar MISSING FROM THE MAP surfaced as "expected null to be true", a message that
 		// says nothing about the actual fault and reads like a gate-logic bug. The absent entity is
 		// never legitimate here (a peer in a PvP session is always on the map), so say so loudly.
 		if (!ent) {
-			throw new Error(`[KDM-224] peer ${id}'s avatar (entity ${sess.avatars.get(id)}) is NOT in ` +
+			throw new Error(`peer ${id}'s avatar (entity ${sess.avatars.get(id)}) is NOT in ` +
 				`${actor}'s snapshot map — the avatar was removed from the world, so the bind gate ` +
 				'cannot be evaluated at all. This is the vanishing-avatar fault, not a bindability result.');
 		}
@@ -88,7 +88,7 @@ describe('PvP real tie — avatar restraint reconciles to the victim (KD-101)', 
 
 	/**
 	/**
-	 * KDM-164 removed a "half Will" rule we invented; KDM-199 removed its successor (0 Will => stun the
+	 * The real-pipeline rework removed a "half Will" rule we invented; the arming rework removed its successor (0 Will => stun the
 	 * avatar). Neither was KD's. The avatar is now armed FROM the peer — hp from Will, stun from their
 	 * own engine countdown, bondage mirrored via specialBoundLevel — so KD's own KDCanApplyBondage
 	 * decides, and it needs boundLevel > 0 (KDBoundEffects short-circuits at KinkyDungeonEnemies.ts:4228).
@@ -100,7 +100,7 @@ describe('PvP real tie — avatar restraint reconciles to the victim (KD-101)', 
 
 		for (let i = 0; i < 40 && s.vitalsFor('B').will > 0; i++) bumpB(s);
 		expect(s.vitalsFor('B').will, 'precondition: the peer really was worn down').toBeLessThanOrEqual(0);
-		expect(bindGateOpen(s, 'B'), 'KDM-200: a worn-down (defeated) opponent IS tie-able').toBe(true);
+		expect(bindGateOpen(s, 'B'), 'a worn-down (defeated) opponent IS tie-able').toBe(true);
 
 		s.world.restorePlayer(s.bundles.get('B'));
 		const added = s.world.addRestraint('HingedCuffs');

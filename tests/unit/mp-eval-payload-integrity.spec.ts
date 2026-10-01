@@ -1,5 +1,5 @@
 /**
- * KDM-218 — the mp-server eval payloads must stay syntactically whole.
+ * The mp-server eval payloads must stay syntactically whole.
  *
  * `headless-host.js` and `swap-session.js` build their in-vm payloads as TEMPLATE LITERALS. A backtick
  * anywhere inside one — including inside a `//` comment written for a human reader — terminates the
@@ -9,7 +9,7 @@
  *   2. the resulting `SyntaxError` is raised not at the offending file but at whichever module
  *      `require`s it, so the message points at the wrong line entirely.
  *
- * This has bitten twice. The second time (KDM-184) a documentation comment added inside
+ * This has bitten twice. The second time a documentation comment added inside
  * `getVitals()`'s literal quoted `typeof` and `let` in backticks — the correct convention EVERYWHERE
  * ELSE in this codebase — and surfaced as
  * `SyntaxError: missing ) after argument list at swap-session.js:26:49`, i.e. at the `require` line of
@@ -185,14 +185,14 @@ function evalPayloads(src: string): Literal[] {
 	return templateLiterals(src).filter((l) => l.evalArg);
 }
 
-describe('KDM-218: mp-server eval payloads stay syntactically whole', () => {
+describe('mp-server eval payloads stay syntactically whole', () => {
 	/**
 	 * A guard that greps source is exactly the kind of check that quietly stops working when a regex or
 	 * a path drifts, and a green that comes from matching nothing is worthless. So prove the detector
-	 * still recognises the breakage it was written to catch, using the REAL KDM-184 mistake as the
+	 * still recognises the breakage it was written to catch, using the REAL mistake that once shipped as the
 	 * sample: a doc comment inside `getVitals()`'s literal that quotes identifiers in backticks.
 	 */
-	it('SELF-CHECK: the detector still flags the real KDM-184 breakage', () => {
+	it('SELF-CHECK: the detector still flags the real backtick breakage', () => {
 		const good = [
 			'class H {',
 			'	getVitals() {',

@@ -1,11 +1,11 @@
 /**
- * E2E (KDM-251) — the guest whose HOST vanished waits, knowingly.
+ * E2E — the guest whose HOST vanished waits, knowingly.
  *
  * The node spec proves the server refuses the turn. This proves the only part it cannot: that the
  * refusal reaches a REAL browser as something the player can read and act on, rather than as a game
  * that has simply stopped responding.
  *
- * ⚠️ THE ROLES ARE NOT SYMMETRIC (KDM-234 D5/D7). A guest who loses the host gets no choice: the
+ * ⚠️ THE ROLES ARE NOT SYMMETRIC. A guest who loses the host gets no choice: the
  * host's process owns the world, so there is nothing to continue. What the guest must get instead is
  * (a) the plain truth about what is happening, and (b) input that is visibly REFUSED rather than
  * silently eaten — the distinction between "waiting for your friend" and "this game is broken".
@@ -57,9 +57,9 @@ test('a guest whose host disconnects is told they are waiting, and their moves a
 
 			// ---- the HOST's connection dies, and STAYS dead ----------------------------------------
 			//
-			// KDM-252 made a bare `ws.close()` self-healing: the client retries after ~1 s, the seat
+			// A bare `ws.close()` is self-healing: the client retries after ~1 s, the seat
 			// comes back and the pause ends — the right product behaviour, and the wrong premise for
-			// this spec. What KDM-251 is about is the window in which the host is still away.
+			// this spec. What this spec is about is the window in which the host is still away.
 			await killCoopSocket(A, { retry: false });
 
 			await B.waitForFunction(
@@ -92,7 +92,7 @@ test('a guest whose host disconnects is told they are waiting, and their moves a
 
 			// ---- S2/N1: a real move is REFUSED, and does not look accepted --------------------------
 			//
-			// The `submitted` half is the point. KDM-225 shipped a client that set `submitted = true`
+			// The `submitted` half is the point. An earlier build shipped a client that set `submitted = true`
 			// on a `waiting` reply and then suppressed every later input as already-acted; a player
 			// whose move entered a barrier that will never close was locked out of their own controls.
 			// A refusal must leave them able to keep trying.

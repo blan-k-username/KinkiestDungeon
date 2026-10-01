@@ -1,5 +1,5 @@
 /**
- * Node-layer (Vitest) — KDM-273: the map-generation SEED is world state, not per-player.
+ * Node-layer (Vitest) — the map-generation SEED is world state, not per-player.
  *
  * `KinkyDungeonSeed` decides what the NEXT floor looks like. `KDInitTempValues` re-randomises it per
  * map and stores the value it used as `KDGameData.LastMapSeed` (`KinkyDungeonGame.ts:960-970`), and
@@ -10,7 +10,7 @@
  * `KDGAMEDATA_WORLD_KEYS` — and this spec is the pin that was missing.
  *
  * ── WHY THIS SPEC EXISTS WHEN THE FIX ALREADY LANDED ──────────────────────────────────────────────
- * KDM-243 found the defect while importing a single-player save: after the import the world's seed
+ * The defect was found while importing a single-player save: after the import the world's seed
  * was correct and the guest's first `restorePlayer` reverted it to the pre-import value. It is pinned
  * by `mp-save-import.spec.ts` — but only INDIRECTLY, through an import.
  *
@@ -22,7 +22,7 @@
  * something red without an import in the path.
  *
  * ── WHY IT IS BENIGN UNTIL IT IS NOT ──────────────────────────────────────────────────────────────
- * Same shape as KDM-228's room classification: in ordinary play every bundle is captured from the
+ * Same shape as the room classification: in ordinary play every bundle is captured from the
  * same world after the same transition, so they all agree and the restore is a no-op. The bug needs
  * the copies to DIVERGE — a rejoin, a stale capture, a bundle that outlives the build that made it
  * (exactly the case `_restoreGlobals` calls out at `headless-host.js:2972-2979`). That is the case
@@ -62,7 +62,7 @@ const BOOT_TIMEOUT = 240_000;
  * (`KinkyDungeonShrine.ts:36`), which nothing outside the shop code writes and which no turn driven
  * here can touch.
  *
- * KDM-266 note, so this control is not "fixed" by mistake: that global is now also listed in
+ * Shop-highlight note, so this control is not "fixed" by mistake: that global is now also listed in
  * `CLIENT_OWNED_GLOBALS` (`client/render-client.js`), which stops a BROWSER adopting the server's
  * copy over the viewer's own shop cursor. That is a client-side authority rule and changes nothing
  * here — capture and `_restoreGlobals` still carry it per player, which is exactly what this control
@@ -77,7 +77,7 @@ const SHOP_INDEX_OF: Record<string, number> = { A: 27301, B: 27302 };
 const WORLD_SEED = 273_000_001;
 const STALE_SEED = 273_999_999;
 
-describe('KDM-273 — the map generation seed is world state', () => {
+describe('the map generation seed is world state', () => {
 	let s: any;
 
 	beforeEach(async () => {

@@ -1,5 +1,5 @@
 /**
- * The KDM-163 classifier must see every `KDInputTypes` handler, whatever key spelling upstream uses.
+ * The apply/commit input classifier must see every `KDInputTypes` handler, whatever key spelling upstream uses.
  *
  * MEASURED producer (2026-09-26 upstream merge): upstream added `setAutoSprint: (data) => {…}` —
  * the first UNQUOTED key in a registry that was otherwise all `"name": …`. The parser only matched

@@ -1,5 +1,5 @@
 /**
- * KDM-309 — a new co-op game starts the party where single player starts the player, with no demo Rat.
+ * A new co-op game starts the party where single player starts the player, with no demo Rat.
  *
  * Owner's UAT (2026-09-30): "the chars should spawn at the same position as SP", beside a Rat nobody
  * asked for. Session start seated seat 0 on `findOpenTile()` — a map-wide scan for the most open tile,
@@ -15,7 +15,7 @@ const { SwapSession } = require('../../tools/mp-server/swap-session');
 
 const BOOT_TIMEOUT = 240_000;
 
-describe('KDM-309 — co-op start position', () => {
+describe('co-op start position', () => {
 	let s: any;
 	let start: any;
 
@@ -46,7 +46,7 @@ describe('KDM-309 — co-op start position', () => {
 	});
 });
 
-describe('KDM-309 — the demo enemy is opt-in', () => {
+describe('the demo enemy is opt-in', () => {
 	it('is summoned only when a spec asks for it', () => {
 		const s = new SwapSession({ requiredPlayers: 1, seed: 'start-position-seed', enemyType: 'Rat' });
 		s.join('A');

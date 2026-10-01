@@ -108,7 +108,7 @@ describe('co-op: untying a peer', () => {
  * `KDUntieEnemy` only lowers the avatar's bind LEVEL, and the avatar is a per-turn stand-in that is
  * rebuilt from the peer every turn — so on its own an untie is forgotten before it means anything.
  * The one bondage channel from avatar back to owner was `ec.npcRestraints`, which is ADDITIVE ONLY
- * (KD-101 mirrors ties). This is the missing half: the per-turn DROP in the avatar's bind level is
+ * (the avatar mirrors ties). This is the missing half: the per-turn DROP in the avatar's bind level is
  * spent as real escape progress on the victim's own worn restraints, through the game's own
  * `KinkyDungeonRemoveRestraint` — the exact mirror of the tie path's `KinkyDungeonAddRestraint`.
  */

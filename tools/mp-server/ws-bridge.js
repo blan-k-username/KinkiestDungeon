@@ -1,8 +1,8 @@
 /**
- * tools/mp-server/ws-bridge.js  (KD-071/KD-085, epic mp-server / KD-066)
+ * tools/mp-server/ws-bridge.js  (epic mp-server)
  *
  * Minimal, dependency-free local WebSocket bridge between browser thin-clients and
- * the server-side SwapSession (the live SWAP-model session — KD-085). A browser can't
+ * the server-side SwapSession (the live SWAP-model session). A browser can't
  * do in-process/worker IPC, so even on localhost the client↔server link is a
  * WebSocket. We hand-roll a tiny RFC6455 server on Node's built-in http+crypto (no
  * `ws` dependency) — text frames only, which is all the protocol needs.
@@ -16,15 +16,15 @@
  *                      { type:'state', tick, snapshot }      this client's render-state
  *                      { type:'waiting', waitingOn:[...] }    barrier still open
  *
- * ⚠️ That list is the ORIGINAL core, not the whole protocol — the join gate (KDM-233), presence
- * (KDM-250/251/252) and the delta encoding (KDM-206) each added messages. `_handle` below is the
+ * ⚠️ That list is the ORIGINAL core, not the whole protocol — the join gate, presence
+ * and the delta encoding each added messages. `_handle` below is the
  * authoritative inbound dispatch; the outbound set is whatever `_send` is called with. Two
  * distinctions worth knowing before adding another:
  *   - `blocked` ≠ `waiting`. `waiting` means "your input entered lockstep" and the client stops
- *     accepting input on it; a refusal must therefore never be sent as `waiting` (KDM-225/251).
+ *     accepting input on it; a refusal must therefore never be sent as `waiting`.
  *   - `state{kind:'push'}` ≠ `state{kind:'ui'}`. A `ui` frame is the REPLY to an input the client
  *     sent, and the client unwinds one in-flight slot for it. A `push` is server-initiated and
- *     replies to nothing (KDM-252).
+ *     replies to nothing.
  *
  * The turn advances only when EVERY player has submitted (R8 lockstep). On advance the
  * server composes each client's render-state from the ONE authoritative world + that
@@ -43,22 +43,22 @@ const { Presence, DEFAULT_HB_TIMEOUT_MS } = require('./presence');
 const { publicAddresses } = require('./lan-address');
 
 /**
- * KDM-206: top-level snapshot keys carried IN FULL by every delta, never diffed.
+ * Top-level snapshot keys carried IN FULL by every delta, never diffed.
  *
  * These are CONSUME-ONCE channels: `snapshotFor` drains pending events (`_takePendingEvents`), and the
  * floating combat text / unknown-input reports are one-shot too. A one-shot value exists in exactly one
  * snapshot, so if it were diffed and its delta were lost, it would be gone for good — the anti-deletion
- * trap KDM-196 documents. Together they are ~0.1 KB, so carrying them whole costs nothing next to the
+ * trap documented for the delta wire. Together they are ~0.1 KB, so carrying them whole costs nothing next to the
  * 26 KB this change removes.
  */
 const VERBATIM_CHANNELS = ['events', 'messages', 'unknownInputs', 'replacedInputs'];
 
 /**
- * KDM-260 — what a `join` message contributes to a SEAT, declared once per role.
+ * What a `join` message contributes to a SEAT, declared once per role.
  *
  * ── WHY THIS IS DATA AND NOT A HAND-WRITTEN OBJECT LITERAL ────────────────────────────────────────
  * It used to be the literal `{ name: msg.name, build: msg.build, mods: msg.mods, perks: msg.perks }`
- * at each call site. KDM-239 added `world` to the handshake and did not add it here, and the failure
+ * at each call site. A later change added `world` to the handshake and did not add it here, and the failure
  * was SILENT: the gate held an empty declaration, the session was built on KD's defaults, and all 605
  * unit tests stayed green — because every one of them calls `claimHost`/`requestJoin` directly and
  * never crosses this bridge. Only an e2e asserting what reached the guest's screen caught it.
@@ -67,20 +67,20 @@ const VERBATIM_CHANNELS = ['events', 'messages', 'unknownInputs', 'replacedInput
  * `tests/unit/mp-join-fields.spec.ts` reads the CLIENT's own `join.<field> =` assignments and fails
  * if one of them is not covered by a shape below.
  *
- * ⚠️ THE TWO LISTS DIFFER ON PURPOSE. `world` is the host's alone (KDM-239 A5): a guest must not be
+ * ⚠️ THE TWO LISTS DIFFER ON PURPOSE. `world` is the host's alone: a guest must not be
  * able to declare one, and "the gate is never even told" is a stronger guarantee than "the gate drops
  * it". Do not unify these into one list with a runtime exception.
  *
  * `role`, `clientId` and `type` are deliberately ABSENT — they are routing, not declarations.
  */
-// KDM-243 — `save` joins `world` in the host-only half, for exactly the same reason: the host brings
+// `Save` joins `world` in the host-only half, for exactly the same reason: the host brings
 // the world, the guest brings a character. This guard did its job on the way in — the field was added
 // to the client and this line was not, and the spec named it rather than letting it ship silently.
-// KDM-256 — `character` joins the SHARED half, not the host-only one, and that is the point: the
+// `Character` joins the SHARED half, not the host-only one, and that is the point: the
 // world has one author, but a character has one per seat. It is the field a guest most needs to
 // bring, so a shape that made it host-only would invert the whole feature.
 //
-// KDM-279 — and `perks` is no longer beside it. It was a second wire field asking the same question
+// And `perks` is no longer beside it. It was a second wire field asking the same question
 // as `character`, so it became a FIELD OF the package: one declaration covers class, outfit, style
 // and perks. Nothing about the party-union rule for start perks changed — that is a read-side rule
 // and lives in `SwapSession.partyPerks()`.
@@ -88,20 +88,20 @@ const HOST_JOIN_FIELDS = Object.freeze(['name', 'build', 'mods', 'character', 'w
 const GUEST_JOIN_FIELDS = Object.freeze(['name', 'build', 'mods', 'character']);
 
 /**
- * KDM-274 — what the SERVER promises to put on the wire, declared once, per message kind.
+ * What the SERVER promises to put on the wire, declared once, per message kind.
  *
  * ── WHY THIS EXISTS, AND WHY IT IS THE MIRROR OF `HOST_JOIN_FIELDS` ───────────────────────────────
- * KDM-260 declared the inbound handshake's fields because KDM-239 shipped a dropped one past a green
+ * The inbound handshake's fields were declared because a dropped one once shipped past a green
  * suite: the client sent `world`, the bridge did not forward it, and 605 unit tests stayed green
  * because every one of them called the gate directly and never crossed this bridge. The same guard
- * caught the same class again on KDM-243 (`save`).
+ * caught the same class again on save import (`save`).
  *
  * It watched ONE DIRECTION. Nothing watched server → client: a payload composed correctly here and
  * then not sent — or sent to the wrong socket — leaves the whole suite green while the feature does
  * nothing, because a session-level test asserts on what a method returned rather than on what left
- * the socket (memory: assert-at-the-deciding-layer). `save_export` (KDM-244/275) was the first field
+ * the socket (memory: assert-at-the-deciding-layer). `save_export` was the first field
  * to travel that way, and was guarded only by its own per-feature spec — which is exactly the
- * pattern KDM-260 replaced on the way in, and for the same reason: a per-feature test protects the
+ * pattern the inbound declaration replaced on the way in, and for the same reason: a per-feature test protects the
  * field whose author thought of it, and nothing else.
  *
  * ── HOW TO ADD A MESSAGE ─────────────────────────────────────────────────────────────────────────
@@ -109,7 +109,7 @@ const GUEST_JOIN_FIELDS = Object.freeze(['name', 'build', 'mods', 'character']);
  *   1. every `{ type: '…' }` this file puts on a socket is declared, and every key on it is named;
  *   2. every declared kind is actually EXERCISED, and every `required` field is on the decoded wire
  *      object when it is — a declaration nothing produces is a promise nobody keeps;
- *   3. every `m.<field>` the CLIENT reads for that kind is declared here — the KDM-239 failure in
+ *   3. every `m.<field>` the CLIENT reads for that kind is declared here — the dropped-world failure in
  *      reverse, a receiver depending on a field the sender quietly stopped sending.
  *
  * `required` = present on the decoded wire object every time this kind is sent. `optional` = may be
@@ -117,13 +117,13 @@ const GUEST_JOIN_FIELDS = Object.freeze(['name', 'build', 'mods', 'character']);
  * those keys, so "the call site names it" and "it arrives" are not the same claim).
  *
  * ⚠️ `to: 'host'` IS A CLAIM ABOUT DISCLOSURE, NOT A NOTE. `save_export` carries the entire world; a
- * broadcast written where a unicast was meant would hand it to every guest (KDM-244 R11, and the
- * one-word `_sendExport(clientId, …)` slip KDM-275 R10 pins). The spec fails if a frame of such a
+ * broadcast written where a unicast was meant would hand it to every guest (and the
+ * one-word `_sendExport(clientId, …)` slip the export spec pins). The spec fails if a frame of such a
  * kind is ever seen on a socket that is not the host's.
  */
 const OUTBOUND_MESSAGES = Object.freeze({
 	// ── the join handshake ───────────────────────────────────────────────────────────────────────
-	// KDM-287 — `lan` is the address a friend can actually TYPE, and only the server can know it: a
+	// `Lan` is the address a friend can actually TYPE, and only the server can know it: a
 	// browser cannot read its own machine's LAN IP, and a host that followed the launcher's own
 	// instructions is sitting on `localhost:8090`. Optional, for two separate reasons — a GUEST's
 	// `joined` carries none (it has nothing to share), and a machine with only loopback honestly has
@@ -133,18 +133,18 @@ const OUTBOUND_MESSAGES = Object.freeze({
 	awaiting_approval: Object.freeze({ required: Object.freeze(['modDiff', 'world']) }),
 	// HOST-ONLY: it is the host that answers the gate, so nobody else is told somebody is asking.
 	join_pending:      Object.freeze({ required: Object.freeze(['clientId', 'name', 'modDiff']), to: 'host' }),
-	// `hostBuild`/`guestBuild` ride the build-mismatch refusal alone (KDM-233 N1) — the client prints
+	// `hostBuild`/`guestBuild` ride the build-mismatch refusal alone — the client prints
 	// them in that one branch, and the other refusals must not be required to carry them.
-	// KDM-270 — `retry` names the seat this client may ask for on this same socket, and its presence
+	// `Retry` names the seat this client may ask for on this same socket, and its presence
 	// is also what tells `_reject` not to hang up. Optional, because a terminal refusal carries none.
 	reject:            Object.freeze({ required: Object.freeze(['reason']),
 		optional: Object.freeze(['hostBuild', 'guestBuild', 'retry']) }),
 
 	// ── play ─────────────────────────────────────────────────────────────────────────────────────
 	// `seq` comes from `_stateFrame`, not from any call site's literal: it is the client's gap
-	// detector, and a frame without one would be merged onto a base nobody can name (KDM-206).
-	// `kind` is absent on a turn-resolving frame, and 'ui' / 'push' otherwise (KDM-252).
-	// `reply` marks the turn frame that answers the input which resolved it (KDM-310).
+	// detector, and a frame without one would be merged onto a base nobody can name.
+	// `kind` is absent on a turn-resolving frame, and 'ui' / 'push' otherwise.
+	// `reply` marks the turn frame that answers the input which resolved it.
 	state:             Object.freeze({ required: Object.freeze(['tick', 'seq']),
 		optional: Object.freeze(['kind', 'srv', 'serverLog', 'snapshot', 'delta', 'reply']) }),
 	ack:               Object.freeze({ required: Object.freeze(['tick', 'srv']) }),
@@ -154,18 +154,18 @@ const OUTBOUND_MESSAGES = Object.freeze({
 	error:             Object.freeze({ required: Object.freeze(['error']), optional: Object.freeze(['reply']) }),
 	ping:              Object.freeze({ required: Object.freeze(['t']) }),
 
-	// ── presence (KDM-250/251/252/253) ───────────────────────────────────────────────────────────
+	// ── presence ───────────────────────────────────────────────────────────
 	// `role` travels with the id because host and guest are not symmetric: a survivor told only
-	// "someone left" cannot tell which of the two situations they are in (KDM-234 D5).
+	// "someone left" cannot tell which of the two situations they are in.
 	peer_joined:       Object.freeze({ required: Object.freeze(['clientId', 'players']) }),
 	peer_missing:      Object.freeze({ required: Object.freeze(['clientId', 'role']) }),
 	peer_back:         Object.freeze({ required: Object.freeze(['clientId', 'role']) }),
 	peer_gone:         Object.freeze({ required: Object.freeze(['clientId', 'reason']) }),
-	// KDM-303 — the host timed out and the seat was handed on. Sent to everyone: the new host learns
+	// The host timed out and the seat was handed on. Sent to everyone: the new host learns
 	// it is the host, the others that the wait is over.
 	host_changed:      Object.freeze({ required: Object.freeze(['host']) }),
 
-	// ── the run itself (KDM-244/275) ─────────────────────────────────────────────────────────────
+	// ── the run itself ─────────────────────────────────────────────────────────────
 	// `reason` is what tells an automatic export ('floor'/'timer') from one the host asked for
 	// ('requested'/'solo'), and it is the whole basis on which the client decides to say anything.
 	save_export:       Object.freeze({ required: Object.freeze(['save', 'version', 'reason']), to: 'host' }),
@@ -188,7 +188,7 @@ function pickFields(msg, fields) {
 /** Monotonic milliseconds. Never Date.now(): a wall-clock jump would corrupt every latency below. */
 function now() { return Number(process.hrtime.bigint()) / 1e6; }
 
-/** KDM-303 — remaining host grace as `m:ss` for the guests' countdown (rounded UP: never shows 0:00 early). */
+/** Remaining host grace as `m:ss` for the guests' countdown (rounded UP: never shows 0:00 early). */
 function graceText(ms) {
 	const s = Math.max(0, Math.ceil(ms / 1000));
 	return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
@@ -254,17 +254,17 @@ function decodeFrames(buf) {
 class WSBridge {
 	/** @param {object} opts { requiredPlayers=2, seed, enemyType } */
 	constructor(opts = {}) {
-		// KDM-163 AC1: the client no longer classifies input — it routes everything — so no type may be
+		// The client no longer classifies input — it routes everything — so no type may be
 		// unlearned when it first arrives. Pre-seeding is what makes that affordable: without it the
 		// first use of each type takes the lockstep default and costs the player a turn, which breaks
 		// click-to-move (`KDFastMoveTo` dispatches through `KDSendInput`). Callers may still override.
 		this.session = new SwapSession(Object.assign({ seedInputKinds: true }, opts));
-		// KDM-233: WHO MAY BE IN THE SESSION — two seats and the one question the host has not answered
+		// WHO MAY BE IN THE SESSION — two seats and the one question the host has not answered
 		// yet. Kept pure and separate (`join-gate.js`) so its rules are unit-tested in milliseconds; the
 		// bridge only carries answers between it and the sockets.
 		this.gate = new JoinGate({ build: opts.build || '' });
 		/**
-		 * KDM-249 R6 — the session's mod PAYLOADS, keyed by content hash.
+		 * The session's mod PAYLOADS, keyed by content hash.
 		 *
 		 * On the bridge because the bridge owns the session lifecycle the payloads belong to; the HTTP
 		 * routes in `demo-server.js` read it through here. In memory only, and cleared with the
@@ -275,7 +275,7 @@ class WSBridge {
 		this.sockets = new Map();          // clientId -> socket
 		this._server = null;
 		this.port = null;
-		// KDM-206: what each client last received, so a reply can carry a DELTA instead of a whole
+		// What each client last received, so a reply can carry a DELTA instead of a whole
 		// capture. `_snapSeq` lets the client detect a gap and ask for a full resync rather than
 		// silently merging onto a stale base.
 		this._lastSnap = new Map();        // clientId -> last snapshot SENT
@@ -284,20 +284,20 @@ class WSBridge {
 		// immediately (others auto-"wait"), instead of blocking on every player.
 		// Real lockstep (block until all submit) stays the default for actual co-op.
 		this.autoAdvance = !!opts.autoAdvance;
-		// Humane lockstep (KD-087): if the submit barrier stays open longer than this,
+		// Humane lockstep: if the submit barrier stays open longer than this,
 		// the server auto-"wait"s the non-submitters so an idle/finished player doesn't
 		// deadlock a partner who is still acting (e.g. walking a longer click-to-move
 		// route). 0 = disabled (strict lockstep — block until ALL submit). A `wait` is
 		// never a contested action, so R9 conflict resolution is unaffected.
 		this.idleGraceMs = (opts.idleGraceMs != null) ? opts.idleGraceMs : 0;
 		this._graceTimer = null;
-		// KDM-250: WHO IS STILL HERE. Kept pure and separate (`presence.js`) so its rules are
+		// WHO IS STILL HERE. Kept pure and separate (`presence.js`) so its rules are
 		// unit-tested in milliseconds; the bridge only feeds it the clock and carries its answers to
 		// the sockets. `hbIntervalMs: 0` disables the heartbeat entirely — the escape hatch an
 		// operator (or a spec) needs, and the ONLY way to turn it off. It is on by default on
 		// purpose: a safety mechanism that ships off is the exact mistake `idleGraceMs` made.
 		this.hbIntervalMs = (opts.hbIntervalMs != null) ? opts.hbIntervalMs : 5000;
-		// KDM-303 — how long a RUNNING game waits for a missing host before a guest becomes the host
+		// How long a RUNNING game waits for a missing host before a guest becomes the host
 		// (owner: 2 minutes). Counted from the moment presence marks the host missing. A spec passes a
 		// short one; there is no "off" — a seat nobody can ever reclaim is the bug this replaces.
 		this.hostGraceMs = (opts.hostGraceMs != null) ? opts.hostGraceMs : 120000;
@@ -305,13 +305,13 @@ class WSBridge {
 		this._hostGrace = null;
 		this.presence = new Presence({
 			hbTimeoutMs: (opts.hbTimeoutMs != null) ? opts.hbTimeoutMs : DEFAULT_HB_TIMEOUT_MS,
-			// KDM-251: presence needs the INTENDED cadence so it can tell a sweep that was late
+			// Presence needs the INTENDED cadence so it can tell a sweep that was late
 			// (our event loop stalled) from a client that went quiet. See the credit rule in `sweep`.
 			hbIntervalMs: this.hbIntervalMs,
 		});
 		this._hbTimer = null;
 		this._startHeartbeat();
-		// KDM-186: the latency probe must be running before the first input arrives.
+		// The latency probe must be running before the first input arrives.
 		this._startLoopLag();
 		this._startStatsTicker();
 	}
@@ -348,7 +348,7 @@ class WSBridge {
 			buf = Buffer.concat([buf, chunk]);
 			const { messages, rest } = decodeFrames(buf);
 			buf = rest;
-			// KDM-186 queue timing: every message in this batch arrived BEFORE we handled any of them,
+			// Queue timing: every message in this batch arrived BEFORE we handled any of them,
 			// so a batch of N is N-1 messages that waited on their predecessors. `_handle` runs
 			// synchronously on the event loop — there is no application queue — so this batch index and
 			// the event-loop lag below are the only places a wait can hide on the server side.
@@ -362,10 +362,10 @@ class WSBridge {
 				if (messages[bi] === null) { socket.end(); return; }
 				const msg = parsed[bi];
 				if (!msg) continue;
-				// KDM-192: a stream input that a NEWER one of the same type already supersedes — with both
+				// A stream input that a NEWER one of the same type already supersedes — with both
 				// already sitting in this same socket read — is stale before we even look at it. Applying
 				// it costs a full transaction and buys nothing but latency for whatever follows.
-				// KDM-310: …but it is still ANSWERED, with the bare ack an unchanged ui input gets. The client
+				// …but it is still ANSWERED, with the bare ack an unchanged ui input gets. The client
 				// matches replies to sends strictly in order, one each (`ackOne`, `_sentRoute`); a silent
 				// drop shifted every later reply onto an earlier send, so a stream's ack was credited to
 				// the `move` behind it and click-to-move stopped after a step (owner UAT 2026-09-30).
@@ -380,19 +380,19 @@ class WSBridge {
 			}
 			this._batch = null;
 		});
-		// KDM-250: an errored socket is a departed player, not a line to swallow. This used to be a
+		// An errored socket is a departed player, not a line to swallow. This used to be a
 		// bare no-op, which is half of why a drop was invisible.
 		socket.on('error', () => { this._dropped(clientId); });
-		// KDM-233: a peer that went away releases whatever it held — a seat, or an unanswered question.
+		// A peer that went away releases whatever it held — a seat, or an unanswered question.
 		// Without this the host is left staring at a dialogue about someone who has already gone, and
-		// slot 1 stays occupied by a ghost. (Making the SESSION survive a drop is KDM-234; this is only
+		// slot 1 stays occupied by a ghost. (Making the SESSION survive a drop is handled elsewhere; this is only
 		// the membership bookkeeping.)
 		socket.on('close', () => {
 			if (!clientId) return;
-			// KDM-297: read BEFORE the release below forgets it — was this the guest the host is being
+			// Read BEFORE the release below forgets it — was this the guest the host is being
 			// asked about? If so the question has withdrawn itself and must leave the host's screen.
 			const wasAsking = !!(this.gate.pending && this.gate.pending.clientId === clientId);
-			// KDM-252 E4: a RUNNING session holds the seat. Before it starts, a departure frees
+			// A RUNNING session holds the seat. Before it starts, a departure frees
 			// everything (that is the lobby's whole job); after it starts, only the unanswered
 			// question goes — the seat belongs to that clientId until they come back or the survivor
 			// dismisses them. See `join-gate.js` → `releasePending`.
@@ -400,7 +400,7 @@ class WSBridge {
 			else {
 				this.gate.release(clientId);
 				/*
-				 * KDM-280 — and the SESSION is told, which it was not.
+				 * And the SESSION is told, which it was not.
 				 *
 				 * "Before it starts, a departure frees everything" is what this branch already says it
 				 * does; it freed the gate and left the session's pre-start roster holding the id. So a
@@ -410,11 +410,11 @@ class WSBridge {
 				 * meantime, so the wedge lasted until they restarted the server.
 				 *
 				 * `removePlayer` rather than splicing the roster: it is the one place that knows
-				 * everything a player leaves behind (KDM-253), and pre-start there is simply nothing
+				 * everything a player leaves behind, and pre-start there is simply nothing
 				 * for it to clean up.
 				 */
 				try { this.session.removePlayer(clientId); }
-				catch (e) { /* a session that predates KDM-253's teardown */ }
+				catch (e) { /* a session that predates player teardown */ }
 			}
 			if (this.sockets.get(clientId) === socket) this.sockets.delete(clientId);
 			if (wasAsking && this.session.started && this.gate.host) {
@@ -423,23 +423,23 @@ class WSBridge {
 					this._pushState(this.gate.host);
 				} catch (e) { /* world may be mid-teardown */ }
 			}
-			// KDM-250: and the SURVIVOR is told. Reported after the socket is dropped from the map so
+			// And the SURVIVOR is told. Reported after the socket is dropped from the map so
 			// the report is not addressed to the person who just left.
 			this._dropped(clientId);
 		});
 	}
 
 	/**
-	 * KDM-237 N2 / KDM-238 R3 — hand what the SEAT knows about a player to the session, immediately
-	 * before it seats them: the name they chose, the seat they hold (KDM-282), and the character
-	 * they built (perks included, since KDM-279).
+	 * Hand what the SEAT knows about a player to the session, immediately
+	 * before it seats them: the name they chose, the seat they hold, and the character
+	 * they built (perks included).
 	 *
 	 * One helper rather than copies of the same gate lookup at each site, because the three seating
 	 * sites (accept, join-late, and the plain/legacy join) must not be able to disagree about where a
 	 * player's identity comes from. The gate is the source; the session is told; neither invents
 	 * anything. The fields travel together for the same reason they are stored together — they are
 	 * answers to "who is this player", and splitting them would let one arrive without the other.
-	 * KDM-279 took that argument one step further: perks were a separate field travelling beside the
+	 * That argument was later taken one step further: perks were a separate field travelling beside the
 	 * character, so they became part of it.
 	 *
 	 * Safe for a player who declares nothing (R9 — the MP e2e harness, and formerly `#coop=`):
@@ -447,7 +447,7 @@ class WSBridge {
 	 * every setter here CLEARS rather than sets on an empty value — so those sessions keep KD's own
 	 * default perk state and character.
 	 *
-	 * ⚠️ KDM-282 changed what such an UNNAMED player is CALLED, deliberately. Every join goes through
+	 * ⚠️ What such an UNNAMED player is CALLED was changed, deliberately. Every join goes through
 	 * the gate, so it carries a real role, and unnamed players read `Player 1`/`Player 2` instead of
 	 * `Player <opaque-id>`. NF2's
 	 * byte-identical guarantee moved to where it always belonged — a session nobody told a role,
@@ -457,33 +457,33 @@ class WSBridge {
 	_carrySeat(clientId) {
 		try { this.session.setPlayerName(clientId, this.gate.nameOf(clientId)); }
 		catch (e) { /* a session that predates names, or an id the gate never seated */ }
-		// KDM-282 — and the SEAT they hold, which is what the session calls them BY when they typed
+		// And the SEAT they hold, which is what the session calls them BY when they typed
 		// no name. From `presence`, not from `msg.role`: presence is where the seat is recorded and
 		// what survives a reconnect, so the label cannot disagree with the seat every other consumer
 		// reads (`_dropped`, `_reportBack`). The session decides what a seat is CALLED; this only
 		// reports which seat it is.
 		try { this.session.setSeatRole(clientId, this.presence.roleOf(clientId)); }
-		catch (e) { /* a session that predates seat labels (KDM-282) */ }
-		// KDM-256 R1 / KDM-279 — the character they built, PERKS INCLUDED. This used to be two
+		catch (e) { /* a session that predates seat labels */ }
+		// The character they built, PERKS INCLUDED. This used to be two
 		// carries, `setPerks` then `setCharacter`, reading two gate accessors; one declaration is one
 		// carry. Unconditional: `characterOf` answers `null` for a seat that declared nothing, and
 		// the session turns that one value into KD's own default in one place (R4).
 		try { this.session.setCharacter(clientId, this.gate.characterOf(clientId)); }
-		catch (e) { /* a session that predates character choice (KDM-256) */ }
-		// KDM-239 R3/R5 — and the world this player declared. Only a HOST ever has one (the gate
+		catch (e) { /* a session that predates character choice */ }
+		// And the world this player declared. Only a HOST ever has one (the gate
 		// refuses to store a guest's), so this is a no-op for everyone else and needs no role check
 		// here: "who may declare a world" is answered in exactly one place, and it is not this one.
 		try { this.session.setWorldOptions(clientId, this.gate.worldOf(clientId)); }
-		catch (e) { /* a session that predates world declaration (KDM-239) */ }
-		// KDM-243 R1 — and the single-player save this host asked to continue, on exactly the same
+		catch (e) { /* a session that predates world declaration */ }
+		// And the single-player save this host asked to continue, on exactly the same
 		// terms as the world above: the gate answers `''` for anyone who is not the host, so this
 		// needs no role check either. "Who may bring a world" stays answered in one place.
 		try { this.session.setSaveOption(clientId, this.gate.saveOf(clientId)); }
-		catch (e) { /* a session that predates save import (KDM-243) */ }
+		catch (e) { /* a session that predates save import */ }
 	}
 
 	/**
-	 * KDM-186: a write that the kernel could not take immediately is queued INSIDE Node, and the
+	 * A write that the kernel could not take immediately is queued INSIDE Node, and the
 	 * client sees it whenever the socket drains — latency the server's own clock never sees. With
 	 * ~40 KB snapshots this is a prime suspect for round-trips that are ~60x the measured CPU cost,
 	 * so record the backlog rather than discarding `write`'s return value.
@@ -499,7 +499,7 @@ class WSBridge {
 	}
 
 	/**
-	 * KDM-287 — what the HOST should tell a friend to type, as a `{ lan }` to merge onto `joined`.
+	 * What the HOST should tell a friend to type, as a `{ lan }` to merge onto `joined`.
 	 *
 	 * ⚠️ THE PORT COMES FROM THE LIVE SOCKET. `socket.localPort` is the port this very connection
 	 * arrived on, so a directly-run gateway follows `PORT` and `listen(0)` without this file knowing
@@ -519,7 +519,7 @@ class WSBridge {
 	}
 
 	/**
-	 * KDM-233: refuse a join IN WORDS (E6).
+	 * Refuse a join IN WORDS (E6).
 	 *
 	 * The reason must travel as an application message, never as a rejected upgrade. A browser cannot
 	 * read an HTTP handshake rejection — it surfaces to `WebSocket` only as close 1006, with no
@@ -527,7 +527,7 @@ class WSBridge {
 	 * to display. Accept the upgrade, send the typed reason, then close. (Lesson carried over from
 	 * `origin/feature/multiplayer`'s `tools/mp-server.js:286-293`.)
 	 *
-	 * KDM-270: AND SOME REFUSALS ARE NOT THE END OF THE CONVERSATION.
+	 * AND SOME REFUSALS ARE NOT THE END OF THE CONVERSATION.
 	 *
 	 * `retry` — set by the gate, where the refusal is raised — names the seat this client may ask for
 	 * on this same socket, and the socket is closed IFF it is absent. That single condition is the
@@ -546,12 +546,12 @@ class WSBridge {
 	}
 
 	_handle(socket, msg, clientId) {
-		// KDM-250: ANY inbound message is evidence the peer's event loop is turning — a `pong` is
+		// ANY inbound message is evidence the peer's event loop is turning — a `pong` is
 		// merely the one we can count on when the player is doing nothing. Recorded before the
 		// dispatch below so a slow handler cannot make its own sender look dead.
 		if (clientId) this.presence.saw(clientId, now());
 		/*
-		 * KDM-313 — …and a MISSING seat speaking on its CURRENT socket was frozen, not gone: it is back.
+		 * …and a MISSING seat speaking on its CURRENT socket was frozen, not gone: it is back.
 		 *
 		 * The heartbeat cannot tell a wedged page from a dead one while it lasts, and both are reported.
 		 * But a socket that closed never speaks again, so a message on the seat's live socket ends the
@@ -565,11 +565,11 @@ class WSBridge {
 			this._reportBack(clientId);
 		}
 		// A `pong` is liveness and nothing else. It must NOT produce a state frame: KD's draw loop
-		// already emits an input every frame, and KDM-186 measured what answering cheap traffic with
+		// already emits an input every frame, and it was measured what answering cheap traffic with
 		// ~40 KB snapshots costs (809 MB egress, one core pegged, lockstep never completing).
 		if (msg.type === 'pong') return clientId;
 		/**
-		 * KDM-249 — a HOST re-states its mod set after publishing the payloads.
+		 * A HOST re-states its mod set after publishing the payloads.
 		 *
 		 * The declaration on `join` is whatever had been hashed by the time the socket opened. A
 		 * player who picks mods from the Mods menu and then hosts would otherwise declare a stale
@@ -584,8 +584,8 @@ class WSBridge {
 			this.gate.claimHost(clientId, { mods: msg.mods });
 			return clientId;
 		}
-		// KDM-233: the host's answer to the one pending question (E2/E3). Only the host may answer —
-		// otherwise a guest could admit itself, which is the whole gate. KDM-297: the body is
+		// The host's answer to the one pending question (E2/E3). Only the host may answer —
+		// otherwise a guest could admit itself, which is the whole gate. The body is
 		// `_answerJoin`, shared with the in-game dialogue — one road for the answer, whichever screen asked.
 		if (msg.type === 'join_answer' && clientId && clientId === this.gate.host) {
 			this._answerJoin(clientId, !!msg.accept);
@@ -595,12 +595,12 @@ class WSBridge {
 			try {
 				clientId = msg.clientId;
 				/*
-				 * KDM-250 E6 / KDM-253 — `gone` is terminal, and it is checked HERE, before anything
+				 * E6 — `gone` is terminal, and it is checked HERE, before anything
 				 * else, because it must hold on both roads back in.
 				 *
 				 * It used to be enforced inside the re-attach branch, which is gated on
 				 * `session.players.includes(clientId)`. That was true while a dismissed player still
-				 * held a seat — and false the moment KDM-253's teardown actually removed them, so the
+				 * held a seat — and false the moment player teardown actually removed them, so the
 				 * ghost fell through to the ORDINARY join path and got a bare `error` about a session
 				 * that had already started. Presence is what decides this, not seat membership.
 				 *
@@ -611,7 +611,7 @@ class WSBridge {
 					return clientId;
 				}
 				/*
-				 * KDM-280 — TWO CLIENTS, ONE ID: refused HERE, before anything is written.
+				 * TWO CLIENTS, ONE ID: refused HERE, before anything is written.
 				 *
 				 * A reload and an impostor send the identical frame, and exactly one signal separates
 				 * them: whether the id's PREVIOUS socket is still live. Only this layer holds it — the
@@ -634,20 +634,20 @@ class WSBridge {
 					return clientId;
 				}
 				this.sockets.set(clientId, socket);
-				// Reload-friendly (KD-098): a KNOWN player reconnecting to an already-started
+				// Reload-friendly: a KNOWN player reconnecting to an already-started
 				// session just REATTACHES its new socket and re-syncs — calling join() again
 				// would throw "session already started". This lets you reload a tab mid-session
 				// (e.g. to re-read the diagnostics) without restarting the server.
 				if (this.session.started && this.session.players.includes(clientId)) {
-					// KDM-252 U1: the seat is live again. A `gone` seat cannot reach this line — it is
+					// The seat is live again. A `gone` seat cannot reach this line — it is
 					// refused at the top of the join branch, which is the only place that rule lives.
-					// KDM-298: only a seat that was actually MISSING is "back". The same tab re-asking on the socket
+					// Only a seat that was actually MISSING is "back". The same tab re-asking on the socket
 					// it never lost (a second press of Join) must not tell the host "your partner is back — the
 					// game has resumed" about somebody who never left.
 					const wasMissing = this.presence.state(clientId) === 'missing';
 					this.presence.back(clientId, now());
 					this._send(socket, { type: 'joined', clientId, started: true, players: this.session.players });
-					// KDM-206/KDM-252 N4: a rejoining client holds nothing we can diff against — force a
+					// A rejoining client holds nothing we can diff against — force a
 					// full snapshot AND restart its sequence, so the client has a base to count gaps from
 					// instead of inheriting a number from a socket that no longer exists.
 					this._resetDelta(clientId);
@@ -656,21 +656,21 @@ class WSBridge {
 					return clientId;
 				}
 				/*
-				 * KDM-255 R1/R2 — THE GATE IS THE ONLY ROAD IN. Two branches, and no third.
+				 * THE GATE IS THE ONLY ROAD IN. Two branches, and no third.
 				 *
 				 * There used to be a fall-through: a `join` carrying no `role` was seated directly by
 				 * `_roleFor`'s arrival order, with `join-gate.js` never consulted — so `already_hosting`,
-				 * `session_full`, `busy` and the `build_mismatch` check (KDM-233 N1) were all skipped on
+				 * `session_full`, `busy` and the `build_mismatch` check were all skipped on
 				 * that road. It was the road `#coop=<id>` and eleven node-layer specs took, which is why
-				 * KDM-233 shipped the gate without being able to remove it.
+				 * the gate first shipped without being able to remove it.
 				 *
 				 * `#coop=` then became a shortcut INTO this flow with a client-side auto-answer, and
-				 * KDM-302 removed it altogether: the lobby is the only client road, and a HUMAN host
+				 * was later removed altogether: the lobby is the only client road, and a HUMAN host
 				 * answers every join. There is no auto-approve anywhere, client or server.
 				 */
 				if (msg.role === 'host') {
-					// KDM-260 — the shape is declared once, at the top of this file, so a new handshake
-					// field cannot be forgotten here. `world` is in the HOST shape only (KDM-239 A5).
+					// The shape is declared once, at the top of this file, so a new handshake
+					// field cannot be forgotten here. `world` is in the HOST shape only.
 					const c = this.gate.claimHost(clientId, pickFields(msg, HOST_JOIN_FIELDS));
 					if (!c.accept) { this._reject(socket, c); return clientId; }
 				} else if (msg.role === 'guest') {
@@ -679,14 +679,14 @@ class WSBridge {
 						// Asking is not joining: no seat is taken and the session is untouched until the
 						// host answers. The guest is told it is waiting so the join screen can say so
 						// rather than looking hung.
-						// KDM-249 R5 — the diff rides on BOTH replies, so each side learns it before the
+						// The diff rides on BOTH replies, so each side learns it before the
 						// session exists. The guest needs to know what it will be missing before it
 						// commits; the host needs to know what it is about to be asked to supply.
 						this._send(socket, { type: 'awaiting_approval', modDiff: q.modDiff, world: q.world });
 						const hostSock = this.sockets.get(this.gate.host);
 						if (hostSock) this._send(hostSock, { type: 'join_pending', clientId, name: this.gate.pending.name, modDiff: q.modDiff });
 					/*
-					 * KDM-297 — AND A HOST WHO IS PLAYING IS ASKED IN THE GAME. `join_pending` only ever
+					 * AND A HOST WHO IS PLAYING IS ASKED IN THE GAME. `join_pending` only ever
 					 * reached the lobby, which is painted on the Multiplayer screen alone, so a host
 					 * already in the dungeon was never asked and the guest waited for ever. Before the
 					 * session starts there is no bundle to open it on — and the host IS on the lobby
@@ -709,24 +709,24 @@ class WSBridge {
 					return clientId;
 				}
 				/*
-				 * KDM-250: seated BEFORE `session.join`, so the seat exists by the time the session
+				 * Seated BEFORE `session.join`, so the seat exists by the time the session
 				 * knows about this client.
 				 *
-				 * KDM-255 — the role is simply what the client declared. This used to go through a
+				 * The role is simply what the client declared. This used to go through a
 				 * `_roleFor(clientId, msg.role)` helper whose real job was the ARRIVAL-ORDER fallback
 				 * the roleless branch needed ("no seat yet ⇒ you are the host"). With that branch gone
 				 * the helper could only ever return its first argument, so it is gone too rather than
 				 * left as a dead default that would quietly make a future bypass work.
 				 */
 				this.presence.seat(clientId, msg.role, now());
-				// KDM-235 — a NEW id arriving at a RUNNING session is a join-late, not an error. (A
+				// A NEW id arriving at a RUNNING session is a join-late, not an error. (A
 				// known id is a reconnect and never reaches here; a dismissed one was refused at the
 				// top of this branch.) `join()` is the pre-start collector and throws once started, so
 				// the two cases get the two different methods they always needed.
 				this._carrySeat(clientId);
 				if (this.session.started) {
 					this._joinLate(clientId);
-					// KDM-303 R4/R6 — a player who took over a VACATED running game as its host is now
+					// A player who took over a VACATED running game as its host is now
 					// the one to answer anybody who asked while the seat was empty.
 					if (msg.role === 'host') this._offerPendingTo(clientId);
 					return clientId;
@@ -741,7 +741,7 @@ class WSBridge {
 			}
 			return clientId;
 		}
-		// KDM-206: the client noticed a gap in the state sequence, so whatever it holds may be stale.
+		// The client noticed a gap in the state sequence, so whatever it holds may be stale.
 		// Forget what we think it has and send a full snapshot — merging a delta onto an unknown base
 		// is the one way this optimisation could corrupt state, and this is the escape hatch.
 		if (msg.type === 'resync' && clientId && this.session.started) {
@@ -756,7 +756,7 @@ class WSBridge {
 			return clientId;
 		}
 		/*
-		 * KDM-244 — the host asks for the run as a single-player save.
+		 * The host asks for the run as a single-player save.
 		 *
 		 * A REQUEST/RESPONSE pair rather than a server-initiated push, because the client must be
 		 * ready to write it: the reply overwrites `localStorage.KinkyDungeonSave` (D2), and a save
@@ -773,30 +773,30 @@ class WSBridge {
 		}
 		if (msg.type === 'input' && clientId && this.session.started) {
 			try {
-				// KDM-163 (option A): the client routes EVERY input and classifies nothing. `apply`
+				// The client routes EVERY input and classifies nothing. `apply`
 				// asks the GAME whether the input consumes a turn; only then does it enter lockstep.
 				const tApply = now();
 				let res = this.session.apply(clientId, msg.action || {});
 				const applyMs = now() - tApply;
-				this._noteInput(clientId, msg.action, res.kind, applyMs);   // KDM-186 telemetry
-				// KDM-253: the session has READ a disconnect answer; acting on it is ours, because it
+				this._noteInput(clientId, msg.action, res.kind, applyMs);   // UAT telemetry
+				// The session has READ a disconnect answer; acting on it is ours, because it
 				// needs presence and seats — neither of which the session knows about. Done before the
 				// reply below so the state frame that reply carries already shows the world the
 				// decision produced.
 				if (res.solo === true) this._goSolo(clientId);
 				else if (res.quit === true) this._acceptQuit(clientId);
-				// KDM-297: the in-game join question, answered — the same road as the lobby's buttons.
+				// The in-game join question, answered — the same road as the lobby's buttons.
 				if (res.joinAnswer === true || res.joinAnswer === false) this._answerJoin(clientId, res.joinAnswer);
 				if (res.kind === 'ui') {
 					// A menu/UI input: applied to this player's own state, no turn consumed. Push their
 					// updated snapshot straight back so the UI responds without waiting for the partner
 					// — this is what keeps R6 true now that nothing runs locally on the client.
-					// KDM-163: TAGGED `kind:'ui'`. Without it this is indistinguishable from a resolved
+					// TAGGED `kind:'ui'`. Without it this is indistinguishable from a resolved
 					// turn, and the client's turn bookkeeping (submitted / route / tick) fires on it.
 					// That matters enormously once the client routes everything: `setMoveDirection` is
 					// sent from KD's draw loop EVERY FRAME, so an untagged push would reset the
 					// per-turn state ~60×/s and no click-to-move route could survive a single frame.
-					// KDM-186 RULE 2 — state on CHANGE, not on input.
+					// RULE 2 — state on CHANGE, not on input.
 					// Measured: KD's draw loop emits an input every frame, so answering each one with a
 					// full snapshot cost ~40 KB × ~100/s × 2 clients (809 MB egress, one core pegged).
 					// The server then fell so far behind that replies stopped and lockstep never
@@ -808,12 +808,12 @@ class WSBridge {
 						this._send(socket, { type: 'ack', tick: this.session.turn, srv: this._srvStamp(applyMs) });
 						return clientId;
 					}
-					// KDM-206: a DELTA, not a whole capture. This is the per-frame path — KD's draw loop
+					// A DELTA, not a whole capture. This is the per-frame path — KD's draw loop
 					// emits `setMoveDirection` every frame — so it is where the 38.3 KB reply hurt.
 					this._send(socket, Object.assign({
 						type: 'state', kind: 'ui', tick: this.session.turn, srv: this._srvStamp(applyMs),
 					}, this._stateFrame(clientId)));
-					// KDM-225: a ui action that changed SOMEONE ELSE's view (a peace offer is only
+					// A ui action that changed SOMEONE ELSE's view (a peace offer is only
 					// interesting to the person being asked) names them in `notify`. Without this the
 					// peer sees nothing until the next resolved turn — and with R5 blocking their turn
 					// on that very answer, that turn would never come. The bridge does not decide who
@@ -828,7 +828,7 @@ class WSBridge {
 					}
 					return clientId;
 				}
-				// KDM-225 UAT: a REFUSED action is not a queued one.
+				// A REFUSED action is not a queued one.
 				//
 				// `submit` can now decline outright (a player owing an answer to a peace offer). That
 				// used to fall through to the `waiting` reply below, and `waiting` is what tells the
@@ -862,7 +862,7 @@ class WSBridge {
 					this._armGrace();
 				}
 			} catch (e) {
-				// KDM-310: `reply` — this error ANSWERS the input, so the client unwinds its slot for it
+				// `Reply` — this error ANSWERS the input, so the client unwinds its slot for it
 				// (the other `error`s, about saves and seats, answer no input).
 				this._send(socket, { type: 'error', error: String(e && e.message || e), reply: true });
 			}
@@ -882,7 +882,7 @@ class WSBridge {
 	}
 
 	/**
-	 * KDM-250 — the heartbeat: ping everybody, then sweep whoever stopped answering.
+	 * The heartbeat: ping everybody, then sweep whoever stopped answering.
 	 *
 	 * WHY AN APPLICATION-LEVEL PING AND NOT RFC6455 OPCODE 0x9. A browser answers a protocol ping
 	 * from its network stack, so a protocol pong proves the SOCKET is alive and says exactly nothing
@@ -919,7 +919,7 @@ class WSBridge {
 	/**
 	 * Tell everyone still here that somebody is not (E3).
 	 *
-	 * The ROLE travels with the id because host and guest are not symmetric (KDM-234 D5): a guest who
+	 * The ROLE travels with the id because host and guest are not symmetric: a guest who
 	 * drops leaves the host a choice, while a host who drops leaves the guest waiting. A survivor who
 	 * only learned "someone left" could not tell which of those it is in.
 	 *
@@ -931,7 +931,7 @@ class WSBridge {
 		if (!this.presence.everPaired) return;
 		const role = this.presence.roleOf(clientId);
 		/*
-		 * KDM-251 S2 — the turn loop stops here, and this is the ONLY place presence is mapped onto
+		 * The turn loop stops here, and this is the ONLY place presence is mapped onto
 		 * session behaviour. `SwapSession` is handed an opaque reason and never learns what a seat is.
 		 *
 		 * Gated on `started`: before the session exists there is no turn loop to pause, and pausing a
@@ -942,25 +942,25 @@ class WSBridge {
 		for (const [cid, sock] of this.sockets) {
 			if (cid === clientId) continue;
 			try { this._send(sock, msg); } catch (e) { /* that one is gone too */ }
-			// KDM-251 S3/S5 — and the survivor is told IN THE GAME, not only in a corner overlay.
+			// And the survivor is told IN THE GAME, not only in a corner overlay.
 			// A guest who has lost the HOST gets the quit-only dialogue (D5/D7): they cannot continue,
 			// because it is the host's process that owns the world. The host's own wait/solo choice on
-			// a GUEST drop is KDM-253 — deliberately not opened here.
+			// a GUEST drop is handled elsewhere — deliberately not opened here.
 			if (role === 'host' && this.session.started) {
 				try { this.session.openHostLostDialogue(cid, graceText(this.hostGraceMs)); } catch (e) { /* world may be mid-teardown */ }
 			}
-			// KDM-253 S4/D1 — and the mirror: a HOST who has lost a guest is given the choice the
+			// And the mirror: a HOST who has lost a guest is given the choice the
 			// guest is never offered. Two options, no timeout; until they answer, the pause stands.
 			if (role === 'guest' && this.session.started) {
 				try { this.session.openPeerLostDialogue(cid); } catch (e) { /* world may be mid-teardown */ }
 			}
 		}
-		// KDM-303 R1 — a missing HOST is waited for only so long; then a guest takes the seat.
+		// A missing HOST is waited for only so long; then a guest takes the seat.
 		if (role === 'host' && this.session.started) this._startHostGrace(clientId);
 	}
 
 	/**
-	 * KDM-303 R1/R8 — start waiting for a missing host, on the SERVER's clock.
+	 * Start waiting for a missing host, on the SERVER's clock.
 	 *
 	 * One timeout decides; a 1 s ticker only keeps the guests' countdown text current (the `TIME`
 	 * token of their host-lost dialogue) and pushes it, so every guest sees the same moment and no
@@ -998,7 +998,7 @@ class WSBridge {
 	}
 
 	/**
-	 * KDM-303 R3/R4/R5 — the host did not come back. Their character leaves, the seat is vacated (the
+	 * The host did not come back. Their character leaves, the seat is vacated (the
 	 * run and its declaration stay), and the seat goes to a connected guest if there is one.
 	 *
 	 * The old host's id is FORGOTTEN rather than tombstoned (`presence.forget` after `_seatGone`), so
@@ -1016,7 +1016,7 @@ class WSBridge {
 	}
 
 	/**
-	 * KDM-303 R3 — give a vacated host seat to a CONNECTED seated player, chosen at random.
+	 * Give a vacated host seat to a CONNECTED seated player, chosen at random.
 	 *
 	 * Called when the grace runs out and again whenever a seated guest comes back while the seat is
 	 * still vacated. With nobody connected it does nothing: the seat waits for the next Host press
@@ -1043,7 +1043,7 @@ class WSBridge {
 	}
 
 	/**
-	 * KDM-303 R6 — a join request that waited while nobody was host is put to the new one, on the
+	 * A join request that waited while nobody was host is put to the new one, on the
 	 * same terms as a fresh request: the lobby message, and the in-game question once the run is live.
 	 */
 	_offerPendingTo(hostId) {
@@ -1061,7 +1061,7 @@ class WSBridge {
 	}
 
 	/**
-	 * KDM-252 E4 — the mirror of `_reportMissing`: somebody who was being waited for is back.
+	 * The mirror of `_reportMissing`: somebody who was being waited for is back.
 	 *
 	 * Three things happen to the SURVIVOR, in this order, and the order matters:
 	 *   1. their disconnect modal is closed on their own bundle (server-side — see
@@ -1077,7 +1077,7 @@ class WSBridge {
 	 */
 	_reportBack(clientId) {
 		const role = this.presence.roleOf(clientId);
-		// KDM-303 R2 — the host is back in time: stop the countdown, nobody is promoted.
+		// The host is back in time: stop the countdown, nobody is promoted.
 		if (this._hostGrace && this._hostGrace.host === clientId) this._clearHostGrace();
 		// Closed on every SEAT, not on every open socket. A survivor who is themselves offline right
 		// now still holds that modal in their bundle, and would be handed it back — stale — inside the
@@ -1103,20 +1103,20 @@ class WSBridge {
 				// its in-flight bookkeeping, because a `ui` frame is the REPLY to an input it sent. This
 				// frame replies to nothing — the survivor pressed nothing; their peer's socket came
 				// back — so tagging it `ui` would free a slot that no reply ever filled and leave the
-				// queue permanently out of step with the wire (the KDM-186 Rule-1 failure).
+				// queue permanently out of step with the wire (the Rule-1 failure).
 				this._pushState(cid, sock);
 			} catch (e) { /* that one is gone too */ }
 		}
-		// KDM-303 R3 — a guest who comes back to a run whose host seat was vacated while they were
+		// A guest who comes back to a run whose host seat was vacated while they were
 		// away is the only one who can take it.
 		if (this.gate.vacated) this._fillHostSeat();
 	}
 
 	/**
-	 * KDM-253 E5/E6 — the survivor has chosen to go on alone. Give up the missing seats for good.
+	 * The survivor has chosen to go on alone. Give up the missing seats for good.
 	 *
 	 * The ONE place a seat becomes `gone`, and therefore the one place the join-gate slot is handed
-	 * back: KDM-252 stopped a mid-session close from releasing it, precisely so a returning player
+	 * back: a mid-session close was stopped from releasing it, precisely so a returning player
 	 * would find their own seat, and this is where that hold finally ends. Miss the `gate.release`
 	 * and slot 1 leaks for the life of the process.
 	 *
@@ -1129,7 +1129,7 @@ class WSBridge {
 		if (!this._seatGone(leaving, 'dismissed')) return false;
 		this.session._dbg(`SOLO — ${deciderId} continues without ${leaving.join(', ')}`);
 		/*
-		 * KDM-244 D1 — the run just stopped being co-op, so this is the moment it becomes a
+		 * The run just stopped being co-op, so this is the moment it becomes a
 		 * single-player save. Sent AFTER `_seatGone`, deliberately: `removePlayer` has already
 		 * despawned the departing peer's avatar (`swap-session.js` step 1), so the export is left
 		 * stripping the HOST's own avatar — the one entity nothing else removes, and the one that
@@ -1143,7 +1143,7 @@ class WSBridge {
 	}
 
 	/**
-	 * KDM-244 — hand the host their run as a single-player save string.
+	 * Hand the host their run as a single-player save string.
 	 *
 	 * HOST-ONLY, checked HERE and again in `session.exportRun` (R1/R11). Two checks for two different
 	 * questions: this one asks "is this the seat the join gate gave slot 0 to", which is the bridge's
@@ -1176,7 +1176,7 @@ class WSBridge {
 	}
 
 	/**
-	 * KDM-253 — a guest pressed Quit on the host-lost dialogue: they are leaving on purpose.
+	 * A guest pressed Quit on the host-lost dialogue: they are leaving on purpose.
 	 *
 	 * The same departure as `_goSolo`, aimed at the person who asked rather than the person who
 	 * vanished. It exists because the alternative is a "clean goodbye" that leaves a seat held for
@@ -1190,11 +1190,11 @@ class WSBridge {
 	}
 
 	/**
-	 * KDM-297 — push one player a fresh state frame they did not ask for.
+	 * Push one player a fresh state frame they did not ask for.
 	 *
 	 * `kind:'push'`, NOT `'ui'`: the client answers a `ui` frame by unwinding one slot of its in-flight
 	 * bookkeeping, because a `ui` frame is the REPLY to an input it sent. A push replies to nothing, so
-	 * tagging it `ui` would free a slot no reply ever filled (the KDM-186 Rule-1 failure, KDM-252).
+	 * tagging it `ui` would free a slot no reply ever filled (the Rule-1 failure).
 	 * Four call sites built this frame by hand; this is the one copy.
 	 */
 	_pushState(cid, sock = this.sockets.get(cid)) {
@@ -1204,7 +1204,7 @@ class WSBridge {
 	}
 
 	/**
-	 * KDM-233 / KDM-297 — the host's answer to the one pending join question.
+	 * The host's answer to the one pending join question.
 	 *
 	 * Reached from TWO screens, and it is one method so they cannot drift: the lobby's Accept/Decline
 	 * (a `join_answer` message) and the in-game dialogue (a routed `dialogue` input whose answer
@@ -1229,9 +1229,9 @@ class WSBridge {
 			return false;
 		}
 		try {
-			// KDM-250: seated before the session is told, so the seat exists by then.
+			// Seated before the session is told, so the seat exists by then.
 			//
-			// ⚠️ KDM-282 — AND BEFORE `_carrySeat`, which is the order the other seating site
+			// ⚠️ AND BEFORE `_carrySeat`, which is the order the other seating site
 			// already used. These two lines were the other way round here, which cost nothing
 			// while `_carrySeat` read only the gate: it now reads `presence.roleOf` too, and an
 			// unseated presence answers `null`, so an approved guest was carried with no seat
@@ -1241,10 +1241,10 @@ class WSBridge {
 			this.presence.seat(res.clientId, 'guest', now());
 			this._carrySeat(res.clientId);
 			/*
-			 * KDM-255 — A GUEST APPROVED INTO A RUNNING SESSION IS A JOIN-LATE, not an error.
+			 * A GUEST APPROVED INTO A RUNNING SESSION IS A JOIN-LATE, not an error.
 			 *
 			 * This branch used to call `session.join()` unconditionally, and that method is the
-			 * PRE-START collector: it throws once the session has started (KDM-235). So approving
+			 * PRE-START collector: it throws once the session has started. So approving
 			 * a friend who turned up mid-run answered them `{type:'error'}` and seated nobody.
 			 *
 			 * It went unnoticed because the roleless join road had the very same two-way split a
@@ -1268,7 +1268,7 @@ class WSBridge {
 	}
 
 	/**
-	 * KDM-235 A5 — admit a newcomer to a run in progress and get everyone looking at the same world.
+	 * Admit a newcomer to a run in progress and get everyone looking at the same world.
 	 *
 	 * The session decides WHETHER and WHEN (it may defer the seat to the turn boundary); the bridge
 	 * only carries the answer to the sockets, exactly as it does for presence and seats elsewhere.
@@ -1298,7 +1298,7 @@ class WSBridge {
 			} catch (e) { /* socket gone */ }
 		}
 		// The players already here get a new avatar in their world. `push`, not `ui`: nobody asked for
-		// this frame, so it must not unwind anyone's in-flight bookkeeping (KDM-252).
+		// this frame, so it must not unwind anyone's in-flight bookkeeping.
 		for (const [cid, s] of this.sockets) {
 			if (cid === clientId) continue;
 			try {
@@ -1310,13 +1310,13 @@ class WSBridge {
 	}
 
 	/**
-	 * KDM-253 E5/E6 — a departure that is FINAL. The one place a seat becomes `gone`.
+	 * A departure that is FINAL. The one place a seat becomes `gone`.
 	 *
 	 * Shared by both ways out (the survivor dismisses a missing peer; a guest quits) because they are
 	 * the same operation seen from two ends, and the two halves that are easy to forget are the same
 	 * either way:
 	 *
-	 *   - the JOIN-GATE slot. KDM-252 stopped a mid-session close from releasing it, precisely so a
+	 *   - the JOIN-GATE slot. A mid-session close was stopped from releasing it, precisely so a
 	 *     returning player would find their own seat. This is where that hold finally ends — miss it
 	 *     and slot 1 leaks for the life of the process;
 	 *   - TELLING THE SURVIVORS. `_goSolo` originally did not, and the server state was perfectly
@@ -1332,7 +1332,7 @@ class WSBridge {
 		const gone = [];
 		for (const id of ids) {
 			if (!this.presence.remove(id)) continue;   // already terminal — do not report it twice
-			// KDM-303 — a host who TIMED OUT vacates the seat of a game that goes on: the session's
+			// A host who TIMED OUT vacates the seat of a game that goes on: the session's
 			// mods and world declaration stay (`vacate`), where an ending host takes them (`release`).
 			if (opts.vacateHost && id === this.gate.host) this.gate.vacate(id);
 			else this.gate.release(id);
@@ -1340,7 +1340,7 @@ class WSBridge {
 			const sock = this.sockets.get(id);
 			// If they are still connected (a quit, or a peer whose socket outlived the decision), say
 			// why in words before closing — the same typed refusal a later reconnect would get.
-			// KDM-303 R5 — except a timed-out host: `seat_gone` makes their client stop reconnecting for
+			// Except a timed-out host: `seat_gone` makes their client stop reconnecting for
 			// good, and they are allowed back as a guest. Their socket is only closed.
 			if (sock) {
 				try {
@@ -1357,14 +1357,14 @@ class WSBridge {
 			try {
 				for (const id of gone) this._send(sock, { type: 'peer_gone', clientId: id, reason });
 				// Their world changed — an avatar left it. `push`, not `ui`: nobody asked for this
-				// frame, so it must not unwind anyone's in-flight bookkeeping (KDM-252).
+				// frame, so it must not unwind anyone's in-flight bookkeeping.
 				this._pushState(cid, sock);
 			} catch (e) { /* that one is gone too */ }
 		}
 		return true;
 	}
 
-	/** KDM-251: everybody is back — let the turn loop run again. */
+	/** Everybody is back — let the turn loop run again. */
 	_resumeIfWhole() {
 		if (this.presence.paused) return false;
 		if (!this.session.started) return false;
@@ -1373,7 +1373,7 @@ class WSBridge {
 	}
 
 	/**
-	 * KDM-275 A4 — everything that must happen once a turn has actually resolved.
+	 * Everything that must happen once a turn has actually resolved.
 	 *
 	 * ONE method rather than two copies, because there are two places a turn resolves — a player's
 	 * submit and the idle-grace auto-wait — and they had already drifted to the extent that only one
@@ -1394,7 +1394,7 @@ class WSBridge {
 	}
 
 	/** Arm the idle-grace timer: after idleGraceMs, auto-"wait" the non-submitters so a
-	 *  still-acting player isn't deadlocked by an idle/finished partner (KD-087). */
+	 *  still-acting player isn't deadlocked by an idle/finished partner. */
 	_armGrace() {
 		if (!(this.idleGraceMs > 0)) return;
 		this._clearGrace();
@@ -1406,7 +1406,7 @@ class WSBridge {
 				try { res = this.session.submit(pid, { kind: 'wait' }); } catch (e) { /* noop */ }
 				if (res.advanced) break;
 			}
-			// KDM-275: through `_turnResolved`, not `_broadcastState` — this is the SECOND path on which
+			// Through `_turnResolved`, not `_broadcastState` — this is the SECOND path on which
 			// a turn resolves, and a turn that resolves here can arm an export just as readily as one a
 			// player submitted. Handling it in only one of the two is a silent drop that no
 			// session-level test can see.
@@ -1415,7 +1415,7 @@ class WSBridge {
 	}
 
 	/**
-	 * KDM-186 UAT telemetry: how much traffic each client actually generates between turns, how the
+	 * UAT telemetry: how much traffic each client actually generates between turns, how the
 	 * GAME classified it, and — since the 2026-08-17 profile — WHERE THE LATENCY IS.
 	 *
 	 * The profile measured a `ui` transaction at ~16-20 ms of server CPU while the owner measured a
@@ -1475,7 +1475,7 @@ class WSBridge {
 	}
 
 	/**
-	 * KDM-186: emit the latency line at 1 Hz, to BOTH the server stdout and the browser console.
+	 * Emit the latency line at 1 Hz, to BOTH the server stdout and the browser console.
 	 *
 	 * The first version drained per resolved turn. That is the wrong clock: under strict lockstep
 	 * (idleGraceMs=0, the demo default) a turn stalls until BOTH humans act, so the telemetry went
@@ -1522,7 +1522,7 @@ class WSBridge {
 	}
 
 	/**
-	 * KDM-192: which messages in this socket read are already superseded by a newer one of the SAME
+	 * Which messages in this socket read are already superseded by a newer one of the SAME
 	 * type, and therefore need not be applied at all?
 	 *
 	 * WHY. Measured in the owner's live session: ~30 inputs/s at ~60 ms each = ~1.8 s of CPU demanded
@@ -1536,7 +1536,7 @@ class WSBridge {
 	 *  - A `ui` input is a LEVEL (the current mouse direction), not an event: the newest value is the
 	 *    whole truth, so an older one is not "dropped work", it is a stale reading.
 	 *  - Anything else — turn-consuming, or simply not yet classified — is NEVER skipped. Unknown
-	 *    defaults to "keep", which is the safe direction (KDM-163 forbids silently swallowing an input).
+	 *    defaults to "keep", which is the safe direction (silently swallowing an input is forbidden).
 	 *  - Scope is ONE socket read. These messages are already queued together; nothing is delayed and
 	 *    nothing is held back waiting for a possible successor.
 	 * Skips are COUNTED and reported, never silent.
@@ -1559,7 +1559,7 @@ class WSBridge {
 		return skip;
 	}
 
-	/** Count a coalesced input so the saving is visible and the drop is never silent (KDM-163). */
+	/** Count a coalesced input so the saving is visible and the drop is never silent. */
 	_noteCoalesced(clientId, msg) {
 		if (!this._coalesced) this._coalesced = new Map();
 		const t = (msg && msg.action && (msg.action.kdType || msg.action.kind)) || "unknown";
@@ -1618,7 +1618,7 @@ class WSBridge {
 	}
 
 	/**
-	 * KDM-206: compose the state payload for one client — a DELTA when we know what they last held,
+	 * Compose the state payload for one client — a DELTA when we know what they last held,
 	 * a full snapshot on the first send and after a resync.
 	 *
 	 * WHY. Every changed `ui` input used to answer with `snapshotFor()`, a whole capture. Measured
@@ -1648,7 +1648,7 @@ class WSBridge {
 	/**
 	 * Forget what a client held, so their next state send is a full snapshot (join / resync).
 	 *
-	 * KDM-252 N4: the SEQUENCE restarts with it. A reconnecting browser is a fresh page with a fresh
+	 * The SEQUENCE restarts with it. A reconnecting browser is a fresh page with a fresh
 	 * counter, so leaving the server's number where the dead socket left it would hand the client a
 	 * `seq` far ahead of its own and turn every subsequent frame into a false gap. Safe for the
 	 * `resync` path too: a full snapshot re-baselines the client's counter to whatever it carries,
@@ -1660,7 +1660,7 @@ class WSBridge {
 	}
 
 	/**
-	 * @param {string} [replyTo] KDM-310 — the client whose input resolved this turn. Its frame is the
+	 * @param {string} [replyTo] the client whose input resolved this turn. Its frame is the
 	 * REPLY to that input and is tagged `reply: true`; everyone else's is news, answering none of their
 	 * sends. The client matches replies to sends in order, and it cannot tell the two apart itself: a
 	 * turn the partner resolves can arrive while its own inputs are still unanswered.
@@ -1668,10 +1668,10 @@ class WSBridge {
 	_broadcastState(replyTo) {
 		this._clearGrace();
 		const tick = this.session.turn;
-		// KD-098: forward the server's per-turn diagnostics to every client so they show up
+		// Forward the server's per-turn diagnostics to every client so they show up
 		// in the browser console (no need to read the Docker terminal). Drained once per turn.
 		let serverLog = (typeof this.session.takeDbg === 'function') ? this.session.takeDbg() : null;
-		// KDM-186: forward whatever the 1 Hz stats ticker has emitted since the last turn. The ticker —
+		// Forward whatever the 1 Hz stats ticker has emitted since the last turn. The ticker —
 		// NOT this turn boundary — is the drain point: the pathology being measured is turns that STALL,
 		// and a per-turn drain goes silent exactly when the stall it exists to explain is happening.
 		if (this._statsLog && this._statsLog.length) {
@@ -1679,7 +1679,7 @@ class WSBridge {
 			this._statsLog = [];
 		}
 		for (const [cid, sock] of this.sockets) {
-			// KDM-206: turn-resolving states go through the SAME frame composer as the ui path, so
+			// Turn-resolving states go through the SAME frame composer as the ui path, so
 			// `_lastSnap` always matches what the client actually holds. A full snapshot sent here
 			// without recording it would leave the next ui delta diffed against a base the client
 			// never had.
@@ -1701,8 +1701,8 @@ class WSBridge {
 
 module.exports = {
 	WSBridge, encodeFrame, decodeFrames, acceptKey,
-	// KDM-260 — exported so the drift guard can check the CLIENT's payload against them.
+	// Exported so the drift guard can check the CLIENT's payload against them.
 	HOST_JOIN_FIELDS, GUEST_JOIN_FIELDS, pickFields,
-	// KDM-274 — the same, for the direction nothing used to watch.
+	// The same, for the direction nothing used to watch.
 	OUTBOUND_MESSAGES,
 };

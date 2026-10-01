@@ -1,11 +1,11 @@
 /**
- * tools/mp-server/kd-codec.js  (KDM-162)
+ * tools/mp-server/kd-codec.js 
  *
  * THE codec for carrying KD state as JSON — Map/Set aware, class instances refused.
  *
  * It lives here, alone, because it now has TWO consumers in two runtimes: the headless host
  * injects it into the bundle's vm scope (capture/restore of per-player globals), and the BROWSER
- * thin client needs the decode half to adopt the same bundle (KDM-162). Duplicating ~30 lines of
+ * thin client needs the decode half to adopt the same bundle. Duplicating ~30 lines of
  * encoder across two runtimes is exactly the failure mode this epic exists to delete — the
  * `stats` block was duplicated in four places and drifted.
  *

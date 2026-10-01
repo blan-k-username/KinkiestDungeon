@@ -1,5 +1,5 @@
 /**
- * E2E DEMO (KD-101) — records a watchable VIDEO of the full PvP flow from BOTH players' browsers:
+ * E2E DEMO — records a watchable VIDEO of the full PvP flow from BOTH players' browsers:
  * wear a peer down → defeat → tie → the restraint shows on the victim. Produces two .webm files
  * (Player A view, Player B view) under tests/_artifacts/videos/. Not an assertion-heavy test — it's a
  * visual capture. Run it, then open the printed .webm paths.

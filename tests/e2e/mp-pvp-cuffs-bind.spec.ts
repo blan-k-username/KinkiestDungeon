@@ -1,5 +1,5 @@
 /**
- * E2E (KD-101) — applying the cuffs ITEM to a peer binds them in DATA (server bundle + victim client),
+ * E2E — applying the cuffs ITEM to a peer binds them in DATA (server bundle + victim client),
  * isolating the remaining gap to the visual paper-doll (which doesn't re-dress on the thin client).
  * Drives the exact input the cuffs submenu emits (addNPCRestraint slot=Wrists restraint=HingedCuffs).
  */

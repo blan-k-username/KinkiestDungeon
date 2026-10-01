@@ -1,15 +1,15 @@
 /**
- * KDM-269 — the drop-report family is declared ONCE, and every member reaches the player.
+ * The drop-report family is declared ONCE, and every member reaches the player.
  *
- * There are four ways a real player action produces nothing — no handler (`unknownInputs`, KDM-163),
- * displaced out of the lockstep slot (`replacedInputs`, KDM-163), a peer took the contested tile
- * (`cancelledMoves`, KDM-208), the dispatch threw (`failedInputs`, KDM-268). Each used to be written
+ * There are four ways a real player action produces nothing — no handler (`unknownInputs`),
+ * displaced out of the lockstep slot (`replacedInputs`), a peer took the contested tile
+ * (`cancelledMoves`), the dispatch threw (`failedInputs`). Each used to be written
  * out by hand in four places: a field in the constructor, a `*Report()` accessor, a `snap.*` line,
  * and a `_dbg` at the call site.
  *
  * THE FAILURE THIS GUARDS. Forgetting the `snap.*` line is **silent**: the recording works, every
- * accessor answers correctly, and nothing at all reaches the browser. That is the exact bug KDM-268
- * existed to fix, so a refactor that makes it easy to reintroduce would be a bad trade.
+ * accessor answers correctly, and nothing at all reaches the browser. That is the exact bug that once
+ * shipped and had to be fixed, so a refactor that makes it easy to reintroduce would be a bad trade.
  *
  * WHY THESE ASSERTIONS ARE DERIVED FROM THE REGISTRY. A test that named the four fields by hand
  * would pass forever for a fifth channel nobody wired up — it would be testing the list it was
@@ -17,7 +17,7 @@
  * `DROP_CHANNELS`, so a new entry is covered the moment it is declared, without anyone remembering
  * to come back here.
  *
- * Requirement ids refer to the `## Requirements (EARS)` section of KDM-269.
+ * The requirement labels name the behaviours this spec pins.
  */
 import { describe, it, expect } from 'vitest';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -26,7 +26,7 @@ const { SwapSession, DROP_CHANNELS } = require('../../tools/mp-server/swap-sessi
 /** The four the family has today. Named ONCE, as a guard that the registry has not silently shrunk. */
 const KNOWN = ['unknownInputs', 'replacedInputs', 'cancelledMoves', 'failedInputs'];
 
-describe('KDM-269 — drop channels are declared once', () => {
+describe('drop channels are declared once', () => {
 
 	it('the registry is the family, and it has not lost a member (R1)', () => {
 		const fields = DROP_CHANNELS.map((c: any) => c.field);

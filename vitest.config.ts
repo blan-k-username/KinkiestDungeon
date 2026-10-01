@@ -9,7 +9,7 @@ export default defineConfig({
 		coverage: { enabled: false },
 
 		/*
-		 * KDM-290 — CHOSEN, not inherited.
+		 * CHOSEN, not inherited.
 		 *
 		 * vitest's default is 5 s, and this suite quietly did not fit in it. Seating the second player
 		 * starts the session, and starting a session boots a real headless KD world — 1.25 s of

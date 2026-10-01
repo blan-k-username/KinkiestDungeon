@@ -1,5 +1,5 @@
 /**
- * E2E (KDM-263) — two real browsers agree the route out of the hub, over the real wire.
+ * E2E — two real browsers agree the route out of the hub, over the real wire.
  *
  * The unit layer proves the arbitration and proves the wrap reverts a write driven through KD's own
  * draw function. Neither of those runs in a browser, and the bug this slice fixes is a BROWSER bug:

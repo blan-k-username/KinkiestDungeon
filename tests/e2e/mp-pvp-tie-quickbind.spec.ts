@@ -1,5 +1,5 @@
 /**
- * E2E (KD-101) — the quick-bind fix: with the demo bootstrap pre-selecting the player's owned
+ * E2E — the quick-bind fix: with the demo bootstrap pre-selecting the player's owned
  * binding material (coop-bootstrap.js ensureQuickBind), the stock "Tie Up" cast opens the bind
  * submenu ALREADY in the generic view with the OWNED material's category selected — no manual
  * toggle, no category hunting. Clicking the rope restraint then binds the defeated peer.

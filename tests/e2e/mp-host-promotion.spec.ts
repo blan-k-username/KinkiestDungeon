@@ -1,5 +1,5 @@
 /**
- * E2E (KDM-303) — the host's browser goes away; after the grace the guest is the host and plays on,
+ * E2E — the host's browser goes away; after the grace the guest is the host and plays on,
  * and when the old host's tab comes back it rejoins as a guest.
  *
  * The node spec (`tests/unit/mp-host-promotion.spec.ts`) proves the seat rules. This proves the two
@@ -27,7 +27,7 @@ const dialog = (P: any) => P.evaluate(() => {
 	return { name: g.CurrentDialog || '', data: g.CurrentDialogMsgData || null };
 });
 
-test('KDM-303 — the host is gone past the grace: the guest hosts and plays on; the old host rejoins as a guest',
+test('the host is gone past the grace: the guest hosts and plays on; the old host rejoins as a guest',
 	async ({ browser }) => {
 		test.setTimeout(MP_TEST_TIMEOUT);
 		/*
@@ -80,7 +80,7 @@ test('KDM-303 — the host is gone past the grace: the guest hosts and plays on;
 			// ---- R5: the old host's machine comes back ------------------------------------------------
 			await ctxA.setOffline(false);
 			// Its tab reconnects claiming the host seat, is told to ask as a guest, and does — so the
-			// NEW host is asked, in the game (KDM-297).
+			// NEW host is asked, in the game.
 			await B.waitForFunction((n) => {
 				// @ts-ignore bare let-global
 				return KDGameData.CurrentDialog === n;
@@ -93,7 +93,7 @@ test('KDM-303 — the host is gone past the grace: the guest hosts and plays on;
 
 			const { real, ignored } = reportedPageErrors(crashes.slice(crashesBefore));
 			// eslint-disable-next-line no-console
-			if (ignored.length) console.log(`[KDM-303] ignored ${ignored.length} pre-existing asset error(s): ${ignored[0]}`);
+			if (ignored.length) console.log(`ignored ${ignored.length} pre-existing asset error(s): ${ignored[0]}`);
 			expect(real, 'handing the seat on must not trip KD\'s error handler').toEqual([]);
 		} finally {
 			await ctxA.close().catch(() => {});

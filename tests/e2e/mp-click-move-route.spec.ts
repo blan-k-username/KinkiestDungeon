@@ -1,5 +1,5 @@
 /**
- * E2E (KDM-310) — co-op click-to-move: a clicked PATH is walked, and a second click REPLACES the first.
+ * E2E — co-op click-to-move: a clicked PATH is walked, and a second click REPLACES the first.
  *
  * Owner's UAT (2026-09-30): "the MP char doesn't remember the planned path, I have to click again and
  * again" and "if I choose another action while waiting for the other player, it should replace my
@@ -35,7 +35,7 @@ const pos = (P: any) => P.evaluate(() => ({
  * Two ways a click used to land on UI instead of the tile: right after boot `KinkyDungeonCamX/Y` can
  * still be settling (the tile left of the player mapped to the top-right corner), and near a map EDGE
  * a neighbour of the player may sit under the HUD — the party now starts on KD's own
- * start tile, which is often beside an edge (KDM-309). Polled, so a settling camera is simply waited out.
+ * start tile, which is often beside an edge. Polled, so a settling camera is simply waited out.
  */
 async function pathTarget(P: any, n: number, avoid: any = null) {
 	let t: any; let prev = '';
@@ -113,11 +113,11 @@ async function withPair(body: (A: any, B: any, bridge: any) => Promise<void>, br
 	}
 }
 
-test.describe('KDM-310 — co-op click-to-move', () => {
+test.describe('co-op click-to-move', () => {
 	test('#1 with only the partner in view, a clicked path is walked to its end', async ({ browser }) => {
 		test.setTimeout(MP_TEST_TIMEOUT);
 		await withPair(async (A, B) => {
-			// No demo enemy by default (KDM-309): the partner is the only other entity near the start.
+			// No demo enemy by default: the partner is the only other entity near the start.
 			// Asserted, so a generated enemy wandering into view fails loudly instead of making #1 #2.
 			expect(await A.evaluate(() => (window as any).__coop._inDanger()), 'control: nothing but the partner in view').toBe(false);
 			const t = await pathTarget(A, 4);
@@ -135,7 +135,7 @@ test.describe('KDM-310 — co-op click-to-move', () => {
 	test('#2 CONTROL — a real enemy in view still stops the walk after the first step, as in single player', async ({ browser }) => {
 		test.setTimeout(MP_TEST_TIMEOUT);
 		await withPair(async (A, B, bridge) => {
-			// The demo enemy, asked for (KDM-309 made it opt-in): KD's own danger rule must still apply to it.
+			// The demo enemy, asked for (it is opt-in): KD's own danger rule must still apply to it.
 			// Right beside A, so it stays in view as A steps away: summoned a few tiles off the start tile,
 			// A walked 3 tiles in one run — presumably it had dropped out of view.
 			const s = bridge.session;

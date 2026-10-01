@@ -1,5 +1,5 @@
 /**
- * KDM-163 (option A) — the apply/commit split, at the node layer.
+ * The apply/commit split, at the node layer.
  *
  * `submit()` used to mean BOTH "here is an input" and "I have finished my turn": `_pending` holds one
  * action per player, so a menu click either overwrote the player's queued real action or, if they were
@@ -18,7 +18,7 @@ const { SwapSession } = require('../../tools/mp-server/swap-session');
 
 const BOOT_TIMEOUT = 240_000;
 
-describe('apply/commit split (KDM-163 option A)', () => {
+describe('apply/commit split', () => {
 	let s: any;
 
 	beforeAll(() => {
@@ -162,7 +162,7 @@ describe('apply/commit split (KDM-163 option A)', () => {
 		expect(s.unknownInputReport().map((r: any) => r.type), 'a registered mod type is not "unknown"')
 			.not.toContain('kdm163UnitPing');
 
-		// KDM-197: one non-advancing observation no longer decides the type — a demotion out of
+		// One non-advancing observation no longer decides the type — a demotion out of
 		// lockstep now needs `uiDemotionEvidence` of them, because a single sample cannot tell a UI
 		// input apart from a turn-consuming one that happened to decline (measured: a co-op bump into
 		// an ally). The mod input still ends up free, it just has to earn it.

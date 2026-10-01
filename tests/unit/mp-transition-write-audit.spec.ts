@@ -1,14 +1,14 @@
 /**
- * Node-layer (Vitest) — KDM-273: a standing guard over the pattern that keeps producing this bug.
+ * Node-layer (Vitest) — a standing guard over the pattern that keeps producing this bug.
  *
  * Four times now, a global written by map generation or a floor transition turned out to be WORLD
  * state that the swap layer was replicating per-player, and each time it was found by a feature that
  * happened to make two players' copies diverge:
  *
- *   KDM-228  KDGameData.RoomType / .MapMod            found by a side-room visit
- *   KDM-265  MiniGameKinkyDungeonLevel / .Checkpoint,
+ *   room     KDGameData.RoomType / .MapMod            found by a side-room visit
+ *   descent  MiniGameKinkyDungeonLevel / .Checkpoint,
  *            JourneyX / JourneyY / HighestLevelCurrent found by ten real descents
- *   KDM-243  KinkyDungeonSeed / KDGameData.LastMapSeed found by a save import, after a bisect
+ *   seed     KinkyDungeonSeed / KDGameData.LastMapSeed found by a save import, after a bisect
  *
  * Four instances of one pattern is a category, not a coincidence. This file is the attempt to catch
  * the fifth at the moment upstream introduces it rather than when a feature exposes it.
@@ -75,7 +75,7 @@ const MIN_GLOBAL_WRITES = 91;
  * ── THE DECISION REGISTER ─────────────────────────────────────────────────────────────────────────
  * Keys a transition site writes that are deliberately NOT world state. Every entry is a recorded
  * decision with a reason; `flagged` entries are decisions too — "left per-player for now, reviewed,
- * tracked by KDM-277" — and KDM-277's acceptance criteria are that none remain.
+ * tracked by a follow-up task" — and that task's acceptance criteria are that none remain.
  *
  * Do not add an entry to silence a failure. A new key here means someone looked at it.
  */
@@ -105,30 +105,30 @@ const PER_PLAYER_BY_DECISION: Record<string, { verdict: Verdict; why: string }> 
 	'KDGameData.RescueFlag':         { verdict: 'player', why: 'this player\'s rescue flag' },
 	'KDGameData.ShortcutIndex':      { verdict: 'player', why: 'this player\'s chosen shortcut' },
 
-	// ── reviewed, left per-player FOR NOW, tracked by KDM-277 ─────────────────────────────────────
+	// ── reviewed, left per-player FOR NOW, tracked by a follow-up task ──────────────────────────────
 	// These are the audit's yield. Each looks like world state; none is being moved here, because a
 	// classification change without its own divergence test is exactly the unproven state the epic
-	// already carries one of (NPCRestraints). KDM-277 decides them one at a time, with tests.
-	// KDM-277: reviewed and DECIDED per-player, against the initial flag. The flag read "cache over
+	// already carries one of (NPCRestraints). The follow-up task decides them one at a time, with tests.
+	// Reviewed and DECIDED per-player, against the initial flag. The flag read "cache over
 	// KDMapData.Grid" — inferred from the NAME. In fact it is written in exactly two places
 	// (KinkyDungeonGame.ts:72 declaring "", KDMapGen.ts:270 resetting to "") and READ NOWHERE in
 	// Game/src. Vestigial, never diverges from baseline, and blacklisting it would be speculative.
 	'KinkyDungeonGrid_Last':         { verdict: 'player', why: 'no reader anywhere in Game/src — vestigial, never diverges' },
-	// KDM-277: reviewed and DECIDED per-player, against KDM-273's initial flag. The deciding read is
+	// Reviewed and DECIDED per-player, against the audit's initial flag. The deciding read is
 	// KinkyDungeonAggressive(enemy, player) — the PrisonerState branches sit inside its own
 	// '// Player mode' guard (KinkyDungeonFactions.ts:8-16), so it answers "is this enemy aggressive
 	// toward THE PLAYER". Under the swap model that is what you want: each turn installs the ACTING
 	// player's bundle, so enemy AI judges aggression against that player's own jail status. Making it
 	// world would force both players into one jail state — a co-op DESIGN change, not a fix.
-	'KDGameData.PrisonerState':      { verdict: 'player', why: 'KDM-277: read inside the "Player mode" branch of KinkyDungeonAggressive; jail FURNITURE stays world (JailGuard)' },
-	// KDM-277: classifies WITH KDGameData.PriorJailbreaks, which the audit never saw (no transition
+	'KDGameData.PrisonerState':      { verdict: 'player', why: 'read inside the "Player mode" branch of KinkyDungeonAggressive; jail FURNITURE stays world (JailGuard)' },
+	// Classifies WITH KDGameData.PriorJailbreaks, which the audit never saw (no transition
 	// site writes it). Read together in one expression (KinkyDungeonJailList.ts:149); the counter is
 	// incremented when THIS player breaks out (KinkyDungeonDialogue.ts:1625). Splitting the pair is
-	// the failure KDM-228 names, so both stay per-player.
-	'KDGameData.PriorJailbreaksDecay': { verdict: 'player', why: 'KDM-277: pairs with PriorJailbreaks, the acting player\'s own jailbreak history' },
-	'MiniGameVictory':               { verdict: 'player', why: 'KDM-277: a BondageClub shim global (Scripts/Patch.ts:33), not KD state; nothing reads it standalone' },
-	'KinkyDungeonRep':               { verdict: 'player', why: 'KDM-277: mirrors the INDIVIDUAL player BC "Gaming" rep; consumers are stubs in Patch.ts:18-19' },
-	'KDRestraintsCache':             { verdict: 'player', why: 'KDM-277: declared Restraints.ts:629, reset Game.ts:940, read NOWHERE — vestigial like Grid_Last' },
+	// the failure the room classification names, so both stay per-player.
+	'KDGameData.PriorJailbreaksDecay': { verdict: 'player', why: 'pairs with PriorJailbreaks, the acting player\'s own jailbreak history' },
+	'MiniGameVictory':               { verdict: 'player', why: 'a BondageClub shim global (Scripts/Patch.ts:33), not KD state; nothing reads it standalone' },
+	'KinkyDungeonRep':               { verdict: 'player', why: 'mirrors the INDIVIDUAL player BC "Gaming" rep; consumers are stubs in Patch.ts:18-19' },
+	'KDRestraintsCache':             { verdict: 'player', why: 'declared Restraints.ts:629, reset Game.ts:940, read NOWHERE — vestigial like Grid_Last' },
 };
 
 // ── extraction ────────────────────────────────────────────────────────────────────────────────────
@@ -277,7 +277,7 @@ function isClassified(key: string): boolean {
 
 function describeWrite(w: Write) { return `${w.key}  (${w.site} — ${w.file}:${w.line})`; }
 
-describe('KDM-273 — every transition-written key carries a recorded classification', () => {
+describe('every transition-written key carries a recorded classification', () => {
 	it('reports what the scan found (drift is visible, not inferred)', () => {
 		// Not an assertion about correctness — a deliberate, always-on drift log. Text coupling to a
 		// tree that moves under us is only safe if the coupling is loud.
@@ -285,7 +285,7 @@ describe('KDM-273 — every transition-written key carries a recorded classifica
 		const gKeys = uniq(found.globals);
 		// eslint-disable-next-line no-console
 		console.log(
-			`[KDM-273 audit] sites=${SITES.length} `
+			`[transition-write audit] sites=${SITES.length} `
 			+ `KDGameData writes=${found.gameData.length} (${gdKeys.length} distinct) `
 			+ `global writes=${found.globals.length} (${gKeys.length} distinct)`);
 		expect(SITES.length).toBeGreaterThan(0);
@@ -320,7 +320,7 @@ describe('KDM-273 — every transition-written key carries a recorded classifica
 		const unknown = found.gameData.filter((w) => !isClassified(w.key));
 		expect(unknown.map(describeWrite),
 			'A floor transition writes these KDGameData keys and nothing records whether they are world '
-			+ 'state or per-player. This is the KDM-228 / KDM-265 / KDM-243 pattern arriving again. '
+			+ 'state or per-player. This is the room-type / descent / seed pattern arriving again. '
 			+ 'Decide each one against the criteria over KDGAMEDATA_WORLD_KEYS in headless-host.js, then '
 			+ 'either declare it world or record it in PER_PLAYER_BY_DECISION with a reason.')
 			.toEqual([]);
@@ -363,7 +363,7 @@ describe('KDM-273 — every transition-written key carries a recorded classifica
 	it('any FLAGGED entry names the task that will decide it', () => {
 		// `flagged` means "reviewed, left per-player for now" — a legitimate verdict, but only while
 		// somebody owns finishing it. Without this, `flagged` degrades into a way to silence the guard
-		// forever. KDM-277 cleared the original backlog to zero; this keeps the next one accountable.
+		// forever. The follow-up task cleared the original backlog to zero; this keeps the next one accountable.
 		const unowned = Object.entries(PER_PLAYER_BY_DECISION)
 			.filter(([, v]) => v.verdict === 'flagged' && !/KDM-\d+/.test(v.why))
 			.map(([k]) => k);

@@ -1,5 +1,5 @@
 /**
- * tools/mp-server/client/render-client.js  (KD-071, epic mp-mvp / KD-066)
+ * tools/mp-server/client/render-client.js
  *
  * The BROWSER thin-client core. A real player's browser runs the stock KD bundle
  * but, instead of simulating, it APPLIES the server's render-state snapshot to the
@@ -10,7 +10,7 @@
  * out/main.js, so it can read/assign the bundle's top-level `let` globals directly
  * (the same property KD's own files rely on). Load it AFTER out/main.js.
  *
- * Snapshot shape === HeadlessHost.serializeRenderState() (render-state v1, KD-067),
+ * Snapshot shape === HeadlessHost.serializeRenderState() (render-state v1),
  * so a server snapshot applies verbatim. Mirror any field changes in both places.
  *
  * Exposes `window.KDRenderClient`:
@@ -36,19 +36,19 @@
 	}
 
 	var inputCb = null;
-	var clientMode = false;   // closure flag — NOT the game-source KDServerRole (reverted, KD-085)
-	var _lastRestraintSig = null;   // KD-101: re-dress the player paper-doll only when worn restraints change
+	var clientMode = false;   // closure flag — NOT the game-source KDServerRole (reverted)
+	var _lastRestraintSig = null;   // re-dress the player paper-doll only when worn restraints change
 
 	/**
 	 * KD's draw loop emits this input EVERY FRAME from the live mouse position — it is a per-frame
 	 * STREAM, not a player command. Named once because two places need it: the debug trace excludes
 	 * it to stay readable, and `__coopDiag.suppressHover()` gates it so the chatter-ON/chatter-OFF
-	 * frame-rate comparison can be taken (KDM-204).
+	 * frame-rate comparison can be taken.
 	 */
 	var HOVER_TYPE = 'setMoveDirection';
 
 	/*
-	 * KDM-163 AC1 — the two hardcoded input lists that used to live here are GONE.
+	 * The two hardcoded input lists that used to live here are GONE.
 	 *
 	 * They were `ROUTED_INPUTS` (~56 keys) and `LOCAL_UI_INPUTS` (~25 keys), and anything on neither
 	 * was dropped in SILENCE: a mod's action, or any type upstream added, did nothing at all — no
@@ -84,7 +84,7 @@
 	 * Drops circular refs and replaces live entity object refs (e.g. spell `enemy`/
 	 * `player`/`bullet`) with a tagged placeholder `{__kdEnt:id}` (or `{__kdEnt:'player'}`
 	 * for the player entity). The server re-resolves these to its OWN authoritative
-	 * entities before replaying the action (HeadlessHost.applyInput, KD-088).
+	 * entities before replaying the action (HeadlessHost.applyInput).
 	 */
 	function sanitizeInputData(data) {
 		if (data == null || typeof data !== 'object') return data;
@@ -103,7 +103,7 @@
 	}
 
 	/**
-	 * KDM-310 — is this entity another PLAYER's avatar (a `RemotePlayer` / `RemotePlayer_<label>` def)?
+	 * Is this entity another PLAYER's avatar (a `RemotePlayer` / `RemotePlayer_<label>` def)?
 	 * The one definition: `ensureAvatarDefs`, the snapshot restraint reset and the route driver's
 	 * danger check (coop-bootstrap.js) all ask this, and used to spell it out inline.
 	 */
@@ -113,7 +113,7 @@
 	}
 
 	/**
-	 * KDM-308 — a struggle group with no worn item must not reach KD's HUD.
+	 * A struggle group with no worn item must not reach KD's HUD.
 	 *
 	 * `KinkyDungeonStruggleGroups` is a CACHE of the worn set (KD's `KinkyDungeonUpdateStruggleGroups`
 	 * keeps only groups whose `KinkyDungeonGetRestraintItem(group)` is truthy), and this client adopts
@@ -123,7 +123,7 @@
 	 * KinkyDungeonHUD.ts:3511 is UPSTREAM_ISSUES.md #3).
 	 *
 	 * How the two fell out of step in that session is not known yet, so this does two things: it drops
-	 * exactly the entries KD's own rebuild would drop (no other derivation — KDM-162), and it reports
+	 * exactly the entries KD's own rebuild would drop (no other derivation), and it reports
 	 * each one loudly with the worn set, so the next occurrence names its cause instead of crashing.
 	 */
 	function pruneStaleStruggleGroups() {
@@ -141,7 +141,7 @@
 		try {
 			var worn = [];
 			KinkyDungeonAllRestraint().forEach(function (it) { if (it && it.name) worn.push(it.name); });
-			console.warn('[coop] KDM-308: dropped struggle group(s) with no worn item: ' + stale.join(',')
+			console.warn('[coop] dropped stale struggle group(s) with no worn item: ' + stale.join(',')
 				+ ' — worn: ' + (worn.join(',') || '(none)') + '. Please report this line.');
 		} catch (e) { /* the report must never be what crashes */ }
 	}
@@ -158,7 +158,7 @@
 		if (KinkyDungeonGetEnemyByName('RemotePlayer')) return;
 		KinkyDungeonEnemies.push({
 			name: 'RemotePlayer', faction: 'Player', tags: KDMapInit(['peaceful']),
-			bound: 'Apprentice', // presence makes KDCanBind true so the Truss/bind context option appears (KD-098)
+			bound: 'Apprentice', // presence makes KDCanBind true so the Truss/bind context option appears
 			AI: 'guard', immobile: true, visionRadius: 0, maxhp: 100, minLevel: 0, weight: -1000,
 			movePoints: 1000, attackPoints: 0, attack: '', attackRange: 0,
 			evasion: -100, armor: 0, followRange: 100, lowpriority: true,
@@ -169,7 +169,7 @@
 	}
 
 	/**
-	 * KD-100: peers now use per-entity def names (RemotePlayer_<label>) so combat text reads the real
+	 * Peers now use per-entity def names (RemotePlayer_<label>) so combat text reads the real
 	 * peer name. KDEnemyRank looks the def up by name and crashes on `.tags` if it's missing, and the
 	 * JSON-cloned Enemy in the snapshot has a mangled tags Map. So for every peer entity: register a
 	 * client def under its exact name (clone of the base, which has a real tags Map) and re-link the
@@ -198,7 +198,7 @@
 	}
 
 	/**
-	 * KDM-232: give KD's own name getter back the fallback it already has everywhere else, so a peer
+	 * Give KD's own name getter back the fallback it already has everywhere else, so a peer
 	 * avatar names ITSELF.
 	 *
 	 * The symptom was the ally dialogue body painting as "(You approach )" — your partner named as
@@ -249,11 +249,11 @@
 	}
 
 	/**
-	 * KDM-162: adopt this player's own STATE BUNDLE — the browser analogue of
+	 * Adopt this player's own STATE BUNDLE — the browser analogue of
 	 * HeadlessHost.restorePlayer.
 	 *
 	 * The browser already runs a full KD instance. It does not need a curated view of the game; it
-	 * needs its own state. The server ships the same generic capture the swap model uses (KDM-161),
+	 * needs its own state. The server ships the same generic capture the swap model uses,
 	 * already stripped of world-scoped KDGameData keys, so there is nothing to classify here and no
 	 * field list to keep in step with the host — which is exactly what the old `stats` block was, in
 	 * four places and two languages.
@@ -263,11 +263,11 @@
 	 * bare name up the scope chain into that same global lexical environment — the identical trick the
 	 * host uses inside the bundle's vm scope.
 	 *
-	 * ⚠️ COPY, never alias (measured on the host, KDM-161): `b` is the snapshot object and is reused;
+	 * ⚠️ COPY, never alias (measured on the host): `b` is the snapshot object and is reused;
 	 * handing the game a reference into it means the game mutates the snapshot in place.
 	 */
 	/**
-	 * KDM-163 AC3: input types the AUTHORITATIVE WORLD had no handler for.
+	 * Input types the AUTHORITATIVE WORLD had no handler for.
 	 *
 	 * Under option A the client classifies nothing, so it cannot know: it routes every type, and the
 	 * server — which owns the real registry, `KDInputTypes` (`KinkyDungeonInput.ts:10`) — reports back
@@ -275,21 +275,21 @@
 	 * for anywhere, which is a real bug and now visible instead of a silent `return ''`.
 	 */
 	var _unhandled = [];                 // [{type, count}] — reported BY THE SERVER, see below
-	// KDM-268: inputs whose dispatch THREW in the authoritative world. Same source and same rule as
+	// Inputs whose dispatch THREW in the authoritative world. Same source and same rule as
 	// _unhandled above: reported BY THE SERVER, exposed rather than only logged, because a console
 	// line is not readable by anything that wants to check the client actually heard about it.
 	var _failed = [];                    // [{clientId, turn, kdType, error}]
 	var _warned = {};
 
 	/*
-	 * KDM-163 AC3: the client-side drop RECORDER that used to live here is gone with the lists that
+	 * The client-side drop RECORDER that used to live here is gone with the lists that
 	 * made drops possible. There is no longer a "type on neither list" case to record — every input is
 	 * routed, so the only place an input can go unhandled is the authoritative world, and the server
 	 * reports that in `snapshot.unknownInputs` (SwapSession.unknownInputReport).
 	 */
 
 	/**
-	 * KDM-196 — presentation ACCUMULATORS the client owns, keyed by the global they live on.
+	 * Presentation ACCUMULATORS the client owns, keyed by the global they live on.
 	 *
 	 * Same criterion as the queues, one step further in: `KinkyDungeonPlayerEntity.visual_stamina` /
 	 * `visual_mana` are not state, they are where the DRAW loop keeps a bar part-way through its
@@ -302,14 +302,14 @@
 	 *
 	 * So: the server's value wins whenever it HAS one, and the client keeps its own when it does not.
 	 * `visual_x`/`visual_y` are deliberately NOT here — the server snaps those to the authoritative
-	 * tile on purpose (KD-098), which is a value, not an absence.
+	 * tile on purpose, which is a value, not an absence.
 	 */
 	var CLIENT_OWNED_ENTITY_FIELDS = {
 		KinkyDungeonPlayerEntity: ['visual_stamina', 'visual_mana'],
 	};
 
 	/**
-	 * KDM-246 — KDGameData keys that belong to the PERSON AT THIS BROWSER, not to their character.
+	 * KDGameData keys that belong to the PERSON AT THIS BROWSER, not to their character.
 	 *
 	 * `KDGameData` is otherwise server-authoritative: `adoptBundle` writes every key the bundle
 	 * carries, which is right for everything describing the run. `LogFilters` is not that. It is which
@@ -329,7 +329,7 @@
 	var CLIENT_OWNED_GAMEDATA_KEYS = ['LogFilters'];
 
 	/**
-	 * KDM-266 — WHOLE globals that belong to the person at this browser. The third granularity of the
+	 * WHOLE globals that belong to the person at this browser. The third granularity of the
 	 * same idea as the two lists above: a field within a global (`CLIENT_OWNED_ENTITY_FIELDS`), a key
 	 * within `KDGameData` (`CLIENT_OWNED_GAMEDATA_KEYS`), and now the global itself.
 	 *
@@ -338,7 +338,7 @@
 	 * cursor move, and every write in the game is a bare local assignment (the click at
 	 * `KinkyDungeonShrine.ts:549`, the keyboard at `KinkyDungeon.ts:4281-4286`). The server does hold
 	 * a value — its `shrineBuy` handler sets it (`KinkyDungeonInput.ts:615`) — which is exactly
-	 * KDM-246's situation: entitled to hold it, not the authority over it.
+	 * the situation of the client-owned keys above: entitled to hold it, not the authority over it.
 	 *
 	 * Skipped BEFORE `_bundleDefaults` and `_bundleDirty` are written, and that placement is the whole
 	 * point. There are two clobber channels, not one: the adopt below overwrites the cursor whenever
@@ -349,7 +349,7 @@
 	 *
 	 * This is deliberately NOT a `GLOBAL_BLACKLIST` entry: that list is "globals that are NOT
 	 * per-player, by CATEGORY, never per feature" (headless-host.js) and this one IS per-player — it
-	 * is the *authority* that differs, not the category. Server capture is unchanged, same as KDM-246.
+	 * is the *authority* that differs, not the category. Server capture is unchanged, same as for those keys.
 	 *
 	 * Pinned by `tests/e2e/mp-shop-identity.spec.ts`, which only exercises this after the server has
 	 * had a reason to carry the value — i.e. after that player has bought something once.
@@ -389,7 +389,7 @@
 
 	/**
 	 * Assign one global from a captured value. Shared by bundle adoption, by its reset pass, and
-	 * (KDM-245) by the snapshot's `worldGlobals` — module scope so all three decode identically,
+	 * by the snapshot's `worldGlobals` — module scope so all three decode identically,
 	 * for the same reason the host has a single `assign`.
 	 * COPY, never alias: `v` belongs to the bundle (or to `_bundleDefaults`), and both outlive
 	 * this call; handing the game a reference lets it mutate our stored copy in place.
@@ -407,7 +407,7 @@
 		_adoptVal = (v && typeof v === 'object')
 			? (v.__kdT ? dec(v) : JSON.parse(JSON.stringify(v)))
 			: v;
-		// KDM-196: carry over the client-owned animation accumulators the server has no
+		// Carry over the client-owned animation accumulators the server has no
 		// value for, so the wholesale replace below does not restart the bar every snapshot.
 		var owned = CLIENT_OWNED_ENTITY_FIELDS[name];
 		if (owned && _adoptVal && typeof _adoptVal === 'object') {
@@ -436,7 +436,7 @@
 			for (var gk in b.gameData) {
 				if (!Object.prototype.hasOwnProperty.call(b.gameData, gk)) continue;
 				if (b.gameData[gk] === undefined) continue;
-				// KDM-246: a viewer's own UI preference is never overwritten by the server's copy of it
+				// A viewer's own UI preference is never overwritten by the server's copy of it
 				// — see CLIENT_OWNED_GAMEDATA_KEYS. Skipped on ADOPT rather than stripped on capture,
 				// because the server is entitled to hold a value here; it just is not the authority.
 				if (CLIENT_OWNED_GAMEDATA_KEYS.indexOf(gk) >= 0) continue;
@@ -449,7 +449,7 @@
 				if (!Object.prototype.hasOwnProperty.call(g, name)) continue;
 				var v = g[name];
 				if (v === undefined) continue;
-				// KDM-266: this viewer's own state, never the server's to install — and skipped here,
+				// This viewer's own state, never the server's to install — and skipped here,
 				// before the two lines below make it eligible for the absent-rule too.
 				if (CLIENT_OWNED_GLOBALS.indexOf(name) >= 0) continue;
 				try {
@@ -506,7 +506,7 @@
 					camY: (typeof KinkyDungeonCamY !== 'undefined') ? KinkyDungeonCamY : 0,
 				},
 				player: P ? entSnap(P) : null,
-				// KDM-162: no `stats` block — it was the host's copy of a hand-kept HUD contract. See
+				// No `stats` block — it was the host's copy of a hand-kept HUD contract. See
 				// headless-host.serializeRenderState; per-player state travels in the bundle now.
 				// full authoritative map (adopted wholesale on apply) — see headless-host
 				map: clone(KDMapData),
@@ -520,7 +520,7 @@
 				buffs: clone(typeof KinkyDungeonPlayerBuffs !== 'undefined' ? KinkyDungeonPlayerBuffs : {}),
 				level: (typeof MiniGameKinkyDungeonLevel !== 'undefined') ? MiniGameKinkyDungeonLevel : 1,
 				checkpoint: (typeof MiniGameKinkyDungeonCheckpoint !== 'undefined') ? MiniGameKinkyDungeonCheckpoint : 'grv',
-				// KDM-222: the OTHER two inputs to the same light-params lookup `level`/`checkpoint`
+				// The OTHER two inputs to the same light-params lookup `level`/`checkpoint`
 				// feed. KinkyDungeonVision reads `KDGetAltType(level)` for `lightParams`, and that
 				// function resolves off KDGameData.RoomType / .MapMod (KinkyDungeonGame.ts:4300-4304),
 				// not off the level number. Carrying three of the four inputs meant the lightmap was
@@ -532,7 +532,7 @@
 				// In production these ride along in the bundle (KDGameData whole, minus
 				// KDGAMEDATA_WORLD_KEYS), so this closes the BUNDLE-LESS path — a snapshot alone must
 				// still describe which map it is.
-				// KDM-263: generic now, from the ONE declared list — served to the browser as
+				// Generic now, from the ONE declared list — served to the browser as
 				// window.KDWorldGameDataKeys, GENERATED from KDGAMEDATA_WORLD_KEYS rather than copied
 				// beside it. The per-field pair this replaces had to be edited in four mirrored places
 				// every time a world key was added, and forgetting one of the four is silent.
@@ -540,7 +540,7 @@
 					var o = {}, ks = (typeof window !== 'undefined' && window.KDWorldGameDataKeys) || null;
 					if (!ks) {
 						// LOUD, not silent. Without the list this returns {} and the receiver adopts nothing
-						// — which is KDM-222's bug exactly (measured then: the wrong alt type moved 0.054 of
+						// — which is the old lightmap bug exactly (measured then: the wrong alt type moved 0.054 of
 						// the frame), and it looks like a working snapshot right up until the pixels differ.
 						// Production serves the list at WORLD_KEYS_ROUTE, ahead of this file.
 						try {
@@ -562,17 +562,17 @@
 		apply: function (s) {
 			if (!s) return { ok: false, error: 'no snapshot' };
 			ensureAvatarDef();   // so peer avatars (RemotePlayer) re-link to a real def
-			installPeerNameFallback();   // KDM-232 — so a peer avatar names itself in the ally dialogue
-			// KDM-162: adopt this player's own state FIRST, so the explicit assignments below (which
+			installPeerNameFallback();   // so a peer avatar names itself in the ally dialogue
+			// Adopt this player's own state FIRST, so the explicit assignments below (which
 			// carry snapshot-time render fixups like snapped visual_x/visual_y) still have the last word.
 			KDRenderClient.lastBundleFields = adoptBundle(s.bundle);
-			// KDM-225: the co-op RELATIONSHIP state (who this player is at war with, and whether they
+			// The co-op RELATIONSHIP state (who this player is at war with, and whether they
 			// owe an answer to a peace offer). Published as a plain field rather than adopted into a
 			// game global: it is the gateway's own state, not KD's, and the context-menu wrap in
 			// coop-menu.js reads it every frame. `undefined` is preserved as null so a client talking
 			// to an older server can tell "no relationship" from "not supported".
 			KDRenderClient.lastCoop = s.coop || null;
-			// KDM-163 AC3: surface what the authoritative world could not dispatch. Warned once per
+			// Surface what the authoritative world could not dispatch. Warned once per
 			// type so a mistyped/removed input is loud in the console instead of doing nothing.
 			if (Array.isArray(s.unknownInputs)) {
 				_unhandled = s.unknownInputs;
@@ -584,7 +584,7 @@
 					}
 				}
 			}
-			// KDM-268: …and the louder sibling — an input whose dispatch THREW in the authoritative
+			// …and the louder sibling — an input whose dispatch THREW in the authoritative
 			// world. Warned once per type through the SAME `_warned` map as above, so one bad input
 			// type cannot produce two parallel warning streams. A throw is strictly louder than an
 			// unhandled type, so it must not be quieter here.
@@ -604,7 +604,7 @@
 			// distorts the client's rendering. The browser keeps its OWN window-based
 			// KinkyDungeonGridSizeDisplay and recomputes the camera each frame to centre
 			// on its player. (Camera stays in the snapshot for the node round-trip test.)
-			// KDM-162: the ~12 hand-assigned HUD stats that used to be here are gone, and so is the
+			// The ~12 hand-assigned HUD stats that used to be here are gone, and so is the
 			// movement-cost patch-up below them (KDGameData.MovePoints/SlowMoveTurns/SprintTurns and
 			// KinkyDungeonSlowLevel). All of it is per-player state that `adoptBundle` above installs
 			// from the server's own capture — including KinkyDungeonSlowLevel, which used to be
@@ -617,10 +617,10 @@
 			// carry their full Enemy defs in the clone, so no def re-link is needed.
 			// Vision/light (KDMapExtraData) is recomputed locally (pinGameScreen flags it).
 			if (s.map) KDMapData = s.map;
-			// KD-100: register/re-link a real def for each peer's unique name so the draw path
+			// Register/re-link a real def for each peer's unique name so the draw path
 			// (KDEnemyRank → .tags) doesn't crash on the renamed/JSON-mangled avatar Enemy.
 			if (KDMapData && Array.isArray(KDMapData.Entities)) ensureAvatarDefsFor(KDMapData.Entities);
-			// KD-101: the "Tie Up" submenu runs LOCALLY on the attacker and writes the avatar's NPC
+			// The "Tie Up" submenu runs LOCALLY on the attacker and writes the avatar's NPC
 				// restraints into KDGameData.NPCRestraints — which the snapshot does NOT reset (it only
 				// syncs KDMapData). Over several ties those local slots accumulate and the stock apply
 				// (KDGetNPCBindingSlotForItem(...).sgroup, no null guard) crashes on a full slot. Reset each
@@ -639,15 +639,15 @@
 				for (var k in s.player) { if (k !== 'enemyName' && k !== 'Enemy') KinkyDungeonPlayerEntity[k] = s.player[k]; }
 			}
 			/*
-			 * KDM-162: the DERIVATIONS that used to live here are gone.
+			 * The DERIVATIONS that used to live here are gone.
 			 *
 			 * This block used to hand-call `KinkyDungeonRefreshRestraintsCache`, `KinkyDungeonUpdateRestraints`
 			 * (→ `KinkyDungeonPlayerTags`) and `KinkyDungeonUpdateStruggleGroups` — a partial reimplementation
-			 * of KD's per-turn pass, each call added reactively after a bug (KD-103 arm pose, KDM-156 struggle-
+			 * of KD's per-turn pass, each call added reactively after a bug (the arm pose, the struggle-
 			 * group crash). They are unnecessary now: those globals are per-player state that the bundle
 			 * carries, so `adoptBundle` above installs the SERVER's already-correct values.
 			 *
-			 * Measured before deleting (KDM-162 probe6): across 4949 candidate globals, a client that adopts
+			 * Measured before deleting: across 4949 candidate globals, a client that adopts
 			 * the bundle has ZERO wrong player-state fields, and running the derivation subset afterwards
 			 * changes nothing. And never call `KinkyDungeonUpdateStats` here — probes 1/4 measured it
 			 * regenerating mana cumulatively and executing a real edge/orgasm event that drains Will, none of
@@ -685,7 +685,7 @@
 				pruneStaleStruggleGroups();
 				KinkyDungeonMessageLog = s.messages.log || [];
 			/*
-			 * KDM-186 — ONE-SHOT EVENTS ARE APPLIED AT MOST ONCE.
+			 * ONE-SHOT EVENTS ARE APPLIED AT MOST ONCE.
 			 *
 			 * The action message is an EVENT, not state: assigning it makes the game show a floater.
 			 * It rides inside the snapshot, which is STATE and re-applied on every delivery — so every
@@ -706,7 +706,7 @@
 				if (typeof KinkyDungeonActionMessageColor !== 'undefined') KinkyDungeonActionMessageColor = s.messages.actionColor;
 			}
 			/*
-			 * KDM-186 — ONE-SHOT EVENTS, APPLIED AT MOST ONCE.
+			 * ONE-SHOT EVENTS, APPLIED AT MOST ONCE.
 			 *
 			 * A snapshot is STATE: re-applying it must converge. An EVENT (a damage number, a cast
 			 * animation) is not idempotent — replaying it duplicates it. They used to share one wire:
@@ -731,7 +731,7 @@
 							var f = ev.floater;
 							KinkyDungeonSendFloater({ x: f.x, y: f.y }, f.text, f.color, f.time);
 						} else if (ev.kind === 'noise' && typeof KDEventData !== 'undefined' && KDEventData) {
-							// KDM-196: the ripple + sound echo, on the same exactly-once channel as the
+							// The ripple + sound echo, on the same exactly-once channel as the
 							// floaters and for the same reason (they used to ride the state wire and were
 							// re-drawn once per SNAPSHOT — spam while the mouse moved).
 							//
@@ -760,13 +760,13 @@
 			if (typeof MiniGameKinkyDungeonLevel !== 'undefined') MiniGameKinkyDungeonLevel = s.level;
 			if (s.checkpoint && typeof MiniGameKinkyDungeonCheckpoint !== 'undefined') MiniGameKinkyDungeonCheckpoint = s.checkpoint;
 			/*
-			 * KDM-222/263: adopt the WORLD half of KDGameData — the room the party is in, the map mod,
+			 * Adopt the WORLD half of KDGameData — the room the party is in, the map mod,
 			 * where it stands on the journey and which route it agreed to take.
 			 *
-			 * KDM-222 shipped two of these by name because the lightmap needs them: KinkyDungeonVision
+			 * Two of these were first shipped by name because the lightmap needs them: KinkyDungeonVision
 			 * reads `KDGetAltType(level)`, which resolves off RoomType/MapMod rather than the level
 			 * number, so a snapshot carrying only the level recomputed the lightmap with the wrong alt
-			 * type. KDM-263 made the set generic — `_clientBundle` STRIPS every declared world key from
+			 * type. The set is now generic — `_clientBundle` STRIPS every declared world key from
 			 * the per-player bundle, so each key the list gains is a key that must arrive here instead,
 			 * and the per-field form made that omission silent.
 			 *
@@ -781,12 +781,12 @@
 				for (var wk in s.worldGameData) KDGameData[wk] = s.worldGameData[wk];
 			}
 			/*
-			 * KDM-245 — the WORLD GLOBALS half, on the same terms as worldGameData directly above:
+			 * The WORLD GLOBALS half, on the same terms as worldGameData directly above:
 			 * iterate what was SENT, so the declared list lives server-side only and an older
 			 * snapshot that carries none of them simply changes nothing.
 			 *
 			 * Today that is the three item-variant registries. They stopped riding the per-player
-			 * bundle when KDM-245 made them world state, and the browser resolves an enchanted item's
+			 * bundle when they became world state, and the browser resolves an enchanted item's
 			 * NAME through them — without this the item list draws entries with no definition behind
 			 * them. Runs AFTER adoptBundle for the same reason: the world's answer wins.
 			 */
@@ -796,7 +796,7 @@
 				}
 			}
 			/*
-			 * KDM-219: invalidate the derived vision/light cache HERE, where the state it derives
+			 * Invalidate the derived vision/light cache HERE, where the state it derives
 			 * from is replaced — not in the caller.
 			 *
 			 * `KDMapData` is adopted WHOLESALE above, so the light grid computed for the previous map
@@ -807,7 +807,7 @@
 			 * chance of forgetting, which FAILS SILENTLY: the state is correct, the tick is right,
 			 * every assertion on the globals passes, and the screen just keeps showing the old world.
 			 * That is exactly how the thin-client spike came to claim adoption it could not see
-			 * (KDM-219): it never called pinGameScreen, so its "applied" frame stayed the previous
+			 * — it never called pinGameScreen, so its "applied" frame stayed the previous
 			 * map's picture. Measured: with this line, applying a snapshot moves the rendered frame
 			 * 0.12 (noise floor 0.0015); without it, the frame does not move.
 			 *
@@ -821,18 +821,18 @@
 		/**
 		 * Mark this browser instance as render-only: it must not simulate gameplay.
 		 * Uses a closure flag (NOT the game-source KDServerRole — that source edit was
-		 * reverted in KD-085; the client is pure monkey-patch). The server is
+		 * reverted; the client is pure monkey-patch). The server is
 		 * authoritative; the client never resolves an action or advances a turn locally.
 		 */
 		/**
-		 * KDM-307 — read-only: is this page a co-op render client right now?
+		 * Read-only: is this page a co-op render client right now?
 		 *
 		 * The one question a routed wrap (`kd-perk-choice.js`, `kd-journey-choice.js`) has to ask before
 		 * it swaps what a click MEANS: a page that never entered a session is an ordinary solo game, and
 		 * rerouting its clicks to a server that is not there is how "Accept does nothing" shipped.
 		 */
 		isClientMode: function () { return clientMode; },
-		/** KDM-310 — see `isPeerAvatar` above. */
+		/** See `isPeerAvatar` above. */
 		isPeerAvatar: isPeerAvatar,
 
 		disableLocalSim: function () {
@@ -850,21 +850,21 @@
 			}
 			if (typeof KDSendInput === 'function' && !KDSendInput.__kdClientGuard) {
 				var _origSend = KDSendInput;
-				// ROUTE the real dispatcher (KD-085): KD's own key/click handlers call
+				// ROUTE the real dispatcher: KD's own key/click handlers call
 				// KDSendInput(type,data) for the default controls — for turn-consuming
 				// gameplay we forward {kdType,data} to the server (authoritative) and DON'T
 				// run it locally. Local-only UI (menus/choices) still dispatches locally (R6).
 				KDSendInput = function (type, data) {
 					if (clientMode) {
-						// KD-098 diagnostics: trace turn-consuming inputs + dropped ones. We log only
-						// KD-098 diagnostics: every input now takes one path, so the trace is just the
+						// Input diagnostics: trace turn-consuming inputs + dropped ones. We log only
+						// Input diagnostics: every input now takes one path, so the trace is just the
 						// type. `setMoveDirection` is per-frame mouse chatter, so it is excluded to keep
 						// the console readable. Toggle window.__KDMP_DEBUG.
 						if (typeof window !== 'undefined' && window.__KDMP_DEBUG && type !== HOVER_TYPE) {
 							try { console.log('[mp-client] KDSendInput', type, '-> ROUTE', (data && data.id != null) ? ('id=' + data.id) : ''); } catch (e) { /* ignore */ }
 						}
 						/*
-						 * KDM-204 — DIAGNOSTIC GATE. Off by default; nothing sets it in real play.
+						 * DIAGNOSTIC GATE. Off by default; nothing sets it in real play.
 						 *
 						 * The whole per-frame round-trip (send → server → state reply → apply → light
 						 * grid recompute) hangs off this ONE input type. Measuring the frame rate with
@@ -873,7 +873,7 @@
 						 * else does — the question tests/e2e/mp-input-matrix.spec.ts exists to answer.
 						 *
 						 * Dropped, never silently: it is counted through the same `noteSkip` channel as
-						 * every other skipped input (KDM-163 — no invisible losses), so the rollup shows
+						 * every other skipped input (no invisible losses), so the rollup shows
 						 * exactly what the reading cost.
 						 */
 						if (type === HOVER_TYPE && typeof window !== 'undefined' && window.__KDMP_SUPPRESS_HOVER) {
@@ -881,10 +881,10 @@
 							return '';
 						}
 						/*
-						 * ⚠️ KNOWN COUPLING — the ONE input still run locally (KD-101, owned by KDM-164).
+						 * ⚠️ KNOWN COUPLING — the ONE input still run locally.
 						 *
 						 * The Bondage cast opens KD's real "tie" SUBMENU, which is a purely client-side UI
-						 * construct: measured (KDM-162 probes/probe10) the headless world returns "Fail"
+						 * construct: measured, the headless world returns "Fail"
 						 * for this cast and touches no submenu state whatsoever — only text-message
 						 * globals. So there is nothing for the server to send back and nothing the state
 						 * bundle can carry; it is the same client-owned category as the paper doll, the
@@ -894,14 +894,14 @@
 						 * tests/e2e/mp-pvp-tie.spec.ts). The submenu's own apply (`addNPCRestraint`) is
 						 * routed normally, so the authoritative tie still happens server-side.
 						 *
-						 * This is recorded as a known coupling rather than kept quietly, per KDM-163. Its
-						 * cause is the synthetic PvP/bondage model, which KDM-164 removes; delete this
+						 * This is recorded as a known coupling rather than kept quietly. Its
+						 * cause is the synthetic PvP/bondage model, which is slated for removal; delete this
 						 * branch when that lands.
 						 */
 						if (type === 'tryCastSpell' && data && data.spellname === 'Bondage') {
 							return _origSend.apply(this, arguments);
 						}
-						// KDM-163 AC1 — DEFAULT = ROUTE. This client classifies nothing and swallows
+						// DEFAULT = ROUTE. This client classifies nothing and swallows
 						// nothing; the server asks the GAME what each input is. See the block comment at
 						// the top of this file for the two reds this was reverted on and why neither
 						// was this change.
@@ -916,7 +916,7 @@
 		},
 
 		/**
-		 * KDM-163 AC3: every input type this client could not handle, with whether the GAME's own
+		 * Every input type this client could not handle, with whether the GAME's own
 		 * registry knows it. Empty is the healthy state; a non-empty list is a to-do, not a mystery.
 		 */
 		unhandledInputs: function () {
@@ -924,14 +924,14 @@
 		},
 
 		/**
-		 * KDM-268: every input whose dispatch THREW inside the authoritative world, as the server
+		 * Every input whose dispatch THREW inside the authoritative world, as the server
 		 * reported it. Fourth member of the drop-report family; empty is the healthy state.
 		 */
 		failedInputs: function () {
 			return _failed.slice();
 		},
 
-		/** True once disableLocalSim() has marked this browser render-only (KD-085). */
+		/** True once disableLocalSim() has marked this browser render-only. */
 		isLocalSimDisabled: function () { return clientMode; },
 
 		/** Register a callback invoked when local input should be sent to the server. */

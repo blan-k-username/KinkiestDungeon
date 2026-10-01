@@ -1,14 +1,14 @@
 /**
- * tools/mp-server/mp-session.js  (KD-081)
+ * tools/mp-server/mp-session.js 
  *
- * Async, transport-based port of the KD-079 orchestrator. Identical turn-clock +
+ * Async, transport-based port of the orchestrator.js orchestrator. Identical turn-clock +
  * reconciler logic, but every interaction with an instance goes through a
  * transport as a serialized message (`await transport.request(cmd, args)`) — so
  * the world and the two players can live behind ANY boundary (same-process JSON,
  * worker thread, or a separate OS process over a socket).
  *
  * Constructed with a `makeTransport(role)` factory, so one session body runs over
- * every transport. `orchestrator.js` (KD-079) remains the sync direct-call
+ * every transport. `orchestrator.js` remains the sync direct-call
  * baseline; this is the version that crosses a real serialization boundary.
  */
 'use strict';

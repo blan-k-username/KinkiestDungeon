@@ -1,9 +1,9 @@
 /**
- * KDM-208 — a contested-tile move must be CANCELLED, never promoted to a bump attack.
+ * A contested-tile move must be CANCELLED, never promoted to a bump attack.
  *
  * Two players submit a move into the SAME empty tile in the same turn. `_advanceTurn` applies them
- * in random order, so one arrives first. Before KDM-208 the loser's move was then applied against a
- * world where the peer's avatar — armed as a REAL hostile enemy by `_armPeerEnemies` (KD-100) — now
+ * in random order, so one arrives first. Before the contested-tile veto the loser's move was then applied against a
+ * world where the peer's avatar — armed as a REAL hostile enemy by `_armPeerEnemies` — now
  * stood on the target tile, so KD's stock bump-to-attack fired: real damage, real bondage, real
  * defeat. A move became an attack purely because of intra-turn application ORDER.
  *
@@ -24,7 +24,7 @@ const BOOT_TIMEOUT = 240_000;
 
 const logOf = (s: any, id: string) => (s.logs.get(id) || []).map((m: any) => (m && m.text) || '').join('\n');
 
-describe('KDM-208 — contested tile is a cancelled move, not friendly fire', () => {
+describe('contested tile is a cancelled move, not friendly fire', () => {
 	for (const order of [['A', 'B'], ['B', 'A']]) {
 		it(`order ${order.join('→')}: the loser stalls — no damage, no attack line`, async () => {
 			const s = new SwapSession({ requiredPlayers: 2, seed: `contested-${order.join('')}`, pvp: true });

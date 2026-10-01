@@ -1,5 +1,5 @@
 /**
- * tools/mp-server/demo-server.js  (KD-071 / epic mp-mvp — hands-on UAT launcher)
+ * tools/mp-server/demo-server.js  — the co-op launcher (hands-on UAT)
  *
  * One Node process that lets you PLAY the co-op MVP in two real browser windows:
  *   - serves the stock game statically from the repo root (index.html + out/main.js
@@ -33,17 +33,17 @@ const { KD_DELTA_BROWSER } = require('./kd-delta');
 const { KD_PEACE_DIALOGUE_BROWSER } = require('./kd-peace-dialogue');
 const { KD_DISCONNECT_DIALOGUE_BROWSER } = require('./kd-disconnect-dialogue');
 const { KD_ABSENT_RESET_BROWSER } = require('./kd-absent-reset');
-// KDM-263 — the routed journey choice: the wrap that stops the client committing a route locally,
+// The routed journey choice: the wrap that stops the client committing a route locally,
 // and the KDInputTypes entry the routed choice is dispatched through. Same two-runtime rule again.
 const { KD_JOURNEY_CHOICE_BROWSER } = require('./kd-journey-choice');
 const { KD_PERK_CHOICE_BROWSER } = require('./kd-perk-choice');
-// KDM-264 — buying by identity: the client tags the purchase with the ITEM it was showing, the
+// Buying by identity: the client tags the purchase with the ITEM it was showing, the
 // server re-finds it in the shared stock. Same two-runtime rule.
 const { KD_SHOP_BUY_BROWSER } = require('./kd-shop-buy');
 // …and the world-key list itself, GENERATED from the host's own declaration below rather than
 // copied. render-client.js needs it to build the world half of a snapshot.
 const { KDGAMEDATA_WORLD_KEYS } = require('./headless-host');
-// KDM-239 R3 — the world/player mode classification, shared with the host for the same reason the
+// The world/player mode classification, shared with the host for the same reason the
 // codec and the delta are: a client that disagrees about which keys are the world's would declare a
 // world the server then silently drops.
 const { GAME_MODES_BROWSER } = require('./game-modes');
@@ -63,7 +63,7 @@ const MIME = {
 };
 
 /**
- * KDM-162: the state codec, served to the browser from the SAME source text the headless host evals
+ * The state codec, served to the browser from the SAME source text the headless host evals
  * into the bundle's vm scope (`kd-codec.js`). The thin client needs `kdDec` to adopt a per-player
  * state bundle, and a second hand-kept copy in the browser is precisely the drift this epic deletes.
  *
@@ -71,25 +71,25 @@ const MIME = {
  * would be a copy that can go stale against the host's.
  */
 const CODEC_ROUTE = '/mp/kd-codec.js';
-// KDM-206: the delta merge half, served from the SAME source the server diffs with — a diff/merge
+// The delta merge half, served from the SAME source the server diffs with — a diff/merge
 // pair that drifts apart corrupts state silently, so there is exactly one definition.
 const DELTA_ROUTE = '/mp/kd-delta.js';
-// KDM-230: the peace-offer DIALOGUE definition. Same two-runtime rule as the codec and the delta —
+// The peace-offer DIALOGUE definition. Same two-runtime rule as the codec and the delta —
 // the server evals this exact text into the world, the browser is served it as a script.
 const PEACE_DLG_ROUTE = '/mp/kd-peace-dialogue.js';
 // The "absent from the bundle ⇒ back to its default" rule, shared with the host for the same reason.
-// KDM-251: the disconnect dialogues, on the same two-runtime terms as the peace one.
+// The disconnect dialogues, on the same two-runtime terms as the peace one.
 const DISCONNECT_DLG_ROUTE = '/mp/kd-disconnect-dialogue.js';
 const ABSENT_RESET_ROUTE = '/mp/kd-absent-reset.js';
-// KDM-239: the game-mode key -> source-global table, on the same two-runtime terms.
+// The game-mode key -> source-global table, on the same two-runtime terms.
 const GAME_MODES_ROUTE = '/mp/game-modes.js';
-// KDM-263: the journey-choice wrap + its routed input type, on the same two-runtime terms.
+// The journey-choice wrap + its routed input type, on the same two-runtime terms.
 const JOURNEY_ROUTE = '/mp/kd-journey-choice.js';
-// KDM-263: the declared world-key list, serialised straight out of the host's own constant.
+// The declared world-key list, serialised straight out of the host's own constant.
 const WORLD_KEYS_ROUTE = '/mp/kd-world-keys.js';
-// KDM-264: buying by identity — the client tag + the server-side shrineBuy resolver.
+// Buying by identity — the client tag + the server-side shrineBuy resolver.
 const SHOP_BUY_ROUTE = '/mp/kd-shop-buy.js';
-// KDM-242: the perk-room choice wrap + its routed input type, on the same two-runtime terms.
+// The perk-room choice wrap + its routed input type, on the same two-runtime terms.
 const PERK_ROUTE = '/mp/kd-perk-choice.js';
 const CODEC_BODY = `${KD_CODEC}\n;(typeof window !== 'undefined' ? window : globalThis).KDCodec = ` +
 	`{ kdEnc: kdEnc, kdDec: kdDec, kdSer: kdSer };\n`;
@@ -116,11 +116,11 @@ SYNTHETIC_ROUTES[WORLD_KEYS_ROUTE] = '(typeof window !== \'undefined\' ? window 
 
 // Scripts injected just before </body> in index.html (in order).
 const INJECT = [
-	// KDM-249 Phase A: the mod pre-seed. FIRST of the client scripts and, critically, after
+	// The mod pre-seed. FIRST of the client scripts and, critically, after
 	// `out/main.js` — it sets the bundle `let`-global `KDGetMods` by BARE assignment, which is a TDZ
 	// throw if the bundle is not yet in scope. Before coop-bootstrap.js, which sends the join.
 	'/tools/mp-server/client/coop-mods.js',
-	// KDM-281: the one table of player-facing co-op strings (`window.KDMPText`). Must precede
+	// The one table of player-facing co-op strings (`window.KDMPText`). Must precede
 	// coop-bootstrap.js AND coop-lobby.js, which both consume it and both hold a hard reference —
 	// a local fallback in either would be the second copy this task exists to remove. It touches no
 	// bundle global, so it has no ordering constraint of its own beyond that.
@@ -132,30 +132,30 @@ const INJECT = [
 	GAME_MODES_ROUTE,               // must precede coop-bootstrap.js — it consumes window.KDGameModes
 	'/tools/mp-server/client/render-client.js',
 	'/tools/mp-server/client/coop-bootstrap.js',
-	// KDM-225/244/276: the co-op context menu (peace offer + host run-save). ONE wrap of
+	// The co-op context menu (peace offer + host run-save). ONE wrap of
 	// KDGetContextActions.Game — new co-op entries go IN it. AFTER coop-bootstrap: it sends through
 	// `window.__coop.sendAction`.
 	'/tools/mp-server/client/coop-menu.js',
-	// KDM-246: co-op chat. AFTER coop-bootstrap for the same reason as the menu above — it sends
+	// Co-op chat. AFTER coop-bootstrap for the same reason as the menu above — it sends
 	// through `window.__coop.sendAction` — and it needs the bundle in scope, because it wraps
 	// KinkyDungeonDrawMessages and registers itself in KD's own KDLogFilters /
 	// KDFocusableTextFields arrays.
 	'/tools/mp-server/client/coop-chat.js',
-	// KDM-233 / KDM-293: the co-op column on KD's class screen + host/join screens. AFTER coop-bootstrap — it drives
+	// The co-op column on KD's class screen + host/join screens. AFTER coop-bootstrap — it drives
 	// `window.__coopConnect` / `window.__coopAnswerJoin`.
 	'/tools/mp-server/client/coop-lobby.js',
-	PEACE_DLG_ROUTE,                // KDM-230: needs KDDialogue, so after the bundle is in scope
-	DISCONNECT_DLG_ROUTE,           // KDM-251: same — needs KDDialogue in scope
-	// KDM-263: wraps KDRenderJourneyMap and registers KDInputTypes.KDCoopJourney, so it needs the
+	PEACE_DLG_ROUTE,                // needs KDDialogue, so after the bundle is in scope
+	DISCONNECT_DLG_ROUTE,           // same — needs KDDialogue in scope
+	// Wraps KDRenderJourneyMap and registers KDInputTypes.KDCoopJourney, so it needs the
 	// bundle in scope. After render-client.js, whose KDSendInput wrapper is what carries the routed
 	// choice to the server — the wrap calls KDSendInput, so the routing gate must already be on.
 	JOURNEY_ROUTE,
-	// KDM-264: wraps KDRenderClient.sendInput, so it must follow render-client.js. An object PROPERTY
+	// Wraps KDRenderClient.sendInput, so it must follow render-client.js. An object PROPERTY
 	// on purpose — render-client installs its own KDSendInput wrapper LATE (inside disableLocalSim)
 	// and does not call through when it routes, so a KDSendInput wrap installed here would be
 	// silently bypassed.
 	SHOP_BUY_ROUTE,
-	// KDM-242: wraps KinkyDungeonDrawPerkOrb and registers KDInputTypes.KDCoopPerk — same needs as
+	// Wraps KinkyDungeonDrawPerkOrb and registers KDInputTypes.KDCoopPerk — same needs as
 	// JOURNEY_ROUTE above (the bundle in scope, and render-client.js's KDSendInput routing gate on).
 	PERK_ROUTE,
 ];
@@ -207,8 +207,8 @@ const BUNDLE_PATCHES = [
 			'while the screen is being DRAWN, so the game dies every frame, not just on interaction.',
 		upstream: UPSTREAM_DRAFTS,
 		removeWhen: 'KDInventoryActions.ts guards the find() result — this entry matches 0 sites. ' +
-			'Our own trigger (a client that never rebuilt KinkyDungeonStruggleGroups) was fixed in ' +
-			'KDM-156; this remains only as belt-and-braces for the genuine upstream hole.',
+			'Our own trigger (a client that never rebuilt KinkyDungeonStruggleGroups) was fixed ' +
+			'separately; this remains only as belt-and-braces for the genuine upstream hole.',
 	},
 	{
 		id: 'kdinventoryactions-sg-blocked',
@@ -289,7 +289,7 @@ function serveBundle(filePath, stat) {
 }
 
 /**
- * KDM-249 R6 — the mod payload relay: `/mp/mods/manifest` and `/mp/mods/<hash>`.
+ * The mod payload relay: `/mp/mods/manifest` and `/mp/mods/<hash>`.
  *
  * WHY HTTP RATHER THAN THE SESSION SOCKET. The guest needs the bytes at PAGE-LOAD time, before its
  * WebSocket exists — `client/coop-mods.js` runs as an injected script ahead of the first frame. A
@@ -355,7 +355,7 @@ function safeJoin(root, urlPath) {
 }
 
 function serveStatic(req, res, bridge) {
-	// KDM-249 R6 — BEFORE anything that touches the filesystem. See `handleModRoute`'s header: a
+	// BEFORE anything that touches the filesystem. See `handleModRoute`'s header: a
 	// `/mp/mods/<hash>` that fell through to `safeJoin` would be answered with a repo file.
 	if (handleModRoute(req, res, bridge)) return;
 	let urlPath = req.url.split('?')[0].split('#')[0];
@@ -405,27 +405,27 @@ function start(port = PORT, overrides = null) {
 		// eslint-disable-next-line no-console
 		console.log(`  [patch] POLICY VIOLATION — ${v}`);
 	}
-	// True lockstep (KD-085 R8): the shared turn advances only when BOTH players have
+	// True lockstep: the shared turn advances only when BOTH players have
 	// acted — required for random conflict resolution (need all actions in hand). So
 	// act in BOTH windows each turn (move/attack/wait). (autoAdvance is left available
 	// on WSBridge as a no-conflict solo-testing shortcut, but off here.)
-	// idleGraceMs (KD-087): if a player is idle/finished (e.g. their click-to-move route
+	// idleGraceMs: if a player is idle/finished (e.g. their click-to-move route
 	// ended) the server auto-"wait"s them after this delay so a partner who is still
 	// walking isn't deadlocked. A `wait` is never a contested action (R9 safe).
 	// DEFAULT 0 = strict lockstep — the turn ALWAYS waits for both humans (a 2s grace
 	// felt like "it didn't wait for me" when a player paused to think). Set a positive
 	// KD_IDLE_GRACE_MS (e.g. 30000) to re-enable auto-pass / self-heal from a stuck client.
 	const graceMs = parseInt(process.env.KD_IDLE_GRACE_MS || '0', 10);
-	// KD_PVP=1 starts the session in global PvP (peers see each other as Enemy — KD-094).
+	// KD_PVP=1 starts the session in global PvP (peers see each other as Enemy).
 	const pvp = /^(1|true|on)$/i.test(process.env.KD_PVP || '');
-	// KD_START_RESTRAINT=<name> equips every player with that worn restraint at start (UAT aid, KD-101).
+	// KD_START_RESTRAINT=<name> equips every player with that worn restraint at start (UAT aid).
 	const startRestraint = process.env.KD_START_RESTRAINT || '';
 	// KD_WEAR_RESTRAINT=<Name[,Name]> puts items straight ON every player at start. Self-equipping
 	// from the inventory is a delayed action that cannot complete in co-op (see SwapSession), so this
 	// is the way to UAT anything about being bound — e.g. movement speed in heels + ankle shackles.
 	const wearRestraint = process.env.KD_WEAR_RESTRAINT || '';
-	// KDM-238 R10: KD_COOP_PERKS=<Key[,Key]> gives every player who did NOT pick their own perks
-	// these ones. It replaces KDM-164's KD_CLASSIC_HEELS, which was a second way to put a perk on a
+	// KD_COOP_PERKS=<Key[,Key]> gives every player who did NOT pick their own perks
+	// these ones. It replaces the earlier KD_CLASSIC_HEELS, which was a second way to put a perk on a
 	// player and named a perk inside this layer — a gameplay table in the gateway (epic AC2). The
 	// same UAT case still works: KD_COOP_PERKS=ClassicHeels is what makes `heelpower` count toward
 	// slow (`KinkyDungeonCalculateSlowLevel` ignores it otherwise).
@@ -433,16 +433,16 @@ function start(port = PORT, overrides = null) {
 	// The keys are the player's to choose; this is only the answer given to someone who chose none,
 	// and it goes through the one `applyPerks` path like anybody else's declaration.
 	const defaultPerks = String(process.env.KD_COOP_PERKS || '').split(',').map(function (s) { return s.trim(); }).filter(Boolean);
-	// KDM-250: the heartbeat. ON by default — a safety mechanism that ships off is the mistake
+	// The heartbeat. ON by default — a safety mechanism that ships off is the mistake
 	// `idleGraceMs` above made, and "one dead tab freezes the game" is the bug this epic is fixing.
 	// KD_HB_INTERVAL_MS=0 turns it off for a UAT session that wants the old behaviour; the timeout is
 	// deliberately generous because a peer whose JS loop is merely BUSY is indistinguishable from one
 	// that is wedged, and a tight window would declare a live player dead for a slow frame.
 	const hbIntervalMs = parseInt(process.env.KD_HB_INTERVAL_MS || '5000', 10);
 	const hbTimeoutMs = parseInt(process.env.KD_HB_TIMEOUT_MS || '30000', 10);
-	// KDM-303 — how long a running game waits for a missing host before a guest takes the seat.
+	// How long a running game waits for a missing host before a guest takes the seat.
 	const hostGraceMs = parseInt(process.env.KD_HOST_GRACE_MS || '120000', 10);
-	// KDM-235: `overrides` lets a caller (a spec) change a session knob without an env var. The
+	// `Overrides` lets a caller (a spec) change a session knob without an env var. The
 	// default is unchanged — two players, as every existing caller expects — and the one this exists
 	// for is `requiredPlayers: 1`, a host who starts playing ALONE and is joined later.
 	const bridge = new WSBridge(Object.assign({
@@ -450,7 +450,7 @@ function start(port = PORT, overrides = null) {
 		hbIntervalMs, hbTimeoutMs, hostGraceMs,
 		pvp, startRestraint, wearRestraint, defaultPerks,
 	}, overrides || {}));
-	// KDM-249: the mod routes read the session's declaration and payload store off the bridge.
+	// The mod routes read the session's declaration and payload store off the bridge.
 	const server = http.createServer((req, res) => serveStatic(req, res, bridge));
 	bridge.attach(server);
 	return new Promise((resolve) => {

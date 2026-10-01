@@ -1,5 +1,5 @@
 /**
- * Node-layer (Vitest) tests for the headless KD host — KD-079 / KD-067 PoC.
+ * Node-layer (Vitest) tests for the headless KD host — proof of concept.
  *
  * These drive the stock out/main.js bundle in plain Node behind the shim layer
  * (no Chromium). They cover the host foundation and serverMode suppression
@@ -54,7 +54,7 @@ describe('HeadlessHost — boot & step', () => {
 	// NOTE: full KinkyDungeonGenerateSaveData() is NOT supported headless — the
 	// save path reads KDCurrentModels.get(player).Poses, which only exists once the
 	// model/draw pipeline runs (we neuter rendering). Full save/load round-trip is
-	// production host scope (KD-067), tracked as tech debt for this PoC.
+	// production host scope, tracked as tech debt for this PoC.
 });
 
 describe('serverMode suppression (R3/AC4)', () => {

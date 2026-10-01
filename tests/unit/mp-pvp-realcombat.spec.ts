@@ -1,5 +1,5 @@
 /**
- * Node-layer (Vitest) tests for KD-100 — PvP through the REAL combat pipeline.
+ * Node-layer (Vitest) tests for PvP through the REAL combat pipeline.
  *
  * The peer is armed as a real hostile Enemy (hp = their Will); the attacker's stock `move`/attack runs
  * the game's REAL `KinkyDungeonMove`→`KDDoAttack`→`KDDamageEnemy` against it (real damage roll, real
@@ -13,7 +13,7 @@ const { SwapSession } = require('../../tools/mp-server/swap-session');
 
 const BOOT_TIMEOUT = 240_000;
 
-describe('PvP via the REAL combat pipeline (KD-100)', () => {
+describe('PvP via the REAL combat pipeline', () => {
 	let s: any;
 	beforeEach(async () => {
 		s = new SwapSession({ requiredPlayers: 2, seed: 'realcombat-seed', pvp: true });
@@ -59,7 +59,7 @@ describe('PvP via the REAL combat pipeline (KD-100)', () => {
 		expect(s.snapshotFor('A').defeatedPlayers).toContain('B');
 	}, BOOT_TIMEOUT);
 
-	// KDM-154: this used to assert "a defeated peer cannot act" — a rule WE invented. KD has no
+	// This used to assert "a defeated peer cannot act" — a rule WE invented. KD has no
 	// Will-based action gate (KinkyDungeonMove has no Will check; KDPlayerCanMove is terrain-only),
 	// so a downed player keeps full agency and it is the bondage a peer then applies — enforced by
 	// the real pipeline — that limits them. The flag now only marks them bindable + down on the HUD.
@@ -68,7 +68,7 @@ describe('PvP via the REAL combat pipeline (KD-100)', () => {
 		expect(s.isDefeated('B')).toBe(true);
 		const pos = s.posOf('B');
 		/*
-		 * KDM-224: assert the avatar EXISTS before asserting it moved.
+		 * Assert the avatar EXISTS before asserting it moved.
 		 *
 		 * `posOf` returns null when the avatar entity is not in the map (swap-session.js:1021-1024),
 		 * so without this the final assertion compares null against null — a peer avatar that VANISHED

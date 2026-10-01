@@ -1,8 +1,8 @@
 /**
- * Node-layer (Vitest) tests for the KD-081 transport boundary.
+ * Node-layer (Vitest) tests for the transport boundary.
  *
  * Runs the SAME orchestrator + reconciler (mp-session.js) over each pluggable
- * transport and asserts the four KD-079 acceptance criteria still hold when the
+ * transport and asserts the orchestrator spec's four acceptance criteria still hold when the
  * world and players are driven ONLY by serialized messages — plus
  * boundary-specific checks (JSON-only payloads; separate OS process for socket).
  *

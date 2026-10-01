@@ -1,5 +1,5 @@
 /**
- * Node-layer (Vitest) tests for the BUNDLE_PATCHES *policy* (KDM-166).
+ * Node-layer (Vitest) tests for the BUNDLE_PATCHES *policy*.
  *
  * Serve-time bundle rewriting is the last resort in the plugin rule's preference order
  * (runtime wrapping > stock API/data > text rewrite). The mechanism stays — but it is the

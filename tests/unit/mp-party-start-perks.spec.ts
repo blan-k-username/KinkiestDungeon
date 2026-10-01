@@ -1,9 +1,9 @@
 /**
- * KDM-271 — a start perk is the PARTY's, so the floor cannot depend on who was swapped in.
+ * A start perk is the PARTY's, so the floor cannot depend on who was swapped in.
  *
  * ── THE DEFECT ────────────────────────────────────────────────────────────────────────────────────
- * KDM-238 gave every seat its own start perks (`_seatPlayer` → `applyPerks([...base, ...perksOf(id)])`).
- * F10 of KDM-242 found that this is the same defect that task fixed for MID-RUN perks, already
+ * Each seat was given its own start perks (`_seatPlayer` → `applyPerks([...base, ...perksOf(id)])`).
+ * The party-perk work (finding F10) showed this is the same defect it fixed for MID-RUN perks, already
  * shipped: several perks rewrite the SHARED world and are read from whichever bundle happens to be
  * swapped in when the read runs — `Stealthy` scales the floor's enemy count and doubles its treasure
  * count (`KDMapGen.ts:1049`, `:1770`), `Pristine` its rubble, `Doorknobs` whether doors generate open,
@@ -14,7 +14,7 @@
  * difficulty a function of swap order.
  *
  * ── THE RULE UNDER TEST ───────────────────────────────────────────────────────────────────────────
- * The same one KDM-242 D1 uses at the other end of the run: a perk belongs to the party. The start
+ * The same one the party-perk rule (D1) uses at the other end of the run: a perk belongs to the party. The start
  * set is the UNION of every seat's declaration, applied to every seat. Nothing here classifies perks
  * as "world-affecting" — if no perk differs between two seats, no world read can differ either, and a
  * subset would have to name perks in `tools/mp-server/**`, which epic AC2 forbids.
@@ -46,7 +46,7 @@ const BOOT_TIMEOUT = 240_000;
  */
 const UNDECLARED = 'Pacifist';
 
-describe('KDM-271 — the start perk set is the party\'s (R1, R2)', () => {
+describe('the start perk set is the party\'s (R1, R2)', () => {
 	let s: any = null;
 
 	beforeAll(async () => {

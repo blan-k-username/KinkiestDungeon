@@ -1,12 +1,12 @@
 /**
- * KDM-260 — the join handshake's fields reach the gate, and a new one cannot be forgotten.
+ * The join handshake's fields reach the gate, and a new one cannot be forgotten.
  *
  * ── THE BUG THIS EXISTS FOR, WHICH ALREADY HAPPENED ───────────────────────────────────────────────
  * `ws-bridge.js` forwarded the `join` message into the gate by naming each field by hand:
  *
  *     this.gate.claimHost(clientId, { name: msg.name, build: msg.build, mods: msg.mods, perks: msg.perks });
  *
- * KDM-239 added a `world` field to the handshake and did not add it here. The failure was SILENT:
+ * The host world declaration added a `world` field to the handshake and did not add it here. The failure was SILENT:
  * the gate held an empty declaration, the world was built on KD's defaults, and the entire 605-test
  * unit layer stayed green — because every one of those tests calls `claimHost` / `requestJoin`
  * DIRECTLY and so never crosses the bridge. It was caught only by an e2e that asserted what reached
@@ -15,7 +15,7 @@
  * So there are two tests here and they are deliberately different in kind:
  *
  *  - the DRIFT GUARD (R4) reads the client's own source and fails when it sends a field no role
- *    shape forwards. This is the one that would have caught KDM-239 the day it happened.
+ *    shape forwards. This is the one that would have caught that the day it happened.
  *  - the DISPATCH test (R5) drives a real message through `_handle` and asserts what the gate
  *    actually received. This is the layer no existing unit test occupies.
  *
@@ -41,7 +41,7 @@ const BOOTSTRAP = path.resolve(__dirname, '../../tools/mp-server/client/coop-boo
  */
 const ROUTING_FIELDS = ['role', 'clientId', 'type'];
 
-describe('KDM-260 — the declared shapes (R1, R2)', () => {
+describe('the declared shapes (R1, R2)', () => {
 	it('exports a frozen shape per role', () => {
 		expect(Array.isArray(HOST_JOIN_FIELDS)).toBe(true);
 		expect(Array.isArray(GUEST_JOIN_FIELDS)).toBe(true);
@@ -52,7 +52,7 @@ describe('KDM-260 — the declared shapes (R1, R2)', () => {
 	/**
 	 * The fields only a HOST may declare, and the one sentence that justifies each.
 	 *
-	 * KDM-243 added the second entry: the host brings the WORLD — as game modes and a seed
+	 * Save resume added the second entry: the host brings the WORLD — as game modes and a seed
 	 * (`world`), or as a whole saved run (`save`) — and the guest brings only a character. Listed
 	 * here rather than filtered inline so the next addition has to state which side it is on.
 	 */
@@ -62,7 +62,7 @@ describe('KDM-260 — the declared shapes (R1, R2)', () => {
 		for (const f of HOST_ONLY) {
 			expect(HOST_JOIN_FIELDS).toContain(f);
 			expect(GUEST_JOIN_FIELDS,
-				`a guest declaring '${f}' is KDM-239 A5 / KDM-243 R1 — one host, no silent blending`)
+				`a guest declaring '${f}' breaks the one-world rule — one host, no silent blending`)
 				.not.toContain(f);
 		}
 	});
@@ -73,7 +73,7 @@ describe('KDM-260 — the declared shapes (R1, R2)', () => {
 	});
 });
 
-describe('KDM-260 — R4: the client cannot send a field the server ignores', () => {
+describe('R4: the client cannot send a field the server ignores', () => {
 	/** Every `join.<field> = …` the client assigns, read from its own source. */
 	function clientJoinFields(): string[] {
 		const src = fs.readFileSync(BOOTSTRAP, 'utf8');
@@ -94,9 +94,9 @@ describe('KDM-260 — R4: the client cannot send a field the server ignores', ()
 		const found = clientJoinFields();
 		expect(found.length, 'a reader that finds nothing would make the guard below vacuous')
 			.toBeGreaterThan(3);
-		// KDM-279: `character` — perks folded into it, so this is the field that used to be `perks`.
+		// `Character` — perks folded into it, so this is the field that used to be `perks`.
 		expect(found).toContain('character');
-		expect(found, 'the field KDM-239 added — the whole reason this task exists').toContain('world');
+		expect(found, 'the world field — the one whose silent drop is the whole reason this spec exists').toContain('world');
 		expect(found).toContain('role');   // routing, filtered below — proves the filter is exercised
 	});
 
@@ -105,8 +105,8 @@ describe('KDM-260 — R4: the client cannot send a field the server ignores', ()
 		const orphans = clientJoinFields().filter((f) => !forwarded.has(f));
 		expect(orphans,
 			'the client sends this on `join` and no role shape forwards it into the gate — add it to '
-			+ 'HOST_JOIN_FIELDS / GUEST_JOIN_FIELDS (KDM-260 R1), or to ROUTING_FIELDS if it is not a '
-			+ 'seat declaration. This is exactly how KDM-239 shipped a dropped field past a green suite.')
+			+ 'HOST_JOIN_FIELDS / GUEST_JOIN_FIELDS, or to ROUTING_FIELDS if it is not a '
+			+ 'seat declaration. This is exactly how the world field once shipped dropped past a green suite.')
 			.toEqual([]);
 	});
 });
@@ -117,7 +117,7 @@ describe('KDM-260 — R4: the client cannot send a field the server ignores', ()
  * direct-call unit tests never cross.
  *
  * ⚠️ `presence` is not optional scaffolding. `_handle` records `presence.saw(clientId)` for EVERY
- * inbound message that carries a client id, before it dispatches on type (KDM-250) — so a rig
+ * inbound message that carries a client id, before it dispatches on type — so a rig
  * without it throws on any message except an anonymous one. Learned by omitting it.
  *
  * One rig for all four tests: two near-identical ones drifted apart within minutes of being written.
@@ -140,7 +140,7 @@ function rig() {
 	return { bridge, seen };
 }
 
-describe('KDM-260 — R5: a real message through _handle reaches the gate', () => {
+describe('R5: a real message through _handle reaches the gate', () => {
 
 	/** A join message carrying a DISTINCT value per field, so a mix-up is visible, not merely absent. */
 	const FULL_JOIN = {
@@ -170,7 +170,7 @@ describe('KDM-260 — R5: a real message through _handle reaches the gate', () =
 		}
 		// R2 — not merely dropped downstream: the gate is never even told.
 		expect('world' in seen.request.info,
-			'a guest must not be able to declare a world (KDM-239 A5)').toBe(false);
+			'a guest must not be able to declare a world').toBe(false);
 	});
 
 	it('a field the client did not send arrives ABSENT, not as an undefined value (F2)', () => {
@@ -185,7 +185,7 @@ describe('KDM-260 — R5: a real message through _handle reaches the gate', () =
 	});
 });
 
-describe('KDM-260 — R3: mods_declare stays a PARTIAL re-statement', () => {
+describe('R3: mods_declare stays a PARTIAL re-statement', () => {
 	it('carries mods alone, so it cannot blank a seated host\'s other fields', () => {
 		const { bridge, seen } = rig();
 		bridge.gate.host = 'H';

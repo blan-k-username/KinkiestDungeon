@@ -1,7 +1,7 @@
 /**
- * tools/mp-server/integration.js  (KD-082)
+ * tools/mp-server/integration.js 
  *
- * Real in-game integration on top of the Lobby (KD-080). Where the lobby/reconciler
+ * Real in-game integration on top of the Lobby. Where the lobby/reconciler
  * copied {x,y,hp} VALUES, this represents every player as a REAL injected KD entity
  * (an ally-faction "RemotePlayer" avatar) in the world and in every other player's
  * instance — so the engine's own AI targets/collides/attacks them, and interactions

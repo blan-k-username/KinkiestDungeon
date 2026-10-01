@@ -1,12 +1,12 @@
 /**
- * E2E — what does the co-op proxy actually cost in frames? (KDM-186, corrected by KDM-205)
+ * E2E — what does the co-op proxy actually cost in frames? (corrected)
  *
  * `mp-input-matrix` measured the co-op client at 3 fps, which would explain every UAT symptom (KD
  * samples transient key state per frame, so at ~300 ms/frame a normal keypress falls between polls).
  * But headless Chromium software-renders with no GPU, so a low number might be the environment rather
  * than a property of the proxy. This spec exists to tell those apart with an in-run control.
  *
- * ⚠️ KDM-205 — THE ORIGINAL CONTROL WAS INVALID, AND ITS VERDICT WAS WRONG. It measured:
+ * ⚠️ THE ORIGINAL CONTROL WAS INVALID, AND ITS VERDICT WAS WRONG. It measured:
  *
  *     A) plain page, no #coop        →  plainFps 37-47   ... rendering the MAIN MENU
  *     C) #coop=SOLO, never paired    →  coopFps   4-8    ... rendering a full DUNGEON
@@ -29,7 +29,7 @@
  *
  * A dungeon costs ~5x a menu whether or not a proxy exists, so the old 6-10x was mostly that.
  *
- * ⚠️ THE "1.86x" WAS ITSELF A SECOND CONFOUND, FOUND BY KDM-207 AND CORRECTED HERE. Those runs
+ * ⚠️ THE "1.86x" WAS ITSELF A SECOND CONFOUND, FOUND BY THE FRAME-PROFILE SPEC AND CORRECTED HERE. Those runs
  * compared a baseline taken with ONE page open against a co-op reading taken with TWO. Headless
  * Chromium software-renders with no GPU and the main thread is already (program)-saturated (measured
  * `taskMs` 3021 of a 3000 ms window), so the SECOND PAGE roughly halves throughput by itself.
@@ -63,7 +63,7 @@ const { start } = require('../../tools/mp-server/demo-server');
 /**
  * Real frames per second, counted from rAF callbacks.
  *
- * KDM-205 — the DUNGEON readings need a LONG window AND a fractional result, and the second mattered
+ * The DUNGEON readings need a LONG window AND a fractional result, and the second mattered
  * more than the first. At the ~5 fps a headless dungeon runs at, a 3 s window counts only ~15 frames.
  * But lengthening it alone changed nothing, because the old meter rounded the RATE
  * (`Math.round(n / (d/1000))`): every reading carried ±0.5 fps ≈ ±10% however long the sample ran, and
@@ -80,7 +80,7 @@ async function fps(P: Page, ms = 3000) {
 		(function f() {
 			n++;
 			if (performance.now() - t0 < d) requestAnimationFrame(f);
-			// KDM-205: ONE DECIMAL, not an integer. `Math.round(n / (d/1000))` rounded the RATE, so at
+			// ONE DECIMAL, not an integer. `Math.round(n / (d/1000))` rounded the RATE, so at
 			// ~5 fps every reading carried ±0.5 fps ≈ ±10% NO MATTER HOW LONG the window was — and the
 			// ratio below multiplied that error across both arms. Lengthening the window alone did not
 			// help precisely because the rounding was applied after the division.
@@ -103,7 +103,7 @@ async function screen(P: Page) {
 
 test('frame-rate controls: plain game vs co-op client', async ({ browser }) => {
 	test.setTimeout(MP_TEST_TIMEOUT);
-	// KDM-302: requiredPlayers 1 — arm C is a host playing ALONE; see the note at arm C.
+	// RequiredPlayers 1 — arm C is a host playing ALONE; see the note at arm C.
 	const { server, port } = await start(0, { requiredPlayers: 1 });
 	const ctx = await browser.newContext();
 	const out: any = {};
@@ -137,7 +137,7 @@ test('frame-rate controls: plain game vs co-op client', async ({ browser }) => {
 		/*
 		 * C) a co-op client page, playing ALONE.
 		 *
-		 * ⚠️ KDM-302 CHANGED WHAT THIS ARM IS. It used to be `#coop=SOLO`: a co-op client that entered
+		 * ⚠️ WHAT THIS ARM IS HAS CHANGED. It used to be `#coop=SOLO`: a co-op client that entered
 		 * the dungeon on load and was never paired, so NO session traffic at all. That URL shortcut is
 		 * gone — the lobby is the only way in — and a lobby host only enters the dungeon once its
 		 * session starts. So this is now a host in a started ONE-player session (`requiredPlayers: 1`):
@@ -153,7 +153,7 @@ test('frame-rate controls: plain game vs co-op client', async ({ browser }) => {
 		out.coopScreen = await screen(coop);
 
 		/*
-		 * ⚠️ BOTH ARMS MUST BE MEASURED WITH THE SAME NUMBER OF PAGES ALIVE (KDM-207).
+		 * ⚠️ BOTH ARMS MUST BE MEASURED WITH THE SAME NUMBER OF PAGES ALIVE.
 		 *
 		 * The first version of this fix compared `gameFps` taken with ONE page open against `coopFps`
 		 * taken with TWO, and reported a "1.86x proxy cost". That number was the second page, not the
@@ -182,14 +182,14 @@ test('frame-rate controls: plain game vs co-op client', async ({ browser }) => {
 		// VALIDITY FIRST — a ratio between two readings is meaningless if either arm drew the wrong
 		// thing, and "both slow" would otherwise pass this test while measuring nothing.
 		expect(out.startedGame, `the control must actually start a game, else gameFps is a MENU reading ` +
-			`and the comparison is the invalid one KDM-205 removed. ${msg}`).toBe(true);
+			`and the comparison is the invalid one that was removed. ${msg}`).toBe(true);
 		expect(out.plainScreen.state, `the control reading must be taken in Game. ${msg}`).toBe('Game');
 		expect(out.coopScreen.state, `the co-op reading must be taken in Game. ${msg}`).toBe('Game');
 		expect(out.gameFps, `the control must produce real frames. ${msg}`).toBeGreaterThan(0);
 
 		// THE ASSERTION — the proxy may not cost more than 2x the un-proxied game rendering the same
 		// dungeon, both measured with the same pages alive. Measured like-for-like the true ratio is
-		// ~1.0 (KDM-207), so 2x is now genuine headroom rather than the 7% it appeared to be while the
+		// ~1.0, so 2x is now genuine headroom rather than the 7% it appeared to be while the
 		// page-count confound was inflating it.
 		//
 		// If this ever goes red: check `gameFpsSolo` against `gameFps` FIRST. A large gap between them

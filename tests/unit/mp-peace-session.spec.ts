@@ -1,5 +1,5 @@
 /**
- * KDM-225 — the SwapSession seams the peace handshake needs.
+ * The SwapSession seams the peace handshake needs.
  *
  * `mp-peace-registry.spec.ts` covers the rules in isolation; this covers the four places the session
  * has to honour them, each of which is a known trap:
@@ -47,7 +47,7 @@ function worldHostility(s: any, cid: string) {
 	})()`);
 }
 
-describe('KDM-225 — peace, at the session seams', () => {
+describe('peace, at the session seams', () => {
 	let s: any;
 	beforeEach(async () => {
 		// pvp:true = the GLOBAL flag, the mode every PvP UAT runs in. That is the hard case for AC8.
@@ -198,7 +198,7 @@ describe('KDM-225 — peace, at the session seams', () => {
 	});
 
 	/**
-	 * UAT bug (KDM-230): answering handed the ANSWERER the OFFERER's player state.
+	 * UAT bug: answering handed the ANSWERER the OFFERER's player state.
 	 *
 	 * Settling a truce closes the dialogue on BOTH sides, and each close is a restore → mutate →
 	 * capture on that player. Done before the answerer's own capture, it left the offerer swapped in,
@@ -235,7 +235,7 @@ describe('KDM-225 — peace, at the session seams', () => {
 	});
 
 	/**
-	 * UAT round 3 (KDM-230): "i have accepted … but still can attack and tie".
+	 * UAT round 3: "i have accepted … but still can attack and tie".
 	 *
 	 * Peace was clearing `hostile`/`rage` and nothing else, but `_armPeerEnemies` stamps
 	 * `e.faction = 'Enemy'` onto the WORLD entity (`setAvatarEnemy`), and that stamp is sticky.
@@ -281,7 +281,7 @@ describe('KDM-225 — peace, at the session seams', () => {
 	});
 
 	/**
-	 * UAT round 4 (KDM-230): peace held for an instant and was undone by the NEXT TURN.
+	 * UAT round 4: peace held for an instant and was undone by the NEXT TURN.
 	 *
 	 * `_reconcilePeers` restores every avatar to full hp each turn via `setAvatarEnemy` — which is the
 	 * ARMING call, and also stamps `faction = 'Enemy'` and `hostile = 9999`. It runs for every avatar

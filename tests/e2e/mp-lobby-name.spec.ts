@@ -1,12 +1,12 @@
 /**
- * E2E (KDM-237) — both players name themselves in the lobby, and the world uses those names.
+ * E2E — both players name themselves in the lobby, and the world uses those names.
  *
  * The unit spec (`tests/unit/mp-player-name.spec.ts`) proves the gate rules in milliseconds and the
  * seating on a directly-driven session. This one proves the half neither can reach: that the name a
  * player TYPES is the name that arrives — lobby field → `join` frame → gate → session → avatar.
  *
  * ── THE HOST IS THE POINT ─────────────────────────────────────────────────────────────────────────
- * KDM-233 gave the Join view a "Your name" field and the Host view nothing at all, so the host was
+ * The original lobby gave the Join view a "Your name" field and the Host view nothing at all, so the host was
  * never asked. Half of a two-player session being nameless is not a partial feature, it is the
  * feature missing — hence the first case asserts the field exists on the host's path before anything
  * else is checked.
@@ -27,7 +27,7 @@ const { start } = require('../../tools/mp-server/demo-server');
 
 const MP_TEST_TIMEOUT = Number(process.env.KD_MP_TEST_TIMEOUT || 600_000);
 
-test.describe('KDM-237 — the name you type is the name you get', () => {
+test.describe('the name you type is the name you get', () => {
 
 	test('the host is asked for a name at all (N1)', async ({ browser }) => {
 		test.setTimeout(MP_TEST_TIMEOUT);
@@ -89,7 +89,7 @@ test.describe('KDM-237 — the name you type is the name you get', () => {
 		}
 	});
 
-	test('KDM-282 — two players who type no name are seated by SEAT, not by raw id (N3, NF2)', async ({ browser }) => {
+	test('two players who type no name are seated by SEAT, not by raw id (N3, NF2)', async ({ browser }) => {
 		test.setTimeout(MP_TEST_TIMEOUT);
 		const { server, bridge, port } = await start(0);
 		const hostCtx = await browser.newContext();
@@ -103,13 +103,13 @@ test.describe('KDM-237 — the name you type is the name you get', () => {
 
 			await expect.poll(() => bridge.gate.host, { timeout: 30_000 }).toBeTruthy();
 			// The whole MP e2e suite depends on this: an empty name field is
-			// not a name, and the seat records nothing. KDM-280 made the id per-tab; KDM-282 then
+			// not a name, and the seat records nothing. The id was made per-tab; a later change then
 			// gave the label below a seat to use instead of that id.
 			expect(bridge.gate.nameOf(bridge.gate.host)).toBe('');
 
 			// ---- BOTH seats, because the fallback has two of them -----------------------------
 			// This test used to host alone and pin `Player <id>`. Bringing a second unnamed player
-			// in is the whole of KDM-282's acceptance criterion: one seat cannot show that the
+			// in is the whole of that change's acceptance criterion: one seat cannot show that the
 			// label is a SEAT rather than a constant, and the two-unnamed-players case is the one
 			// where a naive fallback ("Player", "Guest") makes both people the same person.
 			await openLobby(guest, port);
@@ -117,7 +117,7 @@ test.describe('KDM-237 — the name you type is the name you get', () => {
 			await guest.locator('#KDMPAddress').fill(`127.0.0.1:${port}`);
 			await guest.locator('#KDMPName').fill('');
 			await press(guest, 'KDMPConnect');
-			// KDM-293 — was `pending !== undefined`, which is TRUE for the initial `null` and so never
+			// Was `pending !== undefined`, which is TRUE for the initial `null` and so never
 			// waited at all; Accept was pressed before the request arrived. Pre-existing, and only
 			// exposed when this slice shifted the timing. Poll for a REAL prompt, as join-flow does.
 			await expect.poll(async () => (await lobbyState(host)).pending?.clientId,

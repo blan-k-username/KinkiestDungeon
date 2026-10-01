@@ -1,5 +1,5 @@
 /**
- * E2E (KDM-236) — the three things a player does that KDM-233 left unfinished: come back to an
+ * E2E — the three things a player does that the first lobby left unfinished: come back to an
  * address they already used, be TOLD when a host never answers, and walk away without leaving a
  * socket behind.
  *
@@ -39,7 +39,7 @@ async function openJoinView(page: any) {
 	await press(page, 'KDMPJoin');
 }
 
-test.describe('KDM-236 — the address you used, and the way back out', () => {
+test.describe('the address you used, and the way back out', () => {
 
 	test('a first-ever join view offers this page\'s own address (A3)', async ({ browser }) => {
 		test.setTimeout(MP_TEST_TIMEOUT);
@@ -209,7 +209,7 @@ test.describe('KDM-236 — the address you used, and the way back out', () => {
 	});
 
 	/*
-	 * KDM-306 — the deadline measures the SERVER's silence, not the page's own.
+	 * The deadline measures the SERVER's silence, not the page's own.
 	 *
 	 * Captured (probe runs 14 and 25): the guest dialled, then its own page froze for ~11-16 s — KD's
 	 * work, not the network — while the 10 s deadline came due. On waking the overdue deadline ran
@@ -217,7 +217,7 @@ test.describe('KDM-236 — the address you used, and the way back out', () => {
 	 * not reach <the host's own address>". Intermittent in four specs because it needs a long freeze.
 	 * Here the freeze is made deliberately, in the same task that dials, so the open cannot win the race.
 	 */
-	test('a page that freezes while its join is connecting still gets its join through (KDM-306)', async ({ browser }) => {
+	test('a page that freezes while its join is connecting still gets its join through', async ({ browser }) => {
 		test.setTimeout(MP_TEST_TIMEOUT);
 		const { server, bridge, port } = await start(0);
 		const hostCtx = await browser.newContext();
@@ -263,7 +263,7 @@ test.describe('KDM-236 — the address you used, and the way back out', () => {
 			await openLobby(page, port);
 			await press(page, 'KDMPHost');
 			// The SERVER's gate, not the lobby's opinion of itself — that distinction is the bug.
-			// KDM-280: the id is generated per tab now, so this asks whether slot 0 is SEATED, which
+			// The id is generated per tab now, so this asks whether slot 0 is SEATED, which
 			// is what the sentence above always meant.
 			await expect.poll(() => bridge.gate.host,
 				{ timeout: 30_000, message: 'hosting seats slot 0' }).toBeTruthy();
@@ -273,7 +273,7 @@ test.describe('KDM-236 — the address you used, and the way back out', () => {
 			await expect.poll(() => bridge.gate.host,
 				{ timeout: 30_000, message: 'T1 — cancelling gives the seat back' }).toBe(null);
 			expect(await page.evaluate(() => !window.__coop.ws), 'no socket left on the client').toBe(true);
-			// KDM-293 — Back now returns to the screen the entry was pressed from, not to a menu of ours.
+			// Back now returns to the screen the entry was pressed from, not to a menu of ours.
 			expect(await page.evaluate(() => KinkyDungeonState),
 				'and we are back on the screen we came from').toBe('Diff');
 		} finally {

@@ -1,5 +1,5 @@
 /**
- * Node-layer (Vitest) — KDM-160: the parity oracle (I1 + I3).
+ * Node-layer (Vitest) — the parity oracle (I1 + I3).
  *
  * The instrument is KD's OWN save format (KinkyDungeonGenerateSaveData, KinkyDungeon.ts:6925):
  * an upstream-maintained, versioned, complete definition of what a player IS (56 top-level keys)
@@ -38,7 +38,7 @@ function diffKeys(a: any, b: any): string[] {
 		.filter((k) => JSON.stringify(a[k]) !== JSON.stringify(b[k]));
 }
 
-describe('KDM-160 · I1 — swap fixpoint (no state LOST across a swap)', () => {
+describe('I1 — swap fixpoint (no state LOST across a swap)', () => {
 	let h: any;
 	beforeAll(() => {
 		h = new HeadlessHost({ id: 'i1' });
@@ -64,7 +64,7 @@ describe('KDM-160 · I1 — swap fixpoint (no state LOST across a swap)', () => 
 	}, BOOT_TIMEOUT);
 });
 
-describe('KDM-160 · saveOf — the measuring instrument (R1/R2/R3)', () => {
+describe('saveOf — the measuring instrument (R1/R2/R3)', () => {
 	let h: any;
 	beforeAll(() => {
 		h = new HeadlessHost({ id: 'saveof' });
@@ -94,12 +94,12 @@ describe('KDM-160 · saveOf — the measuring instrument (R1/R2/R3)', () => {
 	}, BOOT_TIMEOUT);
 });
 
-describe('KDM-160 · I3 — single-player parity oracle', () => {
+describe('I3 — single-player parity oracle', () => {
 	it('a 1-player session matches a reference single-player run over 50 turns', () => {
 		const ref = new HeadlessHost({ id: 'ref' });
 		ref.boot();
 		ref.init({ seed: SEED });
-		// KDM-309: single player starts where map generation put the player — the reference no longer
+		// Single player starts where map generation put the player — the reference no longer
 		// copies the co-op session's old `findOpenTile` spawn, it is the thing co-op must now match.
 		const p0 = ref.getPlayerPos();
 		const base = { x: p0.x, y: p0.y };

@@ -1,5 +1,5 @@
 /**
- * tools/mp-server/client/coop-mods.js  (KDM-249)
+ * tools/mp-server/client/coop-mods.js 
  *
  * THE CLIENT HALF OF "THE GUEST PLAYS WITH THE HOST'S MODS".
  *

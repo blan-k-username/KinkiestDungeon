@@ -1,5 +1,5 @@
 /**
- * E2E (Playwright/Chromium) — KD-101: reproduce the live "Tie Up does nothing".
+ * E2E (Playwright/Chromium) — reproduce the live "Tie Up does nothing".
  *
  * Two browsers, PvP. B wears Player A down to defeated, then drives the REAL tie the submenu emits
  * (KDSendInput "addNPCRestraint" against A's avatar — NPCRestrain.ts:311), routed to the server. The
@@ -37,7 +37,7 @@ test('PvP tie: binding a defeated peer applies a real restraint to them', async 
 		// --- B wears Player A down to defeated (real doattack on A's avatar) ---
 		for (let i = 0; i < 25 && !session.isDefeated('A'); i++) {
 			const peer = await waitForPeerAvatar(B);
-			// KDM-210: retired — waitForPeerAvatar throws a named error before this could fail.
+			// Retired — waitForPeerAvatar throws a named error before this could fail.
 			await B.evaluate((p) => (window as any).__coop.sendAction({ kdType: 'doattack', data: { tx: p.x, ty: p.y, id: p.id, attackCost: 1 } }), peer);
 			const t0 = await B.evaluate(() => (window as any).__coop.lastTick);
 			await advance(t0);

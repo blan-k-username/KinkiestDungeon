@@ -1,5 +1,5 @@
 /**
- * tools/mp-server/transport/index.js  (KD-081)
+ * tools/mp-server/transport/index.js 
  *
  * Resolve a transport name → a `makeTransport(role)` factory that MPSession uses.
  * One place to register adapters; the spec parametrizes over TRANSPORTS.

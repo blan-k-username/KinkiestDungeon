@@ -7,7 +7,7 @@
 #   tools/run-tests.sh [all|unit|integration|e2e|watch] [extra args…]
 #
 # Defaults to "all". Any extra args are forwarded verbatim to the underlying
-# runner, so a single spec is a one-liner (KDM-167 AC3):
+# runner, so a single spec is a one-liner:
 #
 #   tools/run-tests.sh e2e tests/e2e/mp-pvp-tie.spec.ts
 #   tools/run-tests.sh unit tests/unit/mp-parity-oracle.spec.ts
@@ -84,7 +84,7 @@ case "$LAYER" in
 esac
 
 # ---------------------------------------------------------------------------
-# KDM-167: host contention is this suite's dominant failure mode, so record it.
+# Host contention is this suite's dominant failure mode, so record it.
 #
 # Each MP e2e runs two full game bundles plus a node host with three headless
 # instances. Measured across four runs: on a loaded host the suite takes ~1 h
@@ -112,7 +112,7 @@ LOAD_BEFORE="$(host_load)"
 echo "── kd tests: layer=$LAYER${ARGS:+ filter=$ARGS}"
 echo "── host at start: $LOAD_BEFORE"
 
-# MEASURED THRESHOLD (KDM-167). Per-spec host load vs outcome, one isolated run:
+# MEASURED THRESHOLD. Per-spec host load vs outcome, one isolated run:
 #     19 containers → FAILED · 18 → flaky · ≤16 → 18/18 passed, all first attempt
 # It is a cliff, not a gradient, and no amount of timeout tuning crosses it: raising the co-op boot
 # budget 150 s → 240 s simply bought 90 s more waiting before the same page-crash death. Above the

@@ -1,5 +1,5 @@
 /**
- * E2E (KD-101) — a tie must PERSIST on the VICTIM. After B ties A, A stays bound on A's own client
+ * E2E — a tie must PERSIST on the VICTIM. After B ties A, A stays bound on A's own client
  * across many turns (the reconcile adds to A's bundle and never removes; A's client renders it from
  * the snapshot). The peer-avatar's per-turn bondage gauge is cleared each turn on the server (so its
  * binding slots never overfill — that overfill crashed the stock submenu apply), so this asserts the

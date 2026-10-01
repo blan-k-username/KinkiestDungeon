@@ -1,5 +1,5 @@
 /**
- * Node-layer (Vitest) tests for the swap-model session — KD-085 uniform action model.
+ * Node-layer (Vitest) tests for the swap-model session — uniform action model.
  *
  * One authoritative world; players are state bundles swapped in/out per turn; actions
  * run through KD's REAL dispatcher (applyInput). Verifies: lockstep (R8), a real move
@@ -14,7 +14,7 @@ const { SwapSession } = require('../../tools/mp-server/swap-session');
 
 const BOOT_TIMEOUT = 240_000;
 
-describe('SwapSession — uniform action model (KD-085)', () => {
+describe('SwapSession — uniform action model', () => {
 	let s: any;
 
 	beforeAll(() => {
@@ -67,7 +67,7 @@ describe('SwapSession — random-order conflict resolution (R9)', () => {
 		s.join('B');
 		const a0 = s.posOf('A');
 		const b0 = s.posOf('B');
-		// Both aim for one free tile adjacent to BOTH (found, not assumed — KDM-309).
+		// Both aim for one free tile adjacent to BOTH (found, not assumed).
 		const target: any = contestedTarget(s);
 		expect(target, 'precondition: a free tile both players can step onto').not.toBeNull();
 		s.submit('A', { kind: 'move', dx: target.x - a0.x, dy: target.y - a0.y });

@@ -1,5 +1,5 @@
 /**
- * KDM-268 — a dispatch that throws must not be discarded in silence.
+ * A dispatch that throws must not be discarded in silence.
  *
  * `applyInputObserved` catches whatever the input's dispatch throws and hands it back as `obs.error`
  * (`headless-host.js:3067`). On the TURN path that field is read in exactly one place —
@@ -10,12 +10,12 @@
  * Nothing logs it, nothing records it, nothing sends it. So a player's action can be aborted
  * half-way through and the session reports a perfectly normal turn.
  *
- * THIS IS THE FOURTH MEMBER OF AN EXISTING FAMILY, not a new idea. `unknownInputs` (KDM-163),
- * `replacedInputs` (KDM-163) and `cancelledMoves` (KDM-208) all exist because — in the words of
+ * THIS IS THE FOURTH MEMBER OF AN EXISTING FAMILY, not a new idea. `unknownInputs`,
+ * `replacedInputs` and `cancelledMoves` all exist because — in the words of
  * `cancelledMoveReport` — *"from the player's side a cancelled move and an ignored input look
  * identical"*. A thrown dispatch is the same event with a louder cause and none of the treatment.
  *
- * ⚠️ THE THROW IS INJECTED, ON PURPOSE. KDM-267 removed the one real cause we knew of (KD's own
+ * ⚠️ THE THROW IS INJECTED, ON PURPOSE. The defeat-autosave fix removed the one real cause we knew of (KD's own
  * autosave, at the tail of `KinkyDungeonDefeat`), so a test that waited for a NATURAL throw would now
  * be asserting on nothing — permanently green, and blind to the next engine bug. `armDispatchThrow`
  * keeps the REPORTING path under test regardless of what produces the exception.
@@ -31,7 +31,7 @@ import { armDispatchThrow, armFired } from './helpers/world';
 const BOOT_TIMEOUT = 300_000;
 const BOOM = 'kdm268 injected dispatch failure';
 
-describe('KDM-268 — a thrown dispatch is recorded, not swallowed', () => {
+describe('a thrown dispatch is recorded, not swallowed', () => {
 	let s: any;
 	beforeEach(async () => {
 		s = new SwapSession({ requiredPlayers: 2, seed: 'failed-input', pvp: false });

@@ -1,10 +1,10 @@
 /**
- * KDM-249 — reconciling two mod sets (`tools/mp-server/mod-sync.js`), on its own.
+ * Reconciling two mod sets (`tools/mp-server/mod-sync.js`), on its own.
  *
  * WHICH MODS DOES THE GUEST NOT HAVE, AND WHERE ARE THE BYTES. This is the pure half of "the guest
  * plays with the host's mods": the difference between two declarations, and the in-memory store the
  * payloads sit in between the host's upload and the guest's fetch. No socket, no world, no game
- * globals — the same call as `join-gate.js` / `peace.js` (KDM-233 architecture R1), so every rule
+ * globals — the same call as `join-gate.js` / `peace.js` (the join-gate architecture rule), so every rule
  * below is checked in milliseconds rather than behind a two-browser session boot.
  *
  * IDENTITY IS THE CONTENT HASH, NEVER THE NAME. Two players may hold the same mod under different
@@ -12,7 +12,7 @@
  * guest to fetch something it already has, or — far worse — tell it that it already has something it
  * does not. Most of the cases below exist to pin that down.
  *
- * Requirement ids refer to the `## Requirements (decided)` section of KDM-249.
+ * The requirement labels (R1, R2, …) name the mod-sync behaviours this spec pins.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -29,7 +29,7 @@ function mod(modname: string, hash: string, extra: any = {}) {
 	}, extra);
 }
 
-describe('KDM-249 — diffDeclarations (R3)', () => {
+describe('diffDeclarations (R3)', () => {
 	it('two identical sets leave nothing to do', () => {
 		const set = [mod('Cool', 'h1'), mod('Neat', 'h2')];
 		const d = diffDeclarations(set, set.slice());
@@ -125,7 +125,7 @@ describe('KDM-249 — diffDeclarations (R3)', () => {
 	});
 });
 
-describe('KDM-249 — ModStore (R6)', () => {
+describe('ModStore (R6)', () => {
 	let s: any;
 	beforeEach(() => { s = new ModStore(); });
 

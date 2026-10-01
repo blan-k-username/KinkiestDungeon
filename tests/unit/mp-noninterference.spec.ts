@@ -1,17 +1,17 @@
 /**
- * Node-layer (Vitest) — KDM-160: I2, cross-player non-interference.
+ * Node-layer (Vitest) — I2, cross-player non-interference.
  *
  * THE primary instrument for this slice. The swap model keeps ONE authoritative world and swaps each
  * player's bundle in and out; anything player-specific that the bundle does NOT carry simply stays on
  * the world and belongs to "whoever was swapped in last".
  *
- * Measured during assessment (KDM-160 §A4): KDGameData has 221 keys, capturePlayer whitelisted 12,
+ * Measured during assessment: KDGameData has 221 keys, capturePlayer whitelisted 12,
  * and 86 of 123 probed primitive keys leaked from A to B — including ShieldTokens, DodgeTokens,
  * BlockTokens, Crouch, Guilt, CurseLevel, CollectedOrbs, TimesJailed. A further 98 non-primitive keys
  * are never restored either (RevealedFog/RevealedTiles = per-player vision, Party, NPCRestraints,
  * PlayerName/PlayerPronoun — both players would share one name).
  *
- * The test is deliberately GENERIC (KDM-160 §D3): it stamps a magic value on every primitive key and
+ * The test is deliberately GENERIC: it stamps a magic value on every primitive key and
  * then searches the OTHER player's whole save for any of them. Enumerating field names here would
  * make the test itself the maintained list this epic exists to delete — and it would not catch
  * field 222.
@@ -32,7 +32,7 @@ function allNumbers(v: any, out: Set<number> = new Set()): Set<number> {
 	return out;
 }
 
-describe('KDM-160 · I2 — one player\'s turn must not contaminate another', () => {
+describe('I2 — one player\'s turn must not contaminate another', () => {
 	let s: any;
 	let stamped: string[];
 

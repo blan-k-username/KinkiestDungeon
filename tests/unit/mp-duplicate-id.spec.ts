@@ -1,8 +1,8 @@
 /**
- * KDM-280 — two clients presenting ONE id, and the seat that used to be stolen in silence.
+ * Two clients presenting ONE id, and the seat that used to be stolen in silence.
  *
  * ── WHAT WAS WRONG ────────────────────────────────────────────────────────────────────────────────
- * Measured with a probe against a real `WSBridge` while writing KDM-270's e2e, not inferred:
+ * Measured with a probe against a real `WSBridge` while writing the already-hosting refusal e2e, not inferred:
  *
  *     B got: {"type":"error","error":"duplicate join: host"}
  *     gate.host = host | name = Bob | players = ["host"] | socket replaced = true | A closed = false
@@ -25,9 +25,9 @@
  * same message on the wire. Only one signal separates them, and only the bridge holds it: whether the
  * id's PREVIOUS socket is still live. So every refusal assertion here is paired with a reload that
  * must still succeed — without that pair, a bridge that refuses everything passes, and reconnect
- * (KDM-252) dies quietly.
+ * dies quietly.
  *
- * Requirement ids refer to the `## Requirements` section of KDM-280.
+ * The requirement labels (R1, R2, …) name the behaviours this spec pins.
  */
 import { describe, it, expect, afterEach } from 'vitest';
 import { MPClient } from '../helpers/mp-ws-client';
@@ -40,7 +40,7 @@ const SOCKET_TEST_TIMEOUT = 20_000;
 const isJoined = (m: any) => m.type === 'joined';
 const isReject = (m: any) => m.type === 'reject';
 
-describe('KDM-280 — one id, two clients', () => {
+describe('one id, two clients', () => {
 	let bridge: any = null;
 	const open: MPClient[] = [];
 
@@ -110,7 +110,7 @@ describe('KDM-280 — one id, two clients', () => {
 
 		const A2 = await client(port);
 		A2.send({ type: 'join', clientId: 'same', role: 'host', name: 'Alice' });
-		// The line that stops R5 above from being "refuse every repeat id" — KDM-252's whole slice
+		// The line that stops R5 above from being "refuse every repeat id" — the whole reconnect feature
 		// rests on this staying true.
 		await A2.next(isJoined);
 		expect(bridge.gate.host).toBe('same');
@@ -139,7 +139,7 @@ describe('KDM-280 — one id, two clients', () => {
 		expect(bridge.session.players.sort()).toEqual(['G', 'H']);
 	}, SOCKET_TEST_TIMEOUT);
 
-	// ── R4: with DIFFERENT ids it is an ordinary refusal, and KDM-270 answers it ─────────────
+	// ── R4: with DIFFERENT ids it is an ordinary refusal, answered as already_hosting ─────────────
 
 	it('R4 — a different id claiming the host seat gets `already_hosting`, not `duplicate_id`', async () => {
 		const port = await boot();
@@ -153,7 +153,7 @@ describe('KDM-280 — one id, two clients', () => {
 
 		// The two refusals must not be confused: this one is somebody who could still play.
 		expect(r.reason).toBe('already_hosting');
-		expect(r.retry, 'KDM-270 — and they are told which seat is free').toBe('guest');
+		expect(r.retry, 'and they are told which seat is free').toBe('guest');
 		expect(bridge.gate.nameOf('alice')).toBe('Alice');
 		expect(await B.closedWithin(500), 'so this one is NOT terminal').toBe(false);
 	}, SOCKET_TEST_TIMEOUT);

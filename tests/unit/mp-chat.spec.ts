@@ -1,5 +1,5 @@
 /**
- * KDM-246 — co-op chat: one player types, the other reads it.
+ * Co-op chat: one player types, the other reads it.
  *
  * Chat is an `mp:` action (`SwapSession._applyMPAction`), NOT a KD input. That distinction is the
  * first thing these tests pin, and it is not cosmetic: `_toInput` ends `return { kdType: 'tick' }`,
@@ -41,7 +41,7 @@ const logEntries = (s: any, id: string): any[] => s.snapshotFor(id).messages.log
 /** The entries `id` gained since `before` — the delta is what a chat message is. */
 const gained = (s: any, id: string, before: number): any[] => logEntries(s, id).slice(before);
 
-describe('KDM-246 — sanitizeChat is the server-side control (R5, AC4)', () => {
+describe('sanitizeChat is the server-side control (R5, AC4)', () => {
 	// A pure function: no session, no boot, milliseconds. This is deliberate — the KDTextField's
 	// `MaxLength` attribute is a client COURTESY and a client can simply not send one, so the cap
 	// that matters is this one and it must be cheap enough to test exhaustively.
@@ -56,7 +56,7 @@ describe('KDM-246 — sanitizeChat is the server-side control (R5, AC4)', () => 
 	});
 
 	/**
-	 * KDM-247 R5 — THE CAP IS A UTF-16 SLICE, AND AN EMOJI IS TWO CODE UNITS.
+	 * THE CAP IS A UTF-16 SLICE, AND AN EMOJI IS TWO CODE UNITS.
 	 *
 	 * `sanitizeChat` ends `.slice(0, CHAT_MAX)` (`swap-session.js:941`). Every string that had ever
 	 * crossed it was ASCII — one code unit per character — so the cut was always on a character
@@ -72,7 +72,7 @@ describe('KDM-246 — sanitizeChat is the server-side control (R5, AC4)', () => 
 	 * Note the ORDER inside the function: replace -> trim -> slice. The slice is last, so it is the
 	 * only step that can split anything, and it is the only step this task touches.
 	 */
-	describe('KDM-247 R5 — the cap never splits a code point', () => {
+	describe('the cap never splits a code point', () => {
 		/**
 		 * Unpaired halves of a surrogate pair, by index. A high surrogate must be followed by a low
 		 * one and a low must be preceded by a high; anything else is a broken code point.
@@ -176,7 +176,7 @@ describe('KDM-246 — sanitizeChat is the server-side control (R5, AC4)', () => 
 	});
 });
 
-describe('KDM-246 — a message reaches the partner, off the turn boundary', () => {
+describe('a message reaches the partner, off the turn boundary', () => {
 	let s: any;
 
 	beforeAll(() => {
@@ -232,7 +232,7 @@ describe('KDM-246 — a message reaches the partner, off the turn boundary', () 
 
 	it('AC3 — a hostile payload survives the eval boundary VERBATIM', () => {
 		// Every character here has broken this codebase or a codebase like it. The backtick is the
-		// one with a task number attached (KDM-184/218): inside `headless-host.js`'s template
+		// one with a task number attached: inside `headless-host.js`'s template
 		// literal it terminates the string, and the resulting SyntaxError blames the requiring file.
 		const nasty = 'hi `tick` ${1+1} "q" \\slash </script>';
 		const before = logEntries(s, 'B').length;

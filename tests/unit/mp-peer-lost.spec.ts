@@ -1,20 +1,20 @@
 /**
- * KDM-251 — a paused session refuses turns OUT LOUD.
+ * A paused session refuses turns OUT LOUD.
  *
- * KDM-250 made the server notice that a peer is gone. This is the half the surviving player actually
+ * The heartbeat makes the server notice that a peer is gone. This is the half the surviving player actually
  * experiences: the turn loop stops, and every key and click they press is refused *with a reason*,
  * instead of being swallowed by a barrier that will never close.
  *
  * THE FAILURE THIS GUARDS IS NOT "THE TURN DID NOT ADVANCE" — it is "the input looked accepted".
- * KDM-225 shipped exactly that: the client sets `coop.submitted = true` on a `waiting` reply and then
+ * The peace-offer slice shipped exactly that: the client sets `coop.submitted = true` on a `waiting` reply and then
  * suppresses every later input as already-acted, so a player whose action entered a barrier that
  * never resolves is locked out of the very controls that could unblock them. Hence every assertion
  * here comes in a pair — `blocked` arrived AND `waiting` did not.
  *
- * WHAT IS DELIBERATELY NOT TESTED HERE. Reconnect (KDM-252) and the wait/solo choice (KDM-253). This
+ * WHAT IS DELIBERATELY NOT TESTED HERE. Reconnect and the wait/solo choice. This
  * slice only has to make the pause honest.
  *
- * Requirement ids refer to the `## Requirements` section of KDM-251 (EARS text in KDM-234).
+ * The requirement ids on the tests name the behaviours this spec pins.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { MPClient, seatPair } from '../helpers/mp-ws-client';
@@ -30,7 +30,7 @@ const isBlocked = (m: any) => m.type === 'blocked';
 const isWaiting = (m: any) => m.type === 'waiting';
 const isMissing = (m: any) => m.type === 'peer_missing';
 
-describe('KDM-251 — the pause is honest', () => {
+describe('the pause is honest', () => {
 	let bridge: any = null;
 	let A: MPClient;      // seat 0 — the host
 	let B: MPClient;      // seat 1 — the guest
@@ -38,7 +38,7 @@ describe('KDM-251 — the pause is honest', () => {
 	beforeAll(async () => {
 		bridge = new WSBridge({ requiredPlayers: 2, seed: 'peer-lost', hbIntervalMs: 0 });
 		const port = await bridge.listen(0);
-		// KDM-255 — through the join gate, the only road in.
+		// Through the join gate, the only road in.
 		({ host: A, guest: B } = await seatPair(port));
 		await A.next(isState);
 		await B.next(isState);
@@ -56,7 +56,7 @@ describe('KDM-251 — the pause is honest', () => {
 		expect(b.reason).toBe('peer-missing');
 	}, BOOT_TIMEOUT);
 
-	it('N1 — and it is NOT answered `waiting`, which is what soft-locked the client in KDM-225', async () => {
+	it('N1 — and it is NOT answered `waiting`, which is what once soft-locked the client', async () => {
 		A.send({ type: 'input', action: { kind: 'wait' } });
 		await A.next(isBlocked);
 		await A.never(isWaiting, 300);
@@ -72,14 +72,14 @@ describe('KDM-251 — the pause is honest', () => {
 	it('A3 — a ui input still flows, so the survivor can still reach their controls', async () => {
 		// `setMoveDirection` is KD's own per-frame hover input and is classified `ui`, so it is routed
 		// around `submit` entirely and must be unaffected by the gate. Without this, the disconnect
-		// dialogue (KDM-253) would be unanswerable and the pause would be a soft-lock of its own.
+		// dialogue would be unanswerable and the pause would be a soft-lock of its own.
 		A.send({ type: 'input', action: { kdType: 'setMoveDirection', data: { dir: { x: 1, y: 0 } } } });
 		const reply = await A.next((m) => m.type === 'state' || m.type === 'ack');
 		expect(['state', 'ack']).toContain(reply.type);
 	}, BOOT_TIMEOUT);
 
 	it('the gate is not permanent — resuming accepts turns again', async () => {
-		// Narrow on purpose: this proves the MECHANISM releases, not the reconnect flow (KDM-252).
+		// Narrow on purpose: this proves the MECHANISM releases, not the reconnect flow.
 		bridge.session.resume();
 		try {
 			A.send({ type: 'input', action: { kind: 'wait' } });
@@ -96,7 +96,7 @@ describe('KDM-251 — the pause is honest', () => {
  * consumers (server eval + browser script), exactly like `kd-peace-dialogue.js`, so the thing worth
  * pinning is what it declares.
  */
-describe('KDM-251 — S5/D7: the guest waiting on a lost host is offered exactly one way out', () => {
+describe('S5/D7: the guest waiting on a lost host is offered exactly one way out', () => {
 	/** Evaluate the shared source text in a bare scope and read back what it registered. */
 	function registered() {
 		const scope: any = { KDDialogue: {}, addTextKey: (k: string, v: string) => { scope._keys[k] = v; } };
@@ -110,7 +110,7 @@ describe('KDM-251 — S5/D7: the guest waiting on a lost host is offered exactly
 		expect(registered().dialogues[HOST_LOST_DIALOGUE]).toBeTruthy();
 	});
 
-	it('offers Quit and NOTHING else — no "continue", ever (D7, KDM-244 C3)', () => {
+	it('offers Quit and NOTHING else — no "continue", ever (D7)', () => {
 		const d = registered().dialogues[HOST_LOST_DIALOGUE];
 		expect(Object.keys(d.options)).toEqual(['Quit']);
 	});

@@ -1,5 +1,5 @@
 /**
- * E2E (KDM-239 R4) — the guest is told what WORLD it is joining, before it commits.
+ * E2E — the guest is told what WORLD it is joining, before it commits.
  *
  * R3 makes the host's game-mode choices govern the shared world. R4 is the half that makes that
  * honest: a guest agreeing to join a run on the host's terms has to be able to SEE those terms while
@@ -11,7 +11,7 @@
  * Same reasoning as `mp-lobby-mod-notice.spec.ts`, and for the same reason: asserting
  * `KDMPLobby.world` holds the right value would prove the data ARRIVED, which the unit layer already
  * proves. The bug this guards against is data arriving and nothing rendering it — exactly the state
- * KDM-249 was in before KDM-257. `paintedText()` records what actually reached the screen.
+ * mod sync was in before the lobby painted its notice. `paintedText()` records what actually reached the screen.
  *
  * ── WHY IT IS NOT A VACUOUS GREEN ─────────────────────────────────────────────────────────────────
  *  1. THE SILENT CASE IS A CONTROL, run through the same flow on the same server. Without it,
@@ -46,7 +46,7 @@ async function hostChoosesHardMode(page: any) {
 	});
 }
 
-test.describe('KDM-239 R4 — the lobby names the host\'s world', () => {
+test.describe('the lobby names the host\'s world', () => {
 	test('a world-level mode the host chose is named on the guest\'s screen before it commits', async ({ browser }) => {
 		test.setTimeout(MP_TEST_TIMEOUT);
 		const { server, port } = await start(0);
@@ -62,7 +62,7 @@ test.describe('KDM-239 R4 — the lobby names the host\'s world', () => {
 
 			await guestAsks(guest, port, 'Nyx');
 			// Park on the approval handshake: neither side has committed, which is R4's whole window.
-			// Waiting on `status` (a KDM-233 field that exists either way) rather than on `world` — a
+			// Waiting on `status` (an original lobby field that exists either way) rather than on `world` — a
 			// wait on the field this task ADDS would make a pre-implementation run hang for the full
 			// timeout instead of failing its assertion.
 			await guest.waitForFunction(
@@ -97,12 +97,12 @@ test.describe('KDM-239 R4 — the lobby names the host\'s world', () => {
 
 			const text = (await screenText(guest)).toLowerCase();
 			/*
-			 * ⚠️ THIS ASSERTION WAS REWRITTEN BY KDM-259, AND THE OLD ONE WAS VACUOUS.
+			 * ⚠️ THIS ASSERTION WAS REWRITTEN, AND THE OLD ONE WAS VACUOUS.
 			 *
 			 * It used to read `.not.toContain("the host's game")` — "a default world paints no banner
 			 * at all". That was green for the wrong reason: the lead line was painting
 			 * `"[NotFound] KDMPWorldLead"`, because `coop-lobby.js`'s `text()` mistook KD's
-			 * missing-key MARKER for a translation (fixed under KDM-259, pinned in
+			 * missing-key MARKER for a translation (fixed in the same change, pinned in
 			 * `mp-lobby-seed.spec.ts`). With the marker gone the real lead line appears and the old
 			 * assertion fails.
 			 *
@@ -130,7 +130,7 @@ test.describe('KDM-239 R4 — the lobby names the host\'s world', () => {
 	});
 
 	/**
-	 * KDM-283 — the banner must speak KD's language, not ours.
+	 * The banner must speak KD's language, not ours.
 	 *
 	 * THE BUG. `drawWorldSummary` looked its label up as `'KinkyDungeonStat' + key`. That prefix is
 	 * wrong for EVERY key: KD does not name its `KinkyDungeonStatsChoice` entries at all — it names

@@ -1,5 +1,5 @@
 /**
- * KDM-262/265: driving a REAL floor transition in a SwapSession, shared by every spec that needs one.
+ * Driving a REAL floor transition in a SwapSession, shared by every spec that needs one.
  *
  * It is here rather than copied into each spec because getting `descend()` wrong does not fail — it
  * passes VACUOUSLY, twice over (see the two warnings below), so a second hand-written copy is a
@@ -28,11 +28,11 @@ export function mapId(s: any): string {
  * cleanly and `mapId()` never moves, so every "the party landed correctly" assertion in an earlier
  * draft of `mp-party-lands-together` was checking a map change that never happened.
  *
- * ⚠️ VACUITY TRAP 2 (KDM-265) — THE PLAYER MUST BE STANDING ON THE STAIRS. `KinkyDungeonHandleStairs`
+ * ⚠️ VACUITY TRAP 2 — THE PLAYER MUST BE STANDING ON THE STAIRS. `KinkyDungeonHandleStairs`
  * passes whatever tile the player occupies to `KDGoThruTile` (`KDStairActions.ts:289`), and after a
  * boot that is wherever the swap parked them — measured: a wall tile. The transition still "works",
  * but it takes the INSTANT branch of `KDStairActions.ts:251` every time, so the deferred
- * `KDGenMapCallback` path is never exercised. That is precisely how KDM-265's B1 stayed invisible: a
+ * `KDGenMapCallback` path is never exercised. That is precisely how the multi-floor descent bug stayed invisible: a
  * test asserting "no generation was left pending" passed while never once deferring any.
  *
  * So this moves the player to the map's own `EndPosition` — the down-stairs — and takes whatever tile
@@ -68,7 +68,7 @@ export function descend(s: any, actor = 'A'): string {
 		catch (err) { return 'threw: ' + err.message; }
 	})()`);
 	// The stairs are driven DIRECTLY here, not through an input, so the completion the input
-	// path now does (KDM-265: applyInput / applyInputObserved -> runDeferredMapGen) has to be done
+	// path now does (applyInput / applyInputObserved -> runDeferredMapGen) has to be done
 	// here too — otherwise a deferred transition is still half-finished when the caller asserts.
 	// Calls the PRODUCTION method, never a copy of it.
 	s.world.runDeferredMapGen();
@@ -77,7 +77,7 @@ export function descend(s: any, actor = 'A'): string {
 }
 
 /**
- * KDM-261 / KDM-267 / KDM-268: run arbitrary code ONCE inside a named player's apply window.
+ * Run arbitrary code ONCE inside a named player's apply window.
  *
  * The fence is the whole reason this is shared rather than copied. `_advanceTurn` applies players in
  * NO fixed order — measured: an unfenced hook armed "for A" fired during **B's** apply, which turns
@@ -146,9 +146,9 @@ export function armFired(s: any): boolean { return !!s.world.eval('globalThis.__
  *
  * @param catchThrow  MANDATORY, no default — the callers need OPPOSITE behaviour and a default would
  *                    silently give one of them the wrong one:
- *                      true  — contain the throw and record it (KDM-261 asks "which BRANCH ran?",
+ *                      true  — contain the throw and record it (the capture-held spec asks "which BRANCH ran?",
  *                              and needs the session to survive to be asked)
- *                      false — let it ESCAPE into the session (KDM-267 asked "does the dispatch
+ *                      false — let it ESCAPE into the session (the defeat-autosave spec asks "does the dispatch
  *                              survive a capture?", unanswerable if the test swallows it first)
  */
 export function armCapture(s: any, actor: string, catchThrow: boolean) {
@@ -168,9 +168,9 @@ export function armCapture(s: any, actor: string, catchThrow: boolean) {
 export function captureRan(s: any): string { return s.world.eval('globalThis.__kdTestCaptureRan'); }
 
 /**
- * KDM-268 — make `actor`'s next dispatch THROW, with a message the test can recognise.
+ * Make `actor`'s next dispatch THROW, with a message the test can recognise.
  *
- * Stands in for any engine-side exception. KDM-267 removed the one real cause we knew about (KD's own
+ * Stands in for any engine-side exception. The defeat-autosave fix removed the one real cause we knew about (KD's own
  * autosave), so a test that waited for a natural throw would now be asserting on nothing; an injected
  * one keeps the REPORTING path under test regardless of which bug produces it next.
  */

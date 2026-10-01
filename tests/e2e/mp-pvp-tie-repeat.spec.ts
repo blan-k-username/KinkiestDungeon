@@ -1,5 +1,5 @@
 /**
- * E2E (KD-101) — repeated ties must not crash the attacker's client.
+ * E2E — repeated ties must not crash the attacker's client.
  *
  * Live crash: after several "Tie Up" applies the attacker hit
  *   "Cannot read properties of null (reading 'sgroup')"  (KDGetNPCBindingSlotForItem(...).sgroup)

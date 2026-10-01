@@ -1,5 +1,5 @@
 /**
- * Node-layer (Vitest): KDM-206 — the snapshot delta must be lossless, and it must actually be small.
+ * Node-layer (Vitest): the snapshot delta must be lossless, and it must actually be small.
  *
  * `kd-delta.js` lets a changed `ui` reply carry only what moved instead of a whole 38.3 KB capture.
  * Two things have to hold or the optimisation is a corruption bug:
@@ -12,10 +12,10 @@
  * The size assertion is deliberately stated as a RATIO against the full snapshot, not an absolute byte
  * count, so it measures the encoding rather than the host or today's capture size.
  *
- * Also guards the CONSUME-ONCE contract (KDM-186/196): `snapshotFor` drains pending events, so a
+ * Also guards the CONSUME-ONCE contract: `snapshotFor` drains pending events, so a
  * one-shot event lives in exactly one snapshot. Those channels must be carried in full by every patch,
  * never diffed — otherwise a lost delta loses the event permanently, which is the anti-deletion trap
- * KDM-196 documents.
+ * documented for the consume-once presentation queues.
  *
  * Imports the harness under tools/mp-server/** only — never Game/src/** or Scripts/**.
  */
@@ -36,7 +36,7 @@ function roundTrip(prev: any, next: any, verbatim?: string[]) {
 	return { patch, merged };
 }
 
-describe('KDM-206 — snapshot delta codec', () => {
+describe('snapshot delta codec', () => {
 	describe('LOSSLESS across every shape the capture produces', () => {
 		const cases: [string, any, any][] = [
 			['no change', { a: 1, b: { c: 2 } }, { a: 1, b: { c: 2 } }],
@@ -107,7 +107,7 @@ describe('KDM-206 — snapshot delta codec', () => {
 			const pct = (100 * delta) / full;
 
 			// eslint-disable-next-line no-console
-			console.log(`KDM-206 DELTA SIZE  full ${(full / 1024).toFixed(1)}KB -> patch ${delta}B ` +
+			console.log(`DELTA SIZE  full ${(full / 1024).toFixed(1)}KB -> patch ${delta}B ` +
 				`(${pct.toFixed(2)}% of full, ${Math.round(full / delta)}x smaller)`);
 
 			// ANTI-VACUITY: a patch that shrank to nothing would mean the change was lost.
@@ -122,7 +122,7 @@ describe('KDM-206 — snapshot delta codec', () => {
 });
 
 /**
- * KDM-206 AC4 — the WIRE guard: a per-frame reply must not carry a whole capture.
+ * The WIRE guard: a per-frame reply must not carry a whole capture.
  *
  * The codec tests above prove the encoding is lossless and small. This proves the BRIDGE actually
  * uses it, which is a separate failure mode: a correct codec that some send path bypasses would leave
@@ -131,7 +131,7 @@ describe('KDM-206 — snapshot delta codec', () => {
  * Stated as an invariant ("a steady-state reply carries a delta, and it is a small fraction of a full
  * snapshot"), not as a byte budget — so it holds on any host, unlike the e2e it protects.
  */
-describe('KDM-206 — the bridge sends deltas, not captures', () => {
+describe('the bridge sends deltas, not captures', () => {
 	// eslint-disable-next-line @typescript-eslint/no-var-requires
 	const { WSBridge } = require('../../tools/mp-server/ws-bridge');
 
@@ -139,7 +139,7 @@ describe('KDM-206 — the bridge sends deltas, not captures', () => {
 		const bridge: any = new WSBridge({ requiredPlayers: 2, seed: 'kdm206-wire' });
 		const port = await bridge.listen(0);
 		const seen: any[] = [];
-		// KDM-255 — the join gate is now the only road in, so each socket names the seat it wants. A
+		// The join gate is now the only road in, so each socket names the seat it wants. A
 		// hand-rolled client rather than `seatPair` because this spec measures RAW frame bytes and
 		// must not go through `MPClient`, which merges deltas into `m.snapshot` and would erase the
 		// very distinction being asserted.
@@ -175,7 +175,7 @@ describe('KDM-206 — the bridge sends deltas, not captures', () => {
 			const fullBytes = JSON.stringify(full[0].snapshot).length;
 			const worst = Math.max(...deltas.map((m) => JSON.stringify(m.delta).length));
 			// eslint-disable-next-line no-console
-			console.log(`KDM-206 WIRE  full ${(fullBytes / 1024).toFixed(1)}KB · ` +
+			console.log(`WIRE  full ${(fullBytes / 1024).toFixed(1)}KB · ` +
 				`${deltas.length} deltas, largest ${worst}B (${((100 * worst) / fullBytes).toFixed(2)}% of full)`);
 			expect(worst / fullBytes,
 				`largest delta is ${worst}B against a ${fullBytes}B snapshot — not a delta in practice`)

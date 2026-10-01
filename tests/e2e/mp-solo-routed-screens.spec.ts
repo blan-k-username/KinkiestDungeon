@@ -1,13 +1,13 @@
 /**
- * E2E (KDM-307) — a SOLO game on the co-op server keeps KD's own perk orb and journey map.
+ * E2E — a SOLO game on the co-op server keeps KD's own perk orb and journey map.
  *
  * ── THE BUG ───────────────────────────────────────────────────────────────────────────────────────
  * Owner's UAT: playing alone on the co-op server, finished a floor, "the Accept button does nothing".
- * `kd-perk-choice.js` (KDM-242) and `kd-journey-choice.js` (KDM-263) wrap two KD draw functions and
+ * `kd-perk-choice.js` and `kd-journey-choice.js` wrap two KD draw functions and
  * swap what their clicks MEAN — a private cursor, an Accept that routes `KDCoopPerk`, a journey pick
  * that is reverted and routed. Right for a co-op client. But the co-op server injects them into EVERY
  * page it serves, and on a solo page there is nobody to route to: the perk was never granted and the
- * journey target never set. KDM-294 made "start solo on the co-op server, host later" a first-class
+ * journey target never set. The co-op entry work made "start solo on the co-op server, host later" a first-class
  * road, which is what turned a latent bug into a blocker.
  *
  * ── WHY THESE ASSERTIONS ──────────────────────────────────────────────────────────────────────────
@@ -16,7 +16,7 @@
  *  2. #3 is the CONTROL, and without it #1/#2 would pass on a build that simply deleted both wraps:
  *     the same page, made a co-op client, must still route and must NOT commit locally.
  *
- * ⚠️ FAILS UNTIL KDM-307 IS IMPLEMENTED. Written first, per the project's Rule 1.
+ * ⚠️ FAILS UNTIL THE FIX IS IMPLEMENTED. Written first, per the project's Rule 1.
  */
 import { test, expect } from '../helpers/playwright-fixtures';
 import { openGameMenu, settle, clickAt } from '../helpers/mp-lobby';
@@ -89,7 +89,7 @@ const pickFirstRoute = (page: any) => page.evaluate(() => {
 	return { target: t ? { x: t.x, y: t.y } : null, routed: (s ? s.routed : 0) - before };
 });
 
-test.describe('KDM-307 — solo on the co-op server keeps KD\'s own choices', () => {
+test.describe('solo on the co-op server keeps KD\'s own choices', () => {
 	test.describe.configure({ timeout: 180_000 });
 
 	test('#1 a solo player picks a perk card and Accept grants it', async ({ isolatedPage: page }) => {

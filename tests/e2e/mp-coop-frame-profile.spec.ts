@@ -1,7 +1,7 @@
 /**
- * E2E — KDM-207: WHERE does the co-op client's extra frame time go?
+ * E2E — WHERE does the co-op client's extra frame time go?
  *
- * [[KDM-205]] established, with a fair control (both arms rendering a dungeon), that the proxy costs
+ * An earlier measurement established, with a fair control (both arms rendering a dungeon), that the proxy costs
  * ~1.86x the un-proxied game's frame rate — not the 6-10x the old menu-vs-dungeon comparison implied.
  * ~1.86x is real, it is a 46% frame-rate loss, and it is UNATTRIBUTED. This spec attributes it.
  *
@@ -16,7 +16,7 @@
  * render-client.js / kd-delta.js) from "the game's own draw got slower" (out/main.js). Those two
  * findings lead to completely different fixes, and no amount of reasoning distinguishes them.
  *
- * ⚠️ VALIDITY FIRST — THE LESSON FROM KDM-205. That task's whole premise collapsed because the two
+ * ⚠️ VALIDITY FIRST — THE LESSON FROM THE EARLIER FPS CONTROL. Its whole premise collapsed because the two
  * arms of its "control" were drawing different things (a menu vs a dungeon). So before comparing any
  * timings, this spec checks that both pages are rendering a COMPARABLE dungeon: same grid size, similar
  * entity count. If the co-op map were bigger, "1.86x" would be map complexity, not proxy overhead —
@@ -63,10 +63,10 @@ async function sceneShape(P: Page) {
 			height: md ? md.GridHeight : -1,
 			entities: md && md.Entities ? md.Entities.length : -1,
 			/*
-			 * KDM-254: "is the proxy client running on this page?" — and NOT `!!w.__coop`.
+			 * "Is the proxy client running on this page?" — and NOT `!!w.__coop`.
 			 *
 			 * `coop-bootstrap.js` assigns `window.__coop` at module top level on EVERY page the demo
-			 * server serves, and has done since KDM-233 removed the `if (!id) return` guard so the
+			 * server serves, and has done since the lobby work removed the `if (!id) return` guard so the
 			 * lobby could reach `window.__coopConnect` from a page with no `#coop=` yet. That change is
 			 * deliberate and the module header says so — what broke is this oracle, which read
 			 * "the API object exists" as a synonym for "the client is active". It stopped being one,
@@ -99,7 +99,7 @@ async function profileByScript(P: Page, ms: number) {
 	const hitsTotal = profile.nodes.reduce((s: number, n: any) => s + (n.hitCount || 0), 0) || 1;
 	for (const n of profile.nodes) {
 		if (!n.hitCount) continue;
-		// KDM-207: group by URL, but fall back to the FUNCTION NAME when there is no url. V8's
+		// Group by URL, but fall back to the FUNCTION NAME when there is no url. V8's
 		// pseudo-frames — (idle), (program), (garbage collector) — all have an empty url, and lumping
 		// them into one "(no url)" bucket hides the only distinction that matters here:
 		//   (idle)    the page is WAITING, so frame rate is limited outside JS (raster/present/vsync)
@@ -121,7 +121,7 @@ async function profileByScript(P: Page, ms: number) {
 /**
  * Native-side cost, which a JS sampling profile cannot see.
  *
- * KDM-207: the first profile attributed ~99% of samples to V8 pseudo-frames and only 35ms of 6143ms
+ * The first profile attributed ~99% of samples to V8 pseudo-frames and only 35ms of 6143ms
  * to `out/main.js`, i.e. the frame rate is NOT bound by script execution. These counters cover the
  * part that a CPU profile misses — layout, style recalc, paint/raster and total task time — so the
  * remaining cost has somewhere to show up.
@@ -153,9 +153,9 @@ async function nativeMetrics(P: Page, ms: number) {
 	};
 }
 
-test('KDM-207: attribute the co-op client extra frame cost by script', async ({ browser }) => {
+test('attribute the co-op client extra frame cost by script', async ({ browser }) => {
 	test.setTimeout(MP_TEST_TIMEOUT);
-	// KDM-302: requiredPlayers 1 — arm C is a host playing ALONE; see the note at arm C.
+	// RequiredPlayers 1 — arm C is a host playing ALONE; see the note at arm C.
 	const { server, port } = await start(0, { requiredPlayers: 1 });
 	const ctx = await browser.newContext();
 	const out: any = {};
@@ -184,7 +184,7 @@ test('KDM-207: attribute the co-op client extra frame cost by script', async ({ 
 		out.plainNative = await nativeMetrics(plain, 3000);
 
 		// ── C) co-op client, playing alone ───────────────────────────────────────────────────────
-		// ⚠️ KDM-302: this arm was `#coop=SOLO` (entered the dungeon on load, never paired, no session
+		// ⚠️ This arm was `#coop=SOLO` (entered the dungeon on load, never paired, no session
 		// traffic). The shortcut is gone; a lobby host enters the dungeon only once its session starts,
 		// so this is now a host in a started ONE-player session — same proxy, same dungeon, plus the
 		// real input/ack traffic. Profiles before 2026-09-28 are not directly comparable.
@@ -193,7 +193,7 @@ test('KDM-207: attribute the co-op client extra frame cost by script', async ({ 
 		await coop.waitForFunction(() => { const c = (window as any).__coop; return !!(c && c.started && c._entered); },
 			undefined, { timeout: 240_000 });
 		await coop.bringToFront();
-		// KDM-254: WAIT for the proxy to be live, don't sample and hope. The validity gate below
+		// WAIT for the proxy to be live, don't sample and hope. The validity gate below
 		// asserts `coopConnected`, and a fixed sleep would make that a race on a contended host —
 		// turning "the socket was 200 ms late" into a failure that reads like a broken control arm.
 		await coop.waitForFunction(() => {
@@ -209,7 +209,7 @@ test('KDM-207: attribute the co-op client extra frame cost by script', async ({ 
 		out.ratio = out.coopFps ? +(out.plainFps / out.coopFps).toFixed(2) : null;
 
 		/*
-		 * ── THE CONFOUND CHECK (KDM-207) ────────────────────────────────────────────────────────
+		 * ── THE CONFOUND CHECK ────────────────────────────────────────────────────────
 		 * `plainFps` above was measured with ONE page alive; `coopFps` with TWO. The main thread is
 		 * (program)-saturated and headless Chromium software-renders with no GPU, so a second live
 		 * WebGL page plausibly costs ~40% of frame throughput on its own — which would masquerade as
@@ -233,7 +233,7 @@ test('KDM-207: attribute the co-op client extra frame cost by script', async ({ 
 		const fmt = (p: any) => p.rows.filter((r: any) => r.pct >= 0.5)
 			.map((r: any) => `      ${String(r.ms).padStart(5)}ms ${String(r.pct).padStart(5)}%  ${r.url}`).join('\n');
 		// eslint-disable-next-line no-console
-		console.log('KDM-207 FRAME COST ATTRIBUTION\n' +
+		console.log('FRAME COST ATTRIBUTION\n' +
 			`  plain: fps ${out.plainFps} · ${JSON.stringify(out.plainScene)}\n` +
 			`  coop : fps ${out.coopFps} · ${JSON.stringify(out.coopScene)}\n` +
 			`  ratio plain/coop = ${out.ratio}   (plain measured ALONE, coop with both open)\n` +
@@ -245,12 +245,12 @@ test('KDM-207: attribute the co-op client extra frame cost by script', async ({ 
 			`      plain ${JSON.stringify(out.plainNative)}\n` +
 			`      coop  ${JSON.stringify(out.coopNative)}`);
 
-		// ── VALIDITY: like-for-like, or the attribution means nothing (the KDM-205 lesson) ───────
+		// ── VALIDITY: like-for-like, or the attribution means nothing (the lesson of the earlier FPS control) ───────
 		const msg = ' scenes=' + JSON.stringify({ plain: out.plainScene, coop: out.coopScene });
 		expect(out.startedGame, 'the plain control must actually start a game' + msg).toBe(true);
 		expect(out.plainScene.state, 'plain must be in Game' + msg).toBe('Game');
 		expect(out.coopScene.state, 'coop must be in Game' + msg).toBe('Game');
-		// KDM-254: the coop arm was TOLD to be a co-op client and its proxy is actually connected…
+		// The coop arm was TOLD to be a co-op client and its proxy is actually connected…
 		expect(out.coopScene.coopId, 'the coop page must actually be a co-op client' + msg).toBe('SOLO');
 		expect(out.coopScene.coopConnected,
 			'the coop page must actually have the proxy client active' + msg).toBe(true);

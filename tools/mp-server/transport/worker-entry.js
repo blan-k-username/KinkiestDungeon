@@ -1,5 +1,5 @@
 /**
- * tools/mp-server/transport/worker-entry.js  (KD-081)
+ * tools/mp-server/transport/worker-entry.js 
  *
  * Runs INSIDE a worker_threads Worker. Owns one instance (a HeadlessHost via the
  * shared `dispatch`) and relays correlated request/response messages over

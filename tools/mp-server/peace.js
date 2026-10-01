@@ -1,5 +1,5 @@
 /**
- * tools/mp-server/peace.js  (KDM-227 / KDM-225)
+ * tools/mp-server/peace.js 
  *
  * WHO IS AT WAR WITH WHOM — the co-op session's player-to-player relationship, and the offer/answer
  * handshake that changes it.
@@ -13,10 +13,10 @@
  * 2. `swap-session.js` is already 1238 lines. Same call as `kd-codec.js` / `kd-delta.js` /
  *    `input-classifier.js`: one concern, one file.
  *
- * ⚠️ THIS IS AN MP-SPECIFIC FEATURE, AND THAT IS DELIBERATE. KDM-159's rule — *the MP server must not
+ * ⚠️ THIS IS AN MP-SPECIFIC FEATURE, AND THAT IS DELIBERATE. The project rule — *the MP server must not
  * implement features; it is a proxy* — bans the gateway from RE-IMPLEMENTING GAME mechanics. A truce
  * between two players is not one: single-player KD has no concept of it, so the gateway is its only
- * possible home (the owner's clarification, recorded in KDM-226). The rule still binds in one place
+ * possible home (the owner's clarification). The rule still binds in one place
  * and the caller honours it there: the EFFECT of peace is written in KD's own entity fields
  * (`hostile`, `rage`), never as a parallel hostility model. This module holds the RELATIONSHIP; it
  * does not know what an entity is.
@@ -153,11 +153,11 @@ class PeaceRegistry {
 	}
 
 	/**
-	 * KDM-253 E5 — a player left FOR GOOD. Drop their offers *and* their relationships.
+	 * A player left FOR GOOD. Drop their offers *and* their relationships.
 	 *
 	 * ⚠️ NOT the same as `forget`, and the difference is the whole reason both exist. `forget` is for
 	 * a player who is merely absent — their war and peace survive, because a reconnecting player
-	 * rejoins the relationships they had (KDM-252, and the note on `forget`). This is for a player the
+	 * rejoins the relationships they had (and the note on `forget`). This is for a player the
 	 * survivor has dismissed: they are `gone`, terminal, and a war entry naming them would outlive
 	 * them — which `swap-session.snapshotFor` renders as a standing war with somebody who no longer
 	 * exists.

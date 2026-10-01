@@ -1,7 +1,7 @@
 /**
- * KDM-184 — a peer is defended by THEIR OWN evasion/block, not by the stand-in's.
+ * A peer is defended by THEIR OWN evasion/block, not by the stand-in's.
  *
- * KDM-164 routed peer damage through KD's real player pipeline, so from the moment damage is dealt the
+ * Peer damage is routed through KD's real player pipeline, so from the moment damage is dealt the
  * victim's own armour, spell resist, type resistances, damage reduction and `beforePlayerDamage` /
  * `duringPlayerDamage` events all apply. What did NOT apply is what the game evaluates BEFORE that —
  * hit-or-miss — because that is read off the stand-in ENTITY, never off the player slot:
@@ -13,7 +13,7 @@
  * The avatar had no `buffs` at all and its def carried `evasion: -100`
  * (`MultiplicativeStat(-100) = 101`), so every PvP attack landed unconditionally.
  *
- * ⚠️ BOTH causes must be fixed together or this suite is vacuous. Measured in the KDM-184 probe: an
+ * ⚠️ BOTH causes must be fixed together or this suite is vacuous. Measured in a probe: an
  * Evasion buff with the def still at -100 gives hitChance 25.25 — a mirror that "works" and changes
  * nothing. Case 2 exists to catch exactly that.
  *
@@ -26,7 +26,7 @@ const { SwapSession } = require('../../tools/mp-server/swap-session');
 
 const BOOT_TIMEOUT = 240_000;
 
-describe('KDM-184 — peer defences apply at attack time', () => {
+describe('peer defences apply at attack time', () => {
 	let s: any;
 
 	beforeEach(async () => {

@@ -1,8 +1,8 @@
 /**
- * Node-layer (Vitest) — KDM-277 slice 2: six keys that describe the MAP or its ENTITIES and were
+ * Node-layer (Vitest) — six keys that describe the MAP or its ENTITIES and were
  * being replicated per-player.
  *
- * All six were flagged by KDM-273's transition-write audit. Each is classified here against the
+ * All six were flagged by the transition-write audit. Each is classified here against the
  * criteria stated over `KDGAMEDATA_WORLD_KEYS` in headless-host.js — (a) keyed by entity id,
  * (b) floor/dungeon generation or population state — with the evidence, not the intuition:
  *
@@ -74,7 +74,7 @@ const WORLD_GAMEDATA_KEYS = ['PersistentItems', 'AlreadyOpened', 'KeyringLocatio
 /** A key no game code writes, so its arrival can only mean "this bundle really was restored". */
 const CONTROL_GAMEDATA = '__kdm277Probe';
 
-describe('KDM-277 · the classifications are declared in production code', () => {
+describe('the classifications are declared in production code', () => {
 	it('the three map/entity globals are blacklisted', () => {
 		for (const g of Object.keys(CONTROL_FOR)) {
 			expect(GLOBAL_BLACKLIST, `${g} describes the map or its entities`).toContain(g);
@@ -100,7 +100,7 @@ describe('KDM-277 · the classifications are declared in production code', () =>
 	});
 });
 
-describe('KDM-277 · map/entity globals do not ride a player bundle', () => {
+describe('map/entity globals do not ride a player bundle', () => {
 	let h: any;
 	const GLOBALS = Object.keys(CONTROL_FOR);
 	let BASELINE: Record<string, string>;
@@ -182,7 +182,7 @@ describe('KDM-277 · map/entity globals do not ride a player bundle', () => {
 	}, BOOT_TIMEOUT);
 });
 
-describe('KDM-277 · a stale bundle does not rewrite map-keyed KDGameData', () => {
+describe('a stale bundle does not rewrite map-keyed KDGameData', () => {
 	let h: any;
 
 	beforeAll(() => {

@@ -1,5 +1,5 @@
 /**
- * Node-layer (Vitest) tests for the "freed" half of KD-099 — recovering from defeat.
+ * Node-layer (Vitest) tests for the "freed" half of recovering from defeat.
  *
  * REPRODUCTION (observed in UAT, 2 browsers): once a player's Will hits the floor they are
  * flagged `defeated` and every action they submit is rewritten to a wait
@@ -49,7 +49,7 @@ function moveTurn(s: any, id: string) {
 	return r.turn.applied.find((e: any) => e.id === id);
 }
 
-describe('defeat recovery (KD-099 "freed")', () => {
+describe('defeat recovery ("freed")', () => {
 	let s: any;
 	beforeEach(() => { s = freshSession(); }, BOOT_TIMEOUT);
 
@@ -66,7 +66,7 @@ describe('defeat recovery (KD-099 "freed")', () => {
 	}, BOOT_TIMEOUT);
 
 	/**
-	 * KDM-199: being down is a HUD MARKER, not a licence to tie.
+	 * Being down is a HUD MARKER, not a licence to tie.
 	 *
 	 * This used to assert that Will at the floor alone made a peer tie-able — true only because the
 	 * proxy INVENTED it, stamping stun=6 onto the avatar (and onto the wire) whenever Will hit 0. The
@@ -98,7 +98,7 @@ describe('defeat recovery (KD-099 "freed")', () => {
 				+ "     ? !!KDCanApplyBondage(e, KDPlayer()) : null }; })()");
 		};
 
-		expect(gate().can, 'KDM-200: a DEFEATED opponent IS tie-able — the declared co-op rule')
+		expect(gate().can, 'a DEFEATED opponent IS tie-able — the declared co-op rule')
 			.toBe(true);
 
 		// Give A REAL bondage, as a peer who has actually been tied would have.
@@ -138,7 +138,7 @@ describe('defeat recovery (KD-099 "freed")', () => {
 	}, BOOT_TIMEOUT);
 
 	/**
-	 * KDM-164: this used to assert HYSTERESIS — that a sliver of Will above the 0.52 line left you
+	 * This used to assert HYSTERESIS — that a sliver of Will above the 0.52 line left you
 	 * still down until you climbed back to a fraction of WillMax. Both numbers were ours, not KD's,
 	 * and the epic's constraint is that the MP layer owns no gameplay thresholds.
 	 *

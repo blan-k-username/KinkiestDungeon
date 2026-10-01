@@ -1,11 +1,11 @@
 /**
- * KDM-162 — I4 RENDER COMPLETENESS (AC2), in a real browser.
+ * I4 RENDER COMPLETENESS (AC2), in a real browser.
  *
  * The claim under test: a thin client that adopts its own per-player STATE BUNDLE ends up with the
  * same state the server holds for it — so the curated `stats` block on the wire, and the pile of
  * hand-called re-derivations in `render-client.apply()`, are both unnecessary.
  *
- * That claim was measured node-side (KDM-162 probe6: 0 wrong fields across 4949 candidate globals),
+ * That claim was measured node-side (a node probe found 0 wrong fields across 4949 candidate globals),
  * but node-side proves nothing about the BROWSER — gray zone G1. The browser has no `restorePlayer`
  * path and holds render-model state (paper doll, poses) that lives outside the globals the node probe
  * fingerprinted. This spec is that missing half.
@@ -16,7 +16,7 @@
  *
  * RED BEFORE GREEN: today the client syncs exactly three KDGameData fields (MovePoints, SlowMoveTurns,
  * SprintTurns — `render-client.js:213`), so the parity assertion must FAIL before the change and pass
- * after. If it ever passes without the implementation, the test is vacuous — see KDM-159 §6.
+ * after. If it ever passes without the implementation, the test is vacuous.
  */
 import { test, expect } from '@playwright/test';
 import { bootCoopPair, MP_TEST_TIMEOUT } from './helpers/coop';
@@ -50,7 +50,7 @@ test('I4: browser client state matches the server bundle for that player', async
 		for (let i = 0; i < 3; i++) await advance();
 
 		// ---- AC3 regression guard, asserted FIRST on purpose.
-		// These are the bugs already paid for (KDM-156 struggle-group crash, KD-103 arm pose, the x1
+		// These are the bugs already paid for (the struggle-group crash, the arm pose, the x1
 		// reticule) and they must hold WITHOUT the hand-called re-derivations that used to live in
 		// apply(). Ordered before the parity block so that a causality run — adoptBundle stubbed to a
 		// no-op — shows whether the BUNDLE is what keeps them green, instead of short-circuiting on
@@ -72,7 +72,7 @@ test('I4: browser client state matches the server bundle for that player', async
 				: -1,
 		}));
 		expect(derived.worn.length, `A should be wearing its seeded restraints, got ${JSON.stringify(derived.worn)}`).toBeGreaterThan(0);
-		expect(derived.sgroups, 'struggle groups must be populated (the KDM-156 crash class)').toBeGreaterThan(0);
+		expect(derived.sgroups, 'struggle groups must be populated (the struggle-group crash class)').toBeGreaterThan(0);
 		expect(derived.slowLevel, 'a bound player should have a non-zero slow level').toBeGreaterThan(0);
 		expect(derived.poses, 'the player model must have poses (paper-doll / arm-pose state)').toBeGreaterThan(0);
 

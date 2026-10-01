@@ -1,5 +1,5 @@
 /**
- * E2E (KDM-287) — the Host screen shows an address a friend can actually type.
+ * E2E — the Host screen shows an address a friend can actually type.
  *
  * The unit specs pin the two halves separately: `mp-lan-address` decides what a shareable address
  * is, and `mp-lobby-share-address` decides which string the screen paints. NEITHER can see the
@@ -50,7 +50,7 @@ async function hostScreenAt(page: any, port: number, origin: string) {
 	return screenText(page);
 }
 
-test.describe('KDM-287 — the address the host is told to share', () => {
+test.describe('the address the host is told to share', () => {
 	test('a host on localhost is shown its LAN address, and a host on its LAN address keeps it', async ({ browser }) => {
 		test.setTimeout(MP_TEST_TIMEOUT);
 		const bug = await start(0);

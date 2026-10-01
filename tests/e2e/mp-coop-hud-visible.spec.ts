@@ -1,15 +1,15 @@
 /**
- * E2E (KDM-286) — a co-op player can actually SEE the rest of the HUD, not only the message log.
+ * E2E — a co-op player can actually SEE the rest of the HUD, not only the message log.
  *
  * ── WHY THIS EXISTS ───────────────────────────────────────────────────────────────────────────────
- * KDM-285 found that a permanently-armed `KinkyDungeonTargetingSpell` had been hiding TEN things
+ * An audit found that a permanently-armed `KinkyDungeonTargetingSpell` had been hiding TEN things
  * from every co-op player since boot, and fixed it. Only ONE of the ten got a paint-level assertion
  * (`mp-coop-log-visible.spec.ts`). The rest were locked down by asserting the shared GATE was clear
  * — `KinkyDungeonTargetingSpell === null` and `KDDrawResourcesQuick() === true` — and those two are
  * the same assertion written twice, because `KDDrawResourcesQuick` is literally
  * `return !KinkyDungeonTargetingSpell` (`KinkyDungeonHUD.ts:3927`).
  *
- * That is a proxy, and KDM-285's own lesson is that a proxy stays green while the screen is blank:
+ * That is a proxy, and that audit's own lesson is that a proxy stays green while the screen is blank:
  * the whole defect survived years of specs asserting `KinkyDungeonMessageLog` CONTENTS. A different
  * future cause — a stray `KDToggles` value, an adopted state frame, an upstream re-gate — would hide
  * the buff icons again with the gate assertion fully green.
@@ -22,7 +22,7 @@
  *   quick resources       `KinkyDungeonHUD.ts:1351`     → `gold` ← `Items/Gold.png`
  *
  * ── WHY IT IS NOT A VACUOUS GREEN ─────────────────────────────────────────────────────────────────
- *  1. THE MUTATION. The last phase RE-ARMS the targeting spell — it reproduces KDM-285's defect on
+ *  1. THE MUTATION. The last phase RE-ARMS the targeting spell — it reproduces the armed-targeting defect on
  *     purpose — and requires both sprites to vanish. An assertion that cannot tell the fixed build
  *     from the broken one is not coverage, and this is the only way to show that without hand-editing
  *     the product between two runs.
@@ -99,7 +99,7 @@ test('a co-op client paints its buff icons and its quick resources, and stops wh
 				"KD's own draw frames must be reaching the wrapped KDDraw — zero here means the page "
 				+ 'stopped painting, and every absence below would be meaningless').toBeGreaterThan(0);
 			expect(drewSprite(base, GOLD_ID, GOLD_IMAGE),
-				'the quick-resource readout must reach the screen. This is the assertion KDM-285 could '
+				'the quick-resource readout must reach the screen. This is the assertion the original fix could '
 				+ 'not make: `KDDrawResourcesQuick()` is `return !KinkyDungeonTargetingSpell`, so '
 				+ `asserting it is asserting the gate twice. Drawn: ${JSON.stringify(base.sprites)}`)
 				.toBe(true);
@@ -119,13 +119,13 @@ test('a co-op client paints its buff icons and its quick resources, and stops wh
 			const blind = await drawWindow(B);
 			expect(drewSprite(blind, BUFF_ID, BLIND_ICON),
 				'the buff/debuff icon must be DRAWN, not merely present in the player\'s state — this '
-				+ 'is the KDM-285 casualty that had no paint assertion at all. Drawn: '
+				+ 'is the armed-targeting casualty that had no paint assertion at all. Drawn: '
 				+ JSON.stringify(blind.sprites)).toBe(true);
 			expect(drewSprite(blind, GOLD_ID, GOLD_IMAGE),
 				'and the quick resources are still there').toBe(true);
 
 			// ---- PHASE 3, THE MUTATION — re-arm the gate and require both to vanish -------------
-			// KDM-285's defect, reproduced deliberately. Without this the two assertions above would
+			// The armed-targeting defect, reproduced deliberately. Without this the two assertions above would
 			// be green on the broken build too, which is exactly how the original bug survived.
 			const armed = await B.evaluate(() => {
 				// @ts-ignore bare let-globals — the same spell `ensureQuickBind()` used to leave armed
@@ -162,7 +162,7 @@ test('a co-op client paints its buff icons and its quick resources, and stops wh
 			});
 			await restoreDrawnSprites(B).catch(() => {});
 
-			// ---- PHASE 4 — the MOVE HELPER, KDM-285's third un-asserted casualty ----------------
+			// ---- PHASE 4 — the MOVE HELPER, the armed-targeting defect's third un-asserted casualty ----------------
 			// ⚠️ NOT a paint, and no sprite recorder can see it. `KDToggles.Helper` reaches the game
 			// as the argument of `KinkyDungeonSetTargetLocation(!KinkyDungeonTargetingSpell &&
 			// KDToggles.Helper)` (`KinkyDungeonHUD.ts:276`), where it snaps the aim OFF a wall onto a
@@ -228,7 +228,7 @@ test('a co-op client paints its buff icons and its quick resources, and stops wh
 				// @ts-ignore
 				KinkyDungeonTargetingSpell = null;
 				const helped = read();
-				// THE CONTROL — KDM-285's defect again, on the same tile, in the same call.
+				// THE CONTROL — the armed-targeting defect again, on the same tile, in the same call.
 				// @ts-ignore
 				KinkyDungeonTargetingSpell = KDBondageSpell;
 				const gated = read();
@@ -244,7 +244,7 @@ test('a co-op client paints its buff icons and its quick resources, and stops wh
 			expect(aim.helped,
 				`aiming just off the wall at ${JSON.stringify(aim.wall)} must SNAP onto the walkable `
 				+ 'neighbour. This is the move helper, and a co-op client had it silently disabled '
-				+ 'for the whole session before KDM-285 — with every gate assertion green.')
+				+ 'for the whole session before the armed-targeting fix — with every gate assertion green.')
 				.toEqual({ x: aim.wall.x + 1, y: aim.wall.y });
 			expect(aim.gated,
 				'and with the targeting spell re-armed it must NOT snap — the same mutation the '

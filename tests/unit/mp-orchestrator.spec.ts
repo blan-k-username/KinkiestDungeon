@@ -1,6 +1,6 @@
 /**
  * Node-layer (Vitest) tests for the PoC orchestrator + turn clock + reconciler —
- * KD-079 (KD-069/KD-070 PoC scope).
+ * PoC scope.
  *
  * Drives one world instance + two player instances of the stock bundle through
  * several synchronized turns in one shared scenario, asserting the four

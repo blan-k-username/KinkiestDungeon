@@ -1,5 +1,5 @@
 /**
- * E2E (KDM-264) — a real browser's purchase carries the item it was showing, over the real wire.
+ * E2E — a real browser's purchase carries the item it was showing, over the real wire.
  *
  * The unit layer covers the SERVER half: given a tagged `shrineBuy`, the wrapped handler re-finds the
  * item in the shared stock, re-points the index at it, and refuses when it is gone. It cannot cover
@@ -14,7 +14,7 @@
  * `KinkyDungeonPayShrine` are all the production ones.
  *
  * R14's other half — that a selection left open while the stock changes keeps DENOTING the same item
- * — landed as KDM-266, and the tail of this test is where it is pinned. Three things, because the
+ * — landed later, and the tail of this test is where it is pinned. Three things, because the
  * feature has three ways to be quietly wrong:
  *   · the highlight follows its item across a partner's purchase (the expectation that used to read
  *     'PotionStamina' and now reads 'PotionWill');
@@ -144,7 +144,7 @@ test('a purchase carries the item the buyer was showing, and the shared stock lo
 			.toEqual(['ManaOrb', 'PotionWill', 'PotionStamina']);
 
 		/*
-		 * KDM-266 — R14's display half. B was pointing at row 2 (PotionWill); A's purchase shifted
+		 * R14's display half. B was pointing at row 2 (PotionWill); A's purchase shifted
 		 * every later row up by one, so row 2 is now PotionStamina and row 1 is PotionWill. The
 		 * highlight must have MOVED WITH ITS ITEM rather than staying on its row number.
 		 *
@@ -153,7 +153,7 @@ test('a purchase carries the item the buyer was showing, and the shared stock lo
 		 * that line, not a new assertion.
 		 */
 		expect((await pageShop(B)).showing,
-			'KDM-266: B\'s highlight follows PotionWill to its new row, instead of staying on row 2')
+			'B\'s highlight follows PotionWill to its new row, instead of staying on row 2')
 			.toBe('PotionWill');
 
 		// ── B buys PotionWill, from the shifted list. ─────────────────────────────────────────────
@@ -183,10 +183,10 @@ test('a purchase carries the item the buyer was showing, and the shared stock lo
 		expect(bridge.session.world.eval('__KDCoopShopStats.repointed'),
 			'…and the server wrap resolved both purchases by identity').toBeGreaterThanOrEqual(2);
 		expect(clickedAt, 'sanity: B clicked a real row, not a hardcoded index').toBeGreaterThanOrEqual(0);
-		expect(b1.stats.followed, 'KDM-266: …and the cursor half actually ran').toBeGreaterThanOrEqual(1);
+		expect(b1.stats.followed, '…and the cursor half actually ran').toBeGreaterThanOrEqual(1);
 
 		/*
-		 * ── KDM-266 H1: the cursor also has to survive REPLICATION ────────────────────────────────
+		 * ── H1: the cursor also has to survive REPLICATION ────────────────────────────────────────
 		 *
 		 * Everything above only proves the cursor follows a SHIFTING SHELF. It says nothing about the
 		 * other half, because in the script so far the server never had a reason to carry B's
@@ -256,7 +256,7 @@ test('a purchase carries the item the buyer was showing, and the shared stock lo
 			.toBe(shelfNow[1]);
 
 		/*
-		 * ── KDM-266 AC2: the selected item is the one that gets sold ──────────────────────────────
+		 * ── AC2: the selected item is the one that gets sold ──────────────────────────────────────
 		 *
 		 * B is pointing at `shelfNow[1]`; A buys exactly that. There is nothing to follow, so the
 		 * cursor must be CLAMPED to a real row and the player TOLD — never left denoting whatever

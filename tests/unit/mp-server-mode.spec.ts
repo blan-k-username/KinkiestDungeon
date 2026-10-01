@@ -1,7 +1,7 @@
 /**
- * Node-layer (Vitest) tests for the KD-068 `KDServerRole` source flag.
+ * Node-layer (Vitest) tests for the `KDServerRole` source flag.
  *
- * KD-068 adds a real, gated engine flag (Game/src/enemy/KinkyDungeonEnemies.ts):
+ * This adds a real, gated engine flag (Game/src/enemy/KinkyDungeonEnemies.ts):
  *   ""      → single-player / offline (default; guard is a no-op → byte-identical)
  *   "world" → this instance owns + simulates shared entities
  *   "player"→ this instance suppresses shared-entity AI (driven by the world)
@@ -17,7 +17,7 @@ const { HeadlessHost } = require('../../tools/mp-server/headless-host');
 
 const BOOT_TIMEOUT = 180_000;
 
-describe('KDServerRole flag (KD-068)', () => {
+describe('KDServerRole flag', () => {
 	it('defaults to "" after boot (single-player / offline byte-identical)', () => {
 		const h = new HeadlessHost({ id: 'sm-default' });
 		h.boot(); // NOTE: no init() — init() assigns the role; boot() must not.

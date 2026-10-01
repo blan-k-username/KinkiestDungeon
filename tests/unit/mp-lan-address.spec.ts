@@ -1,5 +1,5 @@
 /**
- * KDM-287 — `tools/mp-server/lan-address.js`: the address a friend can actually type.
+ * `Tools/mp-server/lan-address.js`: the address a friend can actually type.
  *
  * The Host screen used to paint `location.host`, and the launcher tells a host to open
  * `http://localhost:8090/` — so what the host was shown to share was `localhost:8090`, the one
@@ -25,7 +25,7 @@ const { lanAddresses, publicAddresses } = require('../../tools/mp-server/lan-add
 const v4 = (address: string, internal = false) => ({ address, family: 'IPv4', internal });
 const v6 = (address: string, internal = false) => ({ address, family: 'IPv6', internal });
 
-describe('KDM-287 — lanAddresses', () => {
+describe('lanAddresses', () => {
 	it('AC1 — loopback is never offered, however it is spelled', () => {
 		const out = lanAddresses(8090, {
 			lo0: [v4('127.0.0.1', true), v6('::1', true)],
@@ -100,7 +100,7 @@ describe('KDM-287 — lanAddresses', () => {
  * container's. Detection there produces a plausible address that routes nowhere — which is a worse
  * answer than the `localhost` this task removes, because the host has no way to tell it is wrong.
  * ═════════════════════════════════════════════════════════════════════════════════════════════════ */
-describe('KDM-287 — publicAddresses', () => {
+describe('publicAddresses', () => {
 	const CONTAINER = { eth0: [v4('192.168.215.2')] };   // what a docker gateway sees of itself
 
 	it('a declared public host wins, and takes the PUBLISHED port', () => {

@@ -1,8 +1,8 @@
 /**
- * E2E (Playwright/Chromium): KD-071 browser thin-client over a real WebSocket.
+ * E2E (Playwright/Chromium): browser thin-client over a real WebSocket.
  *
  * Proves the full browser↔server seam: a REAL browser connects to the local
- * WSBridge (KD-071) as player A, renders the render-state snapshots the server
+ * WSBridge as player A, renders the render-state snapshots the server
  * pushes (via KDRenderClient.apply — no local simulation), and its input
  * round-trips to advance the shared world. A node-side WebSocket plays player B so
  * the 2-player session starts and the turn barrier can complete.
@@ -11,7 +11,7 @@
  * test (server delivers snapshots + lockstep over WS), this closes the MVP loop:
  * a browser plays a shared, server-authoritative dungeon over a WebSocket.
  *
- * KDM-216 — uses `isolatedPage`, NOT `kdPage`. This spec injects render-client.js and
+ * Uses `isolatedPage`, NOT `kdPage`. This spec injects render-client.js and
  * calls disableLocalSim(), which installs permanent __kdClientGuard wrappers that make
  * KinkyDungeonAdvanceTime a no-op. resetKDState() cannot undo a monkey-patch, so on the
  * worker-scoped shared page every later spec — all four integration specs included —
@@ -26,7 +26,7 @@ const { WSBridge } = require('../../tools/mp-server/ws-bridge');
 const { KD_DELTA_BROWSER } = require('../../tools/mp-server/kd-delta');
 
 test('a browser thin-client renders server snapshots and rounds input over a WebSocket', async ({ isolatedPage }) => {
-	await installRenderSurfaceReader(isolatedPage);   // KDM-217: before the bundle brings PIXI up
+	await installRenderSurfaceReader(isolatedPage);   // before the bundle brings PIXI up
 	await bootKD(isolatedPage);
 	const bridge = new WSBridge({ requiredPlayers: 2, seed: 'ws-e2e-seed' });
 	const port = await bridge.listen(0);
@@ -34,7 +34,7 @@ test('a browser thin-client renders server snapshots and rounds input over a Web
 	try {
 		// Inject the production thin-client core and bootstrap render structures.
 		await isolatedPage.addScriptTag({ path: 'tools/mp-server/client/render-client.js' });
-		// KDM-206: this spec builds its own thin client on the STOCK game page, not the demo-server,
+		// This spec builds its own thin client on the STOCK game page, not the demo-server,
 		// so nothing has injected the delta merge for it. Same source text the server diffs with.
 		await isolatedPage.addScriptTag({ content: KD_DELTA_BROWSER });
 		await isolatedPage.evaluate(() => {
@@ -53,13 +53,13 @@ test('a browser thin-client renders server snapshots and rounds input over a Web
 			w.__states = [];
 			const ws = new WebSocket(url);
 			w.__ws = ws;
-			// KDM-206: the bridge sends a full `snapshot` first and a `delta` thereafter, so this
+			// The bridge sends a full `snapshot` first and a `delta` thereafter, so this
 			// hand-rolled client merges like the real one — with the served `window.KDDelta.kdMerge`,
 			// the SAME code the server diffs with, never a second implementation.
 			w.__base = null;
 			ws.onmessage = (e: MessageEvent) => {
 				const m = JSON.parse(e.data);
-				// KDM-255: as the host, this client is the gate — the guest below waits on this answer.
+				// As the host, this client is the gate — the guest below waits on this answer.
 				if (m.type === 'joined') w.__seated = true;
 				if (m.type === 'join_pending') ws.send(JSON.stringify({ type: 'join_answer', accept: true }));
 				if (m.type === 'state') {
@@ -70,13 +70,13 @@ test('a browser thin-client renders server snapshots and rounds input over a Web
 					w.__states.push({ tick: m.tick, grid: w.__base.map.Grid });
 				}
 			};
-			// KDM-255 — the join gate is the only road in. This client is the HOST, so it claims slot 0
+			// The join gate is the only road in. This client is the HOST, so it claims slot 0
 			// and answers the node-side guest's request below.
 			ws.onopen = () => ws.send(JSON.stringify({ type: 'join', clientId: 'A', role: 'host' }));
 		}, `ws://127.0.0.1:${port}`);
 
 		/*
-		 * KDM-255 — WAIT FOR THE HOST TO BE SEATED BEFORE THE GUEST ASKS.
+		 * WAIT FOR THE HOST TO BE SEATED BEFORE THE GUEST ASKS.
 		 *
 		 * `page.evaluate` above returns once `onopen` is ASSIGNED, not once the socket has opened and
 		 * joined, so the two joins used to race. That was harmless while a roleless join simply seated
@@ -104,7 +104,7 @@ test('a browser thin-client renders server snapshots and rounds input over a Web
 				stateGrid: w.__states[0].grid,
 				// @ts-ignore — the render globals now reflect the server snapshot
 				liveGrid: KDMapData.Grid,
-				// render-only flag lives on KDRenderClient now (KD-085 reverted the
+				// render-only flag lives on KDRenderClient now (the swap-model change reverted the
 				// KDServerRole game-source flag; the client is pure monkey-patch).
 				clientMode: (window as any).KDRenderClient.isLocalSimDisabled(),
 			};
@@ -115,7 +115,7 @@ test('a browser thin-client renders server snapshots and rounds input over a Web
 
 		// The renderer paints a real frame of the server's world. Read off PIXIapp.view —
 		// this used to screenshot the dead #MainCanvas placeholder and assert a byte length,
-		// which a blank 300x150 PNG also satisfies (KDM-217; see helpers/render-surface.ts).
+		// which a blank 300x150 PNG also satisfies (see helpers/render-surface.ts).
 		await isolatedPage.waitForTimeout(300);
 		const frame = await readRenderSurface(isolatedPage);
 		expect(frame.colors, 'render surface should hold a painted frame').toBeGreaterThan(PAINTED_MIN_COLORS);

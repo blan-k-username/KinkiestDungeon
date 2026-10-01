@@ -1,5 +1,5 @@
 /**
- * Node-layer (Vitest) tests for KD-074 — server-side mod support on the live swap model.
+ * Node-layer (Vitest) tests for server-side mod support on the live swap model.
  *
  * The swap model runs ONE authoritative world engine (players are state bundles), so a mod loads
  * once into that world — "all instances agree" is automatic. Same eval path as the browser loader
@@ -18,7 +18,7 @@ const BOOT_TIMEOUT = 240_000;
 const MOD_CODE = fs.readFileSync(path.join(__dirname, '..', '..', 'Mods', 'example_enemy', 'init.ks'), 'utf8');
 const MOD_ENEMY = 'AngrySkeleton';
 
-describe('Server-side mods on the swap model (KD-074)', () => {
+describe('Server-side mods on the swap model', () => {
 	it('a mod passed at construction registers its enemy in the world; it is summonable', () => {
 		const s: any = new SwapSession({ requiredPlayers: 2, seed: 'mods-seed', mods: [MOD_CODE] });
 		s.join('A');

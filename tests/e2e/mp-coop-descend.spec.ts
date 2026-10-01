@@ -1,5 +1,5 @@
 /**
- * E2E (KDM-240) — the party changes floor together, and can still SEE each other afterwards.
+ * E2E — the party changes floor together, and can still SEE each other afterwards.
  *
  * This is the user-visible half of the task, and the reason it is worth a boot-heavy spec rather
  * than a third unit test (epic cadence rule 5): the failure a player actually reports is *"we went

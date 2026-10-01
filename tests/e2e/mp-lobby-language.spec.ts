@@ -1,5 +1,5 @@
 /**
- * E2E (KDM-289) — the co-op lobby paints the player's language, in a real browser.
+ * E2E — the co-op lobby paints the player's language, in a real browser.
  *
  * ── THE ONE THING ONLY THIS FILE CAN PROVE ────────────────────────────────────────────────────────
  * `tests/unit/mp-client-strings.spec.ts` covers the six seed tables exhaustively — coverage, token
@@ -58,7 +58,7 @@ async function expected(page: any, lang: string, keys: string[]) {
 	}, { lang, keys });
 }
 
-test.describe('KDM-289 — the lobby speaks the player\'s language', () => {
+test.describe('the lobby speaks the player\'s language', () => {
 	test('the briefing paints Russian for a Russian player and English for an English one, on one page', async ({ isolatedPage: page }) => {
 		await bootKD(page);
 		await injectLobby(page);

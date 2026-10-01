@@ -1,5 +1,5 @@
 /**
- * KDM-238 — each player picks their OWN perks, and gets them.
+ * Each player picks their OWN perks, and gets them.
  *
  * Today both players are perk-identical by construction: `init()` runs `KinkyDungeonStartNewGame` +
  * `KDInitPerks()` once in the world slot (`headless-host.js:607-613`), `_start` captures
@@ -17,9 +17,9 @@
  * swapped in next.
  *
  * ── WHY IT IS NOT A VACUOUS GREEN ─────────────────────────────────────────────────────────────────
- *  1. 'The other player is untouched' was this file's central pair, and KDM-271 RETIRED it: a start
+ *  1. 'The other player is untouched' was this file's central pair, and it has been RETIRED: a start
  *     perk turned out to be the PARTY's, because several perks rewrite the shared world and are read
- *     from whichever bundle is swapped in (KDM-242 F9/F10). The assertions that used to read
+ *     from whichever bundle is swapped in. The assertions that used to read
  *     `not.toContain` now read `toContain` and say so at each site. What keeps them non-vacuous is a
  *     perk NOBODY declared, asserted absent — see `mp-party-start-perks.spec.ts`, which owns the
  *     union rule and its controls.
@@ -46,7 +46,7 @@ const BUILD = 'kd-5.5.0-abc123';
 // ---------------------------------------------------------------------------------------------
 // The pure half: what a client is allowed to declare. No socket, no world — milliseconds.
 // ---------------------------------------------------------------------------------------------
-describe('KDM-238 — sanitizePerks (R8)', () => {
+describe('sanitizePerks (R8)', () => {
 	it('answers an empty list for anything that is not a list of strings', () => {
 		expect(sanitizePerks(undefined)).toEqual([]);
 		expect(sanitizePerks(null)).toEqual([]);
@@ -93,7 +93,7 @@ describe('KDM-238 — sanitizePerks (R8)', () => {
 	});
 });
 
-describe('KDM-238 — JoinGate carries the declaration on the SEAT (R3)', () => {
+describe('JoinGate carries the declaration on the SEAT (R3)', () => {
 	let g: any;
 	beforeEach(() => { g = new JoinGate({ build: BUILD }); });
 
@@ -123,7 +123,7 @@ describe('KDM-238 — JoinGate carries the declaration on the SEAT (R3)', () => 
 		expect(g.perksOf('G')).toEqual([]);
 	});
 
-	// The `release` / `releasePending` pair, exactly as the NAME follows it (KDM-237 P2). A dropped
+	// The `release` / `releasePending` pair, exactly as the NAME follows it. A dropped
 	// player still owns their seat and must come back as themselves — including their perks, or a
 	// reconnect would hand them a differently-built character.
 	it('a DROPPED player keeps their perks: releasePending frees the question, not the seat', () => {
@@ -153,7 +153,7 @@ describe('KDM-238 — JoinGate carries the declaration on the SEAT (R3)', () => 
 // ---------------------------------------------------------------------------------------------
 // R2 / R10 as a SOURCE guard: one mechanism, and no perk names of our own.
 // ---------------------------------------------------------------------------------------------
-describe('KDM-238 — the MP layer names no perk and sets none by hand (R2, R10)', () => {
+describe('the MP layer names no perk and sets none by hand (R2, R10)', () => {
 	const MP_DIR = path.resolve(__dirname, '../../tools/mp-server');
 
 	/** Strip comments and template literals so PROSE about a deleted call cannot trip the guard. */
@@ -166,7 +166,7 @@ describe('KDM-238 — the MP layer names no perk and sets none by hand (R2, R10)
 	/** `KinkyDungeonStatsChoice.set("SomePerk", …)` — a perk chosen in our source. */
 	const LITERAL_SET = /KinkyDungeonStatsChoice\s*\.\s*set\s*\(\s*['"]/;
 
-	it('SELF-CHECK: the detector still recognises the call KDM-238 deletes', () => {
+	it('SELF-CHECK: the detector still recognises the call the per-seat perk change deletes', () => {
 		// A green from a regex that has quietly stopped matching is worthless, and this one greps
 		// source. Prove it against the real line being removed (`swap-session.js:1619`).
 		expect(LITERAL_SET.test(codeOnly('\t\t\t\tKinkyDungeonStatsChoice.set("ClassicHeels", true);'))).toBe(true);
@@ -177,7 +177,7 @@ describe('KDM-238 — the MP layer names no perk and sets none by hand (R2, R10)
 		const offenders = fs.readdirSync(MP_DIR)
 			.filter((f: string) => f.endsWith('.js'))
 			.filter((f: string) => LITERAL_SET.test(codeOnly(fs.readFileSync(path.join(MP_DIR, f), 'utf8'))));
-		expect(offenders, 'a perk name here is the MP layer choosing for the player (KDM-164)').toEqual([]);
+		expect(offenders, 'a perk name here is the MP layer choosing for the player').toEqual([]);
 	});
 
 	it('R10 — `_setClassicHeels` is gone; there is exactly one way to put a perk on a player', () => {
@@ -189,12 +189,12 @@ describe('KDM-238 — the MP layer names no perk and sets none by hand (R2, R10)
 // ---------------------------------------------------------------------------------------------
 // The session half, on ONE real booted world carrying both the perked and the unperked player.
 // ---------------------------------------------------------------------------------------------
-describe('KDM-238 — the choice reaches the world, and only its owner (R4, R5, R6, R8)', () => {
+describe('the choice reaches the world, and only its owner (R4, R5, R6, R8)', () => {
 	let s: any = null;
 
 	beforeAll(async () => {
 		s = new SwapSession({ requiredPlayers: 2, seed: 'perk-choice' });
-		// A declares; B declares NOTHING — B is the `#coop=` path (R9). Since KDM-271 that no longer
+		// A declares; B declares NOTHING — B is the `#coop=` path (R9). Now that start perks are the party's, that no longer
 		// means B has no perks: it means B chose none, and plays the party's set.
 
 		// `Submissive` on purpose: its start-effect is two visible restraints, so the assertion can be
@@ -231,12 +231,12 @@ describe('KDM-238 — the choice reaches the world, and only its owner (R4, R5, 
 		expect(perksIn('A')).toContain('Submissive');
 	});
 
-	it('KDM-271 — and in the PARTNER\'s too: a start perk is the party\'s', () => {
+	it('and in the PARTNER\'s too: a start perk is the party\'s', () => {
 		// SUPERSEDED, deliberately. This assertion used to be `not.toContain` — R6, "the perk is NOT
-		// in the other player's bundle". F10 of KDM-242 showed that rule is the shipped defect:
+		// in the other player's bundle". Finding F10 of the perk-card work showed that rule is the shipped defect:
 		// `Stealthy`, `Pristine`, `Fortify_Barricade` and friends are read from whichever bundle is
 		// swapped in when the floor is generated, so a perk one seat holds and another does not makes
-		// the map depend on swap order. KDM-271 unions the declarations across the party.
+		// the map depend on swap order. The fix unions the declarations across the party.
 		// The property R6 actually protected — `applyPerks` running INSIDE the seating window rather
 		// than after `capturePlayer()` — is still covered: it is what makes `perksIn` non-empty at all,
 		// and `mp-party-start-perks.spec.ts` pins the union with an undeclared control key.
@@ -250,7 +250,7 @@ describe('KDM-238 — the choice reaches the world, and only its owner (R4, R5, 
 		expect(restraintsIn('A')).toEqual(expect.arrayContaining(['BasicCollar', 'BasicLeash']));
 	});
 
-	it('KDM-271 — and the partner is wearing it too, because a seat is built from the party set', () => {
+	it('and the partner is wearing it too, because a seat is built from the party set', () => {
 		// Also superseded (was `not.toContain('BasicCollar')`). A seat is a fresh character built from
 		// KD's own template, so `applyPerks` runs `KDInitPerks()` over the whole party set.
 		expect(restraintsIn('B')).toContain('BasicCollar');
@@ -261,7 +261,7 @@ describe('KDM-238 — the choice reaches the world, and only its owner (R4, R5, 
 	});
 
 	it('R9 — a player who declared nothing is still seated on KD\'s default terms', () => {
-		// What survives KDM-271: B DECLARED nothing, and the session still says so. What the party
+		// What survives the party-perk change: B DECLARED nothing, and the session still says so. What the party
 		// plays with is a separate question, answered by `partyPerks()`.
 		expect(s.perksOf('B')).toEqual([]);
 		expect(perksIn('B'), 'and a perk NOBODY declared is on nobody').not.toContain('Pacifist');
@@ -275,13 +275,13 @@ describe('KDM-238 — the choice reaches the world, and only its owner (R4, R5, 
 	});
 
 	it('P3 — a LATE arrival is perked on the same terms', () => {
-		// `_seatPlayer` is shared by `_start` and `joinInProgress` (KDM-235), so this costs nothing to
+		// `_seatPlayer` is shared by `_start` and `joinInProgress`, so this costs nothing to
 		// support — but "costs nothing" is a claim, and an unasserted claim is how it breaks.
 		s.setCharacter('C', { perks: ['Studious'] });
 		const res = s.joinInProgress('C');
 		expect(res.seated, 'the late join itself has to work for this to mean anything').toBe(true);
 		expect(perksIn('C')).toContain('Studious');
-		// KDM-271 (was `not.toContain`): the late arrival widens the PARTY's set, so it does reach the
+		// The late arrival widens the PARTY's set, so it does reach the
 		// seats already taken — see `mp-party-start-perks.spec.ts` for what that grant is and is not.
 		expect(perksIn('A'), 'and the party caught up with it').toContain('Studious');
 	});

@@ -1,5 +1,5 @@
 /**
- * E2E (KDM-252) — the browser comes back on its own, and the survivor's modal goes away by itself.
+ * E2E — the browser comes back on its own, and the survivor's modal goes away by itself.
  *
  * The node spec proves the SERVER re-seats a returning `clientId` into its own bundle. This proves
  * the two halves it cannot see:
@@ -130,7 +130,7 @@ test('a dropped client reconnects by itself and the survivor\'s disconnect modal
 				const first = c._stableId('guest');
 				// what a RELOAD does: the module re-runs and asks again, with storage as it left it
 				const second = c._stableId('guest');
-				// KDM-280 — and asking for the OTHER seat must not mint a second identity. The
+				// And asking for the OTHER seat must not mint a second identity. The
 				// generator used to answer the literal `'host'` here, which is both a collision
 				// between two tabs and a different id for the same tab depending on which button was
 				// pressed. Kept beside the stability check because they are one property: this tab

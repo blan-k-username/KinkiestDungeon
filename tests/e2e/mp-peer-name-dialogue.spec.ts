@@ -1,5 +1,5 @@
 /**
- * E2E (KDM-232) — a co-op partner's avatar NAMES ITSELF in the ally dialogue.
+ * E2E — a co-op partner's avatar NAMES ITSELF in the ally dialogue.
  *
  * The bug: the one line that names your partner named nobody — `"(You approach )"`.
  *
@@ -16,7 +16,7 @@
  * `render-client.js`. Why not the alternatives — `KDGameData.Collection` injection (185 references,
  * 16 of them whole-collection sweeps: it would make a live player capturable), dropping `CustomName`
  * (it is what selects the NPC-sprite branch, `KinkyDungeonEnemies.ts:1042`), or `alwaysEnemyTypeName`
- * (a property of the SHARED stock `GenericAlly` dialogue) — is recorded in KDM-232's Assessment.
+ * (a property of the SHARED stock `GenericAlly` dialogue) — is recorded in the peer-name fix's assessment.
  *
  * ── WHAT THIS SPEC IS FOR, next to `mp-coop-untie` ────────────────────────────────────────────────
  * The two-browser co-op spec proves the fix in the real product flow, but a co-op boot is ~4 minutes
@@ -36,7 +36,7 @@
  *     many places: an entity WITHOUT `CustomName` must still answer `""`, and a `Collection` entry
  *     must still WIN over `CustomName`. The wrap may only ever turn `""` into a name.
  *
- * KDM-216 — `isolatedPage`, not `kdPage`: this spec injects render-client.js, whose wrappers a
+ * `IsolatedPage`, not `kdPage`: this spec injects render-client.js, whose wrappers a
  * resetKDState() cannot undo.
  */
 import { test, expect } from '../helpers/playwright-fixtures';
@@ -147,7 +147,7 @@ test('a co-op partner is named in the ally dialogue, and no other name answer ch
 	expect(before.body, 'precondition: the ally-dialogue body was painted at all').toBeTruthy();
 	expect(before.name, 'precondition: KDGetName answers "" for an avatar — the root cause').toBe('');
 	expect(before.body,
-		'precondition: the KDM-232 defect must still reproduce unfixed, or the fixed half below is '
+		'precondition: the peer-name defect must still reproduce unfixed, or the fixed half below is '
 		+ 'asserting against nothing').toBe('(You approach )');
 
 	// ---- the fix is installed by the client's own apply(), as it is in production ---------------

@@ -1,8 +1,8 @@
 /**
- * KD-075 — PoC integration capstone (node-layer Vitest).
+ * PoC integration capstone (node-layer Vitest).
  *
  * One end-to-end run that exercises EVERY pillar of the server-authoritative MP
- * concept together, asserting each. Pure assembly of KD-079/081/080/082; the
+ * concept together, asserting each. Pure assembly of the host, transport, lobby and integration pieces; the
  * human-readable version is tools/mp-server/demo.js.
  *
  * Imports tools/mp-server/** only — never Game/src/** or Scripts/**.

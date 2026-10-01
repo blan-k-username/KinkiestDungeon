@@ -1,5 +1,5 @@
 /**
- * KDM-249 Phase B — the gateway relays the host's mod PAYLOADS over HTTP (R6).
+ * Mod sync, phase B — the gateway relays the host's mod PAYLOADS over HTTP (R6).
  *
  * ── WHY HTTP AND NOT THE SESSION SOCKET ───────────────────────────────────────────────────────────
  * The guest needs the bytes at PAGE-LOAD time, before its WebSocket exists — `coop-mods.js` runs as
@@ -52,7 +52,7 @@ function req(method: string, path: string, body?: Buffer): Promise<{ status: num
 const BYTES = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x00, 0xff, 0x7f, 0x80]);
 const HASH = 'sha256-testhash';
 
-describe('KDM-249 — /mp/mods routes (R6)', () => {
+describe('/mp/mods routes (R6)', () => {
 	it('an unknown hash is 404, not a static-file lookup', async () => {
 		const r = await req('GET', '/mp/mods/never-uploaded');
 		expect(r.status).toBe(404);

@@ -1,5 +1,5 @@
 /**
- * tools/mp-server/transport/child-entry.js  (KD-081)
+ * tools/mp-server/transport/child-entry.js 
  *
  * Runs as a SEPARATE OS process (spawned via child_process). Owns one instance
  * and serves it over a TCP socket on 127.0.0.1, newline-delimited JSON framing —

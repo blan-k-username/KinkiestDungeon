@@ -1,7 +1,7 @@
 /**
- * Node-layer (Vitest) — KDM-275: the run saves itself, so closing the tab does not cost it.
+ * Node-layer (Vitest) — the run saves itself, so closing the tab does not cost it.
  *
- * [[KDM-244]] built the whole export chain and wired it to two EXPLICIT moments (a context-menu entry
+ * The save export built the whole export chain and wired it to two EXPLICIT moments (a context-menu entry
  * and "go on alone"). Neither fires when the host closes the tab, the browser crashes, or — the event
  * that actually destroys a run — the server process stops. This spec covers the trigger that fixes
  * that, and only the trigger: the export mechanism itself is `mp-save-export.spec.ts`'s subject and
@@ -77,7 +77,7 @@ function session(seed: string, roguelike = false): any {
 	return s;
 }
 
-describe('KDM-275 — the floor trigger fires for every host, in every save mode', () => {
+describe('the floor trigger fires for every host, in every save mode', () => {
 	let s: any;
 	beforeAll(() => { s = session('kdm275-floor'); }, BOOT);
 
@@ -110,7 +110,7 @@ describe('KDM-275 — the floor trigger fires for every host, in every save mode
 	}, BOOT);
 });
 
-describe('KDM-275 — the timer is Roguelike-only, and that is measured both ways', () => {
+describe('the timer is Roguelike-only, and that is measured both ways', () => {
 	it('CONTROL (R5a) — Save Codes mode: no timer export, however long the party plays', () => {
 		const s = session('kdm275-timer-off');
 		expect(s.world.eval('KinkyDungeonStatsChoice.get("saveMode")')).toBeFalsy();
@@ -148,11 +148,11 @@ describe('KDM-275 — the timer is Roguelike-only, and that is measured both way
 });
 
 /**
- * KDM-275 R6/R7 — the two halves agree about what an AUTOMATIC export is called.
+ * The two halves agree about what an AUTOMATIC export is called.
  *
  * `reason` is text-coupled across a boundary no import can cross: the session emits it
  * (`swap-session.js`), and `client/coop-bootstrap.js` is a browser script that cannot `require` a
- * shared constant. That is exactly the class of silent drift [[KDM-274]] was filed for, and the
+ * shared constant. That is exactly the class of silent drift the outbound-field guard was built for, and the
  * failure is quiet in the worst direction — rename `'floor'` server-side and the client stops
  * recognising it as automatic, so every host gets a status line on every floor. Nothing else in the
  * suite would notice: the wire test still passes, the trigger still fires, the run still saves.
@@ -160,7 +160,7 @@ describe('KDM-275 — the timer is Roguelike-only, and that is measured both way
  * So this asserts the coupling itself, on the real files. It is the same instrument
  * `mp-peace-hub-reset` uses to keep the hub-room list at one definition.
  */
-describe('KDM-275 — the client recognises every reason the server can send', () => {
+describe('the client recognises every reason the server can send', () => {
 	it('each automatic reason the session emits is named in the client handler', async () => {
 		const { readFileSync } = await import('node:fs');
 		const { resolve } = await import('node:path');

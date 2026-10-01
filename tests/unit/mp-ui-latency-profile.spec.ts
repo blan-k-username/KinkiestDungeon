@@ -1,5 +1,5 @@
 /**
- * KDM-186 item 1 — WHERE does the ~1 s per-transaction cost go?
+ * Latency item 1 — WHERE does the ~1 s per-transaction cost go?
  *
  * The owner measured a median 1067 ms round-trip per presentation (`ui`) input in a real browser,
  * with samples 642-1920 ms at 400 ms spacing — i.e. it is the cost of ONE transaction, not backlog.
@@ -39,7 +39,7 @@ function ms(fn: () => any) {
 	return { dt: Number(process.hrtime.bigint() - t0) / 1e6, v };
 }
 
-describe('KDM-186 — per-transaction cost of one `ui` input', () => {
+describe('per-transaction cost of one `ui` input', () => {
 	it('profiles each stage of the ui apply path', () => {
 		const s: any = new SwapSession({ requiredPlayers: 2, seed: 'ui-latency-profile', seedInputKinds: true });
 		s.join('A');
@@ -97,7 +97,7 @@ describe('KDM-186 — per-transaction cost of one `ui` input', () => {
 		const applyTotal = applyStages.reduce((a, k) => a + median(stage[k]), 0);
 		const lines = [
 			'',
-			`KDM-186 ui-input transaction profile  (n=${ITERATIONS}, watchNames=${watchCount}, `
+			`ui-input transaction profile  (n=${ITERATIONS}, watchNames=${watchCount}, `
 			+ `capturedGlobals=${globalsCount}, bundle=${(bundleBytes / 1024).toFixed(1)}KB, `
 			+ `snapshot=${(snapBytes / 1024).toFixed(1)}KB)`,
 			'-'.repeat(78),
@@ -175,7 +175,7 @@ describe('KDM-186 — per-transaction cost of one `ui` input', () => {
 		// eslint-disable-next-line no-console
 		console.log([
 			'',
-			'KDM-186 divergence-scan isolation',
+			'divergence-scan isolation',
 			'-'.repeat(78),
 			'watchNames                         ' + String(names.length).padStart(8),
 			'  of which serialisable+scanned    ' + String(scanned).padStart(8),
@@ -192,7 +192,7 @@ describe('KDM-186 — per-transaction cost of one `ui` input', () => {
 	}, BOOT_TIMEOUT);
 
 	/**
-	 * KDM-186 gap-closing: my 16 ms is ~60x below the owner's measured 1067 ms. `boot()` DOES generate
+	 * Gap-closing: my 16 ms is ~60x below the owner's measured 1067 ms. `boot()` DOES generate
 	 * a real dungeon (`KinkyDungeonStartNewGame(false)` → `KinkyDungeonCreateMap`), so map generation
 	 * is not the difference. The remaining difference is STATE ACCUMULATION — the owner's session has
 	 * run for many turns with enemies engaged. Scan cost is O(names x serialised size), so if diverged
@@ -266,7 +266,7 @@ describe('KDM-186 — per-transaction cost of one `ui` input', () => {
 		// eslint-disable-next-line no-console
 		console.log([
 			'',
-			'KDM-186 does the ui transaction get more expensive as a session ages?',
+			'does the ui transaction get more expensive as a session ages?',
 			'-'.repeat(78),
 			'world at boot: entities=' + worldSize.entities + ' grid=' + worldSize.grid
 				+ ' level=' + worldSize.level + '   (real generated dungeon)',
@@ -295,7 +295,7 @@ describe('KDM-186 — per-transaction cost of one `ui` input', () => {
 	 * fires every ~3 s, and a multi-hundred-ms stall would show up exactly as the owner's spread
 	 * (median 1067 ms, samples 642-1920 ms) rather than as a raised floor.
 	 *
-	 * ⚠️ HISTORICAL SHAPE. KDM-195 fixed what this measured: KinkyDungeonEnemies is blacklisted (it was
+	 * ⚠️ HISTORICAL SHAPE. The oversize-audit fix addressed what this measured: KinkyDungeonEnemies is blacklisted (it was
 	 * OUR spawnAvatar appending a def) and the audit is now a budgeted round robin, so the request path
 	 * no longer takes the full pass. This still forces a COMPLETE pass, so the number it prints is the
 	 * whole-set cost — the ceiling of a full cycle, no longer the size of a single stall.
@@ -331,7 +331,7 @@ describe('KDM-186 — per-transaction cost of one `ui` input', () => {
 		// eslint-disable-next-line no-console
 		console.log([
 			'',
-			'KDM-186 periodic oversize audit (fires every ' + 200 + ' captures)',
+			'periodic oversize audit (fires every ' + 200 + ' captures)',
 			'-'.repeat(78),
 			'oversize globals excluded from the watch set  ' + String(overNames.length).padStart(6),
 			'their combined serialised size               ' + (sizes.total / 1024 / 1024).toFixed(2).padStart(7) + ' MB',

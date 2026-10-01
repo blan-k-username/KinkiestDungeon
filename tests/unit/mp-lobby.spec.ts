@@ -1,8 +1,8 @@
 /**
- * Node-layer (Vitest) tests for the KD-080 feature pillars: lobby join (2–4),
+ * Node-layer (Vitest) tests for the lobby feature pillars: lobby join (2–4),
  * PvP (effect lands only on the target's instance), and server-side mod loading.
  *
- * Built on the KD-079/081 host + transport. Default in-process transport for
+ * Built on the headless host + transport. Default in-process transport for
  * speed (a lobby of 4 + world = 5 bundle instances per test).
  *
  * Imports the harness under tools/mp-server/** only — never Game/src/** or Scripts/**.

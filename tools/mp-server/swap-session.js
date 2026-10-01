@@ -1,5 +1,5 @@
 /**
- * tools/mp-server/swap-session.js  (KD-085 — uniform action model)
+ * tools/mp-server/swap-session.js  (uniform action model)
  *
  * Server-authoritative co-op on the SWAP model (replaces the per-instance action
  * routing): ONE authoritative world; each player is a STATE BUNDLE; per turn each
@@ -12,13 +12,13 @@
  * Conflict (R9): players are applied in RANDOM order on the shared world, so the
  * first-mover wins a contested tile/target — random conflict resolution falls out
  * of the model, no special-casing.
- * KDM-208: the loser is stopped by a VETO on the bump-attack, not by KD's collision
+ * The loser is stopped by a VETO on the bump-attack, not by KD's collision
  * as this comment used to claim. Collision never applied: `_armPeerEnemies` makes
  * each peer a real hostile enemy, so the loser's move was promoted to a stock
  * bump-attack instead of blocked. The veto is keyed on the world at TURN START —
  * a peer who was already there stays fully attackable (deliberate PvP is stock).
  *
- * Other players are shown as avatar entities (KD-082) for rendering; the acting
+ * Other players are shown as avatar entities for rendering; the acting
  * player's avatar is parked while they're swapped in (they ARE the global player).
  */
 'use strict';
@@ -34,14 +34,14 @@ const { KD_COOP_CAPTURE } = require('./kd-coop-capture');
 const { KD_VARIANT_REGISTRY, decideVariantSweep } = require('./kd-variant-registry');
 const { KD_DISCONNECT_DIALOGUE, HOST_LOST_DIALOGUE, PEER_LOST_DIALOGUE, JOIN_ASK_DIALOGUE, NOW_HOST_DIALOGUE } = require('./kd-disconnect-dialogue');
 const { sanitizeName, sanitizePerks, sanitizeCharacter } = require('./join-gate');
-// KDM-239 R3/R5 — same normaliser the gate uses, so what the session stores and what the gate
+// Same normaliser the gate uses, so what the session stores and what the gate
 // accepted cannot drift apart.
 const { sanitizeWorld } = require('./game-modes');
 
 const PARK = { x: 1, y: 1 };
 
 /**
- * KDM-282 — what an UNNAMED player is called, per seat.
+ * What an UNNAMED player is called, per seat.
  *
  * A table rather than a conditional so "which seats have a label" and "what that label is" are the
  * same statement: a role absent from here has no label, which is exactly how `setSeatRole` rejects
@@ -61,11 +61,11 @@ const KD_SEAT_LABEL = Object.freeze(Object.assign(Object.create(null), {
 }));
 
 /**
- * KDM-227/262: KD's own room types for the between-floors hub — the room with the perk pick, the
+ * KD's own room types for the between-floors hub — the room with the perk pick, the
  * merchants and the path choice. Named once because this is the ONE detector: every consumer asks it,
  * nothing re-tests the room for itself.
  *
- * ⚠️ KDM-262 CORRECTED WHICH ROOM THIS IS, and the correction is the whole task. KDM-227 matched
+ * ⚠️ THIS WAS CORRECTED ONCE: WHICH ROOM THIS IS. An earlier version matched
  * `JourneyFloor` alone, believing it to be "the mandatory between-floors hub". It is not — it is the
  * level-0 START room, assigned only at new-game boot (KinkyDungeon.ts:6025, KinkyDungeonGame.ts:457)
  * and holding the five journey-TYPE portals (KDJourneyList, KinkyDungeonAlt.ts:1227). No journey slot
@@ -81,13 +81,13 @@ const KD_SEAT_LABEL = Object.freeze(Object.assign(Object.create(null), {
  * and quest NPCs, and KD's own between-floors autosave (KDStairActions.ts:266).
  *
  * `JourneyFloor` stays in the set: arriving at the start room is a legitimate slate-clean, it costs
- * nothing, and it keeps KDM-227's original cases meaningful. `Tunnel` / `ShopStart` / `ElevatorRoom`
+ * nothing, and it keeps the original cases meaningful. `Tunnel` / `ShopStart` / `ElevatorRoom`
  * are deliberately absent — those really are the optional detours a grudge is meant to survive.
  */
 const HUB_ROOM_TYPES = Object.freeze(['PerkRoom', 'JourneyFloor']);
 
 /**
- * KDM-240 D1: how close the rest of the party must be to the stairs before they will fire.
+ * How close the rest of the party must be to the stairs before they will fire.
  *
  * Chebyshev 1 — on the stair tile or touching it. It is the TIGHTEST rule that is satisfiable: the
  * stair tile itself is occupied by whoever is leaving, so a partner physically cannot stand on it too,
@@ -101,11 +101,11 @@ const HUB_ROOM_TYPES = Object.freeze(['PerkRoom', 'JourneyFloor']);
  */
 const PARTY_GATE_RADIUS = 1;
 
-/** KDM-230: the name of OUR dialogue, in `kd-peace-dialogue.js`. Named once; matched by it here. */
+/** The name of OUR dialogue, in `kd-peace-dialogue.js`. Named once; matched by it here. */
 const PEACE_DIALOGUE = 'KDCoopPeace';
 
 /**
- * KDM-246 — co-op chat. A MESSAGE-SIZE cap and a text colour, not gameplay rules (I6): nothing here
+ * Co-op chat. A MESSAGE-SIZE cap and a text colour, not gameplay rules (I6): nothing here
  * decides anything about the dungeon. The cap is the server-side control on what a player may put
  * into the party's log; the client's `MaxLength` attribute is a courtesy and is not trusted.
  */
@@ -113,7 +113,7 @@ const CHAT_MAX = 200;
 const CHAT_COLOR = '#ffe066';
 
 /**
- * KDM-251: every dialogue the GATEWAY itself owns — as opposed to the hundreds the game ships.
+ * Every dialogue the GATEWAY itself owns — as opposed to the hundreds the game ships.
  *
  * Two rules need this set, and before this task each hand-rolled its own answer to "is this ours?"
  * (`apply()` matched `PEACE_DIALOGUE` exactly; `submit()`'s peace check exempted ANY dialogue). A
@@ -121,13 +121,13 @@ const CHAT_COLOR = '#ffe066';
  *
  * WHY IT MATTERS THAT THE SET IS RIGHT. Our dialogues are the ones whose ANSWER is the only thing
  * that can clear the state that is blocking the player. Refuse one and the survivor is soft-locked
- * holding the only key to their own cell — the trap KDM-230 documents against the peace offer, and
+ * holding the only key to their own cell — the trap documented at the peace offer, and
  * the same trap the disconnect dialogues walk into.
  */
 const OWN_DIALOGUES = new Set([PEACE_DIALOGUE, HOST_LOST_DIALOGUE, PEER_LOST_DIALOGUE, JOIN_ASK_DIALOGUE, NOW_HOST_DIALOGUE]);
 
 /**
- * KDM-162: KDGameData fields the CLIENT owns, because only the client can compute them.
+ * KDGameData fields the CLIENT owns, because only the client can compute them.
  *
  * These three are the OUTPUTS of `KinkyDungeonGetVisionRadius` (`KinkyDungeonVision.ts` →
  * `KinkyDungeonStats.ts:376`-`378`), which the headless world never runs — it has no screen. Its
@@ -145,9 +145,9 @@ const OWN_DIALOGUES = new Set([PEACE_DIALOGUE, HOST_LOST_DIALOGUE, PEER_LOST_DIA
 const CLIENT_OWNED_GAMEDATA_KEYS = ['NightVision', 'MaxVisionDist', 'MinVisionDist'];
 
 /**
- * KDM-196: CONSUME-ONCE presentation members of an otherwise per-player global.
+ * CONSUME-ONCE presentation members of an otherwise per-player global.
  *
- * The criterion is KDM-186's: if only the presentation layer consumes it, the server must not
+ * The criterion: if only the presentation layer consumes it, the server must not
  * replicate it. `KDDamageQueue` could satisfy that by name, in GLOBAL_BLACKLIST, because the whole
  * global is presentation. These cannot — they are sub-keys of `KDEventData`, which also holds real
  * accumulating sim state (`SlimeLevel`, `CurseHintTick`, …). One entry per (global, key) so the rule
@@ -171,7 +171,7 @@ function KDParseStartRestraints(spec) {
 }
 
 /*
- * KDM-164: the invented `DEFEAT_WILL = 0.52` / `REVIVE_WILL_FRACTION = 0.25` hysteresis is GONE.
+ * The invented `DEFEAT_WILL = 0.52` / `REVIVE_WILL_FRACTION = 0.25` hysteresis is GONE.
  *
  * Those were our numbers, not KD's. "Down" is now KD's own floor — Will at zero — and a player is up
  * again the moment Will is above it. That is the owner's directive in full: default behaviour
@@ -184,7 +184,7 @@ function KDParseStartRestraints(spec) {
  */
 
 /**
- * KDM-269 — THE FOUR WAYS A REAL ACTION PRODUCES NOTHING, DECLARED ONCE.
+ * THE FOUR WAYS A REAL ACTION PRODUCES NOTHING, DECLARED ONCE.
  *
  * A player pressed a key, the game did nothing, and nothing said so. There are four causes, and from
  * the player's side they are indistinguishable — which is why they are one family and not four
@@ -193,24 +193,24 @@ function KDParseStartRestraints(spec) {
  *
  * ── WHY THIS IS DATA AND NOT FOUR HAND-WRITTEN COPIES ─────────────────────────────────────────────
  * Each member used to be spelled out in four places: a field in the constructor, a `*Report()`
- * accessor, a `snap.*` line in `snapshotFor`, and a `_dbg` at the call site. KDM-268 added the fourth
- * member and unified only the push-and-trim (`_recordDrop`), leaving the DECLARATION fourfold and
+ * accessor, a `snap.*` line in `snapshotFor`, and a `_dbg` at the call site. The change that added the fourth
+ * member unified only the push-and-trim (`_recordDrop`), leaving the DECLARATION fourfold and
  * writing the ritual down in the README — a smell recorded, not a design.
  *
  * The dangerous one is the `snap.*` line, because forgetting it is SILENT: the recording works, the
  * accessor answers correctly, and nothing whatsoever reaches the browser. That is precisely the bug
- * KDM-268 existed to fix. `tests/unit/mp-drop-channels.spec.ts` iterates this registry, so a channel
+ * the fourth channel was added to fix. `tests/unit/mp-drop-channels.spec.ts` iterates this registry, so a channel
  * declared here and not carried to the client fails a test instead of disappearing quietly.
  *
  * ⚠️ THE FOUR WIRE FIELD NAMES ARE THE FIELD NAMES, and they stay four SEPARATE additive fields
- * (KDM-269 R2). Collapsing them into one `drops: {reason -> []}` is a wire change that breaks any
+ *. Collapsing them into one `drops: {reason -> []}` is a wire change that breaks any
  * client older than the server, and `render-client.js` reads two of them by name. Do not do it here.
  *
  * ⚠️ `report` NAMES ARE IRREGULAR ON PURPOSE — `cancelledMoveReport`, not `cancelledMovesReport`.
  * They are called from ~10 spec files and are API; they are listed rather than derived from `field`
  * so that nobody "tidies" one and breaks the callers.
  *
- * ⚠️ NOT in `ws-bridge.js`'s `VERBATIM_CHANNELS`, and that is deliberate (KDM-269 R6). `kdDiff`
+ * ⚠️ NOT in `ws-bridge.js`'s `VERBATIM_CHANNELS`, and that is deliberate. `kdDiff`
  * treats an array as opaque and replaces it whole (`kd-delta.js` — `kdIsPlainObj` is false for
  * arrays), so every channel already reaches the client intact. Listing these cumulative,
  * `maxLog`-bounded arrays there would force them onto EVERY frame and work against the delta
@@ -219,7 +219,7 @@ function KDParseStartRestraints(spec) {
  * Adding a fifth cause: one entry here, plus the `_recordDrop` call and its `_dbg` at the site.
  */
 const DROP_CHANNELS = Object.freeze([
-	// KDM-163 AC3 — the world's own registry (`KDInputTypes`) has no handler for the type.
+	// The world's own registry (`KDInputTypes`) has no handler for the type.
 	// The odd one out: a Map of type -> count rather than a list, because the useful thing about an
 	// unhandled type is HOW OFTEN, not which occurrence. Carries its own `init`/`collect` instead of
 	// being flattened into the array shape, which would lose the count.
@@ -229,14 +229,14 @@ const DROP_CHANNELS = Object.freeze([
 		init: () => new Map(),
 		collect: (m) => [...m.entries()].map(([type, count]) => ({ type, count })),
 	}),
-	// KDM-163 AC3 — `_pending` is ONE slot per player, so a second turn-consuming input REPLACES the
+	// `_Pending` is ONE slot per player, so a second turn-consuming input REPLACES the
 	// first. Deliberate (a player may change their mind before the peer acts), but never silent: the
 	// displaced action was a real action that never happened.
 	Object.freeze({ field: 'replacedInputs', report: 'replacedInputReport' }),
-	// KDM-208 — a peer reached the contested tile earlier in the SAME turn, so the loser stalled: no
+	// A peer reached the contested tile earlier in the SAME turn, so the loser stalled: no
 	// attack, no step.
 	Object.freeze({ field: 'cancelledMoves', report: 'cancelledMoveReport' }),
-	// KDM-268 — the dispatch THREW inside the world. `applyInputObserved` catches it and hands it back
+	// The dispatch THREW inside the world. `applyInputObserved` catches it and hands it back
 	// as `obs.error`, which the turn path read only inside `_learnInputKind` — so an action aborted
 	// half-way reported a perfectly normal turn.
 	Object.freeze({ field: 'failedInputs', report: 'failedInputReport' }),
@@ -248,23 +248,23 @@ const dropInit = (c) => (c.init ? c.init() : []);
 const dropCollect = (c, held) => (c.collect ? c.collect(held) : held.slice());
 
 class SwapSession {
-	/** @param {object} opts { requiredPlayers=2, seed, enemyType=null (KDM-309: a demo enemy, opt-in) } */
+	/** @param {object} opts { requiredPlayers=2, seed, enemyType=null (a demo enemy, opt-in) } */
 	constructor(opts = {}) {
 		this.required = opts.requiredPlayers || 2;
 		this.seed = opts.seed || 'swap-session-seed';
 		this.enemyType = opts.enemyType || null;
 		this.maxLog = opts.maxLog || 100;
-		this.pvp = !!opts.pvp;        // global PvP toggle (KD-092) — OFF by default (co-op)
-		// KDM-227: the per-pair relationship, and the offer/answer handshake that changes it.
-		// This REPLACES the old `pvpPairs` Set (KD-094): two containers that both mean "at war" is the
+		this.pvp = !!opts.pvp;        // global PvP toggle — OFF by default (co-op)
+		// The per-pair relationship, and the offer/answer handshake that changes it.
+		// This REPLACES the old `pvpPairs` Set: two containers that both mean "at war" is the
 		// drift this codebase keeps paying for, and that Set had no callers at all — `setPvPPair` was
 		// dead code, so nothing could ever start or end a per-pair war. See tools/mp-server/peace.js.
 		this.rel = new PeaceRegistry();
-		// KDM-164: the `friendlyFire` toggle is gone with the approximation it gated. Under the real
+		// The `friendlyFire` toggle is gone with the approximation it gated. Under the real
 		// path the GAME decides who its AOE hits — walls, line of sight and the actual bullet — and a
 		// server-side switch could only re-impose our own answer over the game's.
-		this.mods = Array.isArray(opts.mods) ? opts.mods.slice() : []; // server-side mod code (KD-074)
-		this.startRestraint = opts.startRestraint || ''; // KD-101 UAT: give every player this CARRYABLE loose item at start (e.g. "HingedCuffs")
+		this.mods = Array.isArray(opts.mods) ? opts.mods.slice() : []; // server-side mod code
+		this.startRestraint = opts.startRestraint || ''; // give every player this CARRYABLE loose item at start (e.g. "HingedCuffs")
 		// UAT: put items straight ON the player at start (KD_WEAR_RESTRAINT). Self-equip from the
 		// inventory is a DELAYED action (KinkyDungeonInput.ts:386 → KDGameData.DelayedActions) whose
 		// queue is not part of the player bundle (headless-host.js:991) and whose auto-wait cannot
@@ -272,9 +272,9 @@ class SwapSession {
 		// entirely, which is what you want when testing movement speed while bound.
 		this.wearRestraint = opts.wearRestraint || '';
 		/**
-		 * KDM-238 R10 — perks applied to any player who declared none of their own.
+		 * Perks applied to any player who declared none of their own.
 		 *
-		 * This replaces KDM-164's `classicHeels` / `_setClassicHeels`, which was a second, parallel
+		 * This replaces the earlier `classicHeels` / `_setClassicHeels`, which was a second, parallel
 		 * way to put a perk on a player and named a perk inside `tools/mp-server/**`. It is a list of
 		 * KEYS supplied by the operator (`KD_COOP_PERKS=ClassicHeels`), fed through the one
 		 * `applyPerks` path like anybody else's declaration — so there is exactly one mechanism, and
@@ -284,7 +284,7 @@ class SwapSession {
 		 */
 		this.defaultPerks = sanitizePerks(opts.defaultPerks);
 		/**
-		 * KDM-275 A2 — how many resolved turns between timer-driven exports.
+		 * How many resolved turns between timer-driven exports.
 		 *
 		 * A GATEWAY KNOB, not a gameplay constant (epic AC2): it says how often we mirror the run to
 		 * the host's browser, and nothing about what happens in the dungeon. The default is taken from
@@ -295,7 +295,7 @@ class SwapSession {
 		 */
 		this.exportEveryTurns = opts.exportEveryTurns || 50;
 		/**
-		 * KDM-275 A1/A3 — an export is ARMED here and SENT by the bridge, one turn-resolution later.
+		 * An export is ARMED here and SENT by the bridge, one turn-resolution later.
 		 *
 		 * ⚠️ ARM, NEVER ACT. The floor trigger lives in `_onMapChanged`, which runs *inside*
 		 * `_advanceTurn`'s per-player loop with the acting player swapped into the slot — and
@@ -313,13 +313,13 @@ class SwapSession {
 		this.avatars = new Map();     // id -> world avatar entity id
 		this.startOf = new Map();     // id -> {x,y}
 		/**
-		 * KDM-237 — the name each player chose, keyed by clientId. Empty/absent means "unnamed",
+		 * The name each player chose, keyed by clientId. Empty/absent means "unnamed",
 		 * which `displayNameOf` turns into the legacy label. Registered in `_perClientStores()` so a
 		 * departing player takes it with them.
 		 */
 		this.nameOf = new Map();     // id -> chosen display name ('' / absent = unnamed)
 		/**
-		 * KDM-282 — the SEAT this player holds, `'host'` or `'guest'`, as the bridge saw it
+		 * The SEAT this player holds, `'host'` or `'guest'`, as the bridge saw it
 		 * (`ws-bridge.js` `_carrySeat`, from `presence.roleOf`). Absent means "nobody ever told this
 		 * session", which is the legacy `#coop=`-era shape and is what every direct-constructed
 		 * SwapSession in the test suite looks like.
@@ -335,26 +335,26 @@ class SwapSession {
 		 */
 		this.roleOf = new Map();     // id -> 'host' | 'guest' (absent = never told)
 		/**
-		 * KDM-256 / KDM-279 — id -> the character package this player built: class, outfit, style
+		 * Id -> the character package this player built: class, outfit, style
 		 * and the perk keys they chose. Absent means "declared nothing", which `characterOf` turns
 		 * into KD's own default and `perksOf` turns into `defaultPerks` — absence is meaningful, and
 		 * differently so for each reader.
 		 *
 		 * Registered in `_perClientStores()` beside `nameOf` so a departing player takes it with them.
 		 *
-		 * KDM-279 folded the former `perkOf` Map in here; it was this Map's sibling "in every way",
+		 * The former `perkOf` Map was folded in here; it was this Map's sibling "in every way",
 		 * as the comment on it used to say, which is the definition of the duplication to remove.
 		 */
 		this.charOf = new Map();
 		/**
-		 * KDM-239 R3/R5 — the WORLD each player declared, `{ modes, seed }`. Only the host's is ever
+		 * The WORLD each player declared, `{ modes, seed }`. Only the host's is ever
 		 * read (`_hostWorld()`), but it is stored per client on the same terms as `charOf` so a
 		 * departing player takes their declaration with them via `_perClientStores()`.
 		 */
 		this.worldOf = new Map();    // id -> { modes: string[], seed: string }
-		this.logs = new Map();        // id -> per-player message log (KD-090)
-		this.actionMsgOf = new Map(); // id -> {text,color} transient floating combat text (KD-098)
-		// KDM-186: monotonic id per client for ONE-SHOT EVENTS on the wire.
+		this.logs = new Map();        // id -> per-player message log
+		this.actionMsgOf = new Map(); // id -> {text,color} transient floating combat text
+		// Monotonic id per client for ONE-SHOT EVENTS on the wire.
 		//
 		// A snapshot is STATE and must be idempotent — re-applying it converges. An EVENT (a combat
 		// floater, a cast animation) is not: re-applying it duplicates it. They shared one wire, so
@@ -366,15 +366,15 @@ class SwapSession {
 		// construction: neither side enumerates which events exist — one counter, one comparison.
 		this._eventSeq = new Map();      // clientId -> last event id issued
 		this.pendingEvents = new Map();  // clientId -> events awaiting delivery
-		// KDM-196: whether this client's last delivered `sounddesc` list was non-empty, so a list that
+		// Whether this client's last delivered `sounddesc` list was non-empty, so a list that
 		// has just emptied is still sent once (to clear theirs) and silence stays silent afterwards.
 		this._sentSoundDesc = new Map();
 		/*
-		 * KDM-263 A2 — THE PARTY'S ROUTE NEGOTIATION. One pending proposal, and who made it.
+		 * THE PARTY'S ROUTE NEGOTIATION. One pending proposal, and who made it.
 		 *
 		 * Deliberately here and NOT in `KDGameData`. "Wait for your partner to agree" cannot exist in a
 		 * one-player game, which is this epic's own test for what belongs in the gateway rather than in
-		 * the world (KDM-225 D-series). Keeping it off `KDGameData` also keeps it out of every state
+		 * the world. Keeping it off `KDGameData` also keeps it out of every state
 		 * bundle, so it never crosses the wire as replicated state and no client can be confused about
 		 * whose turn it is to agree.
 		 *
@@ -404,7 +404,7 @@ class SwapSession {
 			},
 		});
 		/*
-		 * KDM-242 A2 — the party's perk-room negotiation, on the same terms as the route above and in
+		 * The party's perk-room negotiation, on the same terms as the route above and in
 		 * the same place, for the same reason: "wait for your partner to agree" cannot exist in a
 		 * one-player game. The RULES are `PartyChoice`'s (A1); these five hooks are the perk-specific
 		 * halves.
@@ -430,52 +430,52 @@ class SwapSession {
 				}
 			},
 		});
-		this.vitalsOf = new Map();    // id -> {will,willMax,...} last-known vitals (KD-098 HP bar)
-		this.defeated = new Set();    // ids whose Will hit 0 — incapacitated (KD-099)
-		this.tiedOf = new Map();      // id -> Set of restraint NAMES already reconciled onto this peer (KD-101)
-		// KDM-164: the `_armHp = 100` damage gauge is gone. A peer avatar's hp no longer measures
+		this.vitalsOf = new Map();    // id -> {will,willMax,...} last-known vitals (for the HP bar)
+		this.defeated = new Set();    // ids whose Will hit 0 — incapacitated
+		this.tiedOf = new Map();      // id -> Set of restraint NAMES already reconciled onto this peer
+		// The `_armHp = 100` damage gauge is gone. A peer avatar's hp no longer measures
 		// anything — the game's own damageInfo is recorded per hit and replayed through the victim's
 		// real player pipeline (see installPeerDamageRecorder / _reconcilePeers).
 		this._joined = [];
 		this._pending = new Map();    // id -> { kdType, data }
-		// KDM-235: ids admitted mid-turn, waiting for the barrier to clear. See `joinInProgress`.
+		// Ids admitted mid-turn, waiting for the barrier to clear. See `joinInProgress`.
 		this._pendingJoins = [];
-		// KDM-235 A2: the fresh-character template, captured in `_start`. See the note there.
+		// The fresh-character template, captured in `_start`. See the note there.
 		this._newPlayerTemplate = null;
 		/*
-		 * KDM-243 A4 — a player who is seated from something OTHER than the fresh template.
+		 * A player who is seated from something OTHER than the fresh template.
 		 *
 		 * Today it has exactly one occupant: the host of an imported run, whose character comes out of
 		 * their own save. A Map rather than an `if (isHost && imported)` because "which character does
-		 * this seat start from" is a question [[KDM-256]] asks too, and answering it in one lookup is
+		 * this seat start from" is a question the per-player character choice asks too, and answering it in one lookup is
 		 * what keeps `_seatPlayer` a single path.
 		 *
 		 * Empty in every ordinary session, so `_seatPlayer` falls back to `_newPlayerTemplate` and the
-		 * pre-KDM-243 behaviour is reached by the same line it always was.
+		 * pre-save-import behaviour is reached by the same line it always was.
 		 */
 		this._templateOf = new Map();
 		/*
-		 * KDM-243 R1 — the host's single-player save, forwarded from the join gate, or `''`.
+		 * The host's single-player save, forwarded from the join gate, or `''`.
 		 *
 		 * Per-client for the same reason `worldOf` is: the bridge forwards it with the rest of the
 		 * seat and needs no role check of its own, because the gate already answered `''` for anyone
 		 * who is not the host.
 		 */
 		this.saveOf = new Map();
-		// KDM-269: the drop-report family — `unknownInputs`, `replacedInputs`, `cancelledMoves`,
+		// The drop-report family — `unknownInputs`, `replacedInputs`, `cancelledMoves`,
 		// `failedInputs`. What each one means, and why they are one family, is on `DROP_CHANNELS`
 		// above; this loop is the only place they are brought into existence.
 		for (const c of DROP_CHANNELS) this[c.field] = dropInit(c);
-		// KDM-163: input type -> "turn" | "ui", LEARNED from real turns (never from a speculative apply,
+		// Input type -> "turn" | "ui", LEARNED from real turns (never from a speculative apply,
 		// which would double-apply world-mutating actions — see HeadlessHost.applyInputObserved).
 		this.inputKind = new Map();
-		// KDM-197: what the STATIC classifier knew when it seeded each type — "proven-turn" /
+		// What the STATIC classifier knew when it seeded each type — "proven-turn" /
 		// "assumed-turn" / "proven-ui" (see input-classifier.js). Only a guess may be overturned by
 		// observation; a proven-turn type that declines to advance is the GAME declining, not a
 		// misclassification (measured: a co-op bump into your ally's avatar returns "nomove" and
 		// never calls AdvanceTime, which used to take `move` out of lockstep for the whole session).
 		this.inputConfidence = new Map();
-		// KDM-197: per-type observation tally behind the classification — { advanced, inert, pinned }.
+		// Per-type observation tally behind the classification — { advanced, inert, pinned }.
 		// The old rule was `advanced > 0 ? 'turn' : 'ui'` evaluated once per occurrence, so a single
 		// non-advancing observation decided a type forever. Evidence replaces that guess.
 		this._inputEvidence = new Map();
@@ -484,21 +484,21 @@ class SwapSession {
 		// number is bounded and one-sided — a genuinely-UI type that the classifier over-approximated
 		// costs this many lockstep turns before it is freed, and never costs anything again.
 		this.uiDemotionEvidence = Math.max(2, (opts.uiDemotionEvidence | 0) || 3);
-		// KDM-186: last state FINGERPRINT sent to each client. A reply carrying the full state is only
+		// Last state FINGERPRINT sent to each client. A reply carrying the full state is only
 		// worth its ~40 KB when the state actually changed; measured, the proxy was answering ~100
 		// inputs/s per client with a full snapshot (809 MB egress, one core pegged, replies stopped,
 		// lockstep never completed). This is a DIFF, not a feature rule: the session never learns which
 		// inputs matter, only whether this player's own captured state moved.
 		this._stateFp = new Map();
-		// KDM-163: pre-seed inputKind by static analysis. OFF by default — the classifier is sound and
+		// Pre-seed inputKind by static analysis. OFF by default — the classifier is sound and
 		// unit-tested, but switching the CLIENT to route everything on top of it still destabilises
-		// mp-coop-demo (see KDM-163 § CORRECTION 2). Opt in with { seedInputKinds: true }.
+		// mp-coop-demo. Opt in with { seedInputKinds: true }.
 		this.seedInputKinds = !!opts.seedInputKinds;
 		this.started = false;
 		this.turn = 0;
 		this.enemyId = null;
 		this.lastTurn = null;         // debug/assert record of the last resolution
-		// KD-098 diagnostics: set KD_MP_DEBUG=1 (or opts.debug) to trace action resolution
+		// Diagnostics: set KD_MP_DEBUG=1 (or opts.debug) to trace action resolution
 		// per turn to the server console — what each player submitted, how it was classified
 		// (move/wait/sneak/peer-attack/plain), the PvP adjacency, and the applied result.
 		this.debug = !!opts.debug || (typeof process !== 'undefined' && process.env && process.env.KD_MP_DEBUG === '1');
@@ -525,7 +525,7 @@ class SwapSession {
 	_start() {
 		this.world.boot();
 		/*
-		 * KDM-239 R3/R5 — the host's world, adopted before the map exists.
+		 * The host's world, adopted before the map exists.
 		 *
 		 * `randomMode` changes map generation, so this has to be the SAME call that generates it —
 		 * applying the modes afterwards would give the party a map built on the wrong terms while
@@ -539,7 +539,7 @@ class SwapSession {
 		const hostWorld = this._hostWorld();
 		this.world.init({ seed: hostWorld.seed || this.seed, worldModes: hostWorld.modes });
 		/*
-		 * KDM-239 A3 — snapshot the game modes the world was built with, for `_seatPlayer` to restore.
+		 * Snapshot the game modes the world was built with, for `_seatPlayer` to restore.
 		 *
 		 * Captured from the WORLD rather than echoed back from the declaration, because
 		 * `KDUpdatePlugSettings` has just produced KD's defaults as well as the host's choices, and a
@@ -548,25 +548,25 @@ class SwapSession {
 		 */
 		this._baseStats = this.world.statsChoiceSnapshot();
 		this.world.setServerMode('world');
-		// KDM-197: ALWAYS run the classifier. `seedInputKinds` gates whether its VERDICTS are applied
-		// (that switch is about client routing — KDM-163 § CORRECTION 2); its CONFIDENCE is needed
+		// ALWAYS run the classifier. `seedInputKinds` gates whether its VERDICTS are applied
+		// (that switch is about client routing); its CONFIDENCE is needed
 		// either way, because "may this observation demote the type?" is a question every session asks.
 		this._seedInputKinds();
-		// KD-074: load server-side mods into the ONE authoritative world (players are state
+		// Load server-side mods into the ONE authoritative world (players are state
 		// bundles — no per-instance engine, so "all instances agree" is automatic). Same eval
 		// path as the browser loader (KDMods.ts) — mods push to KD globals / reassign functions.
 		for (const code of this.mods) { try { this.world.loadMod(code); } catch (e) { /* keep going */ } }
-		// KDM-164: record the damage the GAME produces for each peer-avatar hit, so `_reconcilePeers`
+		// Record the damage the GAME produces for each peer-avatar hit, so `_reconcilePeers`
 		// can hand it to the victim's own `KinkyDungeonDealDamage` instead of converting avatar hp into
 		// Will with arithmetic KD does not have.
 		this.world.installPeerDamageRecorder();
 		// …and the same treatment for an ally UNTYING a peer: taken from the call, never from a
 		// standing bind-level delta (see installPeerUntieRecorder for what that cost).
 		this.world.installPeerUntieRecorder();
-		// KDM-224: and the death gate itself refuses to remove an avatar — the backstop for the ~30
+		// And the death gate itself refuses to remove an avatar — the backstop for the ~30
 		// places KD assigns enemy.hp directly, which the damage wrapper above never sees.
 		this.world.installAvatarDeathGuard();
-		// KDM-230: the peace dialogue, and the hook its options call. Registered in the world because
+		// The peace dialogue, and the hook its options call. Registered in the world because
 		// that is where a routed `dialogue` input is applied and therefore where `clickFunction` runs;
 		// the browser is served the SAME source text (demo-server INJECT) so it can draw the buttons.
 		this.world.loadMod(KD_PEACE_DIALOGUE);
@@ -574,12 +574,12 @@ class SwapSession {
 			globalThis.KDCoopPeaceDecide = function (accept) { globalThis.__kdCoopPeaceAnswer = !!accept; };
 			globalThis.__kdCoopPeaceAnswer = undefined;
 		})()`);
-		// KDM-261: and the capture rule — "jail only when nobody is free". Server-side only: this
+		// And the capture rule — "jail only when nobody is free". Server-side only: this
 		// draws nothing, and `KinkyDungeonDefeat` runs in the authoritative world and only there.
 		this.world.loadMod(KD_COOP_CAPTURE);
 		this.world.eval('globalThis.__kdCoopPartnerFree = false; globalThis.__kdCoopCaptureHeld = undefined;');
-		// KDM-251: the disconnect dialogues, on the same terms and for the same reason.
-		// KDM-245: the variant registries are world state, so KD's per-player garbage collector must
+		// The disconnect dialogues, on the same terms and for the same reason.
+		// The variant registries are world state, so KD's per-player garbage collector must
 		// not run here — a descent by one player would delete every variant only the partner holds.
 		// `__kdCoopManaged` is set once, for the lifetime of the session: this world is managed the
 		// moment a SwapSession owns it, whether or not a second seat has joined yet, because the very
@@ -590,14 +590,14 @@ class SwapSession {
 		this.world.eval(`(function(){
 			globalThis.KDCoopSessionQuit = function () { globalThis.__kdCoopQuit = true; };
 			globalThis.__kdCoopQuit = undefined;
-			// KDM-253 S4: the host's wait/solo answer, on the same take-once terms as the other two.
+			// The host's wait/solo answer, on the same take-once terms as the other two.
 			globalThis.KDCoopPeerLostDecide = function (solo) { globalThis.__kdCoopSolo = !!solo; };
 			globalThis.__kdCoopSolo = undefined;
-			// KDM-297: the host's answer to a mid-run join request, on the same take-once terms.
+			// The host's answer to a mid-run join request, on the same take-once terms.
 			globalThis.KDCoopJoinAnswer = function (accept) { globalThis.__kdCoopJoinAnswer = !!accept; };
 			globalThis.__kdCoopJoinAnswer = undefined;
 			/*
-			 * KDM-300 — our dialogues set the player's own one ASIDE instead of destroying it.
+			 * Our dialogues set the player's own one ASIDE instead of destroying it.
 			 *
 			 * KDStartDialog overwrites these fields, so a host in a shop or a conversation lost it for
 			 * good once our question was answered. The stack lives IN KDGameData so it is per-player and
@@ -630,14 +630,14 @@ class SwapSession {
 			};
 		})()`);
 		/*
-		 * KDM-263 A3/A4 — the routed journey choice, and the hook its input type calls.
+		 * The routed journey choice, and the hook its input type calls.
 		 *
 		 * Registered in the world for the same reason the peace dialogue is: this is where a routed
 		 * input is dispatched, so this is where `KDInputTypes.KDCoopJourney` has to exist. The browser
 		 * is served the SAME source text (demo-server INJECT), where the `KDRenderJourneyMap` wrap is
 		 * the half that actually fires.
 		 *
-		 * ONCE, with no re-assert loop: MEASURED in KDM-241 (P1) that `KDInputTypes` is in no player's
+		 * ONCE, with no re-assert loop: MEASURED that `KDInputTypes` is in no player's
 		 * captured globals and a planted entry survives a full turn, so a swap cannot lose it. That
 		 * measurement is pinned by a test rather than trusted.
 		 */
@@ -660,12 +660,12 @@ class SwapSession {
 		 */
 		this.inputKind.set('KDCoopJourney', 'ui');
 		/*
-		 * KDM-242 A3/A4 — the routed perk-room choice, on exactly the terms above.
+		 * The routed perk-room choice, on exactly the terms above.
 		 *
 		 * Same reason, same shape: this is where a routed input is dispatched, so this is where
 		 * `KDInputTypes.KDCoopPerk` has to exist; the browser is served the SAME source text, where the
-		 * `KinkyDungeonDrawPerkOrb` wrap is the half that actually fires. Registered once — KDM-241 P1
-		 * again, pinned by a test rather than trusted.
+		 * `KinkyDungeonDrawPerkOrb` wrap is the half that actually fires. Registered once — the same
+		 * measurement again, pinned by a test rather than trusted.
 		 */
 		this.world.loadMod(KD_PERK_CHOICE);
 		this.world.eval(`(function(){
@@ -680,7 +680,7 @@ class SwapSession {
 		// for the partner who is being asked about that very proposal.
 		this.inputKind.set('KDCoopPerk', 'ui');
 		/*
-		 * KDM-264 — the hub merchants: resolve a purchase by the ITEM the buyer selected, not by the
+		 * The hub merchants: resolve a purchase by the ITEM the buyer selected, not by the
 		 * index they selected it at.
 		 *
 		 * Loaded on the same terms and for the same reason as the journey choice above: the server half
@@ -691,14 +691,14 @@ class SwapSession {
 		 * something about a game input it has no business deciding.
 		 */
 		this.world.loadMod(KD_SHOP_BUY);
-		// KDM-227: baseline for the hub-arrival check. Seeded HERE rather than left undefined so the
+		// Baseline for the hub-arrival check. Seeded HERE rather than left undefined so the
 		// room the session STARTS in is not mistaken for an arrival — the game boots on the journey
 		// hub itself (level 0), so the very first turn of every session would otherwise fire a reset.
 		try { this._lastRoomType = this.world.getRoomType() || ''; } catch (e) { this._lastRoomType = ''; }
-		// KDM-240 A3: the same argument, for the same reason — the map the session BOOTS on is not a
+		// The same argument, for the same reason — the map the session BOOTS on is not a
 		// map change. Seeded here so the first turn of every session compares against something real.
 		try { this._lastMapId = this.world.mapId(); } catch (e) { this._lastMapId = undefined; }
-		// KD-101 UAT aid: give the (shared) starting player a CARRYABLE loose-restraint ITEM (Items
+		// UAT aid: give the (shared) starting player a CARRYABLE loose-restraint ITEM (Items
 		// inventory) BEFORE capturing each bundle, so the server can apply it; every capturePlayer below
 		// inherits it. The CLIENT shows it via coop-bootstrap (snapshots don't sync the loose inventory).
 		if (this.startRestraint) {
@@ -707,8 +707,8 @@ class SwapSession {
 				this._dbg(`start-restraint(loose) ${name} -> ${JSON.stringify(r)}`);
 			}
 		}
-		// KDM-238 R10: the perk seeding that used to happen HERE is gone. KDM-164 made it explicit and
-		// opt-in; this task makes it the SAME path everyone else's perks take — each seat gets its own
+		// The perk seeding that used to happen HERE is gone. It was first made explicit and
+		// opt-in; now it is the SAME path everyone else's perks take — each seat gets its own
 		// perks inside `_seatPlayer`, from `perksOf(clientId)`, and an operator's blanket default is
 		// just the answer that path gives a player who declared nothing (`defaultPerks`).
 		// Worn-at-start items: applied BEFORE each bundle is captured below, so every player
@@ -726,27 +726,27 @@ class SwapSession {
 			} catch (e) { this._dbg('wear-restraint: slow refresh failed — ' + e.message); }
 		}
 		/*
-		 * KDM-235 A2 — THE FRESH-CHARACTER TEMPLATE, captured here and nowhere else.
+		 * THE FRESH-CHARACTER TEMPLATE, captured here and nowhere else.
 		 *
 		 * Right now the global player slot holds the pristine new-game character, which is why every
 		 * bundle below is a clone of it. Mid-run that is no longer true: the slot holds whoever last
 		 * acted (parked between turns), so a latecomer seated with a bare `capturePlayer()` would be
 		 * handed a full copy of that player — stats, restraints, inventory. It would look like a
-		 * working feature and is exactly what KDM-235 R6 forbids.
+		 * working feature and is exactly what join-late forbids (a latecomer never inherits another player).
 		 *
 		 * Captured AFTER the start-restraint / perk seeding above, so a latecomer arrives on the same
-		 * terms as everyone else. This is also the one seam KDM-237 (own character) and KDM-243
-		 * (import a save) replace — they change what the template IS, and touch no seating code.
+		 * terms as everyone else. This is also the one seam that own-character
+		 * and import-a-save replace — they change what the template IS, and touch no seating code.
 		 */
 		this._newPlayerTemplate = this.world.capturePlayer();
 		/*
-		 * KDM-243 A3 — THE HOST'S SAVE, LOADED OVER THE WORLD WE JUST BUILT.
+		 * THE HOST'S SAVE, LOADED OVER THE WORLD WE JUST BUILT.
 		 *
 		 * ⚠️ AFTER THE TEMPLATE CAPTURE, AND THAT ORDER IS THE FEATURE. The line above snapshots the
 		 * pristine new-game character; the load below replaces the player slot with the HOST's saved
 		 * one. Swap the two and `_newPlayerTemplate` becomes a copy of the host — so the guest would
 		 * arrive at floor 9 wearing the host's restraints, carrying their inventory and their perks.
-		 * That is exactly what KDM-235 R6 forbids, and it would look like a working feature.
+		 * That is exactly what join-late forbids, and it would look like a working feature.
 		 *
 		 * The whole new-game path above still runs on this branch. It costs one map generation that is
 		 * about to be thrown away, and it buys the fresh template the guest needs (D2) plus R9: the
@@ -791,12 +791,12 @@ class SwapSession {
 			 * load invalidates "what has gameplay touched since init". Implementing it made
 			 * `mp-save-import`'s R7 fail, and the failure is the real behaviour:
 			 *
-			 * KDM-161's baseline is not merely a change detector — its VALUES are the per-player
+			 * The capture baseline is not merely a change detector — its VALUES are the per-player
 			 * DEFAULTS that `restorePlayer` resets a watched global to when the incoming bundle does
 			 * not mention it. Re-baselining after the load makes the HOST's saved character the
 			 * default, so restoring the pristine `_newPlayerTemplate` into the slot leaves every field
 			 * the template does not name sitting at the host's value — measured: the guest arrived
-			 * wearing the host's `HingedCuffs`. That is precisely the KDM-235 R6 defect this task
+			 * wearing the host's `HingedCuffs`. That is precisely the inherited-player defect this code
 			 * exists to avoid, arriving by a route nobody would look at.
 			 *
 			 * Keeping init's baseline is also the CORRECT semantics, not just the working one: a
@@ -813,7 +813,7 @@ class SwapSession {
 			this._templateOf.set(this._joined[0], this.world.capturePlayer());
 		}
 		/*
-		 * KDM-309 — the party lands where single player lands the player: KD put the player on the map's
+		 * The party lands where single player lands the player: KD put the player on the map's
 		 * start during generation (or, on an imported run, where the host's run left off — A3 §7), and
 		 * `landingTiles` answers "that tile, plus free neighbours" — the same rule as every later floor.
 		 * This used to be `findOpenTile()` (a map-wide scan for the most open tile, nowhere near KD's
@@ -822,7 +822,7 @@ class SwapSession {
 		const seats = this.world.landingTiles(this._joined.length);
 		this._joined.forEach((id, i) => this._seatPlayer(id, seats[i]));
 		const base = seats[0];
-		// KDM-309: the early demo's shared enemy is OPT-IN (`enemyType`) — only specs that fight it ask.
+		// The early demo's shared enemy is OPT-IN (`enemyType`) — only specs that fight it ask.
 		if (this.enemyType) {
 			this.world.placePlayer(base.x, base.y);
 			const enemy = this.world.summonEnemy(base.x + this._joined.length, base.y, this.enemyType, { rad: 6 });
@@ -830,12 +830,12 @@ class SwapSession {
 		}
 		// park the global player between turns
 		this.world.parkGlobalPlayer(PARK.x, PARK.y);
-		// KD-090: seed every player's personal log with the shared intro log; per-turn
+		// Seed every player's personal log with the shared intro log; per-turn
 		// deltas are appended in _advanceTurn so each client sees only its own messages.
 		const intro = this.world.messageLog();
 		for (const id of this._joined) this.logs.set(id, intro.slice());
 		this.started = true;
-		// KD-100: kick the async text load (fire-and-forget) so real combat messages resolve to real
+		// Kick the async text load (fire-and-forget) so real combat messages resolve to real
 		// text in live sessions; unit tests call `await session.ready()` for determinism.
 		try { this.world.ready(); } catch (e) { /* best-effort */ }
 	}
@@ -845,7 +845,7 @@ class SwapSession {
 	 * built-in move/wait helpers). Returns { advanced, waitingOn } / { advanced, turn }.
 	 */
 	/**
-	 * KDM-163 (option A): THE input entry point. Every input the client produces comes here — there is
+	 * THE input entry point. Every input the client produces comes here — there is
 	 * no client-side classification and nothing is ever swallowed.
 	 *
 	 * The split this makes possible: `submit()` used to mean BOTH "here is an input" and "I have
@@ -872,7 +872,7 @@ class SwapSession {
 	 * one turn. It is applied correctly (never lost, never doubled), and every later use is immediate.
 	 */
 	/**
-	 * KDM-186: a cheap content fingerprint of a player's captured state bundle.
+	 * A cheap content fingerprint of a player's captured state bundle.
 	 *
 	 * Deliberately GENERIC — it hashes whatever the capture produced, so a mod's new field is covered
 	 * with no registration, exactly like the capture itself. djb2 over one JSON pass: no per-field
@@ -898,7 +898,7 @@ class SwapSession {
 	}
 
 	/**
-	 * KDM-225 — the peace handshake. An MP-only action: it consumes no turn and never enters the game.
+	 * The peace handshake. An MP-only action: it consumes no turn and never enters the game.
 	 *
 	 * Returned as `kind: 'ui'` with `changed: true` so the bridge answers with a state frame — the
 	 * menu on both clients reads `snap.coop`, so both sides must see the new state at once.
@@ -936,14 +936,14 @@ class SwapSession {
 		}
 
 		/**
-		 * KDM-246 — chat. An `mp:` action for the reason spelled out at the top of `apply`: KD has no
+		 * Chat. An `mp:` action for the reason spelled out at the top of `apply`: KD has no
 		 * input type for "say something to the other human", and inventing one would put a gateway
 		 * feature into `KDInputTypes` AND route it through lockstep, so a message would wait for the
 		 * partner to move before it could be read.
 		 *
 		 * Ungated on purpose (no peace check, no floor check, no adjacency): this is two people at two
 		 * keyboards, and gating it removes coordination exactly when it is needed. It writes no game
-		 * state at all, which is what keeps it inside KDM-226's one-player test.
+		 * state at all, which is what keeps it inside the one-player test.
 		 */
 		if (action.mp === 'chat.say') {
 			const text = SwapSession.sanitizeChat(action.text);
@@ -957,7 +957,7 @@ class SwapSession {
 	}
 
 	/**
-	 * KDM-246 R5 — the ONLY control on what a player may put into the party's log.
+	 * The ONLY control on what a player may put into the party's log.
 	 *
 	 * Static and pure so it can be tested without booting a session: the `KDTextField`'s `MaxLength`
 	 * attribute is a client COURTESY, and a client that does not use our client can simply not
@@ -974,7 +974,7 @@ class SwapSession {
 	 * `KinkyDungeonSendTextMessage` has no notion of a break, so a newline would either vanish or
 	 * break the layout depending on the glyph, and neither is worth leaving to chance.
 	 *
-	 * KDM-247 — THE CAP MUST NOT CUT A CODE POINT IN HALF. `slice` counts UTF-16 CODE UNITS, and
+	 * THE CAP MUST NOT CUT A CODE POINT IN HALF. `slice` counts UTF-16 CODE UNITS, and
 	 * every string that had ever reached here was ASCII — one unit per character — so the cut was
 	 * always on a character boundary and this was never wrong. A quick reaction is the first caller
 	 * that can put a SURROGATE PAIR at the boundary, and cutting between its halves emits a lone
@@ -1001,7 +1001,7 @@ class SwapSession {
 	}
 
 	/**
-	 * KDM-230 — put the offer in front of `target` as KD's own modal dialogue.
+	 * Put the offer in front of `target` as KD's own modal dialogue.
 	 *
 	 * Opened SERVER-SIDE, on that player's bundle, and this is not a style choice: `KDStartDialog`
 	 * stores the open dialogue in `KDGameData.CurrentDialog`, which is per-player state the client
@@ -1018,19 +1018,19 @@ class SwapSession {
 	}
 
 	/**
-	 * KDM-251 S5 — put the host-lost dialogue in front of a guest whose host has gone.
+	 * Put the host-lost dialogue in front of a guest whose host has gone.
 	 *
 	 * No speaker: there is no avatar to attribute it to (that is the entire message), so it opens as
 	 * a plain narration rather than as somebody talking.
 	 */
 	openHostLostDialogue(target, timeText) {
-		// KDM-303 — the body's TIME token (remaining grace, m:ss) is filled from the first moment.
+		// The body's TIME token (remaining grace, m:ss) is filled from the first moment.
 		return this._openOwnDialogue(target, HOST_LOST_DIALOGUE, null,
 			timeText ? { data: { TIME: String(timeText) } } : undefined);
 	}
 
 	/**
-	 * KDM-303 — tick the host-lost countdown on one guest's bundle. Only the token changes, and only if
+	 * Tick the host-lost countdown on one guest's bundle. Only the token changes, and only if
 	 * that dialogue is the one open: a guest who pressed Leave, or has something else on screen, is not
 	 * pulled back into it.
 	 */
@@ -1038,13 +1038,13 @@ class SwapSession {
 		return this._setOwnDialogueData(target, HOST_LOST_DIALOGUE, { TIME: String(timeText) });
 	}
 
-	/** KDM-303 — tell a promoted guest they are the host now. */
+	/** Tell a promoted guest they are the host now. */
 	openNowHostDialogue(target) {
 		return this._openOwnDialogue(target, NOW_HOST_DIALOGUE, null);
 	}
 
 	/**
-	 * KDM-253 S3/S4 — ask the HOST whether to wait for a missing guest or carry on without them.
+	 * Ask the HOST whether to wait for a missing guest or carry on without them.
 	 *
 	 * No speaker, same as the host-lost dialogue: the entity it would be attributed to is the one who
 	 * has gone, which is the entire message.
@@ -1057,7 +1057,7 @@ class SwapSession {
 	}
 
 	/**
-	 * KDM-297 — ask the HOST, in the game, whether to let `guestName` into the running run.
+	 * Ask the HOST, in the game, whether to let `guestName` into the running run.
 	 *
 	 * No speaker: the guest has no avatar yet — that is what is being asked. The name reaches the text
 	 * through KD's own `CurrentDialogMsgData` token substitution, which uses `String.replace`, so `$`
@@ -1071,13 +1071,13 @@ class SwapSession {
 			: { msg: JOIN_ASK_DIALOGUE + 'Anon', data: {} });
 	}
 
-	/** KDM-297 — the question is settled or withdrawn: take it off the host's screen. */
+	/** The question is settled or withdrawn: take it off the host's screen. */
 	closeJoinAskDialogue(target) {
 		return this._closeOwnDialogue(target, JOIN_ASK_DIALOGUE);
 	}
 
 	/**
-	 * KDM-251: open one of OUR dialogues on a specific player's bundle.
+	 * Open one of OUR dialogues on a specific player's bundle.
 	 *
 	 * Generalised from `_openPeaceDialogue` when the disconnect dialogue needed the identical
 	 * restore → KDStartDialog → capture → re-park sequence. That sequence is the load-bearing part —
@@ -1087,7 +1087,7 @@ class SwapSession {
 	 * @param {string} target      whose bundle the dialogue opens on
 	 * @param {string} name        a member of OWN_DIALOGUES
 	 * @param {number|null} speakerEntityId  avatar to attribute it to, or null for plain narration
-	 * @param {{msg?: string, data?: object}} [text]  KDM-297 — a body key other than the dialogue's
+	 * @param {{msg?: string, data?: object}} [text]  a body key other than the dialogue's
 	 *   own `response`, and the `CurrentDialogMsgData` tokens to fill into it. Applied AFTER
 	 *   `KDStartDialog` (which sets `CurrentDialogMsg` from `response` and leaves stale data alone) and
 	 *   inside the same restore → capture, so it can never land on the wrong player's bundle.
@@ -1101,7 +1101,7 @@ class SwapSession {
 		: `KDMapData.Entities.find(function(e){ return e.id === ${speakerEntityId | 0}; })`};
 			var text = ${JSON.stringify(text || null)};
 			try {
-				if (typeof KDCoopSetAside === 'function') KDCoopSetAside('${name}');   // KDM-300
+				if (typeof KDCoopSetAside === 'function') KDCoopSetAside('${name}');
 				KDStartDialog('${name}', speaker ? speaker.Enemy.name : 'RemotePlayer', false,
 					'', speaker || undefined);
 				if (text && text.msg) KDGameData.CurrentDialogMsg = text.msg;
@@ -1121,7 +1121,7 @@ class SwapSession {
 	}
 
 	/**
-	 * KDM-252 E4 — the host is back, so take the "you have lost the host" modal off the guest's
+	 * The host is back, so take the "you have lost the host" modal off the guest's
 	 * screen. Server-side, for the same reason it was OPENED server-side (see
 	 * `kd-disconnect-dialogue.js`): `CurrentDialog` is per-player state the client re-adopts from
 	 * every snapshot, so a close performed on the client is undone by the very state frame that
@@ -1132,7 +1132,7 @@ class SwapSession {
 	}
 
 	/**
-	 * KDM-303 — replace the `CurrentDialogMsgData` tokens of one of OUR dialogues, in place, if it is
+	 * Replace the `CurrentDialogMsgData` tokens of one of OUR dialogues, in place, if it is
 	 * the one open on `target`'s bundle. The third member of the open/close pair, with the same
 	 * restore → write → capture → re-park sequence (it touches per-player state, so it must never land
 	 * on the wrong bundle), and the same name guard.
@@ -1156,8 +1156,8 @@ class SwapSession {
 	 * Close one of OUR dialogues on a specific player's bundle, and only if it is the one open.
 	 *
 	 * Generalised from `_closePeaceDialogue` when the disconnect dialogue needed the identical
-	 * restore → clear → capture → re-park sequence (KDM-252), exactly as `_openOwnDialogue` was
-	 * generalised from `_openPeaceDialogue` in KDM-251. The pair now moves together; a second
+	 * restore → clear → capture → re-park sequence, exactly as `_openOwnDialogue` was
+	 * generalised from `_openPeaceDialogue`. The pair now moves together; a second
 	 * hand-written copy would be free to get the capture or the re-park subtly wrong, and both
 	 * failures corrupt player state rather than merely failing to draw.
 	 *
@@ -1176,7 +1176,7 @@ class SwapSession {
 				&& KDGameData.CurrentDialog === '${name}') {
 				if (typeof KDResetDialogue === 'function') KDResetDialogue();
 				else { KDGameData.CurrentDialog = ''; KDGameData.CurrentDialogStage = ''; }
-				if (typeof KDCoopGiveBack === 'function') KDCoopGiveBack();          // KDM-300
+				if (typeof KDCoopGiveBack === 'function') KDCoopGiveBack();
 			} else if (typeof KDCoopForgetAside === 'function') KDCoopForgetAside('${name}');
 		})()`);
 		this.bundles.set(target, this.world.capturePlayer());
@@ -1184,7 +1184,7 @@ class SwapSession {
 	}
 
 	/**
-	 * KDM-230 — did the input just applied for `clientId` answer a peace dialogue?
+	 * Did the input just applied for `clientId` answer a peace dialogue?
 	 *
 	 * The answer arrives as KD's own routed `dialogue` input, so it is applied by the normal input
 	 * path and the option's `clickFunction` runs inside the game. That function sets a flag in the
@@ -1192,19 +1192,19 @@ class SwapSession {
 	 */
 	_takePeaceAnswer() { return this._takeCoopFlag('__kdCoopPeaceAnswer'); }
 
-	/** KDM-253 S4 — did the host just answer the wait/solo question? `true` = go on alone. */
+	/** Did the host just answer the wait/solo question? `true` = go on alone. */
 	_takeSoloAnswer() { return this._takeCoopFlag('__kdCoopSolo'); }
 
-	/** KDM-253 — did a guest just press Quit on the host-lost dialogue? */
+	/** Did a guest just press Quit on the host-lost dialogue? */
 	_takeQuitAnswer() { return this._takeCoopFlag('__kdCoopQuit'); }
 
-	/** KDM-297 — did the host just answer a mid-run join request? `true` = let them in. */
+	/** Did the host just answer a mid-run join request? `true` = let them in. */
 	_takeJoinAnswer() { return this._takeCoopFlag('__kdCoopJoinAnswer'); }
 
 	/**
 	 * Read-and-clear one boolean a dialogue's `clickFunction` set in the world.
 	 *
-	 * KDM-253: there are now THREE of these (peace answer, wait/solo, guest quit) and they were about
+	 * There are now THREE of these (peace answer, wait/solo, guest quit) and they were about
 	 * to become three copies of the same eval. Take-once is the load-bearing part — a flag left set
 	 * would answer the NEXT question too, silently — so it gets one implementation rather than three
 	 * chances to forget the clear.
@@ -1217,7 +1217,7 @@ class SwapSession {
 	}
 
 	/**
-	 * KDM-263 — the same read-and-clear, for a hook that records a VALUE rather than a yes/no.
+	 * The same read-and-clear, for a hook that records a VALUE rather than a yes/no.
 	 *
 	 * `_takeCoopFlag` narrows to booleans on purpose (its three callers must tell "answered: no" from
 	 * "nothing was answered"), so a journey proposal — an {x,y} — cannot use it directly. The
@@ -1228,7 +1228,7 @@ class SwapSession {
 	_takeCoopValue(name) {
 		try {
 			/*
-			 * Two shapes here are load-bearing, both taught by KDM-218's payload guard:
+			 * Two shapes here are load-bearing, both taught by the eval-payload guard:
 			 *
 			 * ONE template literal, not two concatenated — the guard extracts each eval payload and
 			 * parses it on its own, and it cannot see through a `+`. A payload it cannot parse is a
@@ -1255,18 +1255,17 @@ class SwapSession {
 		return true;
 	}
 
-	/* ── KDM-263: agreeing the route out of the hub ───────────────────────────────────────────────── */
+	/* ── Agreeing the route out of the hub ────────────────────────────────────────────────────────── */
 	/**
 	 * A5/R4-R7 — fold ONE routed journey choice into the party's decision.
 	 *
 	 * Called from the immediate-apply path with `clientId` already swapped out and banked, exactly
 	 * like `_settlePeaceAnswerFrom` and for the same reason: the commit writes to the WORLD (the
 	 * journey keys are world-scoped now), and a world write performed while the wrong player is
-	 * swapped in is how KDM-230 handed one player another's whole state.
+	 * swapped in is how an earlier bug handed one player another's whole state.
 	 *
-	 * The RULES are not here. KDM-242 A1 extracted them into `party-choice.js`, because the perk-room
-	 * choice needs the identical ones and two copies is exactly the duplication that task's Notes
-	 * forbid. This method is now only the wire-to-choice adapter; the journey-specific halves are the
+	 * The RULES are not here. They were extracted into `party-choice.js`, because the perk-room
+	 * choice needs the identical ones and two copies is exactly the duplication to avoid. This method is now only the wire-to-choice adapter; the journey-specific halves are the
 	 * five hooks handed to `PartyChoice` in the constructor.
 	 */
 	_settleJourneyProposalFrom(clientId) {
@@ -1320,7 +1319,7 @@ class SwapSession {
 
 	/**
 	 * A2 — the party is somewhere else now, so an unfinished negotiation about how to get there is
-	 * over. Called from `_onMapChanged`, which is strictly more general than KDM-262's hub detector
+	 * over. Called from `_onMapChanged`, which is strictly more general than the hub detector
 	 * (arriving at the hub IS a map change) and therefore also covers LEAVING it — a second call site
 	 * on the hub detector would be a duplicate, not extra safety.
 	 */
@@ -1346,14 +1345,14 @@ class SwapSession {
 		return { ...this._journey.report(), committed };
 	}
 
-	/* ── KDM-242: agreeing which perk the party takes ─────────────────────────────────────────────── */
+	/* ── Agreeing which perk the party takes ─────────────────────────────────────────────────────── */
 
 	/**
 	 * A5/R4-R7 — fold ONE routed perk choice into the party's decision.
 	 *
 	 * Called from the immediate-apply path with `clientId` already swapped out and banked, exactly like
 	 * `_settleJourneyProposalFrom` and for the same reason: the commit swaps every player in turn, and
-	 * doing that while a stale copy of the acting player is installed is how KDM-230 handed one player
+	 * doing that while a stale copy of the acting player is installed is how an earlier bug handed one player
 	 * another's whole state.
 	 *
 	 * The RULES live in `party-choice.js` (A1) — this is only the wire-to-choice adapter.
@@ -1506,7 +1505,7 @@ class SwapSession {
 	 */
 	_settlePeace(a, b) {
 		this.rel.makePeace(a, b);
-		// KDM-230: the question is answered — take the dialogue off both screens. Harmless when it was
+		// The question is answered — take the dialogue off both screens. Harmless when it was
 		// never open (accept via a counter-offer never opens one on the offerer).
 		for (const id of [a, b]) this._closePeaceDialogue(id);
 		for (const id of [a, b]) {
@@ -1521,7 +1520,7 @@ class SwapSession {
 	apply(clientId, action = {}) {
 		if (!this.started) throw new Error('session not started');
 		if (!this._joined.includes(clientId)) throw new Error(`unknown player ${clientId}`);
-		// KDM-225: MP-only actions are handled HERE and never reach the game.
+		// MP-only actions are handled HERE and never reach the game.
 		//
 		// The ordering is load-bearing: `_toInput` ends `return { kdType: 'tick' }`, so anything it
 		// does not recognise silently becomes a WAIT and spends the sender's turn — no error, no
@@ -1533,7 +1532,7 @@ class SwapSession {
 		if (!kdType) return { advanced: false, kind: 'noop' };
 
 		/*
-		 * KDM-230: OUR OWN dialogue's answer is applied immediately, whatever the classifier thinks of
+		 * OUR OWN dialogue's answer is applied immediately, whatever the classifier thinks of
 		 * `dialogue` in general.
 		 *
 		 * This is not the gateway overruling the game about a game input. The classifier answers "does
@@ -1543,7 +1542,7 @@ class SwapSession {
 		 * ours: we wrote both options, and neither advances time. Scoped to `KDCoopPeace` by name, so
 		 * every other dialogue keeps whatever verdict the game earns for it.
 		 */
-		// KDM-251: was `data.dialogue === PEACE_DIALOGUE` inline. One shared answer to "is this ours?"
+		// Was `data.dialogue === PEACE_DIALOGUE` inline. One shared answer to "is this ours?"
 		// now, so this rule and the pause gate in `submit` can never disagree about it.
 		const ourDialogue = this._isOwnDialogue(kdType, data);
 		// Known NOT to consume a turn (learned from a real turn, below) → apply it now, exactly once.
@@ -1551,19 +1550,19 @@ class SwapSession {
 			const bundle = this.bundles.get(clientId);
 			this._restorePlayer(clientId, bundle);
 			const res = this.world.applyInputObserved(kdType, data) || {};
-			// KDM-197: same learning rule as the lockstep path — one function, so the two can never
+			// Same learning rule as the lockstep path — one function, so the two can never
 			// disagree about what an observation means. A `ui` type that advanced is promoted (and
 			// pinned) here; it is the direction that desynchronises lockstep, so it is never delayed
 			// for corroboration.
 			// A forced-immediate action must not teach the classifier anything: we bypassed its verdict,
 			// so an observation from this path is not evidence about `dialogue` in general.
 			if (!ourDialogue) this._learnInputKind(kdType, res, false);
-			// KDM-300: answering ours closed it — give back whatever it had set aside, in the same capture.
+			// Answering ours closed it — give back whatever it had set aside, in the same capture.
 			if (ourDialogue) this.world.eval(`(function(){ if (typeof KDCoopGiveBack === 'function') KDCoopGiveBack(); })()`);
 			const newBundle = this.world.capturePlayer();
 			this.bundles.set(clientId, newBundle);
 			/*
-			 * KDM-230 — the peace answer IS a `dialogue` input, so settle it here. AFTER the capture
+			 * The peace answer IS a `dialogue` input, so settle it here. AFTER the capture
 			 * above, and that ordering is the whole point.
 			 *
 			 * UAT bug this fixes: settling swaps OTHER players in and out (it closes the dialogue on
@@ -1574,7 +1573,7 @@ class SwapSession {
 			 */
 			const answered = this._settlePeaceAnswerFrom(clientId);
 			/*
-			 * KDM-263 — and a routed journey choice settles here for the same two reasons: it arrives
+			 * And a routed journey choice settles here for the same two reasons: it arrives
 			 * as an ordinary input, and everything it decides is a WORLD write that must not happen
 			 * while somebody else is swapped in. Placed after the capture above, exactly like the peace
 			 * answer, so this player's own state is banked before anything else touches the world.
@@ -1582,23 +1581,23 @@ class SwapSession {
 			this._settleJourneyProposalFrom(clientId);
 			this._settlePerkProposalFrom(clientId);
 			/*
-			 * KDM-253: the disconnect answers are `dialogue` inputs too, and they are READ here but
+			 * The disconnect answers are `dialogue` inputs too, and they are READ here but
 			 * ACTED ON by the caller.
 			 *
 			 * The session must not decide these itself, because deciding them needs two things it
 			 * deliberately does not know: who is missing (that is `presence.js`) and which seat that
-			 * maps to (that is `join-gate.js`). Reporting the answer keeps the split KDM-250/251/252
-			 * all kept — the session owns the world, the bridge owns liveness and seats.
+			 * maps to (that is `join-gate.js`). Reporting the answer keeps the split the disconnect
+			 * handling all kept — the session owns the world, the bridge owns liveness and seats.
 			 *
 			 * Read AFTER the capture above, for the reason spelled out in the peace note: acting on
 			 * these swaps other players in and out, and the ordering bug that produced is one this
-			 * epic has already paid for once.
+			 * code has already hit once.
 			 */
 			const solo = this._takeSoloAnswer();
 			const quit = this._takeQuitAnswer();
-			// KDM-297: and the join question, on the same terms — seats are the bridge's business.
+			// And the join question, on the same terms — seats are the bridge's business.
 			const joinAnswer = this._takeJoinAnswer();
-			// KDM-186: did this player's own state actually move? The caller uses this to decide between
+			// Did this player's own state actually move? The caller uses this to decide between
 			// a full state reply and a bare ack — a diff, never a judgement about which inputs matter.
 			const changed = this._stateChanged(clientId, newBundle);
 			// Leave the world exactly as a resolved turn leaves it. `_advanceTurn` ends with the global
@@ -1607,17 +1606,17 @@ class SwapSession {
 			// read of avatar/enemy positions) starts from a different state than it used to.
 			this.world.parkGlobalPlayer(PARK.x, PARK.y);
 			this._noteUnknown(kdType, res);
-			// KDM-268 R5: …and record a throw. This path RETURNS `error` to its caller below, but
+			// …and record a throw. This path RETURNS `error` to its caller below, but
 			// returning is not recording — without this the UI-path failure is still absent from the
 			// snapshot and from any later diagnosis, which is the whole complaint.
 			this._noteFailedInput(clientId, kdType, res);
 			return { advanced: false, kind: 'ui', changed, unknownType: !!res.unknownType,
 				error: res.error || null,
-				// KDM-253: `null` = not answered, `false` = Wait, `true` = go on alone. The three
+				// `Null` = not answered, `false` = Wait, `true` = go on alone. The three
 				// states are distinct on purpose — "Wait" is an ANSWER (the host has seen the
 				// question and chosen), not the absence of one, and the bridge treats them differently.
 				solo, quit: quit === true,
-				// KDM-297: `null` = not answered, else the host's Accept (true) / Decline (false).
+				// `Null` = not answered, else the host's Accept (true) / Decline (false).
 				joinAnswer,
 				notify: answered ? this._joined.filter(function(i){ return i !== clientId; }) : undefined };
 		}
@@ -1629,7 +1628,7 @@ class SwapSession {
 	}
 
 	/**
-	 * KDM-163: pre-seed `inputKind` by STATIC analysis of the bundle, so no input type is ever
+	 * Pre-seed `inputKind` by STATIC analysis of the bundle, so no input type is ever
 	 * "unlearned" at runtime. Without this, the first use of each type takes the lockstep default and
 	 * costs the player a turn — measured to break click-to-move (`mp-coop-demo`), because
 	 * `KDFastMoveTo` dispatches through KDSendInput.
@@ -1646,7 +1645,7 @@ class SwapSession {
 			let seeded = 0;
 			for (const t of live) {
 				if (!kinds[t]) continue;
-				// KDM-197: keep HOW WELL the analysis knew this, not just what it concluded. A type with
+				// Keep HOW WELL the analysis knew this, not just what it concluded. A type with
 				// no entry has no static evidence, which is the demotable default.
 				if (confidence && confidence[t]) this.inputConfidence.set(t, confidence[t]);
 				if (this.seedInputKinds) this.inputKind.set(t, kinds[t]);
@@ -1659,7 +1658,7 @@ class SwapSession {
 			// Drift: the registry moved and the analysis no longer covers it. Not fatal — the unseeded
 			// types just fall back to the safe default — but it must be visible.
 			if (!report.found || seeded < live.length) {
-				const msg = `[mp-server] KDM-163 input-classifier DRIFT: seeded ${seeded}/${live.length} live input ` +
+				const msg = `[mp-server] input-classifier DRIFT: seeded ${seeded}/${live.length} live input ` +
 					`types (parsed ${report.handlers} handlers from the bundle). Unseeded types default to ` +
 					'turn-consuming, so behaviour is safe but menus may cost a turn until observed.';
 				try { console.warn(msg); } catch (e) { /* ignore */ }
@@ -1671,17 +1670,17 @@ class SwapSession {
 			}
 		} catch (e) {
 			// Never let classification take the session down — an empty cache is merely the old behaviour.
-			try { console.warn('[mp-server] KDM-163 input-classifier failed, falling back to observe-only: ' + e.message); } catch (e2) { /* ignore */ }
+			try { console.warn('[mp-server] input-classifier failed, falling back to observe-only: ' + e.message); } catch (e2) { /* ignore */ }
 		}
 	}
 
 	/**
-	 * KDM-197: fold ONE observation of `kdType` into what the session knows about it.
+	 * Fold ONE observation of `kdType` into what the session knows about it.
 	 *
 	 * The old rule was `seen = obs.advanced > 0 ? 'turn' : 'ui'`, applied immediately. It made a
 	 * measurement out of a single sample, and the sample is not reliable in the "did not advance"
 	 * direction: an input can decline to advance for reasons that say nothing about its type — we
-	 * vetoed it (KDM-208), it threw, the game refused the action. Measured: in co-op the peer's avatar
+	 * vetoed it, it threw, the game refused the action. Measured: in co-op the peer's avatar
 	 * is an ALLY, so bumping it returns `nomove` with `advanced === 0`; that single observation
 	 * demoted `move` to `ui` and took every subsequent move out of lockstep.
 	 *
@@ -1703,7 +1702,7 @@ class SwapSession {
 	 *
 	 * @param {string} kdType
 	 * @param {{advanced?: number, error?: string|null}} obs  what `applyInputObserved` reported
-	 * @param {boolean} cancelled  we stopped this action ourselves (KDM-208 contested-tile veto)
+	 * @param {boolean} cancelled  we stopped this action ourselves (the contested-tile veto)
 	 */
 	_learnInputKind(kdType, obs, cancelled) {
 		if (!kdType) return;
@@ -1745,7 +1744,7 @@ class SwapSession {
 			`${this.inputConfidence.get(kdType) || 'none'})`);
 	}
 
-	/** KDM-197: the evidence behind each learned classification — for tests and diagnostics. */
+	/** The evidence behind each learned classification — for tests and diagnostics. */
 	inputKindReport() {
 		return [...this.inputKind.entries()].map(([type, kind]) => ({
 			type, kind,
@@ -1762,7 +1761,7 @@ class SwapSession {
 	}
 
 	/**
-	 * KDM-269 — the drop reports (`unknownInputReport`, `replacedInputReport`, `cancelledMoveReport`,
+	 * The drop reports (`unknownInputReport`, `replacedInputReport`, `cancelledMoveReport`,
 	 * `failedInputReport`) are DEFINED ON THE PROTOTYPE from `DROP_CHANNELS`, just below this class.
 	 *
 	 * They are not written out here because four near-identical `return this.x.slice()` bodies are
@@ -1774,7 +1773,7 @@ class SwapSession {
 	 */
 
 	/**
-	 * KDM-268 R7 — the one push-and-trim behind every drop report.
+	 * The one push-and-trim behind every drop report.
 	 *
 	 * `replacedInputs`, `cancelledMoves` and `failedInputs` each recorded a real action that produced
 	 * nothing, and each had its own copy of `push` + `while (len > maxLog) shift()`. Three copies of a
@@ -1790,7 +1789,7 @@ class SwapSession {
 	}
 
 	/**
-	 * KDM-268 R1/R3/R5 — note that this player's input threw, from EITHER apply path.
+	 * Note that this player's input threw, from EITHER apply path.
 	 *
 	 * One place, so the record's shape is defined once: the two paths (lockstep turn and immediate
 	 * 'ui') cannot drift into two different records, and a consumer never has to ask which produced
@@ -1810,7 +1809,7 @@ class SwapSession {
 	}
 
 	/**
-	 * KDM-251 — stop the turn loop, with a reason the player can be shown.
+	 * Stop the turn loop, with a reason the player can be shown.
 	 *
 	 * The reason is an OPAQUE STRING to this class. Presence lives on the bridge (`presence.js`) and
 	 * the session knows nothing about seats, sockets or who is missing — it only knows that somebody
@@ -1838,7 +1837,7 @@ class SwapSession {
 		if (!this.started) throw new Error('session not started');
 		if (!this._joined.includes(clientId)) throw new Error(`unknown player ${clientId}`);
 		/*
-		 * KDM-251 S2/N1 — the session is paused, so this turn does not happen.
+		 * The session is paused, so this turn does not happen.
 		 *
 		 * Refused HERE, at the top of submit, because that is the last point at which nothing has
 		 * happened yet: `_pending` is untouched and `_advanceTurn` (the only thing that moves the
@@ -1848,10 +1847,10 @@ class SwapSession {
 		 * `blocked`, never `waiting`. The two are not interchangeable: the client sets
 		 * `coop.submitted = true` on `waiting` and then suppresses further input as already-acted, so
 		 * answering a refusal that way locks the player out of their own controls. That is the exact
-		 * soft-lock KDM-225 shipped and had to fix.
+		 * soft-lock that once shipped and had to be fixed.
 		 *
-		 * Our own dialogues are exempt — their answer is what ENDS the pause (KDM-253's wait/solo, and
-		 * this task's quit). Refusing them would be the soft-lock one level up.
+		 * Our own dialogues are exempt — their answer is what ENDS the pause (the disconnect wait/solo,
+		 * and quit). Refusing them would be the soft-lock one level up.
 		 */
 		if (this._pausedReason) {
 			const input = this._toInput(clientId, action);
@@ -1860,10 +1859,10 @@ class SwapSession {
 				return { advanced: false, blocked: this._pausedReason, waitingOn: [clientId] };
 			}
 		}
-		// KDM-225 R5: a player who owes an answer to a peace offer cannot take their turn until they
+		// A player who owes an answer to a peace offer cannot take their turn until they
 		// give one. This is the ONE choke point for that — `apply()` routes UI-kind actions around
 		// `submit` entirely, so the answer itself is never blocked by this.
-		// KDM-230: …except the answer itself. The dialogue option is a routed `dialogue` input, and if
+		// …except the answer itself. The dialogue option is a routed `dialogue` input, and if
 		// the classifier ever decides that type consumes a turn it would arrive HERE — refused, with
 		// the only action that could clear the block. Exempt it explicitly rather than depend on the
 		// classifier's verdict staying 'ui'.
@@ -1871,7 +1870,7 @@ class SwapSession {
 			this._dbg(`BLOCKED ${clientId}: owes an answer to a peace offer`);
 			return { advanced: false, blocked: 'peace-offer', waitingOn: [clientId] };
 		}
-		// KDM-163 AC3: a queued action being displaced is a real input that will never be applied.
+		// A queued action being displaced is a real input that will never be applied.
 		// Measured in `tests/unit/mp-ui-chatter-repro.spec.ts`: queue a bump-attack, then send any other
 		// turn-consuming input before the peer acts, and the enemy takes no damage — with nothing
 		// anywhere to find it by. Report it; do not change the last-wins semantics the client relies on.
@@ -1892,7 +1891,7 @@ class SwapSession {
 		const waitingOn = this._joined.filter((id) => !this._pending.has(id));
 		if (waitingOn.length > 0) return { advanced: false, waitingOn };
 		const t = this._advanceTurn();
-		// KDM-275 A3 — hoisted to the top level for the same reason `solo` and `quit` are: the bridge
+		// Hoisted to the top level for the same reason `solo` and `quit` are: the bridge
 		// reads one flat result and acts on it. Hoisted ONCE, here, rather than teaching every caller
 		// to reach two levels down.
 		return { advanced: true, turn: t, exportDue: t.exportDue || null };
@@ -1902,8 +1901,8 @@ class SwapSession {
 	_advanceTurn() {
 		const order = this._shuffle(this._joined.slice());
 		const applied = [];
-		this.actionMsgOf.clear();   // floating combat text is per-turn transient (KD-098)
-		// KDM-208: where everyone stood at TURN START — the world each player actually acted against.
+		this.actionMsgOf.clear();   // floating combat text is per-turn transient
+		// Where everyone stood at TURN START — the world each player actually acted against.
 		//
 		// R9's doc comment above claimed collision blocked the loser of a contested tile. It did not:
 		// `_armPeerEnemies` makes each peer a REAL hostile enemy, so once the winner's avatar had been
@@ -1922,7 +1921,7 @@ class SwapSession {
 		const arrived = new Set();   // avatar entity ids that changed tile THIS turn
 		for (const id of order) {
 			const action = this._pending.get(id) || { kind: 'wait' };
-			// KD-099 revised (KDM-154): a downed player is NOT incapacitated by us. KD has no
+			// Revised: a downed player is NOT incapacitated by us. KD has no
 			// "Will = 0 ⇒ you cannot act" rule — KinkyDungeonMove has no Will check and
 			// KDPlayerCanMove is terrain-only; low Will only makes enemies grab you more
 			// (KinkyDungeonEnemyTeaseAttacks.ts:746) and immobility comes from bondage/stun
@@ -1936,47 +1935,47 @@ class SwapSession {
 			this._restorePlayer(id, this.bundles.get(id));
 			const avId = this.avatars.get(id);
 			if (avId != null) this.world.moveAvatar(avId, PARK.x, PARK.y);
-			// KD-100: arm every PvP peer as a REAL hostile enemy (hp = their Will) so this player's
+			// Arm every PvP peer as a REAL hostile enemy (hp = their Will) so this player's
 			// stock attack pipeline can hit them for real (no synthetic interception).
 			this._armPeerEnemies(id);
-			// KDM-208: …but a peer who only got here because they were applied first is not a target.
+			// …but a peer who only got here because they were applied first is not a target.
 			this.world.setBumpVeto([...this.avatars.entries()]
 				.filter(([cid, eid]) => cid !== id && arrived.has(eid))
 				.map(([, eid]) => eid));
-			// KDM-240 A2: and tell the world who else is in this party and where they are standing, so
+			// And tell the world who else is in this party and where they are standing, so
 			// the co-located level goal can be decided from inside KD's own stair cancellation. Pushed
 			// per APPLY, not per turn: the facts are relative to whoever is acting, and a peer position
 			// from the previous apply is a gate that answers about a world that has moved on.
 			this._pushPartyGate(id);
-			// KDM-261: …and whether anybody ELSE is still up, which is the whole capture rule. Written
+			// …and whether anybody ELSE is still up, which is the whole capture rule. Written
 			// per APPLY, from two CONSTANT source strings so V8's eval compilation cache serves both
 			// for free — interpolating a per-call value into a hot eval costs ~8.7x (measured in this
 			// layer, and the same reason `setPartyGate` splits its two payloads).
 			this.world.eval(this._anyPartnerFree(id)
 				? 'globalThis.__kdCoopPartnerFree = true;'
 				: 'globalThis.__kdCoopPartnerFree = false;');
-			// KD-090: capture this player's message-log delta (messages pushed while THEY
+			// Capture this player's message-log delta (messages pushed while THEY
 			// are the swapped-in player are theirs — incl. enemy-AI lines aimed at them).
 			const logLen0 = this.world.messageLogLength();
 			let result = null;
 			let cancelled = false;
-			// KDM-164: the synthetic `pvpAttack` / `pvpBind` primitive is GONE. It computed its own
+			// The synthetic `pvpAttack` / `pvpBind` primitive is GONE. It computed its own
 			// attack and wrote the result onto the target's bundle, bypassing the game entirely — a
 			// second, parallel combat model kept alive "for tests". There is now exactly one path:
 			// the player's real action through KD's own pipeline.
 			if (kdType) {
-				// KD-100: run the player's REAL action. A move/attack/spell INTO a peer's avatar (armed
+				// Run the player's REAL action. A move/attack/spell INTO a peer's avatar (armed
 				// as a real hostile enemy above) auto-runs KD's real attack pipeline — real damage, real
 				// combat text + floaters, real defeat/capture. No interception. Reconciled after the turn.
-				// KDM-163: apply for real, and LEARN whether this input type consumes a turn. The
+				// Apply for real, and LEARN whether this input type consumes a turn. The
 				// classification comes from a genuine application — never a speculative one, which
 				// would double-apply world-mutating actions (measured, probes/probe11).
 				const obs = this.world.applyInputObserved(kdType, data) || {};
 				result = obs.result;
-				// KDM-208: did the contested-tile veto fire for this action? Read it before anything else
+				// Did the contested-tile veto fire for this action? Read it before anything else
 				// can, and RECORD it — a cancelled move is a real input that produced nothing, exactly the
-				// class of silent drop KDM-163 made reportable.
-				// KDM-268: did the dispatch THROW? applyInputObserved caught it into obs.error; until now
+				// class of silent drop that is made reportable.
+				// Did the dispatch THROW? applyInputObserved caught it into obs.error; until now
 				// nothing on this path read that, so the action was truncated in silence.
 				this._noteFailedInput(id, kdType, obs);
 				cancelled = (this.world.takeBumpVetoes() || 0) > 0;
@@ -1985,27 +1984,27 @@ class SwapSession {
 					this._dbg(`CANCELLED contested move for ${id} ("${kdType}") in turn ${this.turn} — ` +
 						`a peer arrived on the target tile earlier in this same turn`);
 				}
-				// KDM-186: this player is swapped in, so whatever the game just queued for its draw layer
+				// This player is swapped in, so whatever the game just queued for its draw layer
 				// is theirs. Harvest it as EVENTS now — it is presentation output, not state, and is no
 				// longer captured (it used to be replicated and re-delivered forever).
 				this._harvestFloaters(id);
 				this._noteUnknown(kdType, obs);
-				// KDM-163/KDM-197: fold this occurrence into what we know about the type. Asymmetric on
-				// purpose — see `_learnInputKind`. KDM-208's `!cancelled` guard is now one instance of
+				// Fold this occurrence into what we know about the type. Asymmetric on
+				// purpose — see `_learnInputKind`. The contested-tile veto's `!cancelled` guard is now one instance of
 				// the general rule "an action we stopped is not a measurement of the type".
 				this._learnInputKind(kdType, obs, cancelled);
-				// KDM-164: the hand-rolled friendly-fire splash is GONE. KD's own AOE already reaches
+				// The hand-rolled friendly-fire splash is GONE. KD's own AOE already reaches
 				// peer avatars — measured: an AOE cast produced a real bullet whose blast damaged a peer
 				// avatar via `KinkyDungeonDamageEnemy`, which the peer-damage recorder captures like any
 				// other hit, so `_reconcilePeers` applies it through that player's real pipeline
-				// (probe: `KDM-164/probes/aoe-real-path.spec.ts` — Will 10 → 6.5, `updateBullets` 16).
+				// (measured by an aoe-real-path probe — Will 10 → 6.5, `updateBullets` 16).
 				// Splash is now whatever the GAME does: real bullet travel, real walls, real LoS.
 			}
 			// Capture the delta; if the log was reset this turn (e.g. a floor transition
 			// clears it), take the whole new log as the delta.
 			const newLen = this.world.messageLogLength();
 			const added = (newLen >= logLen0) ? this.world.messagesSince(logLen0) : this.world.messageLog();
-			// KDM-165: the delta captured while THIS player was swapped in is THIS player's. No text is
+			// The delta captured while THIS player was swapped in is THIS player's. No text is
 			// inspected to guess an audience — the swap window is engine truth, and it is what the game
 			// means by emitting those lines at that moment.
 			//
@@ -2019,10 +2018,10 @@ class SwapSession {
 			// `_markRecovered`, `_onMapChanged`) — a concern the proxy legitimately owns, and one
 			// that never depends on reading game content.
 			if (added && added.length) this._pushLog(id, added);
-			// KDM-261 R6: did KD's capture just get held in place because a partner is still up? Said
+			// Did KD's capture just get held in place because a partner is still up? Said
 			// ONCE, to everyone, in the proxy's own words — a partner who never hears it cannot come
 			// and free them, and KD's own "KinkyDungeonLeashed" line is the captured player's, not a
-			// broadcast (KDM-165). Read AFTER the delta above so the announcement is not also folded
+			// broadcast. Read AFTER the delta above so the announcement is not also folded
 			// into the acting player's personal log twice.
 			if (this._takeCoopFlag('__kdCoopCaptureHeld') === true) {
 				// KD kicked the other players' avatars off the board on its way through
@@ -2031,7 +2030,7 @@ class SwapSession {
 				this._reseatParty(id, null, false);
 				this._announceCaptureHeld(id);
 			}
-			// KDM-240 A3/R5: the party has moved to another MAP, so say so and put everyone on it.
+			// The party has moved to another MAP, so say so and put everyone on it.
 			//
 			// This replaces a `getLevel()` comparison. The level number is not the map: a capture
 			// regenerates the map at an unchanged level (`KinkyDungeonDefeat` → `KinkyDungeonCreateMap`,
@@ -2048,27 +2047,27 @@ class SwapSession {
 			this._lastMapId = mapNow;
 			// swap out: persist this player's new state + move their avatar to its new spot
 			this.bundles.set(id, this.world.capturePlayer());
-			this.vitalsOf.set(id, this.world.getVitals());   // KD-098: refresh for the HP bar
+			this.vitalsOf.set(id, this.world.getVitals());   // refresh for the HP bar
 			const p = this.world.getPlayerPos();
-			// KDM-240 F1: …and re-spawn it if it is gone. `moveAvatar` answers `null` for an entity
+			// …and re-spawn it if it is gone. `moveAvatar` answers `null` for an entity
 			// that no longer exists and that answer used to be dropped on the floor, which is how a
 			// map change made the players permanently invisible to each other.
 			const liveAvId = this._ensureAvatar(id, p.x, p.y);
-			// KDM-208: this avatar now stands somewhere it did not stand at turn start, so for everyone
+			// This avatar now stands somewhere it did not stand at turn start, so for everyone
 			// applied AFTER it, it is an arrival — present enough to block, not to be bumped.
-			// KDM-240: read the id back from `_ensureAvatar`, not from `avId` captured before the apply —
+			// Read the id back from `_ensureAvatar`, not from `avId` captured before the apply —
 			// a re-spawn changes it, and a stale id here would silently stop marking arrivals.
 			const s0 = startPos.get(id);
 			if (liveAvId != null && s0 && (p.x !== s0.x || p.y !== s0.y)) arrived.add(liveAvId);
 			applied.push({ id, kdType, result, pos: p, cancelled });
 		}
-		// KDM-208: the veto is per-apply. Leave the world with it off, or the immediate ("ui") apply
+		// The veto is per-apply. Leave the world with it off, or the immediate ("ui") apply
 		// path — which runs outside this loop — would inherit a stale set from the last turn.
 		this.world.setBumpVeto([]);
-		// KD-100: reconcile each peer avatar's REAL combat result (hp damage, capture) back into its
+		// Reconcile each peer avatar's REAL combat result (hp damage, capture) back into its
 		// owner's bundle (avatar.hp → Will; real capture/helpless → defeated + broadcast).
 		this._reconcilePeers();
-		// KDM-227: finishing a level clears the slate between players.
+		// Finishing a level clears the slate between players.
 		this._checkHubArrival();
 		// Per-turn state line: who is down and where everyone's Will sits. This is the view you
 		// need to tell "my input is ignored" apart from "my input did nothing".
@@ -2080,12 +2079,12 @@ class SwapSession {
 		this.world.parkGlobalPlayer(PARK.x, PARK.y);
 		this.turn += 1;
 		this._pending.clear();
-		// KDM-235 A3 — THE TURN BOUNDARY. The barrier is empty exactly here, so this is the only
+		// THE TURN BOUNDARY. The barrier is empty exactly here, so this is the only
 		// moment a new seat can appear without disturbing a turn in flight.
 		this._flushPendingJoins();
 		this.lastTurn = { order, applied };
 		/*
-		 * KDM-275 A2/R5a — the Roguelike half of KD's cadence.
+		 * The Roguelike half of KD's cadence.
 		 *
 		 * `_exportDue` first: a transition already armed one AND reset the counter, so the two triggers
 		 * cannot fire on the same turn and the timer cannot drift into lockstep with floors.
@@ -2111,7 +2110,7 @@ class SwapSession {
 	}
 
 	/**
-	 * KDM-227/262 — reaching the between-floors hub puts everyone back at peace.
+	 * Reaching the between-floors hub puts everyone back at peace.
 	 *
 	 * THE ONE HUB DETECTOR. Every consumer asks this; nothing re-tests the room for itself. (A second
 	 * hub test elsewhere is how the gateway would drift into two different answers to "are we at the
@@ -2121,7 +2120,7 @@ class SwapSession {
 	 * floor, and only the hub — the one with the perk pick, the merchants and the path choice — ends a
 	 * war. `Tunnel`, `ShopStart`, `ElevatorRoom`, `Summit` are the optional detours a grudge is meant
 	 * to survive, so this matches the named set exactly rather than "any non-empty RoomType". Which
-	 * rooms are in that set, and why KDM-227's original answer was wrong, is on HUB_ROOM_TYPES.
+	 * rooms are in that set, and why the original answer was wrong, is on HUB_ROOM_TYPES.
 	 *
 	 * ARRIVAL, NOT PRESENCE. It fires on the TRANSITION into the hub and not on the turns spent there,
 	 * so a fight that breaks out on the hub is not undone by simply standing on it. A compare-and-store
@@ -2131,7 +2130,7 @@ class SwapSession {
 	 *
 	 * There is nothing to coordinate between players: the session has ONE world, one
 	 * `MiniGameKinkyDungeonLevel` and one `KDGameData.RoomType` — a floor change moves the whole party
-	 * (KDM-165) — so no state exists in which one player is on the hub and the other is not.
+	 * — so no state exists in which one player is on the hub and the other is not.
 	 */
 	_checkHubArrival() {
 		let room = '';
@@ -2141,7 +2140,7 @@ class SwapSession {
 		// Presence ≠ arrival: this fires on the TRANSITION into a hub, never on the turns spent there.
 		if (!HUB_ROOM_TYPES.includes(room) || HUB_ROOM_TYPES.includes(prev)) return;
 		this.rel.resetAll();
-		// KDM-230: and take down any peace dialogue the reset just made moot.
+		// And take down any peace dialogue the reset just made moot.
 		for (const id of this._joined) this._closePeaceDialogue(id);
 		// …and clear the hostility the GAME holds, not only our verdict: `_isPvP` governs whether the
 		// next turn ARMS the avatars as hostile, it does not undo aggro KD already wrote on them.
@@ -2152,7 +2151,7 @@ class SwapSession {
 	}
 
 	/**
-	 * KDM-237 N2 — record the name a player chose. Called by the bridge as it seats them, from the
+	 * Record the name a player chose. Called by the bridge as it seats them, from the
 	 * gate's seat record; the session never invents one.
 	 *
 	 * Idempotent and order-independent: it may be called before `join()` (the normal path, since the
@@ -2167,7 +2166,7 @@ class SwapSession {
 	}
 
 	/**
-	 * KDM-237 — what this player is CALLED. The single fallback in the whole feature.
+	 * What this player is CALLED. The single fallback in the whole feature.
 	 *
 	 * ⚠️ NF2 lives here. The legacy `#coop=` path supplies no name and is what the entire MP e2e
 	 * suite runs on, so the unnamed answer must stay byte-identical to what `_seatPlayer` used to
@@ -2175,7 +2174,7 @@ class SwapSession {
 	 * function; nothing else builds a label. A fallback copied to a second call site is how that
 	 * guarantee rots quietly.
 	 *
-	 * KDM-282 added a MIDDLE tier, and did not weaken that rule: a player who typed no name is
+	 * A MIDDLE tier was added later, and it did not weaken that rule: a player who typed no name is
 	 * called after their SEAT (`Player 1`/`Player 2`, via `KD_SEAT_LABEL`) when the bridge told this
 	 * session which seat they hold. NF2 survives because that tier is reached only when a role WAS
 	 * carried — a direct-constructed session, and anything predating `setSeatRole`, still answers the
@@ -2188,7 +2187,7 @@ class SwapSession {
 	}
 
 	/**
-	 * KDM-282 — record which SEAT this player holds. Called by the bridge as it seats them, from
+	 * Record which SEAT this player holds. Called by the bridge as it seats them, from
 	 * `presence.roleOf`; the session never infers one.
 	 *
 	 * Idempotent and order-independent, exactly like `setPlayerName` and `setCharacter`, and for the
@@ -2207,7 +2206,7 @@ class SwapSession {
 	}
 
 	/**
-	 * KDM-256 R1 / KDM-279 — record the CHARACTER this player built, perks included. Called by the
+	 * Record the CHARACTER this player built, perks included. Called by the
 	 * bridge as it seats them, from the gate's seat record; the session never invents one.
 	 *
 	 * Idempotent and order-independent, exactly like `setPlayerName`: it may be called before
@@ -2217,7 +2216,7 @@ class SwapSession {
 	 * Re-sanitised here even though the gate already did it: this is a public method, and "the caller
 	 * already cleaned it" is an assumption, not a guarantee.
 	 *
-	 * KDM-279 removed the twin `setPerks`. Its whole body was this one with a different sanitiser
+	 * The twin `setPerks` was removed. Its whole body was this one with a different sanitiser
 	 * and a different Map.
 	 */
 	setCharacter(clientId, character) {
@@ -2228,7 +2227,7 @@ class SwapSession {
 	}
 
 	/**
-	 * KDM-256 R4 — what character this player STARTS AS, or `null` for KD's own default.
+	 * What character this player STARTS AS, or `null` for KD's own default.
 	 *
 	 * THE SINGLE FALLBACK IN THE WHOLE FEATURE, and the counterpart of `displayNameOf` / `perksOf`.
 	 * It exists for the reason those do: the legacy `#coop=` road declares nothing and is what the
@@ -2243,7 +2242,7 @@ class SwapSession {
 	characterOf(clientId) {
 		const c = this.charOf.get(clientId);
 		if (!c) return null;
-		// KDM-279 — the perk list is COPIED, not aliased. See `JoinGate.characterOf`: a shallow
+		// The perk list is COPIED, not aliased. See `JoinGate.characterOf`: a shallow
 		// `Object.assign` was a complete copy of three strings and stopped being one the moment an
 		// array joined the package.
 		const out = Object.assign({}, c);
@@ -2252,7 +2251,7 @@ class SwapSession {
 	}
 
 	/**
-	 * KDM-239 R3/R5 — record the world a player declared. Idempotent and order-independent, exactly
+	 * Record the world a player declared. Idempotent and order-independent, exactly
 	 * like `setPlayerName` and `setCharacter`, and called from the same place (`_carrySeat`).
 	 *
 	 * ⚠️ ORDERING IS WHAT MAKES THIS FEATURE POSSIBLE. `_start()` is reached from `join()` only once
@@ -2269,7 +2268,7 @@ class SwapSession {
 	}
 
 	/**
-	 * KDM-239 R3 — the world declaration that governs THIS session: the host's.
+	 * The world declaration that governs THIS session: the host's.
 	 *
 	 * The host is `_joined[0]` — the first player to join is the one whose machine owns the world
 	 * (`join-gate.js` seats the host before it will accept any guest). A guest never has an entry
@@ -2283,7 +2282,7 @@ class SwapSession {
 	}
 
 	/**
-	 * KDM-243 R1 — the save this session continues, declared by the host before they joined.
+	 * The save this session continues, declared by the host before they joined.
 	 *
 	 * Stored on the same terms as `setWorldOptions` and read by the same rule (`_joined[0]` is the
 	 * host, because the gate seats the host before it will accept any guest), so there is again no
@@ -2303,7 +2302,7 @@ class SwapSession {
 	}
 
 	/**
-	 * KDM-238 — what perks this player STARTS WITH. The single fallback in the whole feature.
+	 * What perks this player STARTS WITH. The single fallback in the whole feature.
 	 *
 	 * The counterpart of `displayNameOf`, and it exists for the same reason: the legacy `#coop=` path
 	 * declares nothing and is what the entire MP e2e suite runs on, so "declared nothing" has to have
@@ -2313,7 +2312,7 @@ class SwapSession {
 	 * A player's own declaration is never merged with the default: they chose, so they get theirs.
 	 */
 	perksOf(clientId) {
-		// KDM-279 — read out of the character package rather than a Map of its own. The FALLBACK is
+		// Read out of the character package rather than a Map of its own. The FALLBACK is
 		// untouched and stays here: `defaultPerks` is an operator's blanket setting (`KD_COOP_PERKS`),
 		// not a declaration, so it has no place inside a package describing what a player chose.
 		const c = this.charOf.get(clientId);
@@ -2322,10 +2321,10 @@ class SwapSession {
 	}
 
 	/**
-	 * KDM-271 — the START perk set of the PARTY: the union of what every seat declared.
+	 * The START perk set of the PARTY: the union of what every seat declared.
 	 *
-	 * WHY A UNION AND NOT EACH PLAYER'S OWN. KDM-238 gave each seat its own perks, and F10 of
-	 * KDM-242 found that this is the same defect that task fixed for mid-run perks, shipped:
+	 * WHY A UNION AND NOT EACH PLAYER'S OWN. Each seat was once given its own perks, and that
+	 * turned out to be the same defect the party perk choice fixed for mid-run perks, shipped:
 	 * several perks REWRITE THE SHARED WORLD and are read from whichever bundle happens to be swapped
 	 * in when the read runs. `Stealthy` scales the floor's enemy count and doubles its treasure count
 	 * (`KDMapGen.ts:1049`, `:1770`), `Pristine` its rubble (`:297`), `Doorknobs` whether doors
@@ -2344,7 +2343,7 @@ class SwapSession {
 	 * A subset would have to be named, and naming perks in `tools/mp-server/**` is what epic AC2
 	 * forbids (`mp-perk-choice.spec.ts:173` fails the build on a literal perk name in this source).
 	 *
-	 * WHY THIS IS THE SAME RULE KDM-242 D1 USES, not a second one. D1: "a perk is the PARTY's, not
+	 * WHY THIS IS THE SAME RULE THE PARTY PERK CHOICE USES, not a second one. That rule: "a perk is the PARTY's, not
 	 * the character's — on commit it is written into every seated player's `KinkyDungeonStatsChoice`."
 	 * That is this, at the other end of the run. One answer to "who owns a perk", in both places.
 	 *
@@ -2366,7 +2365,7 @@ class SwapSession {
 	}
 
 	/**
-	 * KDM-271 — a latecomer widened the party's perk set, so the seats already taken have to catch up.
+	 * A latecomer widened the party's perk set, so the seats already taken have to catch up.
 	 *
 	 * `_seatPlayer` gives the ARRIVING player the whole union, because seating builds a character from
 	 * KD's own new-game template and `applyPerks` is the operation for that. The players already in
@@ -2374,7 +2373,7 @@ class SwapSession {
 	 * (`HeadlessHost.grantPerks`: the flag, no wipe, no `KDInitPerks()`). Without this the union is
 	 * per-seat again the moment anyone joins late, which is the bug with extra steps.
 	 *
-	 * The asymmetry is deliberate and it is the same one KDM-242 drew: a seat is a character and
+	 * The asymmetry is deliberate and it is the same one the party perk choice drew: a seat is a character and
 	 * gets start-effects; a mid-run grant is a perk and does not. Nobody is re-equipped because
 	 * somebody else walked in.
 	 *
@@ -2400,7 +2399,7 @@ class SwapSession {
 	}
 
 	/**
-	 * KDM-235 A1 — seat ONE player: the recipe `_start` used to inline, now shared with join-late.
+	 * Seat ONE player: the recipe `_start` used to inline, now shared with join-late.
 	 *
 	 * The exact mirror of `removePlayer`, and kept that way on purpose — a player is seated in one
 	 * place and unseated in one place, so the two can be read against each other. Every container it
@@ -2411,7 +2410,7 @@ class SwapSession {
 	 */
 	_seatPlayer(clientId, pos) {
 		/*
-		 * KDM-243 A4 — which character this seat starts from.
+		 * Which character this seat starts from.
 		 *
 		 * One lookup with the old field as the fallback, so an ordinary session reaches
 		 * `_newPlayerTemplate` exactly as it always did and the import path needs no branch at the
@@ -2421,7 +2420,7 @@ class SwapSession {
 		const template = imported || this._newPlayerTemplate;
 		if (template) this._restorePlayer(clientId, template);
 		/*
-		 * KDM-237 S1/S2 — what this player is called, in the two places it has to appear.
+		 * What this player is called, in the two places it has to appear.
 		 *
 		 * ⚠️ ORDER IS THE WHOLE MECHANISM. `setPlayerName` writes `KDGameData.PlayerName` into the
 		 * world's player slot, and `capturePlayer()` two lines down snapshots `KDGameData` — so the
@@ -2438,7 +2437,7 @@ class SwapSession {
 		 * questions, and only one of them has a co-op fallback.
 		 */
 		/*
-		 * KDM-238 R4/R5 — the party's perks, in the same window and for the same reason (KDM-271: they
+		 * The party's perks, in the same window and for the same reason (they
 		 * used to be this player's alone; see `partyPerks`).
 		 *
 		 * FIRST among the per-player mutations, because it is the one with side effects: `applyPerks`
@@ -2451,7 +2450,7 @@ class SwapSession {
 		 * `perksOf` is what makes "declared nothing" mean KD's default rather than "leave it alone".
 		 */
 		/*
-		 * KDM-239 A3 — a seat starts from KD's OWN new-game state, then adds what this player chose.
+		 * A seat starts from KD's OWN new-game state, then adds what this player chose.
 		 *
 		 * The base is what `init()` produced (`_baseStats`), NOT an empty map. Those consent-derived
 		 * perks are settings, not choices — a player never picked them and never sees them on the perk
@@ -2461,13 +2460,13 @@ class SwapSession {
 		 * A UNION, so nothing KD itself established is dropped: a party that declared nothing gets
 		 * exactly KD's default, and declared perks arrive ON TOP of it rather than instead of it.
 		 *
-		 * KDM-271 — and the declared half is the PARTY's (`partyPerks`), not this player's. KDM-238's
-		 * `perksOf(clientId)` here is exactly the defect F10 of KDM-242 found: a perk one seat holds and
+		 * And the declared half is the PARTY's (`partyPerks`), not this player's. The earlier
+		 * `perksOf(clientId)` here was exactly the per-seat-perk defect: a perk one seat holds and
 		 * another does not makes the generated floor depend on which bundle was swapped in. Every seat
 		 * is built from the same set, so no world read can disagree with itself.
 		 */
 		/*
-		 * KDM-243 A4a — AN IMPORTED SEAT SKIPS BOTH OF THE NEXT TWO CALLS.
+		 * AN IMPORTED SEAT SKIPS BOTH OF THE NEXT TWO CALLS.
 		 *
 		 * `applyPerks` and `applyModes` are NEW-GAME operations. `applyPerks` runs KD's own
 		 * `KDInitPerks()`, which hands the player in the slot their starting restraints, weapons,
@@ -2486,7 +2485,7 @@ class SwapSession {
 			const base = (this._baseStats && this._baseStats.perks) || [];
 			this.world.applyPerks([...new Set([...base, ...this.partyPerks()])]);
 		/*
-		 * KDM-239 A3 — and IMMEDIATELY after it, the game modes `applyPerks` just destroyed.
+		 * And IMMEDIATELY after it, the game modes `applyPerks` just destroyed.
 		 *
 		 * `applyPerks` above rebuilds `KinkyDungeonStatsChoice` from scratch and keeps only real
 		 * perks. KD's game-mode keys live in that same Map but are NOT perks (they are written by
@@ -2500,7 +2499,7 @@ class SwapSession {
 			this.world.applyModes((this._baseStats && this._baseStats.modes) || []);
 		}
 		/*
-		 * KDM-243 A4b — and an imported seat is not renamed either. `setPlayerName` writes
+		 * And an imported seat is not renamed either. `setPlayerName` writes
 		 * `KDGameData.PlayerName`, which is the CHARACTER's name; the lobby name is the SESSION
 		 * identity, and that is what every label and announcement already uses (`displayNameOf`). A
 		 * host continuing their own run keeps the name that character has always had.
@@ -2508,7 +2507,7 @@ class SwapSession {
 		const chosen = imported ? '' : (this.nameOf.get(clientId) || '');
 		if (chosen) this.world.setPlayerName(chosen);
 		/*
-		 * KDM-256 R1/R5 — the character this player built, in the same window and on the same terms.
+		 * The character this player built, in the same window and on the same terms.
 		 *
 		 * ⚠️ INSIDE THE RESTORE→CAPTURE WINDOW, like everything above it, and for the reason stated at
 		 * `setPlayerName`: `applyCharacter` writes globals into the world's ONE player slot, and
@@ -2531,21 +2530,21 @@ class SwapSession {
 		}
 		this.world.placePlayer(pos.x, pos.y);
 		this.bundles.set(clientId, this.world.capturePlayer());
-		this.vitalsOf.set(clientId, this.world.getVitals());   // KD-098: seed for the HP bar
-		// KDM-240: seating goes through the SAME avatar path as everything else. The delete keeps the
+		this.vitalsOf.set(clientId, this.world.getVitals());   // seed for the HP bar
+		// Seating goes through the SAME avatar path as everything else. The delete keeps the
 		// old semantics exactly — a seat always spawns a fresh avatar, never adopts one a previous
 		// seating left behind — while leaving `spawnAvatar` with a single caller.
 		this.avatars.delete(clientId);
 		const avId = this._ensureAvatar(clientId, pos.x, pos.y);
 		this.startOf.set(clientId, pos);
-		// KD-090: a personal log to append per-turn deltas to. At boot `_start` re-seeds every log
+		// A personal log to append per-turn deltas to. At boot `_start` re-seeds every log
 		// from the intro after the loop — harmless and deliberate, so boot behaviour is unchanged.
 		this.logs.set(clientId, (this.world.messageLog() || []).slice(-this.maxLog));
 		return avId;
 	}
 
 	/**
-	 * KDM-235 — admit a NEW player to a session that is already running.
+	 * Admit a NEW player to a session that is already running.
 	 *
 	 * Deliberately NOT `join()`: that one is the pre-start collector and throws once started, and the
 	 * two have genuinely different rules (a free slot vs a quorum). Reconnect is a third thing again
@@ -2583,7 +2582,7 @@ class SwapSession {
 		const hostAv = hostId != null ? this.avatars.get(hostId) : null;
 		const hostPos = hostAv != null ? this.world.entityPos(hostAv) : null;
 		const pos = (hostPos && this.world.findFreeTileNear(hostPos.x, hostPos.y)) || this.world.findOpenTile();
-		// KDM-271: the party's start perk set BEFORE this arrival. Read here, while `_joined` still
+		// The party's start perk set BEFORE this arrival. Read here, while `_joined` still
 		// excludes the newcomer, because the whole question is what they ADD to it.
 		const perksBefore = new Set(this.partyPerks());
 		this._joined.push(clientId);
@@ -2591,7 +2590,7 @@ class SwapSession {
 		// …and the seats already taken catch up, or the union is per-seat again the moment anyone
 		// joins late — which is the very defect `partyPerks` exists to close.
 		this._fanOutStartPerks(perksBefore, clientId);
-		// KDM-253 lowered `required` on a departure; raise it back, or a solo-then-rejoin session ends
+		// A departure lowers `required`; raise it back, or a solo-then-rejoin session ends
 		// with a quorum below its own seat count.
 		this.required = Math.max(this.required, this._joined.length);
 		this.world.parkGlobalPlayer(PARK.x, PARK.y);
@@ -2612,7 +2611,7 @@ class SwapSession {
 	}
 
 	/**
-	 * KDM-253 A5 — EVERY container on this session that is keyed by clientId, declared in ONE place.
+	 * EVERY container on this session that is keyed by clientId, declared in ONE place.
 	 *
 	 * `join()` only ever pushed; until now nothing was ever removed from any of these, and there are
 	 * thirteen of them. A `removePlayer` that deleted from the seven the ticket happened to name would
@@ -2630,14 +2629,14 @@ class SwapSession {
 	_perClientStores() {
 		return [
 			this.bundles, this.avatars, this.startOf, this.logs, this.actionMsgOf, this.nameOf,
-			// KDM-282 — the seat they held, beside the name it stands in for. A stale entry would
+			// The seat they held, beside the name it stands in for. A stale entry would
 			// hand a later player reusing that id the departed player's label.
 			this.roleOf,
-			// KDM-243 — the save a host declared, and the character template it produced. Per-client
+			// The save a host declared, and the character template it produced. Per-client
 			// containers like `worldOf` beside them, so a departing player takes both with them; a
 			// stale `_templateOf` entry would seat a RECONNECTING player from a character captured
 			// before the run moved on.
-			// KDM-256/279 — `charOf` belongs with them: the character a departed player built, perks
+			// `CharOf` belongs with them: the character a departed player built, perks
 			// and all, must leave with them, or a later seat reusing that id would be dressed as
 			// somebody who has gone.
 			this.charOf, this.worldOf, this.saveOf, this._templateOf,
@@ -2647,7 +2646,7 @@ class SwapSession {
 	}
 
 	/**
-	 * KDM-253 E5/D3 — the survivor has chosen to play on. Take this player out of the world entirely.
+	 * The survivor has chosen to play on. Take this player out of the world entirely.
 	 *
 	 * ⚠️ THIS IS THE RISKIEST OPERATION IN THE EPIC. `_joined` is load-bearing across turn order,
 	 * per-player logs, PvP pairs, peace, avatar arming and snapshot composition, and it has never had
@@ -2663,7 +2662,7 @@ class SwapSession {
 	 * must not throw at a player who is already alone.
 	 */
 	/**
-	 * KDM-244 A3a — swap a player into the world slot, and REMEMBER that it was them.
+	 * Swap a player into the world slot, and REMEMBER that it was them.
 	 *
 	 * The only way this class restores a player. It used to be fourteen bare `world.restorePlayer(…)`
 	 * calls, none of which recorded anything, so "who is currently swapped in" was a fact the session
@@ -2688,15 +2687,15 @@ class SwapSession {
 	}
 
 	/**
-	 * KDM-244 — this run as a single-player save the host can keep playing (MP → SP).
+	 * This run as a single-player save the host can keep playing (MP → SP).
 	 *
 	 * The seat-aware half of the export; `HeadlessHost.exportSave` is the world-aware half and knows
 	 * nothing about players. That split is the same one every module here keeps, and it is why this
 	 * method is short: it decides WHOSE character and WHICH entities, and hands both to the world.
 	 *
 	 * HOST-ONLY (R1/R11), and it is one comparison, exactly as the import's host-only rule is. The
-	 * world belongs to whoever is hosting the simulation; a guest has no world to take with them
-	 * (KDM-244 C1/C3), so this refuses rather than quietly exporting somebody else's run.
+	 * world belongs to whoever is hosting the simulation; a guest has no world to take with them,
+	 * so this refuses rather than quietly exporting somebody else's run.
 	 *
 	 * ⚠️ THE PLAYER SLOT DOES NOT HOLD THE HOST BETWEEN TURNS. `_advanceTurn` ends by parking the
 	 * global player off-field at PARK (1,1), so `KinkyDungeonPlayerEntity` — which
@@ -2707,7 +2706,7 @@ class SwapSession {
 	 *
 	 * ⚠️ AND THE WORLD IS PUT BACK, because R10 says the live session is undisturbed and D3 says the
 	 * export is non-terminal — a host may take a backup mid-run and carry on playing. Strictly, the
-	 * restore may be redundant: KDM-161's "absent ⇒ default" rule means the next `restorePlayer`
+	 * restore may be redundant: the capture baseline's "absent ⇒ default" rule means the next `restorePlayer`
 	 * resets whatever a stale occupant left behind. It is done anyway, because a requirement upheld
 	 * by an argument about another subsystem's invariant is a requirement waiting for that subsystem
 	 * to change. It costs two lines.
@@ -2739,7 +2738,7 @@ class SwapSession {
 	}
 
 	/**
-	 * KDM-275 R13 — is this run under KD's "Roguelike" save mode, the one that forces autosaves?
+	 * Is this run under KD's "Roguelike" save mode, the one that forces autosaves?
 	 *
 	 * Read from the WORLD, and from nowhere else. `saveMode` is already a `MODE_WORLD_KEYS` entry
 	 * (`game-modes.js:44-46`), listed there with the note that it is *"a property of the session, not
@@ -2762,7 +2761,7 @@ class SwapSession {
 	}
 
 	/**
-	 * KDM-244 R1 — who is hosting, as the session sees it.
+	 * Who is hosting, as the session sees it.
 	 *
 	 * The session does not own the join gate (that is `join-gate.js`, and the bridge owns the two), so
 	 * "the host" here is the seat that joined first — the same rule the gate applies when it hands
@@ -2800,7 +2799,7 @@ class SwapSession {
 		//    THIS is what lets the survivor's own submit resolve a turn — not `required`, which is
 		//    only ever read by `join()`. Lowered anyway so the two can never disagree.
 		this._joined = this._joined.filter((id) => id !== clientId);
-		// KDM-235: …and any promised-but-unseated arrival, or a player dismissed while their join was
+		// …and any promised-but-unseated arrival, or a player dismissed while their join was
 		// queued would be seated moments later by the turn-boundary flush.
 		this._pendingJoins = this._pendingJoins.filter((id) => id !== clientId);
 		this.required = Math.max(1, this._joined.length);
@@ -2808,26 +2807,26 @@ class SwapSession {
 		return true;
 	}
 
-	/** Enable/disable GLOBAL player-vs-player damage for this session (KD-092). */
+	/** Enable/disable GLOBAL player-vs-player damage for this session. */
 	setPvP(on) { this.pvp = !!on; return this.pvp; }
 
-	/** KD-100: await the world's async text load so real combat messages aren't "[NotFound] …".
+	/** Await the world's async text load so real combat messages aren't "[NotFound] …".
 	 *  Live sessions also kick this fire-and-forget at _start; tests await it explicitly. */
 	async ready() { if (this.started) await this.world.ready(); return this; }
 
 	/**
-	 * KD-100: before `actorId` acts, make every PvP peer's avatar a REAL hostile enemy whose hp tracks
+	 * Before `actorId` acts, make every PvP peer's avatar a REAL hostile enemy whose hp tracks
 	 * that peer's current Will (maxhp = WillMax). Then the actor's stock move/attack/spell runs the
 	 * game's real combat against it — real damage, real text, real defeat/capture.
 	 */
 	/**
 	 * Put a peer's real bondage onto their avatar, as a LEVEL with no items.
 	 *
-	 * KD-101: the avatar must not ACCUMULATE restraint items — its binding slots fill up and the stock
+	 * The avatar must not ACCUMULATE restraint items — its binding slots fill up and the stock
 	 * submenu (`KDGetNPCBindingSlotForItem(...).sgroup`, no null guard) crashes after a few ties. The
 	 * victim keeps the real ties on their own bundle, so the items are cleared every turn.
 	 *
-	 * KDM-199: …and the LEVEL is then mirrored back through the item-free channel, so `KDBoundEffects`
+	 * …and the LEVEL is then mirrored back through the item-free channel, so `KDBoundEffects`
 	 * sees it. Without this the avatar reads as unbound and `KDBoundEffects` returns 0 at its
 	 * `boundLevel` short-circuit.
 	 *
@@ -2858,7 +2857,7 @@ class SwapSession {
 			const v = this.vitalsOf.get(cid) || {};
 			this._mirrorPeerBondage(cid, eid, v);
 			if (!this._isPvP(actorId, cid)) continue;
-			// KDM-199: ARM THE AVATAR FROM THE PEER, do not reset it to a placeholder.
+			// ARM THE AVATAR FROM THE PEER, do not reset it to a placeholder.
 			//
 			// This used to set hp = FULL, stun = 0, boundLevel = 0 and then patch the consequences with an
 			// invented rule (will <= 0 => stun 6). That rule existed only because the reset deleted the
@@ -2866,9 +2865,9 @@ class SwapSession {
 			// KDCanApplyBondage answers about the peer instead of about our placeholder.
 			//
 			// hp: the peer Will, on the avatar own scale. Will IS their defeat meter, snapshotFor already
-			// presents it this way to the client, and this docstring said so before KDM-164 changed the
+			// presents it this way to the client, and this docstring said so before an earlier change altered the
 			// code and left the comment behind. It is a REPRESENTATION only — nothing reads it back as a
-			// measurement any more (that was KDM-156; hits come from the recorder), which is what makes
+			// measurement any more (that was the old damage gauge; hits come from the recorder), which is what makes
 			// restoring it safe. Floored just above zero: a hp=0 entity reads as DEAD and untargetable,
 			// so the floor is a liveness detail, not a threshold.
 			const cur = this.world.getEntityCombat(eid);
@@ -2883,14 +2882,14 @@ class SwapSession {
 			this._dbg(`arm ${cid} hp=${hp.toFixed(2)}/${full} (will=${v.will != null ? v.will.toFixed(1) : "?"}) ` +
 				`stun=${v.stunTurns || 0} bondage=${v.bondage || 0} disabled=${v.disabled}`);
 			// (bondage is mirrored above, for every peer — see `_mirrorPeerBondage`.)
-			// KDM-184: …and their own DEFENCES, so the attack that is about to resolve is evaluated
-			// against the real defender's build. KDM-164 gave the victim their resistances, armour and
+			// …and their own DEFENCES, so the attack that is about to resolve is evaluated
+			// against the real defender's build. The victim already gets their resistances, armour and
 			// on-hit events from the moment damage is dealt (KinkyDungeonDealDamage, with them swapped
 			// in); this is the half BEFORE that — hit-or-miss, which KD reads off the ENTITY
 			// (KinkyDungeonGetEvasion:486) and so never saw the peer at all. Same mirror-from-the-peer
 			// rule as the three above: the values are the game's own buff totals for that player.
 			this.world.setAvatarDefenses(eid, v.evasion || 0, v.block || 0);
-			// KDM-200: the DEFEATED-peer exposure is stamped on the SNAPSHOT (see snapshotFor), not on
+			// The DEFEATED-peer exposure is stamped on the SNAPSHOT (see snapshotFor), not on
 			// the world avatar. Marking the world entity `vulnerable` changes real combat — KD grants
 			// crits against a vulnerable target (KinkyDungeonFight.ts:886) — and measured: it killed the
 			// avatar outright, which broke a downed peer keeping agency. The client is where the tie gate
@@ -2899,7 +2898,7 @@ class SwapSession {
 	}
 
 	/**
-	 * KD-100: after the turn, fold each peer avatar's REAL combat result back into its owner's bundle.
+	 * After the turn, fold each peer avatar's REAL combat result back into its owner's bundle.
 	 * The avatar's hp was on the Will scale (armed hp=Will), so `Will = avatar.hp`. A player whose Will
 	 * reaches the floor (real single-player defeat condition) — or whose avatar the engine marks helpless
 	 * (captured, the real enemy-capture rule once bound) — is flagged `defeated` and broadcast.
@@ -2910,14 +2909,14 @@ class SwapSession {
 			if (eid == null) continue;
 			const ec = this.world.getEntityCombat(eid);
 			const v = this.vitalsOf.get(id) || {};
-			// KDM-225 R15/AC6 — an attack starts a war, and the GAME is what says an attack happened.
+			// An attack starts a war, and the GAME is what says an attack happened.
 			//
 			// The signal is KD's own aggro on the avatar (`hostile`/`rage`), not our reading of the
 			// input: the sneak option (`doaggro`) deals NO damage and would be missed by a
 			// damage-based test, while `KDAggroViaDialogue` sets `hostile` for it just the same. So the
 			// gateway records the relationship the game already decided, and classifies nothing.
 			//
-			// Two players ⇒ the attacker is unambiguous. Attribution for a third player is KDM-226's.
+			// Two players ⇒ the attacker is unambiguous. Attribution for a third player is a separate problem.
 			// KD's aggro flag ONLY — deliberately not "any hit landed".
 			//
 			// A previous version also declared war when `peekPeerHits` was non-zero, to close the case
@@ -2934,13 +2933,13 @@ class SwapSession {
 					}
 				}
 			}
-			// KDM-164: the damage is whatever the GAME produced for each hit on this avatar — taken
+			// The damage is whatever the GAME produced for each hit on this avatar — taken
 			// verbatim, WITH its type — not `ARM_HP − hp` converted into Will by us. That conversion was
 			// the invented model: it stitched KD's two damage pipelines (entity vs player) together with
 			// arithmetic the game does not have, threw the damage type away, and bypassed the victim's
-			// own resistances. It is also what caused the KDM-156 potion bug.
+			// own resistances. It is also what caused the old potion bug.
 			const hits = this.world.takePeerHits(eid) || [];
-			// KD-101: restraints the attacker tied onto the avatar THIS turn (avatar is cleared each turn,
+			// Restraints the attacker tied onto the avatar THIS turn (avatar is cleared each turn,
 			// so this is the per-turn delta). De-dup against what's already on the victim's bundle so a
 			// re-detected name isn't double-applied; mirror new ones via the game's real KinkyDungeonAddRestraint.
 			const restraints = (ec && Array.isArray(ec.npcRestraints)) ? ec.npcRestraints : [];
@@ -2959,7 +2958,7 @@ class SwapSession {
 					// lines all apply, exactly as when anything else in the game hurts a player.
 					const before = this.world.getVitals().will;
 					this.world.dealDamage(h.damage, h.type);
-					// KDM-186: the victim is swapped in, so the game's own damage presentation for this hit
+					// The victim is swapped in, so the game's own damage presentation for this hit
 					// is queued against THEM — take it as an event so they see the number once.
 					this._harvestFloaters(id);
 					this._dbg(`reconcile ${id} real damage ${h.damage} ${h.type}: will ` +
@@ -2984,14 +2983,14 @@ class SwapSession {
 				this.bundles.set(id, this.world.capturePlayer());
 				this.vitalsOf.set(id, this.world.getVitals());
 			}
-			// KDM-156: CONSUME the gauge. It measures damage dealt to this peer THIS TURN
-			// KDM-164: the gauge is gone, and with it the KDM-156 bug class by construction. Hits are
+			// CONSUME the gauge. It measures damage dealt to this peer THIS TURN
+			// The gauge is gone, and with it the potion bug class by construction. Hits are
 			// TAKEN from the recorder (`takePeerHits` clears as it reads), so a hit can only ever be
 			// charged once — there is no standing hp delta left to re-read on a later turn. The avatar
 			// is still restored to full so it never dies and the peer stays targetable; that is a
 			// representation detail now, not a measurement.
 			if (eid != null && ec && ec.maxhp != null) {
-				// KDM-311: `aggro = false`. This restore used to stamp `hostile = 9999` as well, and the war
+				// `Aggro = false`. This restore used to stamp `hostile = 9999` as well, and the war
 				// detector above reads `hostile` as KD's own aggro — so NEXT turn it saw our stamp as an
 				// attack and declared war in every co-op session. A PvP peer is re-armed (with aggro) by
 				// `_armPeerEnemies` before anyone acts on it, so nothing that wants the stamp loses it.
@@ -3009,7 +3008,7 @@ class SwapSession {
 				 * So undo the hostility half whenever this player is at war with nobody. The hp
 				 * restore — the only thing this call is wanted for here — stands.
 				 *
-				 * (KDM-311: the `hostile` half is no longer stamped here at all — see above. The
+				 * (the `hostile` half is no longer stamped here at all — see above. The
 				 * `faction` half still is, which is what the truce undo below exists for.)
 				 */
 				// Scoped to pairs that NEGOTIATED a truce, not to "not at war with anyone". Plain co-op
@@ -3026,7 +3025,7 @@ class SwapSession {
 			if (!this.defeated.has(id) && this._isDown(cur)) {
 				this._markDefeated(id, `will=${cur.will.toFixed(2)}`);
 			} else if (this.defeated.has(id) && cur.will != null && !this._isDown(cur)) {
-				// KD-099 "freed": defeat is a state, not a life sentence. Once Will has recovered
+				// "Freed": defeat is a state, not a life sentence. Once Will has recovered
 				// well clear of the floor the player acts again. Hysteresis (a fraction of WillMax,
 				// not the defeat line) so a sliver of regen doesn't flap them up and down.
 				this._markRecovered(id, `will=${cur.will.toFixed(2)}`);
@@ -3034,10 +3033,10 @@ class SwapSession {
 		}
 	}
 
-	/** KDM-164: "down" is KD's own floor — Will at zero. No MP-specific threshold, no hysteresis. */
+	/** "Down" is KD's own floor — Will at zero. No MP-specific threshold, no hysteresis. */
 	_isDown(vitals) { return !!vitals && vitals.will != null && vitals.will <= 0; }
 
-	/** Clear a player's defeat + broadcast a shared "recovered" message to everyone. KD-099 "freed". */
+	/** Clear a player's defeat + broadcast a shared "recovered" message to everyone. */
 	_markRecovered(id, why) {
 		this.defeated.delete(id);
 		this._broadcast(`Player ${id} is back on their feet!`, '#33ff66', 12);
@@ -3045,7 +3044,7 @@ class SwapSession {
 		this._dbg(`RECOVERED ${id} (${why})`);
 	}
 
-	/** Flag a player defeated + broadcast a shared "defeated" message to everyone. KD-099/100. */
+	/** Flag a player defeated + broadcast a shared "defeated" message to everyone. */
 	_markDefeated(id, why) {
 		this.defeated.add(id);
 		this._broadcast(`Player ${id} has been defeated!`, '#ff3333', 12);
@@ -3057,7 +3056,7 @@ class SwapSession {
 	isDefeated(id) { return this.defeated.has(id); }
 
 	/**
-	 * KDM-261 — is this player still able to come and free somebody?
+	 * Is this player still able to come and free somebody?
 	 *
 	 * Three conditions, none of them ours:
 	 *   - they are seated in the session at all;
@@ -3079,17 +3078,17 @@ class SwapSession {
 		return !(v.defeatTurns > 0);
 	}
 
-	/** KDM-261 R1 — is anybody OTHER than `actingId` still free? The whole input to the capture rule. */
+	/** Is anybody OTHER than `actingId` still free? The whole input to the capture rule. */
 	_anyPartnerFree(actingId) {
 		return this._joined.some((cid) => cid !== actingId && this._isFree(cid));
 	}
 
 	/**
-	 * KDM-261 R6 — a capture was held in place. Everyone hears it, once, from the proxy.
+	 * A capture was held in place. Everyone hears it, once, from the proxy.
 	 *
 	 * Deliberately shaped like `_markDefeated`'s line rather than KD's: this is a fact about the
 	 * SESSION (there are two of you, and that is why the jail door did not open), which is exactly
-	 * the class of message the gateway is the only one who can say (KDM-165).
+	 * the class of message the gateway is the only one who can say.
 	 */
 	_announceCaptureHeld(id) {
 		this._broadcast(`${this.displayNameOf(id)} has been overpowered — free them before the party falls!`,
@@ -3099,7 +3098,7 @@ class SwapSession {
 	}
 
 	/**
-	 * KDM-240 A2 — hand the world the party facts it needs to decide a CO-LOCATED level goal.
+	 * Hand the world the party facts it needs to decide a CO-LOCATED level goal.
 	 *
 	 * `actingId` is excluded: the gate asks "is everyone ELSE here", and a player who counted as their
 	 * own peer would be blocked by themselves forever. Down players are named rather than positioned,
@@ -3123,7 +3122,7 @@ class SwapSession {
 	}
 
 	/**
-	 * KDM-240 / KDM-261 — the world changed under the party; make every player whole again.
+	 * The world changed under the party; make every player whole again.
 	 *
 	 * ONE loop, two callers, because they want the same three things per player and differ only in
 	 * where that player ends up:
@@ -3172,7 +3171,7 @@ class SwapSession {
 	}
 
 	/**
-	 * KDM-240 F1 — guarantee this player HAS an avatar at (x, y), and answer with its entity id.
+	 * Guarantee this player HAS an avatar at (x, y), and answer with its entity id.
 	 *
 	 * The single place an avatar comes into existence. `moveAvatar` returns `null` when the entity id
 	 * no longer resolves (`headless-host.js`), which is the game telling us the entity is gone — most
@@ -3183,7 +3182,7 @@ class SwapSession {
 	_ensureAvatar(clientId, x, y) {
 		const eid = this.avatars.get(clientId);
 		if (eid != null && this.world.moveAvatar(eid, x, y)) return eid;
-		// KDM-256 R2 — the avatar the OTHER players see is dressed from the same package. `style` and
+		// The avatar the OTHER players see is dressed from the same package. `style` and
 		// `outfit` are already carried by `ENT_FIELDS`, so the look reaches the peer for free once it
 		// is on the entity; what this passes is which look, instead of `spawnAvatar`'s constant.
 		const av = this.world.spawnAvatar(x, y, this.displayNameOf(clientId), this.characterOf(clientId));
@@ -3194,7 +3193,7 @@ class SwapSession {
 	}
 
 	/**
-	 * KDM-240 A3/R4 — the party has arrived on a different map. Put everyone on it, and say so.
+	 * The party has arrived on a different map. Put everyone on it, and say so.
 	 *
 	 * EVERY player is re-placed, including `actingId` — deliberately, and it is not a mistake that the
 	 * one player KD already positioned is moved too. `landingTiles` anchors on exactly where KD put
@@ -3208,12 +3207,12 @@ class SwapSession {
 	_onMapChanged(actingId, mapId) {
 		const n = this._joined.length;
 		this._reseatParty(actingId, (n ? this.world.landingTiles(n) : []) || []);
-		// KDM-263 A2: an unfinished argument about how to get here is over now that we are here.
+		// An unfinished argument about how to get here is over now that we are here.
 		this._resetJourneyProposal();
 		this._resetPerkProposal();
 		this._announceMapChange(mapId);
 		/*
-		 * KDM-275 R5 — the party is on a new map, so the run is worth keeping.
+		 * The party is on a new map, so the run is worth keeping.
 		 *
 		 * UNCONDITIONAL, in every save mode, because KD's own `KDPostStairSave`
 		 * (`KDStairActions.ts:265-275`) is unconditional too and its Save Codes description promises
@@ -3232,7 +3231,7 @@ class SwapSession {
 		 */
 		this._exportDue = 'floor';
 		this._sinceExport = 0;
-		// KDM-284 — the descent that got us here ran KD's variant prune, and the wrap withheld every
+		// The descent that got us here ran KD's variant prune, and the wrap withheld every
 		// deletion it proposed. Settle them now: `_reseatParty` above has just re-captured every seat,
 		// so this is the freshest the evidence will ever be.
 		this._sweepVariants();
@@ -3240,7 +3239,7 @@ class SwapSession {
 	}
 
 	/**
-	 * KDM-284 — carry out the variant deletions KD proposed during the transition, against ALL seats.
+	 * Carry out the variant deletions KD proposed during the transition, against ALL seats.
 	 *
 	 * The other half of `kd-variant-registry.js` (read its header for why the work is split here).
 	 * Stock KD's prune deletes every variant it cannot find in the LIVE player's inventory, which on a
@@ -3262,8 +3261,8 @@ class SwapSession {
 	 * ── NO EVIDENCE ⇒ NO DELETION ───────────────────────────────────────────────────────────────────
 	 * If a seat's state cannot be serialised, we do not have the full picture, and sweeping on a
 	 * partial one is exactly how a partner's enchanted gear disappears. Bail instead: the pending names
-	 * are dropped, nothing is deleted, and the registry keeps them for the rest of the run — KDM-245's
-	 * behaviour, which is the safe floor this design never falls below.
+	 * are dropped, nothing is deleted, and the registry keeps them for the rest of the run — the
+	 * original behaviour, which is the safe floor this design never falls below.
 	 *
 	 * @returns {number} entries actually removed from the shared registries
 	 */
@@ -3294,13 +3293,13 @@ class SwapSession {
 	}
 
 	/**
-	 * KDM-165 / KDM-240 R6: the party moved together, so tell everyone — EXPLICITLY, in the proxy's own
+	 * The party moved together, so tell everyone — EXPLICITLY, in the proxy's own
 	 * words. This replaces the old behaviour of duplicating whatever game text happened to be emitted
 	 * during the transition into every player's log: those lines are the acting player's (they passed
 	 * that player's vision check), while "we are all somewhere else now" is genuinely session-level and
 	 * is ours to say.
 	 *
-	 * KDM-240 widened it from "descends to floor N": the party can arrive somewhere without the floor
+	 * It was widened from "descends to floor N": the party can arrive somewhere without the floor
 	 * number changing at all (a side room, the hub, a jail), and announcing a descent that did not
 	 * happen is worse than announcing nothing.
 	 */
@@ -3313,7 +3312,7 @@ class SwapSession {
 	}
 
 	/*
-	 * KDM-165: the `_isPersonalMessage` heuristic that lived here is DELETED. It decided a message's
+	 * The `_isPersonalMessage` heuristic that lived here is DELETED. It decided a message's
 	 * audience by matching `/^you\b|^your\b|^you'/i` against the rendered text — the gateway
 	 * interpreting game content, in one language, to guess something the swap window already knows
 	 * exactly. See `_advanceTurn` for what replaced it.
@@ -3321,7 +3320,7 @@ class SwapSession {
 
 
 	/**
-	 * Load a mod's code server-side (KD-074). Before the session starts it's queued and loaded at
+	 * Load a mod's code server-side. Before the session starts it's queued and loaded at
 	 * `_start`; after start it's eval'd into the live world immediately. One world ⇒ one load.
 	 */
 	loadMod(code) {
@@ -3334,7 +3333,7 @@ class SwapSession {
 	getEnemyByName(name) { return this.world.getEnemyByName(name); }
 
 
-	/** Enable/disable PvP between a specific PAIR of players (KD-094, "PvP starts between A and B"). */
+	/** Enable/disable PvP between a specific PAIR of players ("PvP starts between A and B"). */
 	setPvPPair(a, b, on) {
 		if (on === false) this.rel.makePeace(a, b); else this.rel.declareWar(a, b);
 		return this._isPvP(a, b);
@@ -3343,7 +3342,7 @@ class SwapSession {
 	/**
 	 * Are players `a` and `b` in a PvP relationship?
 	 *
-	 * KDM-227 — PEACE IS CHECKED FIRST, and that ordering is the whole point. This used to open with
+	 * PEACE IS CHECKED FIRST, and that ordering is the whole point. This used to open with
 	 * `if (this.pvp) return true`, so under the global `KD_PVP` flag — the mode every PvP session and
 	 * every PvP UAT runs in — ending a war per pair was a NO-OP. An accepted truce has to be
 	 * expressible as something that beats the global switch, not merely as the absence of a per-pair
@@ -3358,14 +3357,14 @@ class SwapSession {
 	/**
 	 * Say something to the WHOLE party, in the proxy's own words.
 	 *
-	 * KDM-263: extracted when this became the fifth copy of "render one line through the game's own
+	 * Extracted when this became the fifth copy of "render one line through the game's own
 	 * feedback, then push the resulting entries into every joined player's log". The four before it
 	 * (peace settled, defeated, recovered, the party arrived) were identical but for the text and the
 	 * colour, and each was free to get the `|| []` guard or the `_joined` loop subtly wrong.
 	 *
 	 * This is the only sanctioned way for the gateway to address everyone. It is NOT how game text
 	 * reaches a player: KD gates its own messages by vision at the source, so per-player game log
-	 * lines are captured inside that player's swap window and never broadcast (KDM-165). Broadcasting
+	 * lines are captured inside that player's swap window and never broadcast. Broadcasting
 	 * is reserved for facts about the SESSION, which the gateway alone knows.
 	 */
 	_broadcast(text, color = '#88ccff', time = 10, filter = 'Self') {
@@ -3376,14 +3375,14 @@ class SwapSession {
 	}
 
 	/**
-	 * KDM-246 — one player's words, to the whole party, under the `Chat` log filter.
+	 * One player's words, to the whole party, under the `Chat` log filter.
 	 *
 	 * WHY THIS REUSES `_broadcast` RATHER THAN COPYING IT. The requirements drew a sharp line —
 	 * `_broadcast` is the proxy speaking in its OWN words about the session, chat is a person
 	 * speaking — and that line is real. But mechanically the two are the same four lines ("render
 	 * through the game's own feedback, then push the entries into every joined player's log"), and
 	 * `_broadcast` exists precisely because that had been written five times over (see its comment
-	 * above). A sixth copy for chat would re-create the bug KDM-263 paid to remove.
+	 * above). A sixth copy for chat would bring back the drift between copies that `_broadcast` removed.
 	 *
 	 * So the separation lives where a player can actually see it — the `Chat` filter tag, and a
 	 * method that is not called `broadcast` — instead of in a duplicated loop.
@@ -3395,7 +3394,7 @@ class SwapSession {
 		return this._broadcast(`${who}: ${text}`, CHAT_COLOR, 10, 'Chat');
 	}
 
-	/** Append message-log entries to a player's personal log, trimmed to maxLog (KD-098). */
+	/** Append message-log entries to a player's personal log, trimmed to maxLog. */
 	_pushLog(id, entries) {
 		if (!entries || !entries.length) return;
 		const lg = this.logs.get(id) || [];
@@ -3404,7 +3403,7 @@ class SwapSession {
 	}
 
 	/**
-	 * KDM-162: read a player's live vitals (Will, stamina, distraction, …) on the server.
+	 * Read a player's live vitals (Will, stamina, distraction, …) on the server.
 	 *
 	 * Callers used to reach these through `snapshotFor(id).stats.will`, which made the RENDER WIRE
 	 * FORMAT double as the server's read API — so a field could not be removed from the wire without
@@ -3421,7 +3420,7 @@ class SwapSession {
 	}
 
 	/**
-	 * KDM-162: the wire form of a player's state bundle — the capture minus the shared world.
+	 * The wire form of a player's state bundle — the capture minus the shared world.
 	 *
 	 * Same split `restorePlayer` applies on the server (`KDGAMEDATA_WORLD_KEYS`), applied once here so
 	 * the client can adopt everything it receives without knowing the rule. Shallow copy: the bundle
@@ -3439,7 +3438,7 @@ class SwapSession {
 	}
 
 	/**
-	 * KDM-196 — presentation output never crosses the wire as STATE, only as a sequenced event.
+	 * Presentation output never crosses the wire as STATE, only as a sequenced event.
 	 *
 	 * KDDamageQueue could be excluded wholesale (GLOBAL_BLACKLIST) because the whole global is
 	 * presentation. `KDEventData` is a MIXED bag — `SlimeLevel`/`SlimeLevelStart`/`CurseHintTick`/
@@ -3483,11 +3482,11 @@ class SwapSession {
 	}
 
 	/**
-	 * Fisher-Yates over a SEEDED node-side PRNG (KDM-224).
+	 * Fisher-Yates over a SEEDED node-side PRNG.
 	 *
 	 * This used to call `Math.random()`, so turn order was a fresh coin flip on every run even though
 	 * the session takes a `seed` and hands it to the world (`this.world.init({seed})`). Turn order is
-	 * not a detail: KDM-208 established that intra-turn ORDER decides real outcomes (a peer who
+	 * not a detail: the contested-tile veto established that intra-turn ORDER decides real outcomes (a peer who
 	 * arrived this turn vs one who stood still), so an unseeded shuffle made every PvP session
 	 * irreproducible — a test could pass ten times and fail the eleventh with nothing changed, and no
 	 * way to replay the sequence that broke it.
@@ -3548,7 +3547,7 @@ class SwapSession {
 	 * (render-state v1) — exactly what KDRenderClient.apply() consumes in the browser.
 	 */
 	/**
-	 * KDM-186 — queue a ONE-SHOT EVENT for a client, stamped with a fresh sequence id.
+	 * Queue a ONE-SHOT EVENT for a client, stamped with a fresh sequence id.
 	 *
 	 * The id is issued per real occurrence, never per snapshot that carries it, so two identical hits
 	 * in a row are two events (a content hash would wrongly collapse them). The client applies each
@@ -3576,7 +3575,7 @@ class SwapSession {
 	}
 
 	/**
-	 * KDM-196 — the same harvest for the NOISE presentation queues (ripples + the sound echo).
+	 * The same harvest for the NOISE presentation queues (ripples + the sound echo).
 	 *
 	 * Same criterion as the floaters, same two call sites, so a queue cannot be drained on one path
 	 * and left to accumulate on the other: whatever the draw layer would have consumed is taken here
@@ -3613,9 +3612,9 @@ class SwapSession {
 		if (!bundle) throw new Error(`unknown player ${clientId}`);
 		this._restorePlayer(clientId, bundle);
 		const snap = this.world.serializeRenderState();
-		// KDM-162: ship this player's OWN state bundle — the same generic capture the swap model uses
-		// (KDM-161), not a curated view of it. The browser runs a full KD instance; it needs its state,
-		// not our summary of it. Measured (KDM-162 probe6): a client that adopts this has ZERO wrong
+		// Ship this player's OWN state bundle — the same generic capture the swap model uses,
+		// not a curated view of it. The browser runs a full KD instance; it needs its state,
+		// not our summary of it. Measured (by probe): a client that adopts this has ZERO wrong
 		// player-state fields across 4949 candidate globals, and needs no re-derivation at all.
 		//
 		// World-scoped KDGameData keys are stripped HERE rather than skipped on the client, so the
@@ -3624,7 +3623,7 @@ class SwapSession {
 		// to maintain).
 		snap.bundle = this._clientBundle(bundle);
 		/*
-		 * KDM-269 — every drop channel reaches the browser, so a dropped input is visible instead of
+		 * Every drop channel reaches the browser, so a dropped input is visible instead of
 		 * being an indistinguishable no-op.
 		 *
 		 * This loop is the line that used to be forgotten. Four hand-written `snap.x = this.xReport()`
@@ -3635,7 +3634,7 @@ class SwapSession {
 		 * Each field is additive and separate (R2): an older client ignores one it does not know.
 		 */
 		for (const c of DROP_CHANNELS) snap[c.field] = this[c.report]();
-		// KD-098: the headless world never runs the draw-ease loop, so entities' visual_x/visual_y
+		// The headless world never runs the draw-ease loop, so entities' visual_x/visual_y
 		// stay stuck near spawn while x/y jump via AI — the client then re-eases from the stale
 		// spot each turn (the "Rat teleports from its initial tile through several tiles"). Snap
 		// visual→real so every entity renders at its authoritative position. Turn-based ⇒ snapping
@@ -3648,12 +3647,12 @@ class SwapSession {
 		if (snap.map && Array.isArray(snap.map.Entities) && ownAvatar != null) {
 			snap.map.Entities = snap.map.Entities.filter((e) => e.id !== ownAvatar);
 		}
-		// KD-090: replace the shared world log with THIS client's personal log so each
+		// Replace the shared world log with THIS client's personal log so each
 		// player sees only their own relevant messages (not the other player's actions).
 		if (snap.messages) snap.messages.log = (this.logs.get(clientId) || []).slice(-this.maxLog);
-		// KD-098: this turn's PvP floating combat text, scoped to this client (victim or attacker).
+		// This turn's PvP floating combat text, scoped to this client (victim or attacker).
 		const am = this.actionMsgOf.get(clientId);
-		// KDM-186: the event travels WITH its sequence id, so a client that has already applied it can
+		// The event travels WITH its sequence id, so a client that has already applied it can
 		// ignore the copy carried by every later snapshot. Without this, each snapshot re-stamped the
 		// last hit's floater — visible as an ever-growing pile while the mouse moved.
 		if (am && snap.messages) {
@@ -3662,10 +3661,10 @@ class SwapSession {
 			snap.messages.actionTime = 2;
 			snap.messages.actionSeq = am.seq || 0;
 		}
-		// KDM-186: one-shot events ride their OWN channel, each with a sequence the client applies at
+		// One-shot events ride their OWN channel, each with a sequence the client applies at
 		// most once. Take-once on delivery so an undelivered backlog cannot grow without bound.
 		snap.events = this._takePendingEvents(clientId);
-		// KDM-225 A4: the peace menu re-reads this every frame, so it is STANDING STATE, not an event.
+		// The peace menu re-reads this every frame, so it is STANDING STATE, not an event.
 		// Deliberately NOT in `VERBATIM_CHANNELS` (ws-bridge.js:40) — that list is for consume-once
 		// channels, and this one is a value the delta may legitimately elide when it has not changed.
 		snap.coop = {
@@ -3673,14 +3672,14 @@ class SwapSession {
 			peaceOffer: this.rel.pendingFor(clientId),
 			canOffer: this._joined.filter((id) => id !== clientId && this._canOffer(clientId, id)),
 		};
-		// KD-094: peers in a PvP relationship with this client render+target as Enemy faction
+		// Peers in a PvP relationship with this client render+target as Enemy faction
 		// (stock attack mechanics then "just work" — the client originates a normal doattack).
 		if (snap.map && Array.isArray(snap.map.Entities)) {
 			for (const [cid, eid] of this.avatars.entries()) {
 				if (cid === clientId) continue;
 				const ent = snap.map.Entities.find((e) => e.id === eid);
 				if (!ent) continue;
-				// KD-098: drive the peer's HP bar from their REAL defeat meter (Will). The avatar's
+				// Drive the peer's HP bar from their REAL defeat meter (Will). The avatar's
 				// own hp is a meaningless static 100; map Will→hp so the bar shows how close this
 				// player is to defeat (matches their WP corner gauge). Snapshot ent is a deep clone,
 				// so mutating it is per-client and safe.
@@ -3692,9 +3691,9 @@ class SwapSession {
 					ent.hp = Math.max(1, Math.round((v.will / v.willMax) * maxhp));
 					ent.visual_hp = ent.hp;
 				}
-				// KD-094: PvP peers render+target as Enemy faction (red bar; stock attack mechanics).
+				// PvP peers render+target as Enemy faction (red bar; stock attack mechanics).
 				if (this._isPvP(clientId, cid)) { ent.faction = 'Enemy'; ent.hostile = 9999; }
-				// KDM-200: a DEFEATED peer is marked EXPOSED on the snapshot the client evaluates.
+				// A DEFEATED peer is marked EXPOSED on the snapshot the client evaluates.
 				//
 				// It must be stamped here, not only at arm time: `vulnerable` is a per-turn flag the
 				// ENGINE decays (KinkyDungeonEnemies.ts:4650, `vulnerable -= delta`), so a value set
@@ -3713,9 +3712,9 @@ class SwapSession {
 				}
 			}
 		}
-		// KD-099: expose the defeated players so the client HUD can mark them (down/incapacitated).
+		// Expose the defeated players so the client HUD can mark them (down/incapacitated).
 		snap.defeatedPlayers = [...this.defeated];
-		// KD-101 UAT: tell the client which carryable loose-restraint item to seed (KD_START_RESTRAINT),
+		// Tell the client which carryable loose-restraint item to seed (KD_START_RESTRAINT),
 		// so the standard #coop=<id> URL + server env is enough — no per-tab URL param needed. The client
 		// adds it once (the Items inventory is client-local; snapshots don't sync it).
 		if (this.startRestraint) snap.startItem = this.startRestraint;
@@ -3725,7 +3724,7 @@ class SwapSession {
 }
 
 /*
- * KDM-269 — the drop reports, defined once from the registry.
+ * The drop reports, defined once from the registry.
  *
  * On the PROTOTYPE rather than assigned per-instance in the constructor: these are methods, and a
  * per-instance closure would put four functions on every session and would not show up on

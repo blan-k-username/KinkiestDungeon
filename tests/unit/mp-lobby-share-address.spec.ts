@@ -1,5 +1,5 @@
 /**
- * KDM-287 — the Host screen paints an address a friend can actually use.
+ * The Host screen paints an address a friend can actually use.
  *
  * The real `client/coop-lobby.js` is loaded into a `vm` context, which IS the bundle's global scope
  * as a classic script sees it (same harness and same reasoning as `mp-chat-client.spec.ts` /
@@ -27,7 +27,7 @@ import { createContext, runInContext } from 'node:vm';
 import { resolve } from 'node:path';
 
 const SRC = resolve(__dirname, '../../tools/mp-server/client/coop-lobby.js');
-// KDM-281 — the lobby takes its strings from the shared table now, and holds a HARD reference to it
+// The lobby takes its strings from the shared table now, and holds a HARD reference to it
 // (window.KDMPText). It is injected ahead of the lobby in demo-server.js, so the rig loads it first
 // for the same reason: without it the file throws and this spec would be testing nothing.
 const TEXT_SRC = resolve(__dirname, '../../tools/mp-server/client/coop-text.js');
@@ -66,7 +66,7 @@ function drawHostFrame(locHost: string, share?: string[] | null) {
 	runInContext(readFileSync(SRC, 'utf8'), ctx, { filename: 'coop-lobby.js' });
 
 	const lobby = ctx.window.KDMPLobby;
-	// KDM-293 — 'view' was renamed to 'phase' and 'host' became 'waiting' when the root menu went.
+	// 'View' was renamed to 'phase' and 'host' became 'waiting' when the root menu went.
 	lobby.phase = 'waiting';
 	if (share !== undefined) lobby.share = share as any;
 	ctx.KinkyDungeonRun();
@@ -79,7 +79,7 @@ const blob = (painted: Painted[]) => painted.map((p) => p.text).join(' │ ');
 
 const LAN = ['192.168.1.24:8090', '10.0.0.9:8090', '172.17.0.1:8090', '100.64.0.2:8090'];
 
-describe('KDM-287 — the address the Host screen offers to share', () => {
+describe('the address the Host screen offers to share', () => {
 	it('AC1 — a host on localhost is NOT shown localhost', () => {
 		const { painted } = drawHostFrame('localhost:8090', LAN);
 		expect(blob(painted)).not.toMatch(/localhost/);

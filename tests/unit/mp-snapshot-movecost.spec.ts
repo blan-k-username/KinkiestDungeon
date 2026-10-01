@@ -29,7 +29,7 @@ describe('render snapshot: movement cost', () => {
 		const a = s.snapshotFor('A');
 		const b = s.snapshotFor('B');
 
-		// KDM-162: `slowLevel` used to be RECOMPUTED server-side and shipped in a curated `stats`
+		// `SlowLevel` used to be RECOMPUTED server-side and shipped in a curated `stats`
 		// block — a derived value crossing the network, the exact thing that goes stale. It now
 		// travels as ordinary per-player state inside the generic bundle, so this asserts the same
 		// player-visible property at its new address.

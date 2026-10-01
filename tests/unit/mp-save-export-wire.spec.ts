@@ -1,5 +1,5 @@
 /**
- * Node-layer (Vitest) — KDM-244 on the WIRE: who may ask for the run, and who receives it.
+ * Node-layer (Vitest) — the save export on the WIRE: who may ask for the run, and who receives it.
  *
  * ── WHY THIS FILE EXISTS SEPARATELY FROM mp-save-export.spec.ts ───────────────────────────────────
  * R-h. `save_export` could be produced correctly by the session, dropped on the way out, and the
@@ -8,13 +8,13 @@
  * assert-at-the-deciding-layer). The session-level behaviour is `mp-save-export.spec.ts`'s job and
  * is not repeated.
  *
- * ── WHAT THIS FILE NO LONGER OWNS (KDM-274) ───────────────────────────────────────────────────────
+ * ── WHAT THIS FILE NO LONGER OWNS ───────────────────────────────────────────────────────
  * When it was written, nothing at all watched SERVER → CLIENT, so it also carried the GENERIC
  * claims: that a declared outbound field reaches the socket, and that a host-only payload does not
  * reach a guest. `tests/unit/mp-outbound-fields.spec.ts` now declares both for every outbound kind
  * (`OUTBOUND_MESSAGES`) and holds `save_export` to them like any other message — which is the point
  * of generalising: a per-feature test protects the field whose author thought of it and nothing
- * else, exactly as KDM-260 found on the inbound side.
+ * else, exactly as the join-field work found on the inbound side.
  *
  * So what stays here is what is genuinely ABOUT THE EXPORT and could not be stated generically: that
  * the bytes decode to this run at this floor, stripped of every avatar; that `reason` distinguishes
@@ -24,7 +24,7 @@
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { MPClient } from '../helpers/mp-ws-client';
-// KDM-275: the SHARED descent helper. Its doc names two traps that make a hand-rolled descent pass
+// The SHARED descent helper. Its doc names two traps that make a hand-rolled descent pass
 // without moving the party; a third copy would be a third chance to hit them.
 import { descend, mapId } from './helpers/world';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -57,7 +57,7 @@ async function seated(seed: string) {
 	return { bridge, A, B };
 }
 
-describe('KDM-244 wire — the host asks, and the run comes back', () => {
+describe('save export wire — the host asks, and the run comes back', () => {
 	let bridge: any, A: MPClient, B: MPClient;
 
 	beforeAll(async () => { ({ bridge, A, B } = await seated('kdm244-wire')); }, BOOT);
@@ -68,7 +68,7 @@ describe('KDM-244 wire — the host asks, and the run comes back', () => {
 		const m: any = await A.next((x: any) => x.type === 'save_export' || x.type === 'error');
 		expect(m.type, m.error || '').toBe('save_export');
 		// Not merely "a string arrived" — that `save` is present at all is the generic guard's job
-		// now (KDM-274). The payload has to be THE RUN. Decoded with the SERVER's own
+		// now. The payload has to be THE RUN. Decoded with the SERVER's own
 		// world, so this checks the bytes that crossed the wire rather than re-deriving them.
 		bridge.session.world._context.__KD_WIRE_CHK = m.save;
 		const decoded = bridge.session.world.eval(
@@ -87,7 +87,7 @@ describe('KDM-244 wire — the host asks, and the run comes back', () => {
 	}, BOOT);
 
 	/*
-	 * KDM-274 — "and the guest is not sent one as a side effect of the HOST asking" used to be a test
+	 * "And the guest is not sent one as a side effect of the HOST asking" used to be a test
 	 * here. It was the generic claim, not an export one: a broadcast written where a unicast was
 	 * meant, which is the commonest way ANY host-only payload reaches everybody.
 	 *
@@ -107,7 +107,7 @@ describe('KDM-244 wire — the host asks, and the run comes back', () => {
 	}, BOOT);
 });
 
-describe('KDM-244 wire — going solo hands the host their run unprompted', () => {
+describe('save export wire — going solo hands the host their run unprompted', () => {
 	let bridge: any, A: MPClient, B: MPClient;
 
 	beforeAll(async () => {
@@ -146,17 +146,17 @@ describe('KDM-244 wire — going solo hands the host their run unprompted', () =
 });
 
 /**
- * KDM-275 on the WIRE — the AUTOMATIC export reaches the host and nobody else.
+ * The automatic save on the WIRE — the AUTOMATIC export reaches the host and nobody else.
  *
  * Here rather than in `mp-save-autoexport.spec.ts` for the reason this whole file exists (R-h, and
- * now [[KDM-274]]): nothing guards the server→client direction, so the session could arm the flag
+ * now the outbound-field guard): nothing guards the server→client direction, so the session could arm the flag
  * perfectly, the bridge could drop it, and every session-level test would stay green. The `reason`
  * field is the specific thing at risk — it is what tells an automatic export from a requested one,
  * and it is new (memory `assert_at_the_deciding_layer`).
  *
  * It reuses `seated()` above rather than growing a second copy of the same fixture.
  */
-describe('KDM-275 wire — the run saves itself, to the host only', () => {
+describe('autosave wire — the run saves itself, to the host only', () => {
 	let bridge: any, A: MPClient, B: MPClient;
 
 	beforeAll(async () => { ({ bridge, A, B } = await seated('kdm275-wire')); }, BOOT);
@@ -174,7 +174,7 @@ describe('KDM-275 wire — the run saves itself, to the host only', () => {
 		const m: any = await A.next((x: any) => x.type === 'save_export' || x.type === 'error');
 		expect(m.type, m.error || '').toBe('save_export');
 		// `reason` is what tells an automatic export from a requested one. That it ARRIVES AT ALL is
-		// now a generic promise (KDM-274, `OUTBOUND_MESSAGES.save_export.required`); which VALUE this
+		// now a generic promise (`OUTBOUND_MESSAGES.save_export.required`); which VALUE this
 		// particular trigger produces is not, and is the export-specific half that stays here.
 		expect(m.reason, 'the client tells automatic from requested by this alone').toBe('floor');
 

@@ -1,5 +1,5 @@
 /**
- * Node-layer (Vitest) tests for KD-082 — real in-game integration.
+ * Node-layer (Vitest) tests for real in-game integration.
  *
  * Proves the four deep pillars the earlier PoCs only faked (value-copy reconcile,
  * harness-injected PvP, enemy moving toward a coordinate):

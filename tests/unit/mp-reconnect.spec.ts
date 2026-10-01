@@ -1,7 +1,7 @@
 /**
- * KDM-252 — a reconnecting player resumes THEIR OWN character, not a copy of it.
+ * A reconnecting player resumes THEIR OWN character, not a copy of it.
  *
- * KDM-250 noticed the drop; KDM-251 made the pause honest. This is the slice that makes the waiting
+ * The heartbeat notices the drop; the pause is honest about it. This is the slice that makes the waiting
  * pay off: the same `clientId` comes back, takes back its own seat and bundle, and the session runs
  * again from where it stopped.
  *
@@ -12,14 +12,14 @@
  * (the OTHER player's value, untouched) so a test that stamped nothing cannot pass.
  *
  * WHY THE HOST IS THE ONE WHO DROPS. Only a guest who has lost the HOST gets a dialogue put in front
- * of them (KDM-251 S5), so dropping the host is the only arrangement in which "the survivor's modal
+ * of them, so dropping the host is the only arrangement in which "the survivor's modal
  * closes by itself" is observable at all.
  *
  * ONE BOOT, ORDERED CASES. A session boot is ~30 s of real game bundle; the cases below share it and
  * run in order — drop, resume, then the terminal `gone` case LAST, because `gone` is terminal by
  * construction and would poison anything after it.
  *
- * Requirement ids refer to the `## Requirements` section of KDM-252 (EARS text in KDM-234).
+ * The requirement ids on the tests name the behaviours this spec pins.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { MPClient, seatPair } from '../helpers/mp-ws-client';
@@ -67,18 +67,18 @@ function dialogueOf(session: any, clientId: string): string {
 	);
 }
 
-describe('KDM-252 — the same character comes back', () => {
+describe('the same character comes back', () => {
 	let bridge: any = null;
 	let A: MPClient;      // seat 0 — the HOST, the one who drops
 	let B: MPClient;      // seat 1 — the guest, the survivor
 	let A2: MPClient;     // the host's SECOND socket — the reconnect
 
 	beforeAll(async () => {
-		// No heartbeat: every drop below is a socket close, which is its own evidence (KDM-250 E2).
+		// No heartbeat: every drop below is a socket close, which is its own evidence.
 		// A timer running underneath would make the cases race a sweep they are not testing.
 		bridge = new WSBridge({ requiredPlayers: 2, seed: 'reconnect', hbIntervalMs: 0 });
 		const port = await bridge.listen(0);
-		// KDM-255 — through the join gate, the only road in. The RECONNECT frames below stay roleless
+		// Through the join gate, the only road in. The RECONNECT frames below stay roleless
 		// on purpose: a known id re-attaching short-circuits above the role branch, and that is
 		// precisely the behaviour these cases exist to pin.
 		({ host: A, guest: B } = await seatPair(port));
@@ -103,8 +103,8 @@ describe('KDM-252 — the same character comes back', () => {
 		expect(gone.clientId).toBe('A');
 		expect(gone.role, 'the roles are not symmetric — the guest must know it was the HOST').toBe('host');
 		expect(bridge.presence.state('A')).toBe('missing');
-		expect(bridge.session.paused, 'KDM-251: the turn loop stops').toBe(true);
-		expect(dialogueOf(bridge.session, 'B'), 'the survivor is told in the game (KDM-251 S5)')
+		expect(bridge.session.paused, 'the turn loop stops').toBe(true);
+		expect(dialogueOf(bridge.session, 'B'), 'the survivor is told in the game')
 			.toBe(HOST_LOST_DIALOGUE);
 	}, BOOT_TIMEOUT);
 
@@ -193,7 +193,7 @@ describe('KDM-252 — the same character comes back', () => {
 			(f) => fs.readFileSync(`${__dirname}/../../tools/mp-server/${f}`, 'utf8'),
 		).join('\n');
 		expect(/reconnect(Deadline|Timeout|Grace|Limit|Attempts)/i.test(src),
-			'a reconnect deadline would contradict KDM-234 D7 — the survivor decides, not a timer')
+			'a reconnect deadline would contradict the design — the survivor decides, not a timer')
 			.toBe(false);
 		// The heartbeat sweep is the ONLY timer allowed to touch a seat, and it lives in the bridge:
 		// it moves `connected` → `missing`, never `missing` → `gone`. Presence itself owns no clock at

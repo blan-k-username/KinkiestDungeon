@@ -1,7 +1,7 @@
 /**
- * Node-layer (Vitest) test for KD-090 — per-player message log.
+ * Node-layer (Vitest) test for the per-player message log.
  *
- * Bug (found in KD-089 UAT): both co-op clients saw an IDENTICAL chat log (the shared
+ * Bug (found in UAT): both co-op clients saw an IDENTICAL chat log (the shared
  * world `KinkyDungeonMessageLog`), so each player saw the OTHER's action phrased as "You …".
  *
  * Fix (server-side only): SwapSession captures each player's message-log DELTA during their
@@ -18,7 +18,7 @@ const BOOT_TIMEOUT = 240_000;
 const logTexts = (s: any, id: string): string[] =>
 	(s.snapshotFor(id).messages.log || []).map((m: any) => (m && m.text) != null ? m.text : String(m));
 
-describe('Per-player message log over the swap path (KD-090)', () => {
+describe('Per-player message log over the swap path', () => {
 	let s: any;
 
 	beforeAll(() => {
@@ -36,15 +36,15 @@ describe('Per-player message log over the swap path (KD-090)', () => {
 	}, BOOT_TIMEOUT);
 
 	/**
-	 * KDM-165: this used to assert that a NON-second-person line emitted in A's turn reached B, while a
+	 * This used to assert that a NON-second-person line emitted in A's turn reached B, while a
 	 * "You …" line stayed private — a split only expressible by matching the message TEXT, in English.
 	 * That rule is deleted: the swap window decides, so everything emitted in A's turn is A's.
 	 *
-	 * The bug this test was written for (KD-090: both clients saw one identical log) is unchanged and
+	 * The bug this test was written for (both clients saw one identical log) is unchanged and
 	 * still asserted — the logs must diverge, and A's lines must not appear in B's log. Language
 	 * independence is covered in `mp-log-attribution.spec.ts`.
 	 */
-	it('a player’s lines are private to them; the two logs diverge (KD-090)', () => {
+	it('a player’s lines are private to them; the two logs diverge', () => {
 		// Both start from the same shared intro log (seeded equally).
 		const a0 = logTexts(s, 'A');
 		const b0 = logTexts(s, 'B');
@@ -99,7 +99,7 @@ describe('Per-player message log over the swap path (KD-090)', () => {
 		const a1 = logTexts(s, 'A');
 		const b1 = logTexts(s, 'B');
 
-		// KDM-165: the party-wide event still reaches everyone, but as an EXPLICIT session
+		// The party-wide event still reaches everyone, but as an EXPLICIT session
 		// announcement rather than by duplicating whatever game text the transition happened to emit.
 		// Those game lines are the acting player's (they passed that player's vision check); "we are
 		// all on floor N now" is session-level and is the proxy's to say.

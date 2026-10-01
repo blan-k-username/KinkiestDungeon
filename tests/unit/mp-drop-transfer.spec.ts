@@ -1,5 +1,5 @@
 /**
- * Node-layer (Vitest) — KDM-245: giving an item to a co-op partner by DROPPING it.
+ * Node-layer (Vitest) — giving an item to a co-op partner by DROPPING it.
  *
  * The task's route is deliberately the stock one: KD already has `KDInventoryAction["Drop"]`
  * (`KDInventoryActions.ts:155`) → `KDSendInput("drop")` → `KDDropItemInv`
@@ -34,7 +34,7 @@ const VARIANT_ID = 'KDM245Variant';
 /** A key no game code writes, so its arrival can only mean "this bundle really was restored". */
 const CONTROL_GAMEDATA = '__kdm245Probe';
 
-describe('KDM-245 · dropping an item is a transfer to whoever picks it up', () => {
+describe('dropping an item is a transfer to whoever picks it up', () => {
 	let h: any;
 
 	beforeAll(() => {
@@ -239,7 +239,7 @@ describe('KDM-245 · dropping an item is a transfer to whoever picks it up', () 
 		//   KinkyDungeonItem.ts:218 — if (KinkyDungeonRestraintVariants[Item.name])
 		//                               KDGiveInventoryVariant(variant, …, variant.curse, "", Item.name, …)
 		// So the bonuses survive exactly as far as the registry does — which is the whole point of
-		// KDM-245 making it world state. Before that change this case could not have passed.
+		// making the registry world state. Before that change this case could not have passed.
 		const POWER = 7;
 		const EVENT = 'KDM245Enchant';
 
@@ -289,7 +289,7 @@ describe('KDM-245 · dropping an item is a transfer to whoever picks it up', () 
 			return {
 				// KinkyDungeonInventoryGet returns NULL, not undefined, when absent, so a "not undefined"
 				// test is always true and makes any "does not hold it" guard unfalsifiable. Truthiness, always.
-				// (No backticks in this comment - it lives inside a template literal. KDM-184 again.)
+				// (No backticks in this comment - it lives inside a template literal. That mistake has happened before.)
 				held: !!it,
 				power: v ? v.power : null,
 				events: (it && it.events || []).filter(function(e){ return e.type === ${JSON.stringify(EVENT)}; }).length,

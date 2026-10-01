@@ -1,8 +1,8 @@
 /**
- * E2E (KDM-249 Phase B) — THE ACCEPTANCE TEST: a mod the HOST has and the GUEST does not ends up
+ * E2E (mod sync, Phase B) — THE ACCEPTANCE TEST: a mod the HOST has and the GUEST does not ends up
  * running in the guest's page, through the real lobby flow.
  *
- * This is the feature the task exists for. Everything else in KDM-249 is machinery underneath it:
+ * This is the feature the task exists for. Everything else in mod sync is machinery underneath it:
  * the declaration on the handshake (R1), the host as source of truth (R2), the diff (R3), the
  * payload relay (R6), and the stock install path (R7) all have to be right for this one assertion to
  * hold.
@@ -33,7 +33,7 @@ const MARKER = '__kdm249HostModRan';
 const marker = (page: any) => page.evaluate((n: string) => (globalThis as any)[n], MARKER);
 const modsState = (page: any) => page.evaluate(() => (window as any).__coopMods.state());
 
-test.describe('KDM-249 — the guest plays with the host\'s mods', () => {
+test.describe('the guest plays with the host\'s mods', () => {
 	test('a host-only mod is declared, shipped and executed on the guest', async ({ browser }) => {
 		test.setTimeout(MP_TEST_TIMEOUT);
 		const { server, bridge, port } = await start(0);

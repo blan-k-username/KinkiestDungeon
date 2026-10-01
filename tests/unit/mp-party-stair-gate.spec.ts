@@ -1,5 +1,5 @@
 /**
- * KDM-240 A1/A2 — the level goal is CO-LOCATED: the stairs do not fire until the whole party is
+ * The level goal is CO-LOCATED: the stairs do not fire until the whole party is
  * there, and never while a member is down.
  *
  * Owner decision D1/D2 (2026-08-24). The rule is enforced through KD's OWN stair cancellation —
@@ -23,7 +23,7 @@ const { SwapSession } = require('../../tools/mp-server/swap-session');
 
 const BOOT_TIMEOUT = 300_000;
 
-describe('KDM-240 — the stairs wait for the whole party', () => {
+describe('the stairs wait for the whole party', () => {
 	let s: any;
 	beforeEach(async () => {
 		s = new SwapSession({ requiredPlayers: 2, seed: 'party-stair-gate', pvp: false });

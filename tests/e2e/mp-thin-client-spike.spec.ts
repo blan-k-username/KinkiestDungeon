@@ -1,5 +1,5 @@
 /**
- * E2E (Playwright/Chromium): KD-071 Step-0 thin-client feasibility spike.
+ * E2E (Playwright/Chromium): Step-0 thin-client feasibility spike.
  *
  * The MVP's #1 risk: can the stock KD renderer be driven PURELY from an injected
  * render-state snapshot, with NO local simulation? This proves it in a real browser:
@@ -9,14 +9,14 @@
  *    time, and assert both the render globals AND THE PIXELS now reflect A, not B,
  *    while KinkyDungeonCurrentTick did NOT move (no simulation).
  *
- * KDM-219 restored the pixel half of that claim. Read the note at the end before
+ * A later fix restored the pixel half of that claim. Read the note at the end before
  * touching the frame assertions — three separate ways to make them vacuous are
  * measured there, and two of them looked fine.
  *
- * Go/no-go gate for the KD-071 client design. Uses the production client core
+ * Go/no-go gate for the thin-client design. Uses the production client core
  * `tools/mp-server/client/render-client.js` (same snapshot shape as the host).
  *
- * KDM-216 — uses `isolatedPage`, NOT `kdPage`. This spec injects render-client.js and
+ * Uses `isolatedPage`, NOT `kdPage`. This spec injects render-client.js and
  * calls disableLocalSim(), which installs permanent __kdClientGuard wrappers that make
  * KinkyDungeonAdvanceTime a no-op. resetKDState() cannot undo a monkey-patch, so on the
  * worker-scoped shared page every later spec — all four integration specs included —
@@ -46,7 +46,7 @@ const makeHub = () => {
 /**
  * Runs IN THE PAGE. World B: a REAL dungeon floor, via the game's own generator.
  *
- * KDM-219: this is the whole point. `KinkyDungeonStartNewGame` always lands in the same hub
+ * This is the whole point. `KinkyDungeonStartNewGame` always lands in the same hub
  * room, so two seeds gave two worlds that differed in map DATA and rendered the SAME room —
  * there was nothing for a frame assertion to see. `KinkyDungeonCreateMap` at floor 3 gives a
  * genuinely different picture (measured: 37x44 vs the hub's 24x16) and costs no extra page
@@ -66,14 +66,14 @@ const makeDungeon = () => {
 
 test('stock renderer is driven purely from an applied render-state snapshot (no local sim)', async ({ isolatedPage }) => {
 	test.setTimeout(180_000);
-	// KDM-217: arm the render-surface reader BEFORE the bundle brings PIXI up — the
+	// Arm the render-surface reader BEFORE the bundle brings PIXI up — the
 	// frame reads below take PIXIapp.view's pixels, which WebGL would otherwise
 	// have discarded by the time we look.
 	await installRenderSurfaceReader(isolatedPage);
 	await bootKD(isolatedPage);
 
 	/*
-	 * KDM-263: the world-key list, FIRST — render-client.js consumes `window.KDWorldGameDataKeys` to
+	 * The world-key list, FIRST — render-client.js consumes `window.KDWorldGameDataKeys` to
 	 * decide which half of `KDGameData` belongs to the world and therefore travels in the snapshot.
 	 *
 	 * Production serves it from `demo-server.js` (WORLD_KEYS_ROUTE, injected ahead of render-client);
@@ -82,7 +82,7 @@ test('stock renderer is driven purely from an applied render-state snapshot (no 
 	 * route exists to prevent.
 	 *
 	 * Without it, `serialize()` emits an empty world half and the applied frame lands ~0.055 from A's
-	 * picture: KDM-222's wrong-alt-type bug, re-created. That is how this was caught.
+	 * picture: the earlier wrong-alt-type bug, re-created. That is how this was caught.
 	 */
 	await isolatedPage.addScriptTag({
 		content: `window.KDWorldGameDataKeys = ${JSON.stringify(KDGAMEDATA_WORLD_KEYS)};`,
@@ -92,7 +92,7 @@ test('stock renderer is driven purely from an applied render-state snapshot (no 
 	expect(await isolatedPage.evaluate(() => typeof (window as any).KDRenderClient)).toBe('object');
 
 	/*
-	 * WARM-UP, then discard. KDM-219: the FIRST rendered world after a cold boot is not the
+	 * WARM-UP, then discard. The FIRST rendered world after a cold boot is not the
 	 * same picture as the second rendering of that same world — measured 0.1204 apart, as large
 	 * as two different worlds, because sprites/models are still loading. Taking the ground truth
 	 * from an unwarmed renderer is what makes an otherwise-correct frame assertion fail.
@@ -105,7 +105,7 @@ test('stock renderer is driven purely from an applied render-state snapshot (no 
 	await isolatedPage.waitForTimeout(SETTLE);
 
 	/*
-	 * KDM-222: settle the LIGHTMAP too, and discard that render as well.
+	 * Settle the LIGHTMAP too, and discard that render as well.
 	 *
 	 * The warm-up above fixes asset loading; this fixes a second, independent transient. The FIRST
 	 * lightmap recompute after KinkyDungeonStartNewGame does not produce the same picture as every
@@ -154,7 +154,7 @@ test('stock renderer is driven purely from an applied render-state snapshot (no 
 		const before = KinkyDungeonCurrentTick;
 		// @ts-ignore
 		const role = (window as any).KDRenderClient.disableLocalSim();
-		// NOTE: no light-grid flag here on purpose — KDM-219 moved that INTO apply(), and this
+		// NOTE: no light-grid flag here on purpose — that was moved INTO apply(), and this
 		// call site is what proves it. Setting it here would hide a regression in that fix.
 		// @ts-ignore
 		(window as any).KDRenderClient.apply((window as any).__snapA);
@@ -173,11 +173,11 @@ test('stock renderer is driven purely from an applied render-state snapshot (no 
 	// NO simulation happened: the turn counter did not move during apply
 	expect(c.tickAfter).toBe(c.tickBefore);
 
-	// the client marked itself render-only (disableLocalSim returns the flag — KD-085
+	// the client marked itself render-only (disableLocalSim returns the flag — the swap-model change
 	// reverted the KDServerRole game-source flag; the client is pure monkey-patch).
 	expect(c.role).toBe(true);
 
-	// ---- and the PIXELS moved too (KDM-219) ----
+	// ---- and the PIXELS moved too ----
 	const movedFromB = frameDiffRatio(frameC, frameB);
 	const distanceToA = frameDiffRatio(frameC, frameA);
 
@@ -188,7 +188,7 @@ test('stock renderer is driven purely from an applied render-state snapshot (no 
 		.toBeGreaterThan(noise * 20);
 
 	// 2. and it REACHES A: the applied frame is at A's own picture, within a small multiple of this
-	//    run's noise floor. KDM-222 tightened this from `worldGap * 0.75` (0.088 — a direction
+	//    run's noise floor. This was tightened from `worldGap * 0.75` (0.088 — a direction
 	//    assertion) after removing the two things that kept the applied frame away from A.
 	//    Measured after those fixes: distanceToA 0.0052 against a 0.0015 noise floor (3.4x) and a
 	//    0.1179 world gap, i.e. 4% of the gap rather than 54%. The bound takes the larger of 8x noise
@@ -198,11 +198,11 @@ test('stock renderer is driven purely from an applied render-state snapshot (no 
 		.toBeLessThan(reachedA);
 
 	/*
-	 * WHY THESE TWO ASSERTIONS, AND NOT "THE FRAME EQUALS A" — KDM-219.
+	 * WHY THESE TWO ASSERTIONS, AND NOT "THE FRAME EQUALS A".
 	 *
 	 * The render surface is REAL: read off PIXIapp.view, the actual canvas. `#MainCanvas` is a
-	 * dead 300x150 placeholder nothing draws to (KDM-169), and an element screenshot of it
-	 * silently means "the top-left 300x150 of the page" (KDM-217). See helpers/render-surface.ts.
+	 * dead 300x150 placeholder nothing draws to, and an element screenshot of it
+	 * silently means "the top-left 300x150 of the page". See helpers/render-surface.ts.
 	 *
 	 * This spec previously had NO frame assertion at all, because every available one passed with
 	 * the thing under test deleted. Three distinct traps were measured; all three are closed above:
@@ -237,11 +237,11 @@ test('stock renderer is driven purely from an applied render-state snapshot (no 
 	 * ⚠️ Under M2, assertion 1 (`movedFromB`) STILL PASSES: adopting KDMapData repaints the tiles
 	 * even with stale lighting, so "the frame changed" is satisfied by a half-applied world. It is
 	 * assertion 2, the DIRECTION one, that carries the weight. Do not drop it as redundant — on its
-	 * own, assertion 1 is the same shape as the vacuous assertion KDM-217 had to delete.
+	 * own, assertion 1 is the same shape as a vacuous assertion that had to be deleted earlier.
 	 *
-	 * KDM-222 — THE RESIDUAL IS GONE; assertion 2 is now an equality-grade bound, not a direction.
+	 * THE RESIDUAL IS GONE; assertion 2 is now an equality-grade bound, not a direction.
 	 *
-	 * KDM-219 recorded ~3% of this surface as "simply not reproducible across a map swap" and guessed
+	 * An earlier pass recorded ~3% of this surface as "simply not reproducible across a map swap" and guessed
 	 * HUD/overlay repaint. That guess was wrong, and it was TWO separate causes, neither of them an
 	 * overlay. Both were found by rendering the diff as a MASK and looking at where the pixels are —
 	 * the row/column histogram named the region in one run, after argument had gone nowhere:
@@ -265,7 +265,7 @@ test('stock renderer is driven purely from an applied render-state snapshot (no 
 	 * Net: distanceToA 0.0707 → 0.0539 (fix 1) → 0.0052 (fix 2), against a 0.0015 noise floor and an
 	 * unchanged 0.1179 world gap. disableLocalSim was never the cause (it moves the frame 0.0022).
 	 *
-	 *  M3. NEW MUTANT (KDM-222): drop the `KDGameData.RoomType` restore from render-client's apply().
+	 *  M3. NEW MUTANT: drop the `KDGameData.RoomType` restore from render-client's apply().
 	 *      Every globals assertion still passes, assertion 1 still passes, and M2's light-invalidation
 	 *      is untouched — only assertion 2 notices, at 0.0539 against a 0.012 bound. That is what the
 	 *      tightened bound buys: at the old `worldGap * 0.75` (0.088) this mutant sailed through.

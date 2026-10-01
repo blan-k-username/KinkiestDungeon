@@ -1,5 +1,5 @@
 /**
- * Node-layer (Vitest) — KDM-264: buy the item you selected, not your partner's neighbour.
+ * Node-layer (Vitest) — buy the item you selected, not your partner's neighbour.
  *
  * ── WHAT WAS BROKEN, AND WHAT WAS ALREADY RIGHT ───────────────────────────────────────────────────
  * Most of "two players share the hub merchants" works by construction, and this spec covers that half
@@ -117,7 +117,7 @@ function logText(s: any, who: string): string {
 	return (s.logs.get(who) || []).map((m: any) => (m && m.text) || String(m)).join(' | ');
 }
 
-describe('KDM-264 — the hub merchants serve two players', () => {
+describe('the hub merchants serve two players', () => {
 	let s: any;
 	beforeEach(async () => {
 		s = session(['A', 'B']);

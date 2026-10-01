@@ -4,7 +4,7 @@
  * Headless shim layer for running the stock Kinky Dungeon bundle (out/main.js)
  * in plain Node.js — no browser, no jsdom. Hand-stubs PIXI / DOM / WebGL / Audio.
  *
- * Regenerated from the documented shim surface in task KD-067 (PoC verified
+ * Regenerated from the documented shim surface of the PoC (verified
  * 2026-06-19). Keep this small and tracking the bundle's PIXI/DOM surface.
  *
  * Usage:  require('./shims').install()   // BEFORE loading out/main.js

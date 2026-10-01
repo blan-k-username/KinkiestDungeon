@@ -1,7 +1,7 @@
 /**
- * Node-layer (Vitest) tests for the headless-safe render-state snapshot — KD-067.
+ * Node-layer (Vitest) tests for the headless-safe render-state snapshot.
  *
- * The thin client (KD-071) renders the server's state without simulating. Full
+ * The thin client renders the server's state without simulating. Full
  * KinkyDungeonGenerateSaveData() is NOT viable headless (it reads render-derived
  * model Poses — KinkyDungeon.ts:6840). So the host exposes a purpose-built
  * render-state snapshot built directly from the live render globals.
@@ -9,7 +9,7 @@
  * These tests prove the snapshot is JSON-safe, excludes model/pose data, and
  * round-trips faithfully onto a FRESH instance (serialize on A → apply on B →
  * B's render-relevant globals match A). The "actually renders a frame" proof is
- * the KD-071 browser spike — node can't run the PIXI draw path.
+ * the browser spike — node can't run the PIXI draw path.
  *
  * Imports the host harness under tools/mp-server/** only (no Game/src/** source).
  */
@@ -19,7 +19,7 @@ const { HeadlessHost } = require('../../tools/mp-server/headless-host');
 
 const BOOT_TIMEOUT = 180_000;
 
-describe('render-state snapshot (KD-067)', () => {
+describe('render-state snapshot', () => {
 	let A: any;
 	let B: any;
 	let snap: any;
@@ -34,7 +34,7 @@ describe('render-state snapshot (KD-067)', () => {
 		A.summonEnemy(t.x + 2, t.y, 'Rat', { rad: 4 });
 		A.step(3);
 		snap = A.serializeRenderState();
-		// KDM-162: per-player state travels as the generic bundle, not as a curated `stats` block.
+		// Per-player state travels as the generic bundle, not as a curated `stats` block.
 		// `serializeRenderState` carries the shared world; the bundle is attached by whoever knows
 		// WHICH player the snapshot is for (SwapSession.snapshotFor does it from its stored bundles,
 		// so it costs nothing there). This spec drives the raw host, so it attaches one explicitly.
@@ -85,7 +85,7 @@ describe('render-state snapshot (KD-067)', () => {
 	});
 
 	/**
-	 * KDM-162: this used to assert a curated `stats` block field-by-field — the wire contract that had
+	 * This used to assert a curated `stats` block field-by-field — the wire contract that had
 	 * to be hand-maintained in four places. It now asserts the property that REPLACED it: adopting the
 	 * snapshot's bundle reproduces the source player's state on a different instance. Same guarantee,
 	 * no field list, so a HUD value added upstream is covered without touching this spec.

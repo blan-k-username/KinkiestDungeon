@@ -1,5 +1,5 @@
 /**
- * E2E (KDM-235) — a friend joins a run that is already going, and both of them play on.
+ * E2E — a friend joins a run that is already going, and both of them play on.
  *
  * The node spec proves the seating, the placement and the barrier timing. This proves the part it
  * cannot: that a second browser can walk into a live dungeon and the two of them then take turns
@@ -21,8 +21,8 @@ const { start } = require('../../tools/mp-server/demo-server');
 /**
  * Boot one page as a co-op client and wait for it to be playing.
  *
- * KDM-302 — through the lobby's own road (`coopJoinPage`). The HOST is `A`; `B` asks as the guest and
- * `A` answers — mid-run, that is the in-game question (KDM-297), which this spec used to skip because
+ * Through the lobby's own road (`coopJoinPage`). The HOST is `A`; `B` asks as the guest and
+ * `A` answers — mid-run, that is the in-game question, which this spec used to skip because
  * the `#coop=` shortcut answered for the host.
  */
 async function bootOne(P: any, port: number, id: string, host?: any) {
@@ -53,7 +53,7 @@ test('a friend can join a run already in progress, and the two then play togethe
 	async ({ browser }) => {
 		test.setTimeout(MP_TEST_TIMEOUT);
 		// requiredPlayers: 1 — the host starts playing ALONE, which is the situation this feature is
-		// for (and the state KDM-253's "continue solo" leaves behind).
+		// for (and the state the "continue solo" choice leaves behind).
 		const { server, bridge, port } = await start(0, { requiredPlayers: 1 });
 
 		const ctxA = await browser.newContext();
@@ -80,7 +80,7 @@ test('a friend can join a run already in progress, and the two then play togethe
 		A.on('pageerror', record('A'));
 		// Pre-existing boot noise: the demo server does not serve every asset (`Logo.png` 404s in
 		// every MP spec). Excluded by name and reported, never by widening the oracle.
-		const ASSET_NOISE = PAGE_ERROR_NOISE;   // KDM-240: one definition, in the shared helper
+		const ASSET_NOISE = PAGE_ERROR_NOISE;   // one definition, in the shared helper
 
 		try {
 			// ---- the host is playing, alone --------------------------------------------------------
@@ -111,7 +111,7 @@ test('a friend can join a run already in progress, and the two then play togethe
 			expect(bridge.session.players, 'seated into the running session').toEqual(['A', 'B']);
 
 			/*
-			 * KDM-278 — THE PLAYER WHO WAS ALREADY HERE MUST SEE THE NEWCOMER IN THEIR ROSTER.
+			 * THE PLAYER WHO WAS ALREADY HERE MUST SEE THE NEWCOMER IN THEIR ROSTER.
 			 *
 			 * `_joinLate` sends `peer_joined` to everyone already seated, and for a long time NO client
 			 * code read it: `coop.peers` was set once from `joined.players` and never again, so a late
@@ -185,7 +185,7 @@ test('a friend can join a run already in progress, and the two then play togethe
 			const sinceJoin = crashes.slice(crashesBefore);
 			const dropped = sinceJoin.filter((c) => ASSET_NOISE.test(c));
 			// eslint-disable-next-line no-console
-			if (dropped.length) console.log(`[KDM-235] ignored ${dropped.length} pre-existing asset error(s): ${dropped[0]}`);
+			if (dropped.length) console.log(`ignored ${dropped.length} pre-existing asset error(s): ${dropped[0]}`);
 			expect(sinceJoin.filter((c) => !ASSET_NOISE.test(c)),
 				'joining a live run must not trip KD\'s error handler').toEqual([]);
 

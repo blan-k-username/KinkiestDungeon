@@ -1,10 +1,10 @@
 /**
- * E2E (KDM-299) — an accepted guest whose game is still loading is TOLD so, not shown a blank screen.
+ * E2E — an accepted guest whose game is still loading is TOLD so, not shown a blank screen.
  *
  * The owner's UAT: the host accepted, the guest was already seated server-side, and the guest's page
  * sat on the Join screen with its status line CLEARED — `joined.started` wiped "Waiting for the host…"
  * and `enterGame()` then re-queued itself silently every 200 ms while assets (or the host's mods)
- * loaded. It looked exactly like nothing had happened, so the player pressed Join again (KDM-298).
+ * loaded. It looked exactly like nothing had happened, so the player pressed Join again.
  *
  * ⚠️ PAINT, NOT JUST STATE. `lobbyState().status` says what the lobby WOULD draw; `paintedText` records
  * what actually reached the canvas in a settled frame. Both are asserted, and the "Waiting for the host"
@@ -16,7 +16,7 @@ import { MP_TEST_TIMEOUT } from './helpers/coop';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
 
-test('KDM-299 — a seated guest still loading the game is told so on screen', async ({ browser }) => {
+test('a seated guest still loading the game is told so on screen', async ({ browser }) => {
 	test.setTimeout(MP_TEST_TIMEOUT);
 	const { server, bridge, port } = await start(0);
 	const hostCtx = await browser.newContext();

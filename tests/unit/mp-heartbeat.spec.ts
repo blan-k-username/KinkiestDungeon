@@ -1,5 +1,5 @@
 /**
- * KDM-250 — the heartbeat and the drop report, over the real socket.
+ * The heartbeat and the drop report, over the real socket.
  *
  * `mp-presence.spec.ts` proves the rules; this proves the protocol that carries them. The failure
  * this file exists for is the one the epic shipped: a player leaves, nothing notices, the departed
@@ -13,14 +13,14 @@
  *
  * (2) is why the heartbeat is at the APPLICATION level rather than RFC6455 ping opcodes: a browser
  * answers a protocol ping from its network stack, so a protocol pong proves the socket is alive and
- * says exactly nothing about a frozen JS main loop. See KDM-234 A2.
+ * says exactly nothing about a frozen JS main loop.
  *
  * MOST OF THIS SPEC DOES NOT BOOT A WORLD. Presence is bridge-level bookkeeping and is independent of
  * whether the session has started, so the timing cases run with `requiredPlayers: 3` — two seats fill,
  * the session never starts, and no ~30 s bundle boot happens. The last describe pays for one real
  * booted session, because "the heartbeat adds no traffic" is only worth asserting in the real config.
  *
- * Requirement ids refer to the `## Requirements` section of KDM-250 (EARS text in KDM-234).
+ * The requirement labels (E1, N2, …) name the behaviours this spec pins.
  */
 import { describe, it, expect, afterEach, beforeAll, afterAll } from 'vitest';
 import { MPClient, seatPair } from '../helpers/mp-ws-client';
@@ -37,7 +37,7 @@ const isMissing = (m: any) => m.type === 'peer_missing';
 const isPing = (m: any) => m.type === 'ping';
 const isState = (m: any) => m.type === 'state';
 
-describe('KDM-250 — heartbeat and the drop report', () => {
+describe('heartbeat and the drop report', () => {
 	let bridge: any = null;
 	const open: MPClient[] = [];
 
@@ -52,7 +52,7 @@ describe('KDM-250 — heartbeat and the drop report', () => {
 			requiredPlayers: 3, seed: 'heartbeat', hbIntervalMs: HB_INTERVAL, hbTimeoutMs: HB_TIMEOUT,
 		}, opts));
 		const port = await bridge.listen(0);
-		// KDM-255 — through the join gate, the only road in. `bPong` wedges the GUEST only: the host
+		// Through the join gate, the only road in. `bPong` wedges the GUEST only: the host
 		// has to keep answering, because it is the one that must notice.
 		const { host: A, guest: B } = await seatPair(port, { guestPong: opts.bPong !== false });
 		open.push(A, B);
@@ -122,13 +122,13 @@ describe('KDM-250 — heartbeat and the drop report', () => {
 	});
 
 	/*
-	 * KDM-313 — a peer that was only FROZEN comes back on the socket it never lost.
+	 * A peer that was only FROZEN comes back on the socket it never lost.
 	 *
 	 * Captured in the browser: a page froze 34 s (longer than the heartbeat), was correctly reported
 	 * missing and the session paused — then resumed on the same socket, and the session stayed paused
 	 * for good, refusing every move `peer-missing`. The only road back to `connected` was a RECONNECT.
 	 */
-	describe('a FROZEN peer that answers again is back (KDM-313)', () => {
+	describe('a FROZEN peer that answers again is back', () => {
 		const isBack = (m: any) => m.type === 'peer_back';
 
 		it('the survivor is told it is back, and the seat is connected again', async () => {
@@ -176,7 +176,7 @@ describe('KDM-250 — heartbeat and the drop report', () => {
 			const A = await MPClient.connect(port);
 			const W = await MPClient.connect(port);       // a watcher socket that never joins
 			open.push(A, W);
-			A.send({ type: 'join', clientId: 'A', role: 'host' });   // KDM-255: the gate is the road in
+			A.send({ type: 'join', clientId: 'A', role: 'host' });   // the gate is the road in
 			await A.next((m) => m.type === 'joined');
 			A.close();
 			await W.never(isMissing, HB_TIMEOUT * 2);
@@ -204,7 +204,7 @@ describe('KDM-250 — heartbeat and the drop report', () => {
 				requiredPlayers: 2, seed: 'hb-live', hbIntervalMs: HB_INTERVAL, hbTimeoutMs: 30_000,
 			});
 			const port = await live.listen(0);
-			({ host: A, guest: B } = await seatPair(port));   // KDM-255: the gate is the road in
+			({ host: A, guest: B } = await seatPair(port));   // the gate is the road in
 			await A.next(isState);                        // both in → initial render-state
 			await B.next(isState);
 		}, BOOT_TIMEOUT);
@@ -214,7 +214,7 @@ describe('KDM-250 — heartbeat and the drop report', () => {
 			try { live && live.close(); } catch (e) { /* noop */ }
 		});
 
-		it('a heartbeat round-trip produces no state frame (KDM-186 rule 2)', async () => {
+		it('a heartbeat round-trip produces no state frame (the bare-ack rule)', async () => {
 			const t0 = live.session.turn;
 			await A.next(isPing, 5_000);                  // at least one full ping/pong happened
 			await A.next(isPing, 5_000);

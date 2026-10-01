@@ -1,7 +1,7 @@
 /**
- * Node-layer (Vitest) — KDM-202: the two LATENT consume-once queues on the state wire.
+ * Node-layer (Vitest) — the two LATENT consume-once queues on the state wire.
  *
- * Third in the line that starts at KDM-186 (`KDDamageQueue`) and continues through KDM-196
+ * Third in the line that starts at `KDDamageQueue` and continues through the event queues
  * (`KDEventData.shockwaves` / `.sounddesc`). Same criterion, stated once:
  *
  *     if only the RECEIVER'S consumer drains it, the server must not replicate it.
@@ -36,7 +36,7 @@ const { HeadlessHost, GLOBAL_BLACKLIST } = require('../../tools/mp-server/headle
 
 const BOOT_TIMEOUT = 240_000;
 
-describe('KDM-202 · the exclusion is a DECISION, not an accident', () => {
+describe('the exclusion is a DECISION, not an accident', () => {
 	it('both queues are named in GLOBAL_BLACKLIST', () => {
 		expect(GLOBAL_BLACKLIST, 'sim-drained input queue').toContain('KinkyDungeonInputQueue');
 		expect(GLOBAL_BLACKLIST, 'browser-drained save queue').toContain('KDSaveQueue');
@@ -47,7 +47,7 @@ describe('KDM-202 · the exclusion is a DECISION, not an accident', () => {
 	});
 });
 
-describe('KDM-202 · a non-empty queue does not reach the wire', () => {
+describe('a non-empty queue does not reach the wire', () => {
 	let h: any;
 
 	beforeAll(() => {

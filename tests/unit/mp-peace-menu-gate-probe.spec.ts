@@ -1,5 +1,5 @@
 /**
- * PROBE (KDM-225) — why can a player open the interaction submenu on an NPC they attacked, but not
+ * PROBE — why can a player open the interaction submenu on an NPC they attacked, but not
  * on a peer avatar they are at war with?
  *
  * MEASURED, not reasoned. `KDInteract` (KinkyDungeonInput.ts:1727-1741) opens the "GenericAlly"
@@ -8,7 +8,7 @@
  *     KDIsImprisoned(E) || ((!KinkyDungeonAggressive(E) || KDAllied(E)) && !(E.playWithPlayer && KDCanDom(E)))
  *
  * The gate runs in the BROWSER, against the entity the SNAPSHOT gave it — so it is evaluated here on
- * exactly that object, not on the world entity (the KDM-200 lesson: a wire whitelist / a wire STAMP
+ * exactly that object, not on the world entity (an earlier lesson: a wire whitelist / a wire STAMP
  * is what the client's predicates actually see).
  *
  * Three subjects, so the answer is a comparison and not an assertion about one case:

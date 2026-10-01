@@ -1,7 +1,7 @@
 /**
  * Finding tiles in a `SwapSession` world — for any spec holding one (unit, or e2e via `bridge.session`).
  *
- * Tiles are FOUND, never assumed: the party lands on KD's start and its free neighbours (KDM-309), so
+ * Tiles are FOUND, never assumed: the party lands on KD's start and its free neighbours, so
  * no fixed offset between the players, or between a player and a wall, holds from seed to seed.
  */
 

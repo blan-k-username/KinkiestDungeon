@@ -1,8 +1,8 @@
 /**
- * KDM-249 Phase B — the mod declaration on the join handshake (`tools/mp-server/join-gate.js`).
+ * Mod sync, phase B — the mod declaration on the join handshake (`tools/mp-server/join-gate.js`).
  *
  * The gate already carries a per-client `build` and refuses a skewed pair before the host is ever
- * prompted (KDM-233 N1). A mod set rides on the same handshake — and the whole point of these tests
+ * prompted. A mod set rides on the same handshake — and the whole point of these tests
  * is that it must behave DIFFERENTLY from `build` in one specific way:
  *
  *   A BUILD MISMATCH CANNOT WORK, SO IT IS REFUSED. A MOD DIFFERENCE ONLY DEGRADES PRESENTATION,
@@ -16,7 +16,7 @@
  * "HOST IS SOURCE OF TRUTH" (owner, 2026-08-22) is implemented here exactly as it already is for
  * `build`: the host's declaration, adopted on `claimHost`, IS the session's.
  *
- * Requirement ids refer to `## Requirements (decided)` in KDM-249.
+ * The requirement labels (R1, R2, …) name the mod-sync behaviours this spec pins.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -30,7 +30,7 @@ function mod(modname: string, hash: string, priority = 0) {
 
 const HOST_MODS = [mod('Art', 'h-art'), mod('Text', 'h-text')];
 
-describe('KDM-249 — the mod set on the join gate', () => {
+describe('the mod set on the join gate', () => {
 	let g: any;
 	beforeEach(() => { g = new JoinGate({ build: BUILD }); });
 

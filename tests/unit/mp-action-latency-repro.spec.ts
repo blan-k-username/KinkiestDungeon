@@ -1,5 +1,5 @@
 /**
- * KDM-192 REPRO + GUARD — a real action landed ~3 s late because every per-frame stream input in a
+ * REPRO + GUARD — a real action landed ~3 s late because every per-frame stream input in a
  * socket read was paid in full.
  *
  * MEASURED IN THE OWNER'S LIVE SESSION (2026-08-17, `[mp-stats]` at 1 Hz, ~100 fps both windows):
@@ -87,7 +87,7 @@ async function startedPair() {
 	const port = await bridge.listen(0);
 	const a = await connect(port);
 	const b = await connect(port);
-	// KDM-255 — through the join gate, the only road in. The `session.started` precondition below is
+	// Through the join gate, the only road in. The `session.started` precondition below is
 	// the proof the handshake actually completed.
 	a.write(maskFrame(JSON.stringify({ type: 'join', clientId: 'A', role: 'host' })));
 	b.write(maskFrame(JSON.stringify({ type: 'join', clientId: 'B', role: 'guest' })));
@@ -100,7 +100,7 @@ async function startedPair() {
 	return { bridge, a, b };
 }
 
-describe('KDM-192 — a burst of per-frame stream input must not cost a transaction each', () => {
+describe('a burst of per-frame stream input must not cost a transaction each', () => {
 	it('coalesces superseded stream inputs within one socket read, and never drops a command', async () => {
 		const { bridge, a, b } = await startedPair();
 		try {
@@ -114,7 +114,7 @@ describe('KDM-192 — a burst of per-frame stream input must not cost a transact
 			expect(all, "precondition: the burst must have reached the session and been reported")
 				.toContain("A:");
 			// eslint-disable-next-line no-console
-			console.log("\nKDM-192 — burst of " + BURST + " stream inputs + 1 command:\n  "
+			console.log("\nburst of " + BURST + " stream inputs + 1 command:\n  "
 				+ (bridge._statsLog || []).join("\n  ") + "\n");
 
 			const uiApplied = [...all.matchAll(/A: ui=(\d+) turn=(\d+)/g)]
@@ -143,7 +143,7 @@ describe('KDM-192 — a burst of per-frame stream input must not cost a transact
 	}, BOOT_TIMEOUT);
 
 	/*
-	 * KDM-310 — coalescing must still ANSWER every input it drops.
+	 * Coalescing must still ANSWER every input it drops.
 	 *
 	 * The client matches replies to its sends strictly in order, one reply per send (`ackOne`,
 	 * `_sentRoute`). A coalesced input used to be skipped with no reply at all, so every later reply was
@@ -164,7 +164,7 @@ describe('KDM-192 — a burst of per-frame stream input must not cost a transact
 			const answers = fromA.filter((m) => m.type === 'ack' || m.type === 'waiting'
 				|| (m.type === 'state' && m.kind !== 'push'));
 			// eslint-disable-next-line no-console
-			console.log('\nKDM-310 — reply types: ' + answers.map((m) => m.type + (m.kind ? ':' + m.kind : '')).join(' '));
+			console.log('\nreply types: ' + answers.map((m) => m.type + (m.kind ? ':' + m.kind : '')).join(' '));
 			expect((bridge._statsLog || []).join('\n'), 'precondition: the burst must actually have been coalesced')
 				.toMatch(/coalesced \d+/);
 			expect(answers.length, 'one reply per input sent').toBe(BURST + 1);

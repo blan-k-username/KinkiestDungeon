@@ -1,12 +1,12 @@
 /**
- * KDM-233 — the join APPROVAL round-trip, over the real socket.
+ * The join APPROVAL round-trip, over the real socket.
  *
  * `mp-join-gate.spec.ts` proves the rules; this proves the protocol that carries them: a guest asks,
  * the HOST is asked, and nothing happens to the session until the host answers. Approval-only is the
- * whole gate (R2 — no join code, LAN-only per KDM-226), so the failure that matters most here is a
+ * whole gate (R2 — no join code, LAN-only by design), so the failure that matters most here is a
  * guest who gets in without the host ever saying yes.
  *
- * Requirement ids refer to the `## Requirements (EARS)` section of KDM-233.
+ * The requirement labels (R1, R2, …) name the behaviours this spec pins.
  */
 import { describe, it, expect, afterEach } from 'vitest';
 import { MPClient } from '../helpers/mp-ws-client';
@@ -20,7 +20,7 @@ const isJoined = (m: any) => m.type === 'joined';
 const isPending = (m: any) => m.type === 'join_pending';
 const isReject = (m: any) => m.type === 'reject';
 
-describe('KDM-233 — join approval over the wire', () => {
+describe('join approval over the wire', () => {
 	let bridge: any = null;
 	const open: MPClient[] = [];
 
@@ -147,9 +147,9 @@ describe('KDM-233 — join approval over the wire', () => {
 	});
 
 	/*
-	 * KDM-255 — this used to be `'legacy join with no role still works — the #coop= entry path is
+	 * This used to be `'legacy join with no role still works — the #coop= entry path is
 	 * not broken'`, and it asserted that a roleless `join` was seated WITHOUT the gate. That was
-	 * honest at the time: KDM-233 shipped the gate beside the old road rather than in place of it,
+	 * honest at the time: the join gate first shipped beside the old road rather than in place of it,
 	 * because the suite and `#coop=` both stood on the old one.
 	 *
 	 * The road is gone. `#coop=` now asks for the host seat and comes back as a guest if someone

@@ -1,5 +1,5 @@
 /**
- * E2E (KDM-231) — untying your co-op partner, in TWO BROWSERS, over real turns.
+ * E2E — untying your co-op partner, in TWO BROWSERS, over real turns.
  *
  * The unit spec (`tests/unit/mp-coop-untie.spec.ts`) drives the same flow through `submit`, which is
  * honest about the input path but single-process: one node host holds both bundles, and "the victim
@@ -193,7 +193,7 @@ test('a co-op player unties their partner: menu → dialogue → the partner\'s 
 				.toBe(true);
 		}
 
-		// ---- 5b. AC1 of KDM-232 — the body NAMES the partner -------------------------------------
+		// ---- 5b. the body NAMES the partner ---------------------------------------------------
 		//
 		// This used to be pinned as a known defect: the line came out `"(You approach )"`, naming
 		// nobody. `spawnAvatar` gives the avatar a `CustomName` so the client draws a name plate, and
@@ -212,7 +212,7 @@ test('a co-op player unties their partner: menu → dialogue → the partner\'s 
 		// Two independently-sourced spellings of the partner's name must agree.
 		const body = drawn.texts.find((t) => t.indexOf('(You approach') >= 0);
 		expect(body, 'the ally-dialogue body was painted').toBeTruthy();
-		expect(body, 'KDM-232 AC1: the one line that names your partner must name them')
+		expect(body, 'the one line that names your partner must name them')
 			.toBe(`(You approach ${expected.name})`);
 
 		// ---- 6. AC3 — start a war and the way in is shut ----------------------------------------

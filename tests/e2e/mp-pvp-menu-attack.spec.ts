@@ -1,5 +1,5 @@
 /**
- * E2E (Playwright/Chromium) — KD-098: PvP attack via KD's REAL context menu.
+ * E2E (Playwright/Chromium) — PvP attack via KD's REAL context menu.
  *
  * Reproduces the hands-on UAT sequence faithfully: a CO-OP session (no KD_PVP), then A
  * starts PvP with a sneak and keeps attacking — each action issued through KD's actual
@@ -17,7 +17,7 @@ const { start } = require('../../tools/mp-server/demo-server');
 const TURNS = 4;
 
 /** Drive KD's real context menu against the peer avatar; invoke the attack option it offers. */
-// KDM-210: the caller WAITS for the avatar (waitForPeerAvatar) and passes its id in, so the
+// The caller WAITS for the avatar (waitForPeerAvatar) and passes its id in, so the
 // 'RemotePlayer' name pattern lives in exactly one place and this can never race an absent entity.
 async function menuAttackPeer(P: any, peerId: any) {
 	return P.evaluate((id: any) => {
@@ -107,9 +107,9 @@ test('PvP via the real context menu: sneak then repeated attacks keep landing', 
 			// Real KD mechanic: the sneak/Aggro option (doaggro, unaware) does NOT deal damage —
 			// it makes the peer hostile + stun(1) + vulnerable(1) (KDAggroViaDialogue). The damage
 			// lands on the FOLLOW-UP Attack (doattack), boosted by `vulnerable`. So Will only drops
-			// on Attack/Tease/Capture turns, not the sneak-transition turn. (The synthetic KD-098/099
-			// path dealt sneak damage directly; KD-100 moved PvP to the real pipeline — KD-102.)
-			// KDM-164: this used to require EVERY non-Aggro turn to reduce Will. That was the synthetic
+			// on Attack/Tease/Capture turns, not the sneak-transition turn. (The synthetic
+			// path dealt sneak damage directly; PvP has since moved to the real pipeline.)
+			// This used to require EVERY non-Aggro turn to reduce Will. That was the synthetic
 			// combat model's guarantee — it converted any avatar hp delta into Will, so an attack could
 			// never come up empty. PvP now runs KD's real pipeline, where an attack can miss or roll
 			// zero: measured 1 zero-damage turn in 8 bump-attacks, with damage varying (1.5 … 1.0).

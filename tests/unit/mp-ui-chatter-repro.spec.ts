@@ -1,5 +1,5 @@
 /**
- * KDM-163 — ISOLATION of the `mp-coop-demo.spec.ts:108` failure, at the node layer.
+ * ISOLATION of the `mp-coop-demo.spec.ts:108` failure, at the node layer.
  *
  * With the client's hardcoded lists deleted and the static seed ON, the browser spec's routed
  * bump-attack stopped damaging the world enemy:
@@ -54,7 +54,7 @@ function armBump(s: any) {
  * bump KILLED the shared Rat — every later test then read `enemyView() === null` and asserted nothing,
  * which is a vacuous green. Same seed keeps the runs comparable; separate sessions keep them honest.
  */
-describe('KDM-163 — per-frame UI chatter vs the routed bump-attack', () => {
+describe('per-frame UI chatter vs the routed bump-attack', () => {
 
 	/**
 	 * CONTROL. No chatter — the same sequence the hand-list client produces. If this is red the
@@ -125,7 +125,7 @@ describe('KDM-163 — per-frame UI chatter vs the routed bump-attack', () => {
 });
 
 /**
- * KDM-163 — the OTHER candidate for `mp-coop-demo.spec.ts:108`, and the one that survives reading.
+ * The OTHER candidate for `mp-coop-demo.spec.ts:108`, and the one that survives reading.
  *
  * `_advanceTurn` learns from a real application (swap-session.js): `seen = obs.advanced > 0 ? 'turn' : 'ui'`.
  * That treats ONE occurrence as proof about the TYPE. But turn-consuming inputs routinely no-op:
@@ -141,7 +141,7 @@ describe('KDM-163 — per-frame UI chatter vs the routed bump-attack', () => {
  * means the whole resolved call graph is clean). This runtime demotion undoes that guarantee from a
  * single negative sample, in the dangerous direction.
  */
-describe('KDM-163 — runtime demotion of a turn-consuming type', () => {
+describe('runtime demotion of a turn-consuming type', () => {
 
 	it('a BLOCKED move must not reclassify `move` as a non-turn input', () => {
 		const s = makeSession('demotion-seed');
@@ -149,7 +149,7 @@ describe('KDM-163 — runtime demotion of a turn-consuming type', () => {
 
 		// Walk A into a genuinely blocked tile (no position change, no advance) — the ALLY blocking it,
 		// the case mp-coop-demo hits while hunting for an open tile. Built, not hunted for: which
-		// directions happen to be walls depends on where the party lands (KDM-309).
+		// directions happen to be walls depends on where the party lands.
 		s._shuffle = () => ['A', 'B'];   // B's own turn must not move its avatar off the tile first
 		s.world.moveAvatar(s.avatars.get('B'), 0, 0);
 		const n = freeNeighbour(s, 'A');

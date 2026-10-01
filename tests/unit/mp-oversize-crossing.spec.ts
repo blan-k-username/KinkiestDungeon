@@ -1,10 +1,10 @@
 /**
- * KDM-221 — a WATCHED global that crosses BASELINE_MAX_LEN after baseline must not vanish silently.
+ * A WATCHED global that crosses BASELINE_MAX_LEN after baseline must not vanish silently.
  *
  * `BASELINE_MAX_LEN` classifies a global as "static data table, not per-player state". That
  * classification is a judgement call, so the epic's contract is that it must never be applied
  * SILENTLY — `_auditOversize` exists precisely to re-hash the excluded set and warn if one of them
- * turns out to mutate (KDM-161/KDM-195).
+ * turns out to mutate.
  *
  * The threshold has three doors and only the first was guarded:
  *
@@ -19,7 +19,7 @@
  *      about for the baseline-time set.
  *
  * `KDSaveQueue` was the worked example: `[]` at post-init baseline (hence watched), over 20 KB the
- * moment a real save lands (hence dropped). KDM-202 removed that one instance by blacklisting the
+ * moment a real save lands (hence dropped). An earlier fix removed that one instance by blacklisting the
  * name, which does nothing about the hole — hence this spec.
  *
  * The probe is a mod-declared global on purpose: `loadMod` re-baselines, which is what puts a new
@@ -61,7 +61,7 @@ function grow(h: any, size: number) {
 	h.eval(`(function(){ globalThis.${PROBE} = 'x'.repeat(${size}); })()`);
 }
 
-describe('KDM-221 · a watched global that crosses BASELINE_MAX_LEN', () => {
+describe('a watched global that crosses BASELINE_MAX_LEN', () => {
 	let h: any;
 	let cleanBundle: any;
 
@@ -109,7 +109,7 @@ describe('KDM-221 · a watched global that crosses BASELINE_MAX_LEN', () => {
 	it('AC2 — an unchanged value does not re-report on every capture', () => {
 		const said = probeWarningsDuring(() => { h._captureGlobals(); h._captureGlobals(); });
 		expect(said, 'the alarm was already raised; repeating it for the same value is noise, not ' +
-			'signal — this is the KDM-195 re-baseline-on-report contract').toEqual([]);
+			'signal — this is the oversize-audit re-baseline-on-report contract').toEqual([]);
 	}, BOOT_TIMEOUT);
 
 	it('AC2 — but a DISTINCT drift while still over the cap reports again', () => {

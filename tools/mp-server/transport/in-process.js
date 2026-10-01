@@ -1,5 +1,5 @@
 /**
- * tools/mp-server/transport/in-process.js  (KD-081)
+ * tools/mp-server/transport/in-process.js 
  *
  * Same-process transport with a REAL serialization boundary: the instance lives
  * in this process, but every request's args and result are JSON round-tripped

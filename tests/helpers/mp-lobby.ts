@@ -1,9 +1,9 @@
 /**
- * tests/helpers/mp-lobby.ts  (KDM-236)
+ * tests/helpers/mp-lobby.ts 
  *
  * The one copy of "drive the co-op lobby the way a player drives it".
  *
- * These five helpers were written for `mp-lobby-join-flow.spec.ts` (KDM-233) and were about to be
+ * These five helpers were written for `mp-lobby-join-flow.spec.ts` and were about to be
  * copied a third time for `mp-lobby-address-and-exit.spec.ts`. They live here instead — the repo's
  * DRY rule, and also the practical reason: `press()` encodes a non-obvious fact about how KD's
  * buttons work, and a stale copy of that would fail in a way that looks like a product bug.
@@ -21,7 +21,7 @@ import { expect } from '@playwright/test';
 import { waitForBundleReady } from './bundle';
 
 /**
- * KDM-281 — inject the lobby the way the demo server does: the shared string table FIRST.
+ * Inject the lobby the way the demo server does: the shared string table FIRST.
  *
  * A spec that reaches the lobby through `openLobby()` gets the real `INJECT` order for free. Three
  * specs do not — they `addScriptTag` the lobby onto a plain static page to prove the menu entry is
@@ -62,7 +62,7 @@ export async function press(page: any, button: string) {
  * Open the Multiplayer lobby on a page served by the demo server.
  *
  * `host` defaults to `127.0.0.1`; pass `localhost` when a test needs the page's own origin to be a
- * DIFFERENT STRING from the address it will type into the join field (KDM-236's address-memory
+ * DIFFERENT STRING from the address it will type into the join field (the address-memory
  * tests turn on exactly that distinction).
  */
 /**
@@ -80,7 +80,7 @@ export async function press(page: any, button: string) {
 
 export async function openLobby(page: any, port: number, host = '127.0.0.1', opts: { preload?: boolean; briefing?: boolean } = {}) {
 	await bootToMenu(page, port, host, opts);
-	// KDM-293 — the co-op entries moved from a Multiplayer menu of ours onto KD's own class screen.
+	// The co-op entries moved from a Multiplayer menu of ours onto KD's own class screen.
 	// The BUTTON IDS did not change (`KDMPHost`, `KDMPContinue`, `KDMPJoin`), so every caller that
 	// already knows which one it wants needs only this different way of arriving — which is why this
 	// one edit migrates the whole suite instead of seventeen.
@@ -88,7 +88,7 @@ export async function openLobby(page: any, port: number, host = '127.0.0.1', opt
 }
 
 /**
- * KDM-294 — the other road in: a SOLO run already in progress, with KD's in-game menu open.
+ * The other road in: a SOLO run already in progress, with KD's in-game menu open.
  *
  * Same boot as `openLobby` (one copy of "skip the intro, settle on the menu, mark the briefing"),
  * then a real single-player game — KD's own `KinkyDungeonStartNewGame`, a few real turns — and the
@@ -144,7 +144,7 @@ export async function bootToMenu(page: any, port: number, host: string, opts: { 
 	// `waitAssetsPreloaded`.
 	if (opts.preload) await waitAssetsPreloaded(page);
 	await onMenu(page);
-	// KDM-272 — a player who has never seen the co-op briefing is shown it on their FIRST entry, and
+	// A player who has never seen the co-op briefing is shown it on their FIRST entry, and
 	// the entry's action is held until they have read it. Every spec but `mp-lobby-about` is about
 	// something else, so the briefing is marked seen HERE rather than by a copy in each of them.
 	// `{briefing: true}` opts out, and the one spec that opts out is the one asserting the real
@@ -169,7 +169,7 @@ async function onMenu(page: any, timeout = 30_000) {
 	 * When preload finishes, KD schedules a 100 ms timer that drops the page on `Intro` and then the
 	 * menu — silently undoing any state forced beforehand. The old `gotoMenu` was immune by accident:
 	 * the menu IS where that timer lands, so polling for it could not be raced. Parking straight on
-	 * `'Diff'` (or starting a game — KDM-294) is not, and the timer fires just after the poll succeeds.
+	 * `'Diff'` (or starting a game from the in-game menu) is not, and the timer fires just after the poll succeeds.
 	 *
 	 * It cost six specs — every one of them a `{ preload: true }` caller (`mp-save-export`,
 	 * `mp-save-import`, `mp-mod-sync-guest`, `mp-coop-render-alive`) — failing with
@@ -179,7 +179,7 @@ async function onMenu(page: any, timeout = 30_000) {
 	await page.waitForFunction(() => {
 		// @ts-ignore — bundle `let` globals, readable by bare name.
 		if (KinkyDungeonState !== 'Menu') { KinkyDungeonState = 'Menu'; return false; }
-		// @ts-ignore — a stock menu button: `MultiplayerButton` is gone (KDM-293).
+		// @ts-ignore — a stock menu button: `MultiplayerButton` is gone.
 		return !!(KDButtonsCache && KDButtonsCache.GameStart);
 	}, undefined, { timeout, polling: 'raf' });
 }
@@ -203,7 +203,7 @@ async function onDiff(page: any, timeout = 30_000) {
 
 
 /**
- * KDM-293 — the same road as `openLobby`, but WITHOUT marking the briefing seen.
+ * The same road as `openLobby`, but WITHOUT marking the briefing seen.
  *
  * The only difference between the two is that convenience, so this delegates rather than repeating
  * the navigation: a second copy of "boot, skip the intro, wait for the entries" is exactly the drift
@@ -217,13 +217,13 @@ export async function openEntry(page: any, port: number, host = '127.0.0.1') {
 
 /** The lobby's own view of itself — the fields the specs assert on. */
 export const lobbyState = (page: any) => page.evaluate(() => ({
-	// KDM-293 — 'connect' | 'waiting' | 'about'. Replaces the old `view`, whose 'menu' value named a
+	// 'Connect' | 'waiting' | 'about'. Replaces the old `view`, whose 'menu' value named a
 	// screen that no longer exists.
 	phase: window.KDMPLobby.phase,
 	pending: window.KDMPLobby.pending,
 	error: window.KDMPLobby.error,
 	status: window.KDMPLobby.status,
-	// KDM-259 — the seed the host typed, cached across view changes like `name`.
+	// The seed the host typed, cached across view changes like `name`.
 	seed: window.KDMPLobby.seed,
 }));
 
@@ -262,8 +262,8 @@ export async function waitAssetsPreloaded(page: any, timeout = 120_000) {
 /**
  * Build a REAL mod zip in the page and hand it to KD's stock installer (`KDMods.ts:238`).
  *
- * Here rather than in a spec because two specs now need it (KDM-249's acceptance test and KDM-257's
- * notice test), and a second copy would drift from the first — the same reason `press()` lives here.
+ * Here rather than in a spec because two specs now need it (the mod-sync acceptance test and the
+ * mod-exchange notice test), and a second copy would drift from the first — the same reason `press()` lives here.
  * It is deliberately a real zip built with the game's own zip library, so unzip -> `mod.json` ->
  * priority -> `eval` is genuinely exercised; a stub payload would make every caller's green weaker.
  *
@@ -351,7 +351,7 @@ export type Rect = { name: string; x: number; y: number; w: number; h: number };
  * (`KinkyDungeon.ts:6421`), so a button of ours that overlaps a stock control STEALS its clicks with
  * both still painted. Checked against every other `KDButtonsCache` entry, computed live, plus the
  * caller's list of hand-rolled `MouseIn` regions — which no cache read can see. One copy, because
- * KDM-293 (class screen) and KDM-294 (in-game menu) need exactly the same rule.
+ * the class screen and the in-game menu need exactly the same rule.
  *
  * Answers `['<ours>:MISSING']` for an entry that is not registered, so an absent button cannot pass.
  */
@@ -398,7 +398,7 @@ export async function clickAt(page: any, x: number, y: number) {
 /**
  * Bring a guest in and have the host accept, returning once the session really has two players.
  *
- * Was copied verbatim in `mp-save-import` and `mp-save-export`, and KDM-294 would have been the third
+ * Was copied verbatim in `mp-save-import` and `mp-save-export`, and the in-game-menu spec would have been the third
  * copy. 120s rather than 60s for the prompt: the two-browser join handshake is the first thing to slow
  * down on a loaded host. The assertion is unchanged; only the patience is.
  */
@@ -419,8 +419,8 @@ export const goldOf = (page: any): Promise<number> => page.evaluate(() => {
 
 /**
  * Replace the transport with a recorder: every `__coopConnect` the lobby makes is kept, none dials.
- * For single-page tests about what an entry DECLARES — not about the server. Shared by KDM-294's and
- * KDM-295's specs, which assert the same thing (the declaration) from two different entries.
+ * For single-page tests about what an entry DECLARES — not about the server. Shared by the in-game-menu and
+ * save-slot specs, which assert the same thing (the declaration) from two different entries.
  */
 export const recordConnects = (page: any) => page.evaluate(() => {
 	const w = window as any;
@@ -430,7 +430,7 @@ export const recordConnects = (page: any) => page.evaluate(() => {
 export const connects = (page: any): Promise<any[]> => page.evaluate(() => (window as any).__kdmpConnects as any[]);
 
 /**
- * KDM-295 — a save CODE for a solo run started as `klass` by a character called `name`, produced by
+ * A save CODE for a solo run started as `klass` by a character called `name`, produced by
  * KD's own serialiser (`KinkyDungeonSaveGame(true)` + `LZString.compressToBase64`, the recipe of KD's
  * "Get save code"). Answers the code; the page is left in that run.
  *
@@ -451,7 +451,7 @@ export async function saveCodeFor(page: any, classIndex: number, name: string): 
 }
 
 /**
- * KDM-295 — KD's save-slot screen with a save SELECTED, by KD's own road: main menu `LoadGame` →
+ * KD's save-slot screen with a save SELECTED, by KD's own road: main menu `LoadGame` →
  * paste the code → `LoadFromCodeButton`, which sets `LoadMenuCurrentSave` exactly as a slot press does.
  * Polls until our entry is registered AND enabled — enabled is the whole gate (R2).
  */

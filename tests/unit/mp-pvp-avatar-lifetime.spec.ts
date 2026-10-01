@@ -1,5 +1,5 @@
 /**
- * KDM-224 — a peer avatar is KNOCKED DOWN, never DELETED.
+ * A peer avatar is KNOCKED DOWN, never DELETED.
  *
  * Two PvP specs failed intermittently with a null where a peer position/entity should be
  * (`mp-pvp-realcombat` "a defeated peer keeps agency", `mp-pvp-bind-reconcile` "bindable once WORN
@@ -26,7 +26,7 @@ const { SwapSession } = require('../../tools/mp-server/swap-session');
 
 const BOOT_TIMEOUT = 240_000;
 
-describe('KDM-224 — a peer avatar survives being worn down (down ≠ deleted)', () => {
+describe('a peer avatar survives being worn down (down ≠ deleted)', () => {
 	let s: any;
 	beforeEach(async () => {
 		s = new SwapSession({ requiredPlayers: 2, seed: 'avatar-lifetime-seed', pvp: true });
@@ -81,7 +81,7 @@ describe('KDM-224 — a peer avatar survives being worn down (down ≠ deleted)'
 	/**
 	 * THE HOLE THE FIRST FIX LEFT (UAT, 2026-08-20).
 	 *
-	 * KDM-224 floored the avatar's hp inside a wrapper around `KinkyDungeonDamageEnemy`. That is ONE
+	 * The first fix floored the avatar's hp inside a wrapper around `KinkyDungeonDamageEnemy`. That is ONE
 	 * of the paths that writes enemy hp: the game has ~30 others that assign `enemy.hp` directly —
 	 * damage-over-time ticks (`KinkyDungeonEvents.ts:11225/11237/11249`), spells
 	 * (`KinkyDungeonMagicCode.ts:95/785/839`), dialogue outcomes, prison code. None of them is a
@@ -105,7 +105,7 @@ describe('KDM-224 — a peer avatar survives being worn down (down ≠ deleted)'
 			if (!e) return { pre: 'the avatar is not on the map to begin with' };
 			var logBefore = (typeof KinkyDungeonMessageLog !== 'undefined' && KinkyDungeonMessageLog)
 				? KinkyDungeonMessageLog.length : 0;
-			// A DoT tick / spell / event write. The KDM-224 damage wrapper never sees this one.
+			// A DoT tick / spell / event write. The first fix's damage wrapper never sees this one.
 			e.hp = 0;
 			// …and the fight path leaves the dying entity here, which is what makes the kill line print.
 			if (typeof KinkyDungeonKilledEnemy !== 'undefined') KinkyDungeonKilledEnemy = e;

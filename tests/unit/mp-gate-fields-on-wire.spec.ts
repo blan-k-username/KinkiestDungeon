@@ -1,5 +1,5 @@
 /**
- * KDM-200 — the snapshot must carry the fields KD's OWN gate reads.
+ * The snapshot must carry the fields KD's OWN gate reads.
  *
  * THE BUG THIS EXISTS FOR. The tie submenu evaluates `KDCanApplyBondage` in the BROWSER, against the
  * client's copy of the peer avatar. `serializeRenderState` copies entity fields through a whitelist
@@ -21,7 +21,7 @@ const { SwapSession } = require('../../tools/mp-server/swap-session');
 
 const BOOT_TIMEOUT = 300_000;
 
-describe('KDM-200 — gate-relevant entity state must survive serialisation', () => {
+describe('gate-relevant entity state must survive serialisation', () => {
 	it('carries stun / vulnerable / boundLevel for a peer avatar to the client', async () => {
 		const s: any = new SwapSession({ requiredPlayers: 2, seed: 'wire-fields', pvp: true });
 		s.join('A'); s.join('B');
@@ -49,7 +49,7 @@ describe('KDM-200 — gate-relevant entity state must survive serialisation', ()
 		expect(world.boundLevel, 'precondition: the world avatar is bound').toBeGreaterThan(0);
 
 		// eslint-disable-next-line no-console
-		console.log('\nKDM-200 wire check — world: ' + JSON.stringify(world)
+		console.log('\nwire check — world: ' + JSON.stringify(world)
 			+ '\n                     wire:  ' + JSON.stringify({
 				stun: ent.stun, vulnerable: ent.vulnerable, boundLevel: ent.boundLevel,
 				enemyName: ent.enemyName, hp: ent.hp }) + '\n  FULL: ' + JSON.stringify(ent) + '\n');
@@ -101,7 +101,7 @@ describe('KDM-200 — gate-relevant entity state must survive serialisation', ()
 
 		const down = gateOnWire('B', 'A');
 		// eslint-disable-next-line no-console
-		console.log('\nKDM-200 gate on the WIRE entity: ' + JSON.stringify(down) + '\n');
+		console.log('\ngate on the WIRE entity: ' + JSON.stringify(down) + '\n');
 		expect(down.vulnerable, 'a defeated peer must reach the client marked exposed').toBeGreaterThan(0);
 		expect(down.hp, 'and reading as worn down, from their real Will')
 			.toBeLessThanOrEqual(0.5 * down.maxhp);

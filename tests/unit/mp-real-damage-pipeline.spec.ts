@@ -1,13 +1,13 @@
 /**
- * KDM-164 — peer damage goes through KD's REAL player pipeline, not our arithmetic.
+ * Peer damage goes through KD's REAL player pipeline, not our arithmetic.
  *
  * Today a PvP hit lands on the victim's AVATAR (the entity pipeline, `KinkyDungeonDamageEnemy`), and
  * the server then converts the avatar's hp loss into Will by hand: `dmg = ARM_HP − hp`, `Will -= dmg`
  * (`swap-session.js`). That conversion is the invented model — it is a seam stitching KD's two damage
  * pipelines together with arithmetic the game does not have, it discards the damage TYPE entirely, and
- * it bypasses the victim's own resistances. It is also what caused the KDM-156 potion bug.
+ * it bypasses the victim's own resistances. It is also what caused the potion bug that wiped healing.
  *
- * Measured in the POC (`KDM-164/probes/poc-final.spec.ts`): the real chain is
+ * Measured in the POC: the real chain is
  * `KinkyDungeonMove → KDDoAttack → KinkyDungeonAttackEnemy → KinkyDungeonDamageEnemy → KDDamageEnemy`,
  * the damageInfo arrives intact as `{damage, type}`, the call is NOT inside KD's enemy loop, and
  * `KinkyDungeonDealDamage` — the game's real PLAYER damage pipeline — is called ZERO times for a PvP
@@ -39,7 +39,7 @@ const RECORDER = `
 	})();
 `;
 
-describe('KDM-164 — PvP damage uses the real player pipeline', () => {
+describe('PvP damage uses the real player pipeline', () => {
 	let s: any;
 
 	beforeEach(async () => {
@@ -48,13 +48,13 @@ describe('KDM-164 — PvP damage uses the real player pipeline', () => {
 		await s.ready();
 		// A plain eval, NOT `loadMod`: loading a mod mid-session re-baselines every per-player default
 		// against the parked global player (headless-host `loadMod`, the accepted edge case). A player
-		// still on their post-init tile carries no position in their bundle (KDM-309 seats the host
+		// still on their post-init tile carries no position in their bundle (the host is seated
 		// exactly there), so their next restore put them on the parking tile. The recorder only wraps
 		// a function; it has no per-player state to baseline.
 		s.world.eval(RECORDER);
 		// A acts first, so B's avatar is still where we put it when A swings. With random order the
 		// peer's own turn re-syncs its avatar back and silently undoes the setup (same mechanism as the
-		// KDM-163 mp-coop-demo flake).
+		// mp-coop-demo flake).
 		s._shuffle = () => ['A', 'B'];
 	}, BOOT_TIMEOUT);
 
@@ -96,10 +96,10 @@ describe('KDM-164 — PvP damage uses the real player pipeline', () => {
 	}, BOOT_TIMEOUT);
 
 	/**
-	 * KDM-156 forever-regression: the gauge must not re-charge. A hit is applied ONCE; a later heal
+	 * Potion-bug forever-regression: the gauge must not re-charge. A hit is applied ONCE; a later heal
 	 * must stick instead of being wiped by a stale hit re-read every turn.
 	 */
-	it('KDM-156: a hit is charged once and a later heal is not wiped', () => {
+	it('a hit is charged once and a later heal is not wiped', () => {
 		bumpB();
 		const afterHit = s.vitalsFor('B').will;
 		// no further attacks — just quiet turns

@@ -1,7 +1,7 @@
 /**
  * Node-layer (Vitest): the OTHER consume-once presentation queues are delivered once, not replicated.
  *
- * KDM-196, the sibling of the KDDamageQueue fix (KDM-186). UAT: *"when I move my mouse very often over
+ * The sibling of the KDDamageQueue fix. UAT: *"when I move my mouse very often over
  * Player A (on Player B's screen), I see spam of sound echo animation"* — spam that scales with the
  * SNAPSHOT RATE rather than with game events, which is the signature of one-shot presentation output
  * being replicated as ordinary state.
@@ -19,7 +19,7 @@
  * the player must be shown crosses as a SEQUENCED EVENT applied at most once.
  *
  * ⚠️ The anti-deletion assertions below are load-bearing (AC3): "no duplicates" must not be achievable
- * by presenting nothing. REPRO 3 v1 of KDM-186 fell into exactly that trap.
+ * by presenting nothing. An early version of a repro fell into exactly that trap.
  *
  * Imports the harness under tools/mp-server/** only — never Game/src/** or Scripts/**.
  */
@@ -39,7 +39,7 @@ function walkTurn(s: any, dx: number, dy: number) {
 const isShock = (e: any) => !!e && e.kind === 'noise'
 	&& (((e.shockwaves || []).length + (e.sounddesc || []).length) > 0);
 
-describe('KDM-196: consume-once presentation queues', () => {
+describe('consume-once presentation queues', () => {
 	let s: any;
 	let firstEvents: any[] = [];
 

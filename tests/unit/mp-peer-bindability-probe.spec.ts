@@ -1,5 +1,5 @@
 /**
- * KDM-193 PROBE — what actually lets a peer be tied in co-op?
+ * PROBE — what actually lets a peer be tied in co-op?
  *
  * ⚠️ EARLIER VERSIONS OF THIS FILE ENCODED THE WRONG GATE and produced a wrong conclusion. They
  * checked `KinkyDungeonIsDisabled(t) || t.vulnerable > 0`, copied from the per-restraint quick-bind
@@ -29,7 +29,7 @@ const { SwapSession } = require('../../tools/mp-server/swap-session');
 
 const BOOT_TIMEOUT = 300_000;
 
-describe('KDM-193 probe — the REAL bondage gate on a peer avatar', () => {
+describe('probe — the REAL bondage gate on a peer avatar', () => {
 	it('shows which branch of KDCanApplyBondage a peer can actually satisfy', async () => {
 		const s: any = new SwapSession({ requiredPlayers: 2, seed: 'bindability-real-gate', pvp: true });
 		s.join('A');
@@ -62,7 +62,7 @@ describe('KDM-193 probe — the REAL bondage gate on a peer avatar', () => {
 		// eslint-disable-next-line no-console
 		console.log([
 			'',
-			'KDM-193 — KDCanApplyBondage branches on a peer avatar',
+			'KDCanApplyBondage branches on a peer avatar',
 			'-'.repeat(68),
 			'  ' + JSON.stringify(armed),
 			'',

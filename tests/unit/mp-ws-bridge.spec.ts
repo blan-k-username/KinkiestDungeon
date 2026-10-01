@@ -1,5 +1,5 @@
 /**
- * Node-layer (Vitest) test for the local WebSocket bridge — KD-071/KD-085.
+ * Node-layer (Vitest) test for the local WebSocket bridge.
  *
  * Drives the hand-rolled RFC6455 bridge (tools/mp-server/ws-bridge.js, now fronting
  * the SWAP-model SwapSession) with TWO REAL WebSocket clients (Node's built-in global
@@ -20,7 +20,7 @@ const BOOT_TIMEOUT = 240_000;
 import { MPClient as Client } from '../helpers/mp-ws-client';
 
 
-describe('WSBridge — local WebSocket render+input round-trip (KD-071)', () => {
+describe('WSBridge — local WebSocket render+input round-trip', () => {
 	let bridge: any;
 	let port: number;
 	let A: Client;
@@ -37,7 +37,7 @@ describe('WSBridge — local WebSocket render+input round-trip (KD-071)', () => 
 		A?.close(); B?.close(); bridge?.close();
 	});
 
-	// KDM-255 — hand-written rather than `seatPair`, because the two cases below are deliberately
+	// Hand-written rather than `seatPair`, because the two cases below are deliberately
 	// SPLIT across the barrier: A is alone for the first, and B's arrival is the event the second one
 	// is about. A shared helper that seats both at once would erase exactly what is being asserted.
 	it('does not start until both clients join (barrier on join)', async () => {

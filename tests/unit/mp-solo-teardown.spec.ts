@@ -1,7 +1,7 @@
 /**
- * KDM-253 — wait or continue solo: the host's choice, and a clean goodbye.
+ * Wait or continue solo: the host's choice, and a clean goodbye.
  *
- * The last slice of KDM-234. KDM-250 detects the drop, KDM-251 pauses honestly, KDM-252 brings the
+ * The last slice of drop handling. The heartbeat detects the drop, the pause is honest, reconnect brings the
  * peer back — this one covers the case where they do not come back, and gives the host a decision
  * instead of an indefinite wait they never chose.
  *
@@ -17,7 +17,7 @@
  * headline case walks the live session generically and demands that NOTHING reachable from it still
  * keys the departed player.
  *
- * Requirement ids refer to the `## Requirements` section of KDM-253 (EARS text in KDM-234).
+ * The requirement ids on the tests name the behaviours this spec pins.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { MPClient } from '../helpers/mp-ws-client';
@@ -83,11 +83,11 @@ function entityExists(session: any, entityId: number): boolean {
 }
 
 // ---------------------------------------------------------------------------------------------
-// The dialogue DEFINITION, read as data — no session boot needed. Same shape as the KDM-251 case
+// The dialogue DEFINITION, read as data — no session boot needed. Same shape as the pause slice's case
 // for `KDCoopHostLost`: this is source text with two consumers (server eval + browser script), so
 // what is worth pinning is what it declares.
 // ---------------------------------------------------------------------------------------------
-describe('KDM-253 A4 — what the host is actually offered', () => {
+describe('what the host is actually offered', () => {
 	function registered() {
 		const scope: any = { KDDialogue: {}, addTextKey: (k: string, v: string) => { scope._keys[k] = v; } };
 		scope._keys = {};
@@ -103,7 +103,7 @@ describe('KDM-253 A4 — what the host is actually offered', () => {
 	});
 
 	it('D1 — and the guest\'s dialogue is still the asymmetric one, unchanged by this slice', () => {
-		// The roles are not symmetric (KDM-234 D5): a guest who lost the HOST has no world to
+		// The roles are not symmetric: a guest who lost the HOST has no world to
 		// continue in, so "carry on alone" must never appear on their side.
 		const d = registered().dialogues[HOST_LOST_DIALOGUE];
 		expect(Object.keys(d.options)).toEqual(['Quit']);
@@ -131,7 +131,7 @@ describe('KDM-253 A4 — what the host is actually offered', () => {
 // The teardown itself, on a real session. No sockets: `removePlayer` is session-level, and driving
 // it directly is what lets each of the seven steps be asserted separately.
 // ---------------------------------------------------------------------------------------------
-describe('KDM-253 E5/N3 — letting them go is clean', () => {
+describe('letting them go is clean', () => {
 	let s: any = null;
 	let avB: number;
 	let joinedBefore: string[];
@@ -218,7 +218,7 @@ describe('KDM-253 E5/N3 — letting them go is clean', () => {
 // The decision, over the wire — the half the session cannot see: who is ASKED, what `Wait` does,
 // and that the seat is really given up.
 // ---------------------------------------------------------------------------------------------
-describe('KDM-253 S4/D1/E6 — the host is asked, and their answer is honoured', () => {
+describe('the host is asked, and their answer is honoured', () => {
 	let bridge: any = null;
 	let A: MPClient;      // seat 0 — the host, the survivor
 	let B: MPClient;      // seat 1 — the guest, who leaves
@@ -302,7 +302,7 @@ describe('KDM-253 S4/D1/E6 — the host is asked, and their answer is honoured',
 	}, BOOT_TIMEOUT);
 
 	it('E6 — the gate seat is released too, or slot 1 leaks for the life of the process', () => {
-		// KDM-252 stopped a mid-session close from freeing the SEAT (a returning player must find
+		// Reconnect stopped a mid-session close from freeing the SEAT (a returning player must find
 		// their own). `gone` is where it is finally given back — and nothing else gives it back.
 		expect(bridge.gate.has('B'), 'the join gate no longer holds a seat for them').toBe(false);
 	});

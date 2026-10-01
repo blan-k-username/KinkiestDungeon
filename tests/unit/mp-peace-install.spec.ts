@@ -1,5 +1,5 @@
 /**
- * KDM-229 — `client/coop-menu.js` installs its context-menu wrap synchronously, with no timer.
+ * `Client/coop-menu.js` installs its context-menu wrap synchronously, with no timer.
  *
  * WHY A UNIT SPEC AND NOT JUST THE E2E. `mp-peace-menu.spec.ts:69` already asserts the wrap is
  * installed, but it lets a whole browser boot elapse first — a re-introduced `setInterval` would
@@ -39,7 +39,7 @@ function vanillaBuilder() {
  */
 function loadCoopPeace(coop: any = null, coopApi: any = null) {
 	const armed: string[] = [];
-	// KDM-275: `__coop` is the bootstrap's own handle — `isHost()` gates the save entry, and
+	// `__Coop` is the bootstrap's own handle — `isHost()` gates the save entry, and
 	// `lastSaveOk`/`lastSaveAt` are what it reports. Absent by default, so every existing case here
 	// keeps exercising a page that is not the host.
 	const win: any = { KDRenderClient: coop === null ? null : { lastCoop: coop }, __coop: coopApi || undefined };
@@ -61,7 +61,7 @@ function loadCoopPeace(coop: any = null, coopApi: any = null) {
 	return { ctx, win, armed };
 }
 
-describe('KDM-229 — the peace context-menu wrap installs without a timer', () => {
+describe('the peace context-menu wrap installs without a timer', () => {
 	it('AC3: evaluating the script arms no timer at all', () => {
 		const { armed } = loadCoopPeace();
 		expect(armed, `coop-menu.js armed: ${armed.join(', ')}`).toEqual([]);
@@ -99,7 +99,7 @@ describe('KDM-229 — the peace context-menu wrap installs without a timer', () 
 });
 
 /**
- * KDM-275 R7/AC4 — the host can tell whether their run is safe, without doing anything.
+ * The host can tell whether their run is safe, without doing anything.
  *
  * The run now saves itself and does so SILENTLY (a status line per floor is noise the player learns
  * to ignore). Something therefore has to answer "is my run saved, and how recently?" on demand, and
@@ -110,7 +110,7 @@ describe('KDM-229 — the peace context-menu wrap installs without a timer', () 
  * a browser boot would only make the same assertion slower and flakier. `mp-save-autoexport` pins
  * the trigger, `mp-save-export-wire` pins the wire; this pins what the host is told.
  */
-describe('KDM-275 — the save entry says when the run was last saved', () => {
+describe('the save entry says when the run was last saved', () => {
 	const host = (extra: any = {}) => Object.assign({ isHost: () => true }, extra);
 	const saveText = (api: any) => {
 		const { ctx } = loadCoopPeace(null, api);
@@ -121,10 +121,10 @@ describe('KDM-275 — the save entry says when the run was last saved', () => {
 
 	it('CONTROL — a guest is offered no save entry at all, so there is nothing to label', () => {
 		// Without this, every assertion below could be describing an entry that is shown to everybody.
-		expect(saveText({ isHost: () => false }), 'a guest has no world to keep (KDM-244 C1)').toBe(null);
+		expect(saveText({ isHost: () => false }), 'a guest has no world to keep').toBe(null);
 	});
 
-	it('before anything has been saved, the entry is the plain KDM-244 wording', () => {
+	it('before anything has been saved, the entry is the plain save-export wording', () => {
 		// The regression this guards is a label that reads "(saved NaN min ago)" on the first frame of
 		// every session, which is what an unguarded Date arithmetic would produce.
 		expect(saveText(host())).toBe('Save this run for single player');
@@ -139,7 +139,7 @@ describe('KDM-275 — the save entry says when the run was last saved', () => {
 
 	it('R6 — and a FAILED save is stated, not merely left unmentioned', () => {
 		// The automatic path is the one nobody is watching. "No news" must not be able to mean "your
-		// last three saves failed" — that is precisely the silent-failure trap KDM-244 A6 names.
+		// last three saves failed" — that is precisely the silent-failure trap the save-export requirement A6 names.
 		expect(saveText(host({ lastSaveOk: false, lastSaveAt: Date.now() })))
 			.toContain('LAST SAVE FAILED');
 	});

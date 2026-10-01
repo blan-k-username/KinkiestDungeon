@@ -1,5 +1,5 @@
 /**
- * E2E — KDM-198: the guard for KDM-186 RULE 1 v3 (STREAM vs COMMAND input).
+ * E2E — the guard for input RULE 1 v3 (STREAM vs COMMAND input).
  *
  * Rule 1 v3 is shipped and working, and it is the THIRD design in a row. Each earlier one fixed a
  * real UAT regression and caused another:
@@ -33,7 +33,7 @@
  * reproduced by playing — that is what defeated the earlier attempts. The condition Rule 1 turns on
  * is not a rate but a STATE: "a send arrives while this type's slot is still busy". Each test drives
  * that state directly, by issuing two or more sends inside ONE synchronous `page.evaluate`. A reply
- * takes ~250 ms (it is frame-bound, KDM-214), so the later sends are guaranteed to land on a busy
+ * takes ~250 ms (it is frame-bound), so the later sends are guaranteed to land on a busy
  * slot. Deterministic, and independent of how fast the host renders.
  */
 import { test, expect } from '@playwright/test';
@@ -58,7 +58,7 @@ const NOVEL = 'kdm198NovelCommand';
  * `[[-1,-1],[1,0],[-1,-1],…]` where `[-1,-1]` was never sent by the test — the same tell, an
  * unsent value, that exposed REPRO 7 v1.)
  *
- * `suppressHover` is KDM-204's diagnostic gate. It drops the game's hover input inside the
+ * `suppressHover` is a diagnostic gate. It drops the game's hover input inside the
  * `KDSendInput` routing wrapper (`render-client.js:522`), BEFORE `submit()`, so Rule 1 itself is
  * untouched and the test's own `__coop.sendAction` calls still travel the full path. It is a
  * measurement isolator, not a stub of the thing under test.

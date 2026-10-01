@@ -1,7 +1,7 @@
 /**
  * tools/mp-server/headless-host.js
  *
- * Headless Node game host (KD-067 PoC scope). Boots the stock out/main.js inside
+ * Headless Node game host (PoC scope). Boots the stock out/main.js inside
  * an isolated V8 context (vm) behind the shim layer, and exposes a small API:
  *   init(opts) · step(n) · getState() · loadSave(str) · saveOf() · eval(code)
  *
@@ -14,8 +14,8 @@
  * bundle so its closure can read/write those bindings — the Node analogue of
  * Playwright's page.evaluate(() => SomeGlobal).
  *
- * Zero edits to Game/src/** or Scripts/** (KD-067 invariant). The serverMode
- * flag (KD-068) is set via a bundle global from the orchestrator, not a source edit.
+ * Zero edits to Game/src/** or Scripts/** (a standing invariant). The serverMode
+ * flag is set via a bundle global from the orchestrator, not a source edit.
  */
 'use strict';
 
@@ -30,12 +30,12 @@ const LZSTRING_PATH = path.join(REPO_ROOT, 'Scripts', 'lib', 'LZString.js');
 const BUNDLE_PATH = path.join(REPO_ROOT, 'out', 'main.js');
 
 /**
- * KDM-160: keys of KD's own save that describe the SHARED WORLD, not a player.
+ * Keys of KD's own save that describe the SHARED WORLD, not a player.
  *
  * `player = KinkyDungeonGenerateSaveData() - WORLD_KEYS` — the swap model keeps one authoritative
  * world and N players, and this is the subtraction that separates them. Deliberately short and
  * SEMANTIC: it changes only when the world model changes, which is far rarer than feature additions.
- * (Enumerating the *player* side instead is what produced the KDM-156 bug class — the player side is
+ * (Enumerating the *player* side instead is what produced an earlier bug class — the player side is
  * large, growing and unknowable; the world side is small and stable.)
  */
 const WORLD_KEYS = Object.freeze([
@@ -47,7 +47,7 @@ const WORLD_KEYS = Object.freeze([
 ]);
 
 /**
- * KDM-160: KDGameData keys that are FLOOR/WORLD scope rather than player scope.
+ * KDGameData keys that are FLOOR/WORLD scope rather than player scope.
  *
  * KDGameData is 221 keys and mixes both — in single-player the distinction does not exist (one
  * player, one world, one bag), so upstream has no reason to separate them. Everything NOT listed
@@ -55,7 +55,7 @@ const WORLD_KEYS = Object.freeze([
  *
  * The default is deliberately per-player: a player field wrongly shared is exactly the contamination
  * bug class this epic exists to remove. Measured evidence: 86 of 123 probed primitive keys leaked
- * between players before this list existed (KDM-160 §A4).
+ * between players before this list existed.
  *
  * CRITERION for adding an entry — one of:
  *   (a) it is keyed by ENTITY ID (it describes world entities, not the player), or
@@ -71,7 +71,7 @@ const KDGAMEDATA_WORLD_KEYS = Object.freeze([
 	'NamesGenerated', 'Regiments', 'RegimentID',
 	'KinkyDungeonSpawnJailers', 'KinkyDungeonSpawnJailersMax',
 	'ChestsGenerated', 'PersistentNPCCache',
-	// KDM-277 — three more that are keyed by MAP COORDINATES or by a world slot, found by KDM-273's
+	// Three more that are keyed by MAP COORDINATES or by a world slot, found by the
 	// transition-write audit rather than by a bug:
 	//   PersistentItems    keyed by `RoomType + "," + KDCurrentWorldSlot.x + "," + .y`
 	//                      (KDMapGen.ts:70) and read across every slot by KinkyDungeonInventory.ts:3369.
@@ -81,20 +81,20 @@ const KDGAMEDATA_WORLD_KEYS = Object.freeze([
 	//   KeyringLocations   `{x, y}` map coordinates for jail keyring placement (KinkyDungeonJail.ts:651).
 	// Pinned by tests/unit/mp-world-generation-keys.spec.ts (divergence + control on each).
 	'PersistentItems', 'AlreadyOpened', 'KeyringLocations',
-	// KDM-277 — the run's JOURNEY TYPE ("Random"/"Harder"/"Explorer"), written at
+	// The run's JOURNEY TYPE ("Random"/"Harder"/"Explorer"), written at
 	// KDStairActions.ts:187 and KinkyDungeon.ts:4455. It is the INPUT to
 	// `KDInitializeJourney(KDGameData.Journey, level)` (KDStairActions.ts:188, KDMapGen.ts:681), which
-	// builds `JourneyMap` — already a world key since KDM-265. Leaving the input per-player while its
-	// output is world is exactly the half-classified pair KDM-228 warns about: two players holding
+	// builds `JourneyMap` — already a world key. Leaving the input per-player while its
+	// output is world is exactly the half-classified pair the RoomType fix warns about: two players holding
 	// different journey types would generate different journey maps for one party.
 	'Journey',
-	// KDM-277 — the jail-point selection timer for ENEMIES (KinkyDungeonEnemies.ts:202/205/215, reset
+	// The jail-point selection timer for ENEMIES (KinkyDungeonEnemies.ts:202/205/215, reset
 	// at KDMapGen.ts:48). Decisive detail: it is compared against and assigned from
 	// `KinkyDungeonCurrentTick`, which is itself blacklisted world state. A per-player value
 	// denominated in a world clock is incoherent — whoever was swapped in last would move the party's
 	// shared jail timer. Pinned by tests/unit/mp-journey-jail-keys.spec.ts.
 	'PreferredJailPointTick',
-	// KDM-243 — the seed the CURRENT map was generated from, and the value KD's save loader re-seeds
+	// The seed the CURRENT map was generated from, and the value KD's save loader re-seeds
 	// the RNG to (`KinkyDungeon.ts:7379`). Classified with `KinkyDungeonSeed` in GLOBAL_BLACKLIST,
 	// which is where the full argument lives: they are written by one statement
 	// (`KinkyDungeonGame.ts:962-970`) and describe the party's one world, not a player.
@@ -112,7 +112,7 @@ const KDGAMEDATA_WORLD_KEYS = Object.freeze([
 	'NPCRestraints',
 	// (b) WHICH MAP the party is on — "" for a dungeon floor, JourneyFloor for the between-floors
 	// hub, Tunnel/PerkRoom/ShopStart for the side rooms. The session has one world and one map, and a
-	// floor change moves the whole party (KDM-165).
+	// floor change moves the whole party.
 	//
 	// Unlike NPCRestraints above, this one is PROVEN rather than reasoned: the game assigns these two
 	// in exactly four places and every one is a map load, a map generation or a floor transition —
@@ -129,12 +129,12 @@ const KDGAMEDATA_WORLD_KEYS = Object.freeze([
 	// They classify together because they are written by the same statements; splitting them would
 	// leave the pair half-classified. No client compensation is needed — render-client.js:617-618
 	// already restores both from the snapshot's own world-sourced fields, after adoptBundle, so the
-	// browser has always preferred the world's answer (KDM-222). This makes the server agree.
+	// browser has always preferred the world's answer. This makes the server agree.
 	//
 	// Pinned by tests/unit/mp-room-world-state.spec.ts (the divergence case) and, generically, by
 	// mp-noninterference.spec.ts, which checks declared world keys from both directions.
 	'RoomType', 'MapMod',
-	// KDM-265 — WHERE ON THE JOURNEY the party stands, and how deep this RUN has gone.
+	// WHERE ON THE JOURNEY the party stands, and how deep this RUN has gone.
 	//
 	// JourneyX/JourneyY are committed by the transition itself
 	// (KinkyDungeonTiles.ts:861-862 copies them out of JourneyTarget), i.e. derived from the same
@@ -148,12 +148,12 @@ const KDGAMEDATA_WORLD_KEYS = Object.freeze([
 	// per-player copy makes the between-floors room appear or not depending on WHO took the stairs.
 	//
 	'JourneyX', 'JourneyY', 'HighestLevelCurrent', 'HighestLevel',
-	// KDM-263 A6 — WHICH ROUTE the party is taking out of the hub, and the map of routes it is
+	// WHICH ROUTE the party is taking out of the hub, and the map of routes it is
 	// choosing from.
 	//
-	// KDM-265 deliberately left these three per-player, because until there was a rule for what a
+	// These three were deliberately left per-player at first, because until there was a rule for what a
 	// "target" means when two players disagree, the acting player's target was the only answer
-	// available. KDM-263 IS that rule — one pending proposal, one agreed target, arbitrated by the
+	// available. The journey agreement (party-choice.js) IS that rule — one pending proposal, one agreed target, arbitrated by the
 	// session — so the committed answer is now the PARTY's, and can no longer be a copy belonging to
 	// whoever happens to be swapped in.
 	//
@@ -167,12 +167,12 @@ const KDGAMEDATA_WORLD_KEYS = Object.freeze([
 	//
 	// JourneyMap belongs with them for a reason of its own: `KDAdvanceLevel` MUTATES it on every
 	// descent, pruning the departed slot's Connections down to the one actually taken. Two players'
-	// maps are byte-identical at boot — MEASURED, KDM-241 P2 — so the divergence does not exist until
+	// maps are byte-identical at boot — MEASURED — so the divergence does not exist until
 	// a descent creates it, and then one player's pruned map would be stamped onto the party (R10).
 	// A test comparing two boot-time maps would therefore be vacuous; the coverage constructs the
 	// divergence instead.
 	'JourneyMap', 'JourneyTarget', 'UseJourneyTarget',
-	// KDM-242 A6/D6 — WHICH ESCAPE the party is playing towards.
+	// WHICH ESCAPE the party is playing towards.
 	//
 	// Criterion (b), and by the same evidence as RoomType/MapMod above: the game itself says this is
 	// the source of a KDMapData field. `KDMapGen.ts:694-695` is literally
@@ -180,13 +180,13 @@ const KDGAMEDATA_WORLD_KEYS = Object.freeze([
 	//     if (!KDGameData.SelectedEscapeMethod) KDGameData.SelectedEscapeMethod = "Key";
 	//     KDMapData.EscapeMethod = KDGameData.SelectedEscapeMethod;
 	//
-	// i.e. the next floor's LEVEL GOAL — KDM-240's subject — is a copy of it. A per-player copy makes
-	// the goal depend on which player took the stairs, which is the defect KDM-228 fixed for RoomType.
+	// i.e. the next floor's LEVEL GOAL is a copy of it. A per-player copy makes
+	// the goal depend on which player took the stairs, which is the defect already fixed for RoomType.
 	//
-	// It became reachable mid-run with KDM-242: a perk altar can set it (KinkyDungeonShrine.ts:965-967,
+	// It became reachable mid-run with the perk agreement: a perk altar can set it (KinkyDungeonShrine.ts:965-967,
 	// and KD's own routed handler at KinkyDungeonInput.ts:1028-1030), and that grant now goes to the
 	// whole party.
-	// KDM-245 — the ITEM ID counter, `KDGameData.ItemID` (KinkyDungeonEnemies.ts:7812). It is the
+	// The ITEM ID counter, `KDGameData.ItemID` (KinkyDungeonEnemies.ts:7812). It is the
 	// direct sibling of `RegimentID` two lines up and of the `KinkyDungeonEnemyID` /
 	// `KinkyDungeonSpellID` globals in GLOBAL_BLACKLIST: a monotonic counter whose only job is to
 	// make a NAME unique.
@@ -201,7 +201,7 @@ const KDGAMEDATA_WORLD_KEYS = Object.freeze([
 ]);
 
 /**
- * KDM-161: how many top-level bindings we expect to derive from the bundle.
+ * How many top-level bindings we expect to derive from the bundle.
  * Measured 2026-08-14: 2,254 `let` + 121 `const` + 6 `var` = 2,381 unique names.
  * A materially smaller number means the regex no longer matches upstream's output shape — that MUST
  * be loud, not silently degrade into "this player has almost no state" (same drift contract as
@@ -210,7 +210,7 @@ const KDGAMEDATA_WORLD_KEYS = Object.freeze([
 const MIN_EXPECTED_GLOBALS = 2000;
 
 /**
- * KDM-161: only globals whose JSON is at most this long are watched as per-player state.
+ * Only globals whose JSON is at most this long are watched as per-player state.
  * Anything larger is a static data table (enemy/restraint/spell defs), i.e. shared world data — and
  * those are exactly what made an unbounded fingerprint pass slow (109 ms). Measured: every real
  * per-player global except KDGameData is under 2 KB, and KDGameData is carried by its own path.
@@ -229,7 +229,7 @@ const MIN_EXPECTED_GLOBALS = 2000;
 const BASELINE_MAX_LEN = 20000;
 
 /**
- * KDM-161/KDM-195: how many captures between oversize audit SLICES (_auditOversize).
+ * How many captures between oversize audit SLICES (_auditOversize).
  *
  * It used to be one UNBOUNDED pass every 200 captures. Measured 2026-08-17: 22 globals / 5.53 MB,
  * one pass 59-90 ms — a synchronous stall of a single-threaded server that is already the bottleneck,
@@ -240,7 +240,7 @@ const BASELINE_MAX_LEN = 20000;
  * 6.8, 36.7, 3.5, 4.0, 8.7, 15.6, 6.3 ms — median 6.8, worst 36.7. 30 captures between slices puts a
  * cycle at ~210 captures: the same coverage latency and the same amortised cost as the old 90 ms/200,
  * with the single 90 ms stall replaced by a ~7 ms median one. The worst slice is still ~37 ms because
- * ModelDefs (1878 KB) is ONE name and a time budget cannot split it — see KDM-194.
+ * ModelDefs (1878 KB) is ONE name and a time budget cannot split it.
  *
  * `_auditOversize(true)` still runs a COMPLETE pass, ignoring the budget — that is the diagnostic and
  * test entry point, never the request path.
@@ -248,18 +248,18 @@ const BASELINE_MAX_LEN = 20000;
 const OVERSIZE_AUDIT_EVERY = 30;
 
 /**
- * KDM-195: wall-clock budget, inside the vm, for ONE audit slice.
+ * Wall-clock budget, inside the vm, for ONE audit slice.
  *
  * The budget is checked AFTER each name, so a slice always hashes at least one — the true worst case
  * is therefore the single largest oversize global, not this number. Measured with this budget: slices
  * of 2-5 names, median ~7 ms, worst ~37 ms (the slice that contains ModelDefs, 1878 KB). Splitting one
  * global into sub-chunks would bound that too, at the cost of per-chunk baseline hashes; not worth it
- * until it shows up in a measurement of the real path — see KDM-194.
+ * until it shows up in a measurement of the real path.
  */
 const OVERSIZE_AUDIT_BUDGET_MS = 4;
 
 /**
- * KDM-195: the ONE definition of the divergence hash, shared by every vm payload that needs it.
+ * The ONE definition of the divergence hash, shared by every vm payload that needs it.
  *
  * It is a source string rather than a function because these payloads run inside the bundle's own
  * `vm.Context` — nothing from this module is in scope there. It was copy-pasted into four payloads
@@ -269,14 +269,14 @@ const OVERSIZE_AUDIT_BUDGET_MS = 4;
 const KD_HASH_FN = 'function hash(s){ var x = 5381, i = s.length; while (i) { x = (x*33) ^ s.charCodeAt(--i); } return x>>>0; }';
 
 /**
- * KDM-161: globals that are NOT per-player, by CATEGORY (never per feature — a per-feature entry
+ * Globals that are NOT per-player, by CATEGORY (never per feature — a per-feature entry
  * here would rebuild the whitelist under a new name). Everything not listed is per-player.
  */
 const GLOBAL_BLACKLIST = Object.freeze([
 	// --- shared world: the dungeon and its inhabitants -----------------------
 	'KDMapData', 'KDMapExtraData', 'KDWorldMap', 'KDCurrentWorldSlot',
 	'KinkyDungeonCurrentTick', 'KinkyDungeonEnemyID', 'KinkyDungeonSpellID',
-	// KDM-245 — the three ITEM VARIANT REGISTRIES. `KinkyDungeonRestraintVariants`,
+	// The three ITEM VARIANT REGISTRIES. `KinkyDungeonRestraintVariants`,
 	// `KinkyDungeonWeaponVariants` and `KinkyDungeonConsumableVariants`
 	// (KinkyDungeonInventory.ts:116-120) are name → definition tables: an enchanted item's identity
 	// is a generated NAME, and every consumer resolves it through these
@@ -289,7 +289,7 @@ const GLOBAL_BLACKLIST = Object.freeze([
 	// `KDGameData.NPCRestraints` — and KD's own garbage collector agrees, scanning exactly those
 	// world sources for live references (`KDPruneInventoryVariants`, :3261). Leaving the table
 	// per-player while the names it defines sit in shared world state is the half-classified pair
-	// KDM-228 warns about.
+	// the RoomType fix warns about.
 	//
 	// MEASURED, not reasoned: with these per-player, a variant item dropped by one player resolved to
 	// `undefined` for the partner who picked it up — `KDRest(name)` false for B, true for A, with a
@@ -302,34 +302,34 @@ const GLOBAL_BLACKLIST = Object.freeze([
 	//     runs on every descent (KDStairActions.ts:32) against the SWAPPED-IN player's inventory, so
 	//     on a shared table it would delete every variant only the partner holds.
 	'KinkyDungeonRestraintVariants', 'KinkyDungeonWeaponVariants', 'KinkyDungeonConsumableVariants',
-	// KDM-265: WHICH FLOOR the party is on, and which checkpoint that floor belongs to. Same
+	// WHICH FLOOR the party is on, and which checkpoint that floor belongs to. Same
 	// category as KDMapData/KDCurrentWorldSlot above — this file already says so at the `level()`
 	// accessor ("The current dungeon floor … A change is a party-wide event"), it just did not act on
 	// it. Left per-player, each turn's restorePlayer installed the acting player's copy and their turn
 	// captured it straight back, so two disagreeing bundles made the world OSCILLATE between floors
 	// and the party never got past floor 1 (measured over ten real descents).
 	//
-	// This is KDM-228's RoomType argument applied to the level, including its client half: the thin
+	// This is the RoomType argument applied to the level, including its client half: the thin
 	// client has always preferred the world's answer, restoring both from the snapshot's own
 	// `s.level` / `s.checkpoint` (render-client.js:609-610). This makes the server agree.
 	'MiniGameKinkyDungeonLevel', 'MiniGameKinkyDungeonCheckpoint',
 	/*
-	 * KDM-243: THE MAP GENERATION SEED. Same argument as the floor directly above, and found the same
+	 * THE MAP GENERATION SEED. Same argument as the floor directly above, and found the same
 	 * way — by a case that made the world's copy disagree with a bundle's.
 	 *
 	 * `KinkyDungeonSeed` decides what the NEXT floor looks like: `KDInitTempValues` re-randomises it
 	 * per map and stores it as `KDGameData.LastMapSeed` (`KinkyDungeonGame.ts:960-970`), and the save
 	 * loader restores from that pair (`KinkyDungeon.ts:7116`, `:7379`). One party, one world, one next
 	 * floor — a per-player copy makes map generation depend on whose bundle was swapped in, which is
-	 * the exact non-determinism this epic exists to prevent (cf. KDM-271 on world-affecting perks).
+	 * the exact non-determinism this epic exists to prevent (cf. world-affecting perks).
 	 *
-	 * MEASURED, in KDM-243's own unit spec: an imported world's seed was reverted to the pre-import
+	 * MEASURED, in the save-import unit spec: an imported world's seed was reverted to the pre-import
 	 * value by the FIRST restore of the guest's bundle, because the guest's template predates the
 	 * import and the seed was watched per-player. The floor already generated was unaffected (the map
 	 * is in `KDMapData`); the damage is entirely to what comes next, which is why it is invisible
 	 * until someone descends.
 	 *
-	 * `LastMapSeed` is classified with it, in KDGAMEDATA_WORLD_KEYS, for the reason KDM-228 gives for
+	 * `LastMapSeed` is classified with it, in KDGAMEDATA_WORLD_KEYS, for the reason given for
 	 * RoomType/MapMod: they are written by the same statement, and splitting a pair leaves it
 	 * half-classified.
 	 */
@@ -338,12 +338,12 @@ const GLOBAL_BLACKLIST = Object.freeze([
 	'KDPathfindingCacheHits', 'KDPathCache', 'KDUpdateEnemyCache',
 	// Derived lookup caches over the world's ENTITIES — same category as KDPathCache above, and the
 	// same criterion (a) as KDGAMEDATA_WORLD_KEYS' entity-keyed entries: they describe world entities,
-	// not a player. They only became visible when KDM-161 taught the capture layer about Map, and they
+	// not a player. They only became visible when the capture layer learned about Map, and they
 	// are emphatically NOT per-player: MEASURED, resetting them on swap-in wiped the enemy lookup, so
 	// a PvP bump-attack landed once and then stopped doing damage (mp-pvp-realcombat, -bind-reconcile,
 	// -defeat-recovery all went red). KDEnemiesCache alone is 400 KB after one turn.
 	// The enemy DEFINITION table — the templates every entity's `.Enemy` points at, not any entity's
-	// state. Same category as the entity caches above, and KDM-195 settled it with evidence rather
+	// state. Same category as the entity caches above, and the drift audit settled it with evidence rather
 	// than argument: the audit reported it CHANGED on every pass, and the writer turned out to be
 	// OURS. `spawnAvatar` pushes a `RemotePlayer_<peer>` def clone into it (measured: 337 → 338 defs)
 	// so the peer avatar renders as a real character. That is world content shared by both players —
@@ -351,23 +351,23 @@ const GLOBAL_BLACKLIST = Object.freeze([
 	// player in. Excluded before this only by its 386 KB size, which meant a one-time append warned
 	// forever (the audit never re-baselines) while costing 3.9 ms of every audit.
 	'KinkyDungeonEnemies',
-	// KDM-277: the enemy COMMANDER ROLE table, `Map<number, string>` keyed by `enemy.id`
+	// The enemy COMMANDER ROLE table, `Map<number, string>` keyed by `enemy.id`
 	// (KDCommander.ts:174/179, deleted at :205/:209). A number key in KD is an entity id, so this is
 	// criterion (a) verbatim — the same argument KDIDCache and KDEntityFlagCache below already rest
-	// on. Flagged by KDM-273's transition-write audit because KinkyDungeonCreateMap resets it.
+	// on. Flagged by the transition-write audit because KinkyDungeonCreateMap resets it.
 	'KDCommanderRoles',
-	// KDM-277 (criterion b): generation state, by name and by use. Set during generation
+	// Generation state, by name and by use. Set during generation
 	// (KDMapGen.ts:239/245, KinkyDungeonSetpiece.ts:355, KinkyDungeonAlt.ts:2504/2548) and read BY
 	// generation to decide jail placement (KDMapGen.ts:460, :615).
 	'KDStageBossGenerated',
-	// KDM-277 (criterion b): map points of interest emitted by the generator (KDMapGen.ts:383-384),
+	// Map points of interest emitted by the generator (KDMapGen.ts:383-384),
 	// drawn at KinkyDungeonDraw.ts:4355. They describe the map, so they belong to the one map.
 	'KinkyDungeonPOI',
 	'KDEnemiesCache', 'KDEnemyCache', 'KDEnemyEventCache', 'KDIDCache', 'KDEntityFlagCache',
 	'KDEntityRestraintMetadata', 'KDThoughtBubbles',
 	'KDBuffedStatTypeMemo', 'KDBuffedStatTypeMemoUpdate',
 	// --- render / dirty flags: the server has no screen ----------------------
-	// KDM-186: KDDamageQueue belongs HERE, and its absence was a real bug. It is a CONSUME-ONCE
+	// KDDamageQueue belongs HERE, and its absence was a real bug. It is a CONSUME-ONCE
 	// presentation queue drained by `KinkyDungeonDrawFight` (KinkyDungeonFight.ts:3368) — the draw
 	// emits a floater per entry and splices it out. The server has no draw loop, so it never drained
 	// it; the generic capture then replicated the stale entries as ordinary state and EVERY snapshot
@@ -376,7 +376,7 @@ const GLOBAL_BLACKLIST = Object.freeze([
 	// Presentation-only state is not authoritative state and must not be replicated; what the player
 	// needs to be TOLD travels as a sequenced EVENT instead (SwapSession `pendingEvents`).
 	'KDDamageQueue',
-	// KDM-202: the same criterion, applied to the two queues that are consume-once but harmless
+	// The same criterion, applied to the two queues that are consume-once but harmless
 	// only BY ACCIDENT. Neither was a live bug when this was written; both are one upstream change
 	// away from being one, and an exclusion that rests on an accident is not an exclusion. Listed
 	// here so that it is a DECISION.
@@ -396,10 +396,10 @@ const GLOBAL_BLACKLIST = Object.freeze([
 	// its own. It was excluded before this only by SIZE — a real save exceeds BASELINE_MAX_LEN — and
 	// that protection is both accidental and INVISIBLE: unlike the baseline-time oversize set, a
 	// watched name that grows past the cap later is `continue`d in `_captureGlobals` and never
-	// reaches `_auditOversize` (see KDM-221). MEASURED: a sub-20 KB entry rode the wire.
+	// reaches `_auditOversize`. MEASURED: a sub-20 KB entry rode the wire.
 	'KDSaveQueue',
 	'KDDrawUpdate', 'KDVisionUpdate', 'KDUpdateChokes', 'KDAlertCD',
-	// KDM-277: three more of exactly this category, found by KDM-273's transition-write audit rather
+	// Three more of exactly this category, found by the transition-write audit rather
 	// than by a bug — they were missing from a decision that had already been made, which is the
 	// cheapest possible kind of finding and the reason that audit exists.
 	//
@@ -413,7 +413,7 @@ const GLOBAL_BLACKLIST = Object.freeze([
 	//   KDTileModes                  read by exactly one thing — a draw-time alpha oscillator
 	//                                (KinkyDungeonTiles.ts:392-393). Presentation, not state.
 	//
-	// Same consequence as KDDamageQueue (KDM-186): the server has no draw loop, so the clearing code
+	// Same consequence as KDDamageQueue: the server has no draw loop, so the clearing code
 	// never runs and these never return to baseline — they were captured as diverged per-player state
 	// on every bundle, letting the acting player's stale "please redraw" land on the world.
 	// Pinned by tests/unit/mp-render-dirty-flags.spec.ts, with a same-SHAPED control per flag
@@ -424,10 +424,10 @@ const GLOBAL_BLACKLIST = Object.freeze([
 	'KDMusicToast', 'KDMusicUpdateTime',
 	// --- already managed per-player by swap-session (do NOT double-manage) ---
 	'KinkyDungeonMessageLog', 'KinkyDungeonFloaters',
-	// --- carried by its OWN path, not by divergence (KDM-161 D7) -------------
+	// --- carried by its OWN path, not by divergence -------------
 	// KDGameData is the one global no mechanical rule can classify: 221 keys mixing per-player
 	// (Guilt, ShieldTokens, RevealedFog) with world (GuardSpawnTimer, JailGuard, ChestsGenerated).
-	// KDM-160 inverted it — capture whole, restore whole minus KDGAMEDATA_WORLD_KEYS — which is a
+	// The swap layer inverts it — capture whole, restore whole minus KDGAMEDATA_WORLD_KEYS — which is a
 	// semantic subtraction, not a whitelist. It is also 27 KB (JourneyMap alone is 21 KB), so the
 	// divergence path would exclude it on size anyway. Listed here so that exclusion is a DECISION.
 	'KDGameData',
@@ -437,7 +437,7 @@ const GLOBAL_BLACKLIST = Object.freeze([
 
 
 /**
- * KDM-245: world globals the BROWSER must be told about.
+ * World globals the BROWSER must be told about.
  *
  * `GLOBAL_BLACKLIST` answers "is this per-player?", and the answer "no" removes the name from the
  * per-player bundle — which is also the only route most globals had to the client. `KDMapData` has
@@ -449,18 +449,18 @@ const GLOBAL_BLACKLIST = Object.freeze([
  * dirty flags, the audio toasts). A name earns a place here only when the client RESOLVES something
  * through it.
  *
- * Generic on purpose, in the shape KDM-263 arrived at for `worldGameData`: one list, one loop on each
+ * Generic on purpose, in the shape already arrived at for `worldGameData`: one list, one loop on each
  * side. The per-field form of the same idea was four mirrored edits and a silent omission every time.
  */
 const WORLD_GLOBALS_CLIENT = Object.freeze([
 	// The item variant registries. An enchanted item's identity is a generated NAME, and the browser
 	// resolves it through these on every draw of the item list (KDRest / KDRestraint / KDGetItemName).
-	// They arrived in the per-player bundle until KDM-245 made them world state.
+	// They arrived in the per-player bundle until they were made world state.
 	'KinkyDungeonRestraintVariants', 'KinkyDungeonWeaponVariants', 'KinkyDungeonConsumableVariants',
 ]);
 
 /**
- * KDM-161: a tagged codec for the values plain JSON silently destroys.
+ * A tagged codec for the values plain JSON silently destroys.
  *
  * `JSON.stringify(new Map())` is `"{}"`. KD uses Maps heavily for per-player state
  * (KinkyDungeonInventory is a Map of Maps; KinkyDungeonFlags, KinkyDungeonStatsChoice), so without
@@ -477,16 +477,16 @@ const WORLD_GLOBALS_CLIENT = Object.freeze([
  * A consequence worth relying on: a `__kdT` tag can only ever appear at the top level of a captured
  * value, so restore can test for it in O(1) instead of walking every global.
  */
-// KDM-162: the codec moved to its own module — the BROWSER thin client needs the same decoder to
+// The codec moved to its own module — the BROWSER thin client needs the same decoder to
 // adopt a state bundle, and two hand-kept copies in two runtimes is the drift this epic deletes.
 const { KD_CODEC } = require('./kd-codec');
-// KDM-239 A4 — the world/player classification of KD's game-mode keys. Own module so the
+// The world/player classification of KD's game-mode keys. Own module so the
 // lightweight join-gate can validate a declaration without loading this engine host.
 const { MODE_WORLD_KEYS, MODE_PLAYER_KEYS, MODE_SOURCE, isModeKey } = require('./game-modes');
 
 /**
- * KD-088 entity re-resolution + the dispatch call, shared by applyInput and applyInputObserved
- * (KDM-163). The thin client cannot ship live entity object refs, so it sends {__kdEnt:id} (or
+ * Entity re-resolution + the dispatch call, shared by applyInput and applyInputObserved.
+ * The thin client cannot ship live entity object refs, so it sends {__kdEnt:id} (or
  * {__kdEnt:'player'}); these are replaced with THIS world's authoritative entities before dispatch.
  *
  * One copy on purpose: the probed and unprobed paths must dispatch IDENTICALLY, or the classification
@@ -494,18 +494,18 @@ const { MODE_WORLD_KEYS, MODE_PLAYER_KEYS, MODE_SOURCE, isModeKey } = require('.
  */
 
 /**
- * KDM-265 — run KD's DEFERRED map generation, which nothing else on the server ever will.
+ * Run KD's DEFERRED map generation, which nothing else on the server ever will.
  *
  * `KDGoThruTile` does not always build the new map inline. When
  * `!forceInstant && level < maxLevel-1 && …` it sets `KinkyDungeonState = "GenMap"` and parks the work
  * in `KDGenMapCallback` (KDStairActions.ts:251-258). The ONLY thing upstream that ever runs it is the
  * DRAW loop — `if (KDGenMapCallback) setTimeout(RunGenMapCallback, 100)` (KinkyDungeon.ts:2858). The
  * server has no draw loop, so the transition simply never completed: measured, four consecutive real
- * descents left the callback armed and the session sitting in `GenMap` with the map unchanged. Since
- * KDM-239 R7 the client ADOPTS the server's screen, so both players would stare at a `GenMap` screen
+ * descents left the callback armed and the session sitting in `GenMap` with the map unchanged. And
+ * the client ADOPTS the server's screen, so both players would stare at a `GenMap` screen
  * that never resolves.
  *
- * ⚠️ CLEAR BEFORE CALLING. This is KDM-240's lesson as code, not a style choice: when
+ * ⚠️ CLEAR BEFORE CALLING. This is a paid-for lesson as code, not a style choice: when
  * `KDPostStairSave` threw, the exception escaped AFTER the map had been generated but BEFORE
  * `KDGenMapCallback = null` ran, leaving a stale callback that poisoned every later turn
  * (see `_neuterAutosave`). Clear-then-call makes a throw cost one transition instead of the
@@ -560,7 +560,7 @@ const HOST_RESERVED = new Set([
 ]);
 
 /**
- * KDM-161: derive the bundle's top-level binding NAMES from its source.
+ * Derive the bundle's top-level binding NAMES from its source.
  *
  * KD declares its globals as top-level `let`/`var` in SCRIPT scope, so they are not properties of
  * globalThis and `Object.keys(globalThis)` cannot see them — a reflective "capture every global" is
@@ -581,7 +581,7 @@ function deriveBundleGlobals(src, opts = {}) {
 	}
 	if (opts.assert && names.length < MIN_EXPECTED_GLOBALS) {
 		throw new Error(
-			`[KDM-161] bundle-global DRIFT: derived ${names.length} top-level names, expected at least ` +
+			`bundle-global DRIFT: derived ${names.length} top-level names, expected at least ` +
 			`${MIN_EXPECTED_GLOBALS}. The declaration shape of out/main.js has changed — per-player state ` +
 			`capture would silently lose almost everything. Fix the regex in deriveBundleGlobals().`);
 	}
@@ -690,7 +690,7 @@ class HeadlessHost {
 	/**
 	 * Server-authoritative role flag + shared-entity AI suppression — installed as a
 	 * RUNTIME monkey-patch (mod-style reassignment, same pattern as _neuterRendering),
-	 * NOT a game-source edit (KD-085 restored zero source edits; KD-068's source flag
+	 * NOT a game-source edit (zero source edits were restored; the earlier source flag
 	 * was reverted). Roles:
 	 *   ""       → single-player / offline (default; AI runs normally — byte-identical).
 	 *   "world"  → this instance OWNS + simulates the shared entities (full AI).
@@ -730,7 +730,7 @@ class HeadlessHost {
 	}
 
 	/**
-	 * KDM-240 / KDM-267 — KD's OWN AUTOSAVE, which made headless game flows throw.
+	 * KD's OWN AUTOSAVE, which made headless game flows throw.
 	 *
 	 * `KinkyDungeonGenerateSaveData` reads `KDCurrentModels.get(KinkyDungeonPlayer).Poses` off a
 	 * paper-doll model that `_neuterRendering` above deliberately never builds, and it does so
@@ -743,22 +743,22 @@ class HeadlessHost {
 	 * was still to happen in that flow does not. The two measured cases differ in how far the throw
 	 * travelled, which is worth knowing before assuming a third one is loud:
 	 *
-	 *   KDM-240  KDGoThruTile -> KDGenMapCallback -> KDPostStairSave -> KinkyDungeonSaveGame
+	 *   stairs   KDGoThruTile -> KDGenMapCallback -> KDPostStairSave -> KinkyDungeonSaveGame
 	 *            `KDPostStairSave` is the second-to-last statement of `KDGenMapCallback`
 	 *            (KDStairActions.ts:239), so the throw escaped AFTER the new map was generated but
 	 *            BEFORE `KDGenMapCallback = null` ran — a stale callback, on every floor change.
-	 *   KDM-267  KinkyDungeonAdvanceTime -> KDRunDefeatForEnemy -> KinkyDungeonDefeat
+	 *   defeat   KinkyDungeonAdvanceTime -> KDRunDefeatForEnemy -> KinkyDungeonDefeat
 	 *            `KinkyDungeonSaveGame()` is the LAST statement of `KinkyDungeonDefeat`
 	 *            (KinkyDungeonJail.ts:1894). `applyInputObserved` DOES catch this one, so the session
 	 *            survived — but on the turn path `obs.error` is read only by `_learnInputKind`
 	 *            (swap-session.js:1125), never logged and never shown. So a captured player had the
 	 *            rest of their own input discarded and the session reported a normal turn. The
-	 *            reporting hole itself is KDM-268; this only removes one cause of hitting it.
+	 *            reporting hole itself is a separate fix; this only removes one cause of hitting it.
 	 *
 	 * TWO NAMES, BOTH LOAD-BEARING — neither makes the other redundant:
 	 *
 	 *   `KinkyDungeonSaveGame`  the save itself, and therefore all 12 of its call sites at once
-	 *                           (five in KinkyDungeonJail.ts alone). KDM-240 stubbed only the stairs
+	 *                           (five in KinkyDungeonJail.ts alone). The first fix stubbed only the stairs
 	 *                           wrapper because it believed `saveOf()` needed this function; it does
 	 *                           NOT — `saveOf` calls `KinkyDungeonGenerateSaveData` directly
 	 *                           (see `saveOf`), as does the only other consumer. Nothing in
@@ -804,7 +804,7 @@ class HeadlessHost {
 	/** Read the current global turn counter. */
 	tick() { return this.eval('KinkyDungeonCurrentTick'); }
 
-	// ----- message log (KD-090: per-player log composition) --------------------
+	// ----- message log (per-player log composition) --------------------
 
 	/** Length of the world message log (KinkyDungeonMessageLog). */
 	messageLogLength() {
@@ -822,14 +822,14 @@ class HeadlessHost {
 	}
 
 	/**
-	 * Push a combat-feedback line through KD's REAL message API (KD-098). Reuses
+	 * Push a combat-feedback line through KD's REAL message API. Reuses
 	 * `KinkyDungeonSendTextMessage` so the entry has the same shape/styling as any in-game
 	 * message (and sets the floating `KinkyDungeonActionMessage`), then returns the produced
 	 * log entry so the caller can route it to the right player's personal log. NOT a fake
 	 * string injection — the game's own messaging code runs. Used for PvP hit feedback, which
 	 * the silent `KinkyDungeonDealDamage` path never emits on its own.
 	 *
-	 * KDM-246 — `filter` is KD's own log-filter TAG (`KinkyDungeonGame.ts:2601`, 8th parameter),
+	 * `Filter` is KD's own log-filter TAG (`KinkyDungeonGame.ts:2601`, 8th parameter),
 	 * which the log's draw pass honours (`KinkyDungeonDraw.ts:2819/2862`). It defaults to KD's own
 	 * `'Self'`, so every pre-existing caller is unchanged. Co-op chat passes `'Chat'`, which is what
 	 * lets a player hide chat without hiding the game.
@@ -848,7 +848,7 @@ class HeadlessHost {
 		})()`);
 	}
 
-	/** A spell's AOE footprint + damage as data (KD-096 friendly-fire): {aoe,power,type}. */
+	/** A spell's AOE footprint + damage as data (friendly-fire): {aoe,power,type}. */
 	getSpellInfo(name) {
 		return this.eval(`(function(){
 			var sp = (typeof KinkyDungeonFindSpell === 'function') ? KinkyDungeonFindSpell(${JSON.stringify(name)}, true) : null;
@@ -867,7 +867,7 @@ class HeadlessHost {
 	}
 
 	/**
-	 * KDM-227: which ROOM the party is in — `''` for a plain dungeon floor, otherwise one of KD's own
+	 * Which ROOM the party is in — `''` for a plain dungeon floor, otherwise one of KD's own
 	 * room types (`JourneyFloor`, `Tunnel`, `PerkRoom`, `ShopStart`, `ElevatorRoom`, `Summit`, …).
 	 *
 	 * The floor NUMBER is not enough to tell "we finished a level" from "we ducked into a shop": both
@@ -881,7 +881,7 @@ class HeadlessHost {
 
 	/**
 	 * The swapped-in player's movement slow-level, RE-DERIVED from their worn restraints
-	 * (KD-093 self-heal proof): runs the real `KinkyDungeonCalculateSlowLevel` (reads
+	 * (self-heal proof): runs the real `KinkyDungeonCalculateSlowLevel` (reads
 	 * `KinkyDungeonAllRestraint()`) then returns `KinkyDungeonSlowLevel`. >0 ⇒ bound/slowed.
 	 */
 	playerSlowLevel() {
@@ -889,7 +889,7 @@ class HeadlessHost {
 	}
 
 	/**
-	 * Compute the CURRENTLY swapped-in player's outgoing weapon attack as data (KD-092 PvP):
+	 * Compute the CURRENTLY swapped-in player's outgoing weapon attack as data (PvP):
 	 * runs the real `KinkyDungeonGetPlayerWeaponDamage` so perks/bondage penalties apply, and
 	 * returns a plain {damage,type,bind,bindType} that can be applied to another player's bundle.
 	 */
@@ -922,7 +922,7 @@ class HeadlessHost {
 		// the map is generated inside StartNewGame.
 		if (opts.seed != null) this.eval(`KDsetSeed(${JSON.stringify(String(opts.seed))})`);
 		/*
-		 * KDM-239 R1 — the half of the stock start the co-op path never ran.
+		 * The half of the stock start the co-op path never ran.
 		 *
 		 * `KinkyDungeonStartNewGame` below is genuinely KD's own new-game entry, so the FLOOR has
 		 * always been real. What was missing is everything the stock start BUTTONS do around it
@@ -977,13 +977,13 @@ class HeadlessHost {
 		this.eval('typeof KDInitPerks === "function" && KDInitPerks()');
 		this.eval('typeof KDSyncLocalPlayerSlot === "function" && KDSyncLocalPlayerSlot()');
 		/*
-		 * KDM-239 R1 — the listener the stock start registers after the game exists. `KDAddListener`
+		 * The listener the stock start registers after the game exists. `KDAddListener`
 		 * with no id pushes onto `KDGameData.ListenerList` (`KinkyDungeon.ts:8473-8489`); registered
 		 * here, before `_newPlayerTemplate` is captured, so it rides into every player's bundle.
 		 */
 		this.eval('typeof KDAddListener === "function" && KDAddListener("SpeciesChecker")');
 		/*
-		 * KDM-242 — GAG PARTICLES OFF IN THE AUTHORITATIVE WORLD. The server has no screen.
+		 * GAG PARTICLES OFF IN THE AUTHORITATIVE WORLD. The server has no screen.
 		 *
 		 * Not a workaround for a test: it is a real server-side crash. `KDSendGagParticles`
 		 * (KDParticles.ts:336-360) asks `GetHardpointLoc` where the player's MOUTH is, which walks the
@@ -1001,8 +1001,8 @@ class HeadlessHost {
 		 */
 		this.eval('(function(){ if (typeof KDToggles !== "undefined" && KDToggles) KDToggles.GagParticles = false; })()');
 		/*
-		 * KDM-239 R2 — THE TUTORIAL IS SUPPRESSED ON PURPOSE, FOR BOTH PLAYERS. This is a decision,
-		 * not an omission, and it is the one place this task knowingly does not reproduce the stock
+		 * THE TUTORIAL IS SUPPRESSED ON PURPOSE, FOR BOTH PLAYERS. This is a decision,
+		 * not an omission, and it is the one place the co-op start knowingly does not reproduce the stock
 		 * start (owner, 2026-08-24).
 		 *
 		 * The stock buttons run `if (!KDToggles.SkipTutorial) KDStartDialog("Tutorial")`. In a
@@ -1010,12 +1010,12 @@ class HeadlessHost {
 		 * BOTH players on a dialogue neither asked for, and the guest has no way to dismiss the
 		 * host's copy. A co-op run is also unlikely to be anyone's first game.
 		 *
-		 * ⚠️ Do NOT "restore parity" by adding the call here without re-reading KDM-239 R2 first —
+		 * ⚠️ Do NOT "restore parity" by adding the call here without re-reading the reasoning above first —
 		 * `mp-start-ritual.spec.ts` asserts no Tutorial dialogue is open after a co-op start, and it
 		 * will tell you about this comment rather than about a mistake.
 		 */
 		this.setServerMode(this.serverMode);
-		// KDM-161: record the post-init fingerprint. Anything that diverges from it later is mutable,
+		// Record the post-init fingerprint. Anything that diverges from it later is mutable,
 		// hence a per-player state candidate — this is what lets an unknown feature or mod be captured
 		// without anyone adding it to a list. Must happen AFTER the data tables are loaded and BEFORE
 		// any gameplay, so "differs from baseline" means "gameplay touched it".
@@ -1029,10 +1029,10 @@ class HeadlessHost {
 		return this.tick();
 	}
 
-	// ----- serverMode (KD-068 PoC scope) ---------------------------------------
+	// ----- serverMode (PoC scope) ----------------------------------------------
 
 	/**
-	 * Gate shared-entity (enemy) AI via the real KD-068 source flag `KDServerRole`.
+	 * Gate shared-entity (enemy) AI via the real source flag `KDServerRole`.
 	 * 'world' instances run the AI; 'player' instances suppress it (the in-engine
 	 * guard at the top of KinkyDungeonUpdateEnemies returns early when role==='player').
 	 * This replaces the PoC's mod-style function-reassignment with the production flag.
@@ -1079,7 +1079,7 @@ class HeadlessHost {
 	}
 
 	/**
-	 * KDM-235 J1/J2 — the nearest legal, UNOCCUPIED tile to (x,y), searched in expanding rings.
+	 * The nearest legal, UNOCCUPIED tile to (x,y), searched in expanding rings.
 	 *
 	 * `findOpenTile` above answers a different question: it scans the whole map for the most open
 	 * spot, which is a boot-time layout choice. This one is "put them next to their friend", so the
@@ -1194,7 +1194,7 @@ class HeadlessHost {
 		return this.avatars[avatarId] || null;
 	}
 
-	// ----- features: PvP + server-side mods (KD-080) ---------------------------
+	// ----- features: PvP + server-side mods ---------------------------
 
 	/**
 	 * Load a mod's code into this instance — the same path the production loader
@@ -1204,7 +1204,7 @@ class HeadlessHost {
 	 */
 	loadMod(code) {
 		this.eval(code);
-		// KDM-161: a mod introduces NEW globals, and its freshly-initialised values are the world's new
+		// A mod introduces NEW globals, and its freshly-initialised values are the world's new
 		// per-player DEFAULTS. Without re-baselining, those names have no default to reset to, so a
 		// player who never touched the mod's state would inherit the previous player's value — the mod
 		// would silently be shared instead of per-player. Re-baselining is also what puts the mod's
@@ -1237,12 +1237,12 @@ class HeadlessHost {
 			willMax: (typeof KinkyDungeonStatWillMax !== 'undefined') ? KinkyDungeonStatWillMax : null,
 			distraction: (typeof KinkyDungeonStatDistraction !== 'undefined') ? KinkyDungeonStatDistraction : null,
 			restraints: (typeof KinkyDungeonAllRestraint === 'function') ? KinkyDungeonAllRestraint().length : null,
-			// KDM-199: the peer state a STAND-IN avatar must mirror, so KD own gate can read it.
+			// The peer state a STAND-IN avatar must mirror, so KD own gate can read it.
 			// All three are the GAME computing them for the swapped-in player; none is a rule of ours.
 			disabled: (typeof KDPlayerIsDisabled === "function") ? !!KDPlayerIsDisabled() : null,
 			stunTurns: (typeof KinkyDungeonFlags !== "undefined" && KinkyDungeonFlags && KinkyDungeonFlags.get)
 				? (KinkyDungeonFlags.get("playerStun") || 0) : 0,
-			// KDM-261: how many turns KD still considers this player DEFEATED. Set by KinkyDungeonDefeat
+			// How many turns KD still considers this player DEFEATED. Set by KinkyDungeonDefeat
 			// itself in the stay-put branch (KinkyDungeonJail.ts:1651) and expired by KD, so "currently
 			// held" is read from the game — the session keeps no timer of its own.
 			defeatTurns: (typeof KinkyDungeonFlags !== "undefined" && KinkyDungeonFlags && KinkyDungeonFlags.get)
@@ -1257,7 +1257,7 @@ class HeadlessHost {
 				}
 				return t;
 			} catch (e) { return 0; } })(),
-			// KDM-184: the swapped-in player's own defensive stats, RAW — the buff totals, not the
+			// The swapped-in player's own defensive stats, RAW — the buff totals, not the
 			// multiplicative values KinkyDungeonPlayerEvasion/Block derive from them. Raw is what the
 			// stand-in needs: KD applies its own MultiplicativeStat to an entity's buff total
 			// (KinkyDungeonGetEvasion:486, KinkyDungeonEnemies.ts:6681/:6684), so passing the raw stat
@@ -1274,11 +1274,11 @@ class HeadlessHost {
 	}
 
 	/**
-	 * KDM-164: record every hit the game lands on a peer AVATAR, with the damage info the game itself
+	 * Record every hit the game lands on a peer AVATAR, with the damage info the game itself
 	 * produced — `{damage, type}` — so the victim can take it through KD's own player pipeline instead
 	 * of us converting avatar hp into Will by hand.
 	 *
-	 * Measured (KDM-164 POC): the real chain is
+	 * Measured (in a proof of concept): the real chain is
 	 * `KinkyDungeonMove → KDDoAttack → KinkyDungeonAttackEnemy → KinkyDungeonDamageEnemy → KDDamageEnemy`,
 	 * the damageInfo arrives intact WITH its type, and the call is NOT inside `KinkyDungeonEnemyLoop`
 	 * (so this wrap is not re-entrant with KD's enemy iteration).
@@ -1287,7 +1287,7 @@ class HeadlessHost {
 	 * their post-init baseline on every swap, which would silently empty a global tally and make a live
 	 * wrap look as if it had never fired.
 	 *
-	 * KDM-224 — the same wrap also KEEPS THE AVATAR ALIVE, because this is the only place a peer
+	 * The same wrap also KEEPS THE AVATAR ALIVE, because this is the only place a peer
 	 * avatar can take damage and therefore the only place the rule can be enforced.
 	 *
 	 * `_armPeerEnemies` mirrors the peer's Will onto the avatar as hp, floored at 0.01 — so a peer
@@ -1296,7 +1296,7 @@ class HeadlessHost {
 	 * (`KinkyDungeonEnemies.ts:3340`) `KDRemoveEntity`s it, mid-turn, permanently — and `posOf` /
 	 * every snapshot map returns nothing for that player from then on. But the avatar is not a
 	 * combatant that can die; it is a stand-in for a PLAYER, and a downed player stays on the map
-	 * (KDM-154: down ≠ frozen — they keep agency, and KDM-200 makes them bindable). KD's own "knocked
+	 * (down ≠ frozen — they keep agency, and can be bound). KD's own "knocked
 	 * down instead of killed" branch (`KinkyDungeonFight.ts:1370`) covers bound / in-party /
 	 * `Damage.nokill` targets and nothing else, so an avatar falls straight through it.
 	 *
@@ -1305,7 +1305,7 @@ class HeadlessHost {
 	 * turn start. `tests/unit/mp-pvp-avatar-lifetime.spec.ts` drives that state directly.
 	 */
 	/**
-	 * KDM-224 — "knocked down, never killed", as ONE rule the world enforces in one place.
+	 * "Knocked down, never killed", as ONE rule the world enforces in one place.
 	 *
 	 * `KDMPFloorAvatar` lifts a peer avatar off the death threshold. 0.001 is the GAME's own knockdown
 	 * value, not a number we chose: it is what `KinkyDungeonFight.ts:1386` writes for a target its
@@ -1341,7 +1341,7 @@ class HeadlessHost {
 	}
 
 	/**
-	 * KDM-224 (UAT follow-up) — the floor belongs at the DEATH GATE, not on one writer.
+	 * The floor belongs at the DEATH GATE, not on one writer.
 	 *
 	 * The original fix floored hp inside the `KinkyDungeonDamageEnemy` wrapper. That covers exactly
 	 * one of the ways KD lowers an enemy's hp; the engine assigns `enemy.hp` DIRECTLY in ~30 other
@@ -1391,7 +1391,7 @@ class HeadlessHost {
 					w.__hits[E.id].push({ damage: Number(D.damage) || 0, type: D.type || 'pain' });
 				}
 				var res = _dmg.apply(this, arguments);
-				// KDM-224: floor it as soon as the damage lands, so everything the rest of the turn
+				// Floor it as soon as the damage lands, so everything the rest of the turn
 				// reads (targeting, KDHelpless, the fight path's own follow-ups) sees a live entity.
 				// The DEATH GATE below is the backstop for every other writer.
 				globalThis.KDMPFloorAvatar(E);
@@ -1403,9 +1403,9 @@ class HeadlessHost {
 		})()`);
 	}
 
-	/** KDM-164: take (and clear) the hits recorded against one peer avatar this turn. */
+	/** Take (and clear) the hits recorded against one peer avatar this turn. */
 	/**
-	 * KDM-186 — take the game's own presentation output for the player currently swapped in.
+	 * Take the game's own presentation output for the player currently swapped in.
 	 *
 	 * `KDDamageQueue` is how KD tells its DRAW layer "show this damage": `KinkyDungeonDrawFight`
 	 * emits a floater per entry and splices it out. Headless there is no draw loop, so the queue only
@@ -1435,7 +1435,7 @@ class HeadlessHost {
 	}
 
 	/**
-	 * KDM-196 — drain the game's NOISE presentation queues; the sibling of takeDamageFloaters above.
+	 * Drain the game's NOISE presentation queues; the sibling of takeDamageFloaters above.
 	 *
 	 * `KDEventData.shockwaves` and `KDEventData.sounddesc` are consume-once presentation output: the
 	 * enemy-noise path pushes them (`KinkyDungeonEnemies.ts:9607`) and the DRAW layer drains them
@@ -1469,8 +1469,8 @@ class HeadlessHost {
 	 * Record every untie performed on a peer avatar — the sibling of `installPeerDamageRecorder`.
 	 *
 	 * WHY A RECORDER AND NOT A LEVEL DELTA. The obvious reading of "someone untied this peer" is the
-	 * drop in the avatar's `boundLevel` since it was armed. That is wrong for the same reason KDM-164
-	 * gave up on the hp delta: the avatar is a live entity in a running world, and a standing delta
+	 * drop in the avatar's `boundLevel` since it was armed. That is wrong for the same reason the hp
+	 * delta was given up: the avatar is a live entity in a running world, and a standing delta
 	 * picks up everything ELSE that moves it. Measured — a bound avatar sheds bind level on its own
 	 * every turn, so every quiet turn read as an untie and quietly stripped the peer's real
 	 * restraints (`mp-slow-per-player`: a hobbled player walked away unslowed).
@@ -1524,7 +1524,7 @@ class HeadlessHost {
 	}
 
 	/**
-	 * KDM-230: how many hits are recorded against this avatar, WITHOUT consuming them.
+	 * How many hits are recorded against this avatar, WITHOUT consuming them.
 	 *
 	 * `takePeerHits` is take-once by design (a hit may be charged to the victim exactly once), so it
 	 * cannot also answer "was this avatar attacked this turn?" for a second caller. This peeks.
@@ -1632,7 +1632,7 @@ class HeadlessHost {
 		})()`);
 	}
 
-	/** KD-101 UAT: add a CARRYABLE loose-restraint item (Items inventory), not a worn one. */
+	/** Add a CARRYABLE loose-restraint item (Items inventory), not a worn one. */
 	addLooseRestraint(name, quantity = 1) {
 		return this.eval(`(function(){
 			var def = KinkyDungeonGetRestraintByName(${JSON.stringify(name)});
@@ -1644,7 +1644,7 @@ class HeadlessHost {
 		})()`);
 	}
 
-	// ----- real in-game integration: players-as-entities (KD-082) ---------------
+	// ----- real in-game integration: players-as-entities ---------------
 
 	/**
 	 * Ensure the `RemotePlayer` enemy-def exists (pushed mod-style, once) — an
@@ -1658,10 +1658,10 @@ class HeadlessHost {
 			if (!KinkyDungeonGetEnemyByName('RemotePlayer')) {
 				KinkyDungeonEnemies.push({
 					name: 'RemotePlayer', faction: 'Player', tags: KDMapInit(['peaceful']),
-					bound: 'Apprentice', // sprite name; presence makes KDCanBind true so the Truss/bind option appears (KD-098)
+					bound: 'Apprentice', // sprite name; presence makes KDCanBind true so the Truss/bind option appears
 					AI: 'guard', immobile: true, visionRadius: 0, maxhp: 100, minLevel: 0, weight: -1000,
 					movePoints: 1000, attackPoints: 0, attack: '', attackRange: 0,
-					// KDM-184: evasion 0 = NEUTRAL, and it must stay neutral. It used to be -100, and
+					// Evasion 0 = NEUTRAL, and it must stay neutral. It used to be -100, and
 					// KinkyDungeonMultiplicativeStat(-100) is 101 — a x101 hit chance that made every PvP
 					// attack land unconditionally and swamped anything the peer brought (measured: a peer
 					// with an Evasion buff of 3.0 still came out at 25.25, i.e. still an unconditional
@@ -1676,7 +1676,7 @@ class HeadlessHost {
 				});
 				if (typeof KinkyDungeonRefreshEnemiesCache === 'function') KinkyDungeonRefreshEnemiesCache();
 			}
-			// KD-100: register the def's display-name key so real combat text reads a real name
+			// Register the def's display-name key so real combat text reads a real name
 			// ("Your attack hits the Rival …") instead of "[NotFound] NameRemotePlayer".
 			if (typeof addTextKey === 'function') addTextKey('NameRemotePlayer', 'Rival');
 			return true;
@@ -1684,7 +1684,7 @@ class HeadlessHost {
 	}
 
 	/**
-	 * KDM-237 S2 — set the display name of the player currently in the world's player slot.
+	 * Set the display name of the player currently in the world's player slot.
 	 *
 	 * `KDGameData.PlayerName` is KD's own field for this (`KinkyDungeon.ts:647` seeds it, the "Name"
 	 * creation screen writes it). Deliberately NOT `KinkyDungeonPlayer` / `CharacterLoadNPC`: that is
@@ -1704,7 +1704,7 @@ class HeadlessHost {
 	}
 
 	/**
-	 * KDM-238 R4/R5 — give the player currently in the world's player slot the perks they chose.
+	 * Give the player currently in the world's player slot the perks they chose.
 	 *
 	 * Whoever is in the slot, exactly as `setPlayerName` above: callers sandwich this between
 	 * `restorePlayer` and `capturePlayer` so everything it does lands inside ONE player's bundle
@@ -1746,21 +1746,21 @@ class HeadlessHost {
 	}
 
 	/**
-	 * KDM-271 — ADD perk keys to whoever is swapped in, without rebuilding them as a new character.
+	 * ADD perk keys to whoever is swapped in, without rebuilding them as a new character.
 	 *
 	 * ⚠️ NOT A SECOND `applyPerks`, and the difference is the whole point. `applyPerks` above is the
 	 * SEATING operation: it replaces the map and runs `KDInitPerks()`, i.e. it decides what character
 	 * walks into the dungeon, starting rope and all. This is the MID-RUN operation: the party's start
 	 * perk set widened after a seat was already taken (a latecomer declared something the party did
 	 * not have), and the players already in the dungeon have to hold the same set or the shared world
-	 * stops being deterministic (KDM-242 F9 — `Stealthy` scales the floor's enemy and treasure counts
+	 * stops being deterministic (`Stealthy` scales the floor's enemy and treasure counts
 	 * from whichever bundle is swapped in when generation runs).
 	 *
 	 * So it sets the flag and nothing else. No wipe — the seat's own perks and the game-mode keys in
 	 * the same Map must survive. No `KDInitPerks()` — re-running it would hand every already-seated
 	 * player a second copy of their OWN start-effects (`Submissive` adds its collar and leash
 	 * unconditionally), and somebody else's arrival is not a reason to re-equip a player mid-run.
-	 * This is the boundary KDM-242 drew: a mid-run grant is a perk, not a character.
+	 * This is the boundary the perk agreement drew: a mid-run grant is a perk, not a character.
 	 *
 	 * KD's own table is still the whitelist, exactly as in `applyPerks` — an unknown key dies in the
 	 * GAME, not in a perk list of ours (epic AC2).
@@ -1790,7 +1790,7 @@ class HeadlessHost {
 	}
 
 	/**
-	 * KDM-239 A3 — re-assert KD's game-mode keys AFTER `applyPerks` has wiped them.
+	 * Re-assert KD's game-mode keys AFTER `applyPerks` has wiped them.
 	 *
 	 * ⚠️ THIS IS NOT A SECOND WAY TO SET PERKS, and it must not become one.
 	 *
@@ -1803,7 +1803,7 @@ class HeadlessHost {
 	 *
 	 * So this runs immediately AFTER `applyPerks` on each seat, and sets only classified mode keys
 	 * (`isModeKey`). Anything else is dropped — an unknown key here would be this layer choosing
-	 * something for a player, which is exactly what KDM-164 forbids.
+	 * something for a player, which is exactly what the "never choose for a player" rule forbids.
 	 *
 	 * `set(k, true)` from a VARIABLE, never from a literal name: `mp-perk-choice.spec.ts` greps this
 	 * source for `KinkyDungeonStatsChoice.set("<literal>"` and fails the build if one appears.
@@ -1812,7 +1812,7 @@ class HeadlessHost {
 	 * start-effect to run — re-running it would re-apply the player's starting restraints twice.
 	 */
 	/**
-	 * KDM-239 A3 — the game-mode keys currently set in the world, so they can be restored after a wipe.
+	 * The game-mode keys currently set in the world, so they can be restored after a wipe.
 	 *
 	 * Read once, right after `init()`, rather than reconstructed from the host's declaration: what
 	 * `KDUpdatePlugSettings` produced is KD's DEFAULTS *plus* whatever the host chose, and a seat must
@@ -1821,7 +1821,7 @@ class HeadlessHost {
 	 * full default set, and the two runs diverged on `statchoice` from the very first turn.
 	 */
 	/**
-	 * KDM-239 A3 — the WHOLE of `KinkyDungeonStatsChoice` as the world's own init left it, split into
+	 * The WHOLE of `KinkyDungeonStatsChoice` as the world's own init left it, split into
 	 * the half `applyPerks` preserves (`perks`) and the half it destroys (`modes`).
 	 *
 	 * Read once, right after `init()`. Both halves are needed to reconstruct a seat, and finding that
@@ -1902,7 +1902,7 @@ class HeadlessHost {
 	 * real KD entity id (the engine now sees/targets/collides with it).
 	 */
 	/**
-	 * KDM-256 — apply a player's CHARACTER PACKAGE to whoever is currently in the world's player slot.
+	 * Apply a player's CHARACTER PACKAGE to whoever is currently in the world's player slot.
 	 *
 	 * Whoever is in the slot, exactly as `setPlayerName` and `applyPerks` are: callers sandwich this
 	 * between a template restore and `capturePlayer()`, and that sandwich is the entire mechanism.
@@ -1949,26 +1949,26 @@ class HeadlessHost {
 	}
 
 	/**
-	 * @param {object} [character] KDM-256 — `{ style, outfit }` this player chose, or null for the
+	 * @param {object} [character] `{ style, outfit }` this player chose, or null for the
 	 *   default look. Per-player-safe because each avatar owns its own def clone (below).
 	 */
 	spawnAvatar(x, y, name, character) {
 		this._ensureAvatarDef();
 		const label = name || 'Player';
 		/*
-		 * KDM-256 R2 — the look, which is what makes two players tell each other APART on screen.
+		 * The look, which is what makes two players tell each other APART on screen.
 		 *
 		 * KD draws an entity carrying `CustomName` and (`style` or `outfit`) as a full paper-doll NPC
 		 * rather than a flat sprite (`KinkyDungeonEnemies.ts:1042`), building the model from
 		 * `KDModelStyles[style]` and dressing it from `outfit` (`:11211-11237`).
 		 *
-		 * `'BlueHair'` stays as the fallback — it is what every avatar has looked like since KD-100,
+		 * `'BlueHair'` stays as the fallback — it is what every avatar has always looked like,
 		 * so a player who declared nothing keeps exactly the look they had (R4). An unknown style is
 		 * left to KD, which falls back on its own; nothing here judges the value (epic AC2).
 		 */
 		const style = (character && character.style) || 'BlueHair';
 		const outfit = (character && character.outfit) || '';
-		// KD-100: combat text reads TextGet("Name"+Enemy.Enemy.name) — the def name, NOT CustomName —
+		// Combat text reads TextGet("Name"+Enemy.Enemy.name) — the def name, NOT CustomName —
 		// so give each avatar its OWN def clone with a unique name + registered name key, so a hit reads
 		// the real peer ("Your attack hits Player A …") instead of the shared "the Rival".
 		const defName = 'RemotePlayer_' + String(label).replace(/[^A-Za-z0-9]/g, '');
@@ -1990,7 +1990,7 @@ class HeadlessHost {
 				// it (KinkyDungeonEnemies.ts:2356); undefined crashes the whole render.
 				CustomName: ${JSON.stringify(label)}, CustomNameColor: '#88bbff',
 				style: ${JSON.stringify(style)} };
-			// KDM-256 R2 — set only when the player chose one. An empty outfit key on every avatar
+			// Set only when the player chose one. An empty outfit key on every avatar
 			// would cross the wire as a change on a session that declared nothing.
 			var outfit = ${JSON.stringify(outfit)};
 			if (outfit) ent.outfit = outfit;
@@ -2001,7 +2001,7 @@ class HeadlessHost {
 	}
 
 	/**
-	 * KDM-253 E5 — take an injected avatar entity back out of the world.
+	 * Take an injected avatar entity back out of the world.
 	 *
 	 * The counterpart `spawnAvatar` never had. Removes the ENTITY only: its `RemotePlayer_<name>` def
 	 * stays in `KinkyDungeonEnemies`, because that is a template rather than an instance — deleting it
@@ -2033,7 +2033,7 @@ class HeadlessHost {
 	}
 
 	/**
-	 * KDM-208: for the NEXT apply, veto KD's stock bump-to-attack against the listed entity ids.
+	 * For the NEXT apply, veto KD's stock bump-to-attack against the listed entity ids.
 	 *
 	 * `KinkyDungeonMove` promotes a move into an occupied tile to an attack (KinkyDungeonGame.ts:2977)
 	 * — correct stock behaviour, and what makes deliberate PvP work through the real pipeline. It is
@@ -2078,7 +2078,7 @@ class HeadlessHost {
 	}
 
 	/**
-	 * KDM-240 A1 — the LEVEL GOAL IS CO-LOCATED: the stairs do not fire until the whole party is at
+	 * The LEVEL GOAL IS CO-LOCATED: the stairs do not fire until the whole party is at
 	 * them, and never while a member is down (owner decisions D1/D2, 2026-08-24).
 	 *
 	 * WHY THIS IS THE GATEWAY'S RULE AND NOT A GAME RULE. "Wait for the other player" cannot exist in
@@ -2182,7 +2182,7 @@ class HeadlessHost {
 		})()`);
 	}
 
-	/** KDM-240: take-once count of stair transitions the party gate refused (never a silent drop). */
+	/** Take-once count of stair transitions the party gate refused (never a silent drop). */
 	takePartyGateHits() {
 		return this.eval(`(function(){
 			var n = globalThis.__KD_PARTY_GATE_HITS || 0;
@@ -2192,7 +2192,7 @@ class HeadlessHost {
 	}
 
 	/**
-	 * KDM-240 A3/R5 — WHICH MAP the party is on, in the game's own vocabulary.
+	 * WHICH MAP the party is on, in the game's own vocabulary.
 	 *
 	 * The level number alone is not the map, which is exactly what made a party-wide relocation
 	 * invisible: a capture regenerates the map at an UNCHANGED level (KinkyDungeonDefeat ->
@@ -2211,7 +2211,7 @@ class HeadlessHost {
 	}
 
 	/**
-	 * KDM-240 A3/R4 — where the party should be standing on the map it has just arrived on.
+	 * Where the party should be standing on the map it has just arrived on.
 	 *
 	 * KD has already placed whoever triggered the transition, and that tile is the truth about "where
 	 * the party landed" — preferred over StartPosition, which is the map's nominal entrance and is NOT
@@ -2265,7 +2265,7 @@ class HeadlessHost {
 		})()`);
 	}
 
-	/** KDM-208: take-once count of bump-attacks vetoed since the last read (never a silent drop). */
+	/** Take-once count of bump-attacks vetoed since the last read (never a silent drop). */
 	takeBumpVetoes() {
 		return this.eval(`(function(){
 			var n = globalThis.__KD_BUMP_VETO_HITS || 0;
@@ -2275,7 +2275,7 @@ class HeadlessHost {
 	}
 
 	/**
-	 * KDM-284 — take-once drain of the variant names a managed prune WITHHELD.
+	 * Take-once drain of the variant names a managed prune WITHHELD.
 	 *
 	 * The wrap (`kd-variant-registry.js`) runs stock KD's prune, records what it deleted here, and puts
 	 * it all back; this is how those names reach Node, which is the only side that can see the other
@@ -2297,14 +2297,14 @@ class HeadlessHost {
 	}
 
 	/**
-	 * KDM-284 — carry out the deletions Node decided were safe (`decideVariantSweep`).
+	 * Carry out the deletions Node decided were safe (`decideVariantSweep`).
 	 *
 	 * Deliberately does NOT re-check reachability: stock KD already proposed every one of these, and a
 	 * second opinion computed by us would be exactly the re-implementation of KD's inventory walk the
 	 * design refuses. This only executes a verdict.
 	 *
 	 * Counts what it took into `__kdCoopVariantSwept` so "the sweep is live" is observable — without
-	 * it, a sweep silently reduced to a no-op looks identical to the KDM-245 debt it replaced.
+	 * it, a sweep silently reduced to a no-op looks identical to the never-prune debt it replaced.
 	 *
 	 * @param {{restraint?:string[], weapon?:string[], consumable?:string[]}} sweep
 	 * @returns {number} how many entries were actually removed
@@ -2368,7 +2368,7 @@ class HeadlessHost {
 	}
 
 	/**
-	 * KD-100: await the async text provider so real combat messages resolve to real text instead of
+	 * Await the async text provider so real combat messages resolve to real text instead of
 	 * "[NotFound] …". `textProvider.readyAll()` returns a cross-realm promise; awaiting it in Node
 	 * pumps the loop until the boot-time CSV loads finish. Idempotent; safe to call repeatedly.
 	 */
@@ -2381,12 +2381,12 @@ class HeadlessHost {
 	}
 
 	/**
-	 * KD-100: make an injected avatar a REAL hostile enemy so the attacker's stock attack pipeline
+	 * Make an injected avatar a REAL hostile enemy so the attacker's stock attack pipeline
 	 * (KinkyDungeonMove bump → KDDoAttack/KDDamageEnemy, real defeat/capture) targets it. hp tracks the
 	 * peer's Will (maxhp = WillMax) so KD's real low-hp helpless/capture thresholds fire near Will 0.
 	 */
 	/**
-	 * @param {boolean} [aggro=true] KDM-311 — also stamp KD's aggro (`hostile = 9999`). The PvP arming
+	 * @param {boolean} [aggro=true] Also stamp KD's aggro (`hostile = 9999`). The PvP arming
 	 * wants it; the per-turn hp restore does not: `hostile` is exactly what the war detector reads as
 	 * "an attack happened", so stamping it there declared war on turn 1 of every co-op session.
 	 */
@@ -2398,7 +2398,7 @@ class HeadlessHost {
 			e.hp = Math.max(0, ${Number(hp) || 0});
 			e.faction = 'Enemy'; e.ce = undefined; e.player = undefined;
 			if (${aggro ? 1 : 0}) e.hostile = 9999;
-			// KD-101: stun marks the avatar "disabled" (KinkyDungeonIsStunned) so the game's real
+			// Stun marks the avatar "disabled" (KinkyDungeonIsStunned) so the game's real
 			// KDCanApplyBondage gate lets a SUBDUED peer be tied — the avatar's hp is a per-turn damage
 			// gauge (always full) and can't express the victim's subdued state, so we set it explicitly.
 			e.stun = Math.max(0, ${Number(stun) || 0});
@@ -2408,7 +2408,7 @@ class HeadlessHost {
 	}
 
 	/**
-	 * KDM-184: mirror a peer's own defensive stats onto their stand-in, so KD evaluates an incoming
+	 * Mirror a peer's own defensive stats onto their stand-in, so KD evaluates an incoming
 	 * PvP attack against the REAL defender's build.
 	 *
 	 * Hit-or-miss is decided entirely off the ENTITY, never off the player slot:
@@ -2443,8 +2443,8 @@ class HeadlessHost {
 		})()`);
 	}
 
-	/** KD-100/101: read an entity's combat + bondage state for reconciliation back to a player bundle.
-	 *  npcRestraints = the restraint NAMES tied onto the avatar this turn (KD-101 real "tie"). */
+	/** Read an entity's combat + bondage state for reconciliation back to a player bundle.
+	 *  npcRestraints = the restraint NAMES tied onto the avatar this turn (real "tie"). */
 	getEntityCombat(entityId) {
 		return this.eval(`(function(){
 			var e = KDMapData.Entities.find(function(en){ return en.id === ${entityId | 0}; });
@@ -2455,7 +2455,7 @@ class HeadlessHost {
 				for (var k in r) { if (r[k] && r[k].name) names.push(r[k].name); }
 			}
 			return { id: e.id, hp: e.hp, maxhp: e.Enemy && e.Enemy.maxhp, boundLevel: e.boundLevel || 0,
-				// KDM-225: KD's OWN aggro on this avatar. The gateway does not classify inputs to decide
+				// KD's OWN aggro on this avatar. The gateway does not classify inputs to decide
 				// "was that an attack" — it reads the flag the game sets (KDMakeHostile / KDAggroViaDialogue),
 				// which covers the damaging attack AND the sneak that deals none.
 				hostile: e.hostile || 0, rage: e.rage || 0,
@@ -2464,27 +2464,27 @@ class HeadlessHost {
 		})()`);
 	}
 
-	/** KD-101: clear an avatar's per-turn bondage gauge (NPC restraints + boundLevel) before the turn,
+	/** Clear an avatar's per-turn bondage gauge (NPC restraints + boundLevel) before the turn,
 	 *  so _reconcilePeers reads only the bondage applied THIS turn (mirrors the hp damage gauge). */
 	/**
-	 * KDM-199: mirror a peer PLAYER real worn bondage onto their stand-in avatar.
+	 * Mirror a peer PLAYER real worn bondage onto their stand-in avatar.
 	 *
 	 * Uses specialBoundLevel — the GAME own ITEM-FREE bondage channel (what KDTieUpEnemy writes, e.g.
 	 * specialBoundLevel.Rope). KDResyncBondage sums it back into boundLevel, so the value survives the
 	 * engine recomputing it; a bare boundLevel write does NOT (KDResyncBondage zeroes it when
 	 * specialBoundLevel is unset). Measured: 1 to 1, 5 to 5, 60 to 60, 80 to 80.
 	 *
-	 * Item-free is the point: no KDSetNPCRestraints entries are created, so the KD-101 binding-slot
+	 * Item-free is the point: no KDSetNPCRestraints entries are created, so the earlier binding-slot
 	 * overflow that crashes the stock submenu cannot come back.
 	 */
 	/**
-	 * KDM-200: mark a DEFEATED peer avatar as exposed for this turn.
+	 * Mark a DEFEATED peer avatar as exposed for this turn.
 	 *
 	 * This is the epic ONE declared co-op rule, and it is deliberately the SMALLEST possible one: it
 	 * sets the game own per-turn exposure flag and then lets KD own gate decide. It does NOT override
 	 * KDCanApplyBondage, does not fake a stun, and does not invent a bondage level — the branch that
 	 * fires is the stock one, target.vulnerable && target.hp <= 0.5 * maxhp, and the hp half comes from
-	 * the peer REAL Will (KDM-199 arming).
+	 * the peer REAL Will (the Will arming).
 	 *
 	 * Why co-op needs it at all: KD subdues an NPC through stun/freeze or accumulated bondage, both of
 	 * which arrive via weapons and spells an NPC fight supplies. Between two PLAYERS the product
@@ -2495,7 +2495,7 @@ class HeadlessHost {
 	 * defeated, so it expires the moment they are not.
 	 */
 	/**
-	 * KDM-227: end an avatar's hostility — the inverse of KD's own `KDMakeHostile`
+	 * End an avatar's hostility — the inverse of KD's own `KDMakeHostile`
 	 * (`KinkyDungeonEnemies.ts:5207`, which sets `hostile` and deletes `ceasefire`/`allied`).
 	 *
 	 * Both fields, because `KDAllied` and `KinkyDungeonAggressive` each read BOTH: `rage > 0` alone
@@ -2571,7 +2571,7 @@ class HeadlessHost {
 		})()`);
 	}
 
-	/** KD-100: write the swapped-in player's Will (the reconcile target), clamped to [0, WillMax]. */
+	/** Write the swapped-in player's Will (the reconcile target), clamped to [0, WillMax]. */
 	setWill(will) {
 		return this.eval(`(function(){
 			var mx = (typeof KinkyDungeonStatWillMax !== 'undefined') ? KinkyDungeonStatWillMax : 10;
@@ -2632,7 +2632,7 @@ class HeadlessHost {
 		})()`);
 	}
 
-	/** The ~20-global per-player independence snapshot (KD-082 gap #4). */
+	/** The ~20-global per-player independence snapshot. */
 	getParams() {
 		return this.eval(`(function(){
 			return {
@@ -2653,24 +2653,24 @@ class HeadlessHost {
 		})()`);
 	}
 
-	// ----- headless-safe render-state snapshot (KD-067) ------------------------
+	// ----- headless-safe render-state snapshot ------------------------
 
 	/**
 	 * Serialize a JSON-safe RENDER-STATE snapshot — the minimal set of globals the
-	 * stock per-frame render path reads, so a thin client (KD-071) can render it
+	 * stock per-frame render path reads, so a thin client can render it
 	 * without simulating. Built DIRECTLY from live globals, NOT from
 	 * KinkyDungeonGenerateSaveData() — that throws headless because it reads
 	 * render-derived model Poses (KinkyDungeon.ts:6840). This serializer never
 	 * touches model/pose data; it carries game state, not pixels.
 	 *
-	 * Shape is `version`-stamped for protocol evolution (shared with KD-070/071).
+	 * Shape is `version`-stamped for protocol evolution (shared with the reconciler and the launcher).
 	 * Per-entity `Enemy` defs are reduced to `enemyName` and re-linked on apply
 	 * (the client already has the shared defs) — see applyRenderState.
 	 */
 	serializeRenderState() {
 		return this.eval(`(function(){
 			function clone(o){ try { return (o === undefined) ? undefined : JSON.parse(JSON.stringify(o)); } catch(e){ return null; } }
-			// KDM-200: these are the fields KD OWN predicates read to decide whether a target is
+			// These are the fields KD OWN predicates read to decide whether a target is
 			// subdued — KinkyDungeonIsStunned reads stun/freeze, KDCanApplyBondage reads vulnerable and
 			// hp, KDBoundEffects reads boundLevel (and KDResyncBondage rebuilds it from
 			// specialBoundLevel). Omitting them meant the CLIENT — where the tie submenu actually
@@ -2699,7 +2699,7 @@ class HeadlessHost {
 				},
 				player: P ? entSnap(P) : null,
 				/*
-				 * KDM-239 R7 — WHICH SCREEN the session is on, so the client can follow the game
+				 * WHICH SCREEN the session is on, so the client can follow the game
 				 * instead of overriding it.
 				 *
 				 * The client used to stamp KinkyDungeonState = 'Game' on every state frame, which
@@ -2709,18 +2709,18 @@ class HeadlessHost {
 				 * get to invent a screen.
 				 *
 				 * Defaults to 'Game' because that is what an in-progress dungeon is, and because it
-				 * keeps every pre-KDM-239 client and the whole coop suite behaving identically.
+				 * keeps every older client that sends no screen and the whole coop suite behaving identically.
 				 *
 				 * NOTE: no backticks in this comment on purpose -- it lives INSIDE an eval template
 				 * literal, where one would terminate the string and blame the requiring file.
 				 */
 				screen: (typeof KinkyDungeonState !== 'undefined' && KinkyDungeonState) ? String(KinkyDungeonState) : 'Game',
-				// KDM-162: the curated stats block is GONE. It named ~12 HUD fields by hand, in TWO
+				// The curated stats block is GONE. It named ~12 HUD fields by hand, in TWO
 				// languages (here and client/render-client.js), and shipped slowLevel — a value it
 				// RECOMPUTED and then sent, i.e. derived state crossing the network, which is exactly
 				// what goes stale. Every one of those fields is per-player state the generic bundle
 				// already carries (snapshotFor attaches it), so adding a HUD value upstream now needs
-				// no change here at all. Measured: KDM-162 probe6 + tests/e2e/mp-render-completeness.
+				// no change here at all. Measured: a probe + tests/e2e/mp-render-completeness.
 				// Full authoritative KDMapData (JSON-clones cleanly headless, ~10KB). The
 				// client adopts it WHOLESALE — a field-subset splice leaves a half-local/
 				// half-server map that renders broken. Entities carry their full Enemy
@@ -2733,26 +2733,26 @@ class HeadlessHost {
 					actionTime: (typeof KinkyDungeonActionMessageTime !== 'undefined') ? KinkyDungeonActionMessageTime : 0,
 					actionColor: (typeof KinkyDungeonActionMessageColor !== 'undefined') ? KinkyDungeonActionMessageColor : '#ffffff',
 				},
-				// KD-101: ship the FULL worn-restraint items (not just name/id) so the client can rebuild
+				// Ship the FULL worn-restraint items (not just name/id) so the client can rebuild
 				// the player's worn-restraint Map — a peer-applied tie must render on the victim's screen.
 				restraints: (typeof KinkyDungeonAllRestraint === 'function') ? KinkyDungeonAllRestraint().map(function(r){ return clone(r) || { name: r.name, id: r.id }; }).filter(function(r){ return r && r.name; }) : [],
 				buffs: clone(typeof KinkyDungeonPlayerBuffs !== 'undefined' ? KinkyDungeonPlayerBuffs : {}),
 				level: (typeof MiniGameKinkyDungeonLevel !== 'undefined') ? MiniGameKinkyDungeonLevel : 1,
 				checkpoint: (typeof MiniGameKinkyDungeonCheckpoint !== 'undefined') ? MiniGameKinkyDungeonCheckpoint : 'grv',
-				// KDM-263: the WORLD half of KDGameData, whole — every key KDGAMEDATA_WORLD_KEYS
+				// The WORLD half of KDGameData, whole — every key KDGAMEDATA_WORLD_KEYS
 				// declares, taken from the world and adopted verbatim by the client.
 				//
-				// This replaced a hand-written roomType/mapMod pair (KDM-222), which was the same idea
+				// This replaced a hand-written roomType/mapMod pair, which was the same idea
 				// spelled out one field at a time in FOUR mirrored places: here, applyRenderState below,
 				// and render-client.js serialize/apply. _clientBundle already STRIPS these keys from the
 				// per-player bundle, so every world key the list gains is a key the client stops
 				// receiving and must be sent here instead - and the per-field form made that a silent
-				// omission, four edits wide, every single time. KDM-263 adds three at once.
+				// omission, four edits wide, every single time. The journey agreement added three at once.
 				//
-				// Cheap despite the size: the state frame is delta-encoded (KDM-206), so a value that
+				// Cheap despite the size: the state frame is delta-encoded, so a value that
 				// did not change costs nothing on the wire.
 				// (No backticks in this comment on purpose - it lives inside an eval template literal.)
-				// KDM-245: WORLD GLOBALS the client resolves things through. Same one-list-one-loop
+				// WORLD GLOBALS the client resolves things through. Same one-list-one-loop
 				// shape as worldGameData above, and for the same reason: a name that stops being
 				// per-player stops arriving in the bundle, and per-field plumbing made that a silent
 				// omission every time. Today this is the three item-variant registries, without which
@@ -2785,7 +2785,7 @@ class HeadlessHost {
 	 * summary for assertions.
 	 */
 	applyRenderState(snap) {
-		// KDM-162: per-player state arrives as the generic bundle, adopted through the SAME path the
+		// Per-player state arrives as the generic bundle, adopted through the SAME path the
 		// swap model uses. This is what removed the curated `stats` block from both apply sites: there
 		// is no longer a per-field contract here to keep in step with the serializer.
 		if (snap && snap.bundle) this.restorePlayer(snap.bundle);
@@ -2800,7 +2800,7 @@ class HeadlessHost {
 			if (typeof KinkyDungeonGridHeightDisplay !== 'undefined') KinkyDungeonGridHeightDisplay = s.camera.gridHeightDisplay;
 			if (typeof KinkyDungeonCamX !== 'undefined') KinkyDungeonCamX = s.camera.camX;
 			if (typeof KinkyDungeonCamY !== 'undefined') KinkyDungeonCamY = s.camera.camY;
-			// KDM-162: the hand-assigned HUD stats are gone — per-player state arrives in the bundle,
+			// The hand-assigned HUD stats are gone — per-player state arrives in the bundle,
 			// which restorePlayer() has already applied before this eval runs (see below).
 			// adopt the authoritative KDMapData WHOLESALE (internally consistent).
 			if (s.map) KDMapData = s.map;
@@ -2816,14 +2816,14 @@ class HeadlessHost {
 			if (typeof KinkyDungeonActionMessageColor !== 'undefined') KinkyDungeonActionMessageColor = s.messages.actionColor;
 			if (typeof MiniGameKinkyDungeonLevel !== 'undefined') MiniGameKinkyDungeonLevel = s.level;
 			if (s.checkpoint && typeof MiniGameKinkyDungeonCheckpoint !== 'undefined') MiniGameKinkyDungeonCheckpoint = s.checkpoint;
-			// KDM-263 — see serializeRenderState: the world half of KDGameData, adopted generically.
+			// See serializeRenderState: the world half of KDGameData, adopted generically.
 			// AFTER restorePlayer (which ran before this eval), so the world's answer wins over any
 			// copy the bundle still carried. Iterating what was SENT rather than the declared list
 			// keeps an older snapshot working: a key it does not carry is simply left alone.
 			if (typeof KDGameData !== 'undefined' && KDGameData && s.worldGameData) {
 				for (var wk in s.worldGameData) KDGameData[wk] = s.worldGameData[wk];
 			}
-			// KDM-245 — and the WORLD GLOBALS half, on the same terms. Iterating what was SENT keeps
+			// And the WORLD GLOBALS half, on the same terms. Iterating what was SENT keeps
 			// the declared list server-side only, so an older snapshot carrying none of them is a
 			// no-op rather than a wipe. These are bundle bindings, so bare eval assignment, never
 			// globalThis. (No backticks in this comment on purpose - it lives inside an eval template.)
@@ -2841,7 +2841,7 @@ class HeadlessHost {
 
 	/**
 	 * Adopt the WORLD's authoritative MAP (tiles + vision/lighting) onto THIS player
-	 * instance — KD-070 reconciler push. Map-ONLY by design: it does NOT touch this
+	 * instance — the reconciler push. Map-ONLY by design: it does NOT touch this
 	 * instance's player/stats NOR its entity list. Shared entities (the world's
 	 * enemies + the other players' avatars) are managed separately as PROPER engine
 	 * entities (injectSharedEnemy / spawnAvatar+moveAvatar) so they stay well-formed
@@ -2873,7 +2873,7 @@ class HeadlessHost {
 
 	/**
 	 * Inject the world's shared enemy as a PROPER, well-formed entity in THIS player
-	 * instance (KD-070) so it renders + survives the per-turn CheckHP pass. Uses the
+	 * instance so it renders + survives the per-turn CheckHP pass. Uses the
 	 * real enemy def (KinkyDungeonGetEnemyByName) via the engine's KDAddNewEntity —
 	 * the same proven path as spawnAvatar. AI is suppressed here (role 'player'); the
 	 * reconciler keeps its position in sync with the world via moveAvatar(by id).
@@ -2892,7 +2892,7 @@ class HeadlessHost {
 	}
 
 	/**
-	 * Read a world enemy's REAL attack descriptor from its def (KD-070 adjudication):
+	 * Read a world enemy's REAL attack descriptor from its def (reconciler adjudication):
 	 * power/dmgType/attack/range come from the actual enemy data, not a fixed profile.
 	 * The reconciler routes this to the targeted player's instance via applyEnemyHit.
 	 * `isBind` flags bind/rope/lock attacks (so a restraint is applied, not just damage).
@@ -2915,7 +2915,7 @@ class HeadlessHost {
 		})()`);
 	}
 
-	// ----- action routing (KD-085) --------------------------------------------
+	// ----- action routing --------------------------------------------
 
 	/** The acting player's current weapon attack profile (from their instance). */
 	getAttackProfile() {
@@ -2930,7 +2930,7 @@ class HeadlessHost {
 
 	/**
 	 * Apply a damage profile to a WORLD enemy by id via the engine's real
-	 * KinkyDungeonDamageEnemy (KD-085 routed attack). Returns {hp, dealt, name} or null.
+	 * KinkyDungeonDamageEnemy (routed attack). Returns {hp, dealt, name} or null.
 	 * Run on the world instance (authoritative). The reconciler then re-broadcasts.
 	 */
 	damageEnemy(enemyId, profile = {}) {
@@ -2960,7 +2960,7 @@ class HeadlessHost {
 	}
 
 	/**
-	 * KDM-160: give KinkyDungeonPlayer a ModelContainer so KD's own save serializer can run headless.
+	 * Give KinkyDungeonPlayer a ModelContainer so KD's own save serializer can run headless.
 	 *
 	 * KinkyDungeonGenerateSaveData reads `KDCurrentModels.get(KinkyDungeonPlayer).Poses`
 	 * (main.js:18026) WITHOUT a null guard — unlike its four sibling call sites (:1435, :9467, :9472,
@@ -2982,7 +2982,7 @@ class HeadlessHost {
 		})()`);
 	}
 
-	// ----- KDM-161: generic per-player globals (no hand-written whitelist) -----
+	// ----- generic per-player globals (no hand-written whitelist) -----
 
 	/** Candidate names: bundle bindings ∪ mod-declared globalThis keys, minus blacklists. */
 	_candidateGlobals() {
@@ -3041,11 +3041,11 @@ class HeadlessHost {
 		this._baselineValues = snap.vals;
 		this._oversize = snap.over;
 		this._capturesSinceAudit = 0;
-		// KDM-195: the audit is a round robin over _oversize, so a new baseline restarts the cycle.
+		// The audit is a round robin over _oversize, so a new baseline restarts the cycle.
 		this._oversizeCursor = 0;
 		this._lastAuditNames = null;
 		this._oversizeChanged = [];
-		// KDM-221: hashes of WATCHED globals that have since grown past the cap — the de-dup store for
+		// Hashes of WATCHED globals that have since grown past the cap — the de-dup store for
 		// _reportGrownOverMax. Cleared with the baseline, because a re-baseline reclassifies everything.
 		this._grownOverMax = {};
 		return this._baseline;
@@ -3067,7 +3067,7 @@ class HeadlessHost {
 	 * static tables (enemy/restraint/spell defs) are skipped: they are shared world data by definition,
 	 * and they are exactly what made an unbounded pass slow.
 	 *
-	 * ⚠️ KDM-215 — KEEP THIS EVAL SOURCE BYTE-IDENTICAL FROM CALL TO CALL. The `_watchNames` literal
+	 * ⚠️ KEEP THIS EVAL SOURCE BYTE-IDENTICAL FROM CALL TO CALL. The `_watchNames` literal
 	 * below is ~48 KB, and parsing it costs ~4.5 ms — but V8 caches compiled `eval` by source string,
 	 * and `_watchNames` is fixed after the baseline, so it is parsed once per process and every later
 	 * pass is served from that cache. MEASURED (quiet host, interleaved): identical source 0.58 ms/pass
@@ -3075,7 +3075,7 @@ class HeadlessHost {
 	 * per call into this template (a tick, a player id, a timestamp) silently reinstates the full parse
 	 * on both halves, ~9 ms on a ~13.6 ms transaction. `mp-eval-source-stable.spec.ts` guards it.
 	 *
-	 * This is also why KDM-215 candidate 2 (pass the list over the vm context instead of embedding it)
+	 * This is also why the alternative (pass the list over the vm context instead of embedding it)
 	 * is CLOSED as neutral: measured 0.57 vs 0.58 ms/pass. There is no per-pass parse cost to remove.
 	 */
 	_captureGlobals() {
@@ -3093,7 +3093,7 @@ class HeadlessHost {
 				try {
 					var s = kdSer(v);
 					if (s === undefined) continue;
-					// KDM-221: a watched name whose value has GROWN past the cap used to be skipped here
+					// A watched name whose value has GROWN past the cap used to be skipped here
 					// with a bare 'continue' — silently dropped from per-player state, forever, with
 					// nothing watching it. Record the crossing so the host can report it. The hash is the
 					// de-dup key; it is computed on a string kdSer already built, and only for names
@@ -3110,16 +3110,16 @@ class HeadlessHost {
 	}
 
 	/**
-	 * KDM-221: announce a WATCHED global that has crossed BASELINE_MAX_LEN since the baseline.
+	 * Announce a WATCHED global that has crossed BASELINE_MAX_LEN since the baseline.
 	 *
 	 * The threshold has three doors. `_captureBaseline` guards its own (over the cap ⇒ into
 	 * `_oversize`, audited from then on by `_auditOversize`). The other two — the capture pass above
 	 * and the reset half of `_restoreGlobals` — used to take a bare `continue`, so a global that is
 	 * small at post-init and large during real play stopped being replicated AND stopped being reset,
 	 * with no warning at all. `KDSaveQueue` was the worked example ([] at baseline, >20 KB once a real
-	 * save lands); KDM-202 blacklisted that one name, which did nothing about the hole.
+	 * save lands); an earlier fix blacklisted that one name, which did nothing about the hole.
 	 *
-	 * De-dup is the KDM-195 contract, not a second mechanism: re-baseline what is reported, so each
+	 * De-dup is the drift-audit contract, not a second mechanism: re-baseline what is reported, so each
 	 * DISTINCT drift warns exactly once, while a global that keeps mutating while over the cap keeps
 	 * warning — that is the case the contract exists for.
 	 *
@@ -3143,7 +3143,7 @@ class HeadlessHost {
 		fresh.forEach((n) => seen.add(n));
 		this._oversizeChanged = [...seen];
 		// eslint-disable-next-line no-console
-		console.warn(`[KDM-221] WATCHED GLOBAL GREW PAST THE CAP: ${fresh.join(', ')} — it was under ` +
+		console.warn(`WATCHED GLOBAL GREW PAST THE CAP: ${fresh.join(', ')} — it was under ` +
 			`${BASELINE_MAX_LEN} bytes at baseline (so it is watched as per-player state) and is over it ` +
 			'now. While it stays this large it is NOT replicated to the other player, and it is reset to ' +
 			'its post-init default on every swap rather than carried. Either it is shared world data ' +
@@ -3153,7 +3153,7 @@ class HeadlessHost {
 	}
 
 	/**
-	 * KDM-161/KDM-195: the size threshold must fail LOUDLY, not silently — affordably, and once per drift.
+	 * The size threshold must fail LOUDLY, not silently — affordably, and once per drift.
 	 *
 	 * Globals whose serialised form exceeds BASELINE_MAX_LEN are excluded from the watch set as static
 	 * data tables (measured: every one of them is an enemy/restraint/spell/model definition table, and
@@ -3162,7 +3162,7 @@ class HeadlessHost {
 	 * per-player global is precisely the bug class this epic exists to remove; the same drift contract
 	 * as the BUNDLE_PATCHES site counts in demo-server.js.
 	 *
-	 * KDM-195 fixed two ways that contract was being paid for badly, without weakening it:
+	 * Two ways that contract was being paid for badly were fixed, without weakening it:
 	 *
 	 *  - **Cost.** The pass was unbounded: 22 globals / 5.53 MB / 59-90 ms, synchronously, on the
 	 *    request path of a single-threaded server. It is now a time-budgeted ROUND ROBIN — resume at
@@ -3218,7 +3218,7 @@ class HeadlessHost {
 			changed.forEach((n) => seen.add(n));
 			this._oversizeChanged = [...seen];
 			// eslint-disable-next-line no-console
-			console.warn(`[KDM-161] OVERSIZE GLOBAL CHANGED: ${changed.join(', ')} — excluded from ` +
+			console.warn(`OVERSIZE GLOBAL CHANGED: ${changed.join(', ')} — excluded from ` +
 				`per-player capture as a static data table (> ${BASELINE_MAX_LEN} bytes) but it MUTATED. ` +
 				'Either it is shared world data (fine, blacklist it explicitly) or it is per-player state ' +
 				'the swap is now losing. Do not ignore this.');
@@ -3234,7 +3234,7 @@ class HeadlessHost {
 	 * player left there, so a player who never touched a global would inherit their opponent's value.
 	 * That is the whole contamination bug class, and "absent ⇒ default" is what closes it.
 	 *
-	 * ⚠️ KDM-215 — KEEP THIS EVAL SOURCE BYTE-IDENTICAL FROM CALL TO CALL, for the reason spelled out
+	 * ⚠️ KEEP THIS EVAL SOURCE BYTE-IDENTICAL FROM CALL TO CALL, for the reason spelled out
 	 * over `_captureGlobals`: the ~48 KB name literal is free only because V8 serves it from its eval
 	 * compilation cache, and only an unchanging source string hits that cache.
 	 */
@@ -3271,7 +3271,7 @@ class HeadlessHost {
 					eval(n + ' = globalThis.__KD_V;');
 				} catch (e) { /* not assignable */ }
 			}
-			// KDM-265: SUBTRACT THE BLACKLIST HERE TOO, symmetrically with capture.
+			// SUBTRACT THE BLACKLIST HERE TOO, symmetrically with capture.
 			//
 			// The capture half stopped producing these names, but restore trusted whatever key set the
 			// bundle happened to carry — and a bundle outlives the build that made it (a reconnect, a
@@ -3297,7 +3297,7 @@ class HeadlessHost {
 				try {
 					var s = kdSer(v);
 					if (s === undefined) continue;
-					// KDM-221: this used to skip on size too, which was a LEAK, not merely a loss. A
+					// This used to skip on size too, which was a LEAK, not merely a loss. A
 					// watched name whose value is over the cap is dirty BY DEFINITION — it was under the
 					// cap at baseline, so it cannot still be holding its default — and skipping it left
 					// the previous player's data in the world for the incoming player to inherit. That is
@@ -3313,7 +3313,7 @@ class HeadlessHost {
 	}
 
 	/**
-	 * KDM-160: this player's state as KD's OWN save format, minus the shared world (WORLD_KEYS).
+	 * This player's state as KD's OWN save format, minus the shared world (WORLD_KEYS).
 	 *
 	 * The measuring instrument for the epic's invariants: an upstream-maintained, versioned, complete
 	 * definition of what a player IS (56 top-level keys) — as opposed to the hand-picked subset
@@ -3338,21 +3338,21 @@ class HeadlessHost {
 		return save;
 	}
 
-	// ----- per-player state swap (KD-085 uniform action model) -----------------
+	// ----- per-player state swap (uniform action model) -------------------------
 
 	/**
 	 * Capture the CURRENT player's state bundle (everything that defines a player, EXCLUDING the
 	 * shared world). Used by the swap model: one authoritative world, players swapped in/out per turn.
 	 * JSON-safe, so it can go over the wire unchanged.
 	 *
-	 * KDM-161 AC1: there is NO hand-written list of player globals here any more. It used to name ~20
+	 * There is NO hand-written list of player globals here any more. It used to name ~20
 	 * of them plus a 12-key KDGameData sub-list, and that list could only ever be as complete as our
-	 * knowledge of a 280-file moving target — every KDM-156 bug was a hole in it. Both halves are now
+	 * knowledge of a 280-file moving target — every contamination bug of that era was a hole in it. Both halves are now
 	 * inversions:
 	 *
 	 *   globals  — everything that DIVERGED from the post-init baseline, minus a category blacklist
 	 *              (world / render / audio). New state, including a mod's, is carried without being named.
-	 *   gameData — KDGameData whole, minus KDGAMEDATA_WORLD_KEYS on restore (KDM-160). Its own path
+	 *   gameData — KDGameData whole, minus KDGAMEDATA_WORLD_KEYS on restore. Its own path
 	 *              because no mechanical rule can split per-player Guilt from world GuardSpawnTimer,
 	 *              and because at 27 KB it is over the divergence path's size threshold. This is the
 	 *              epic's one declared, bounded exception — not a whitelist reintroduced.
@@ -3369,7 +3369,7 @@ class HeadlessHost {
 	/**
 	 * Restore a player-state bundle into the world's player globals (swap-in).
 	 *
-	 * KDM-161 AC1: the ~20 hand-written assignments that used to live here are gone. What remains is
+	 * The ~20 hand-written assignments that used to live here are gone. What remains is
 	 * the two inversions plus one recompute — see capturePlayer for why each is not a whitelist.
 	 * Generic globals go first so the derived recompute at the end still has the last word.
 	 */
@@ -3378,7 +3378,7 @@ class HeadlessHost {
 		this._context.__KD_PB = bundle;
 		return this.eval(`(function(){
 			var b = globalThis.__KD_PB; if (!b) return false;
-			// KDM-160: restore every captured KDGameData key EXCEPT the world-scoped ones.
+			// Restore every captured KDGameData key EXCEPT the world-scoped ones.
 			// Inverted from a 12-key allow-list; see capturePlayer and KDGAMEDATA_WORLD_KEYS.
 			if (b.gameData && typeof KDGameData !== 'undefined') {
 				var __world = ${JSON.stringify(KDGAMEDATA_WORLD_KEYS)};
@@ -3400,7 +3400,7 @@ class HeadlessHost {
 	}
 
 	/**
-	 * KDM-265 — complete any map generation the last input deferred. See KD_RUN_DEFERRED_MAPGEN.
+	 * Complete any map generation the last input deferred. See KD_RUN_DEFERRED_MAPGEN.
 	 *
 	 * Called by BOTH apply paths, right after their dispatch returns — not from inside `__kdDispatch`,
 	 * even though that would be a single call site. `applyInputObserved` keeps a counting wrapper over
@@ -3432,12 +3432,12 @@ class HeadlessHost {
 			${KD_ENT_RESOLVE}
 			return __kdDispatch(${JSON.stringify(type)});
 		})()`);
-		this.runDeferredMapGen();   // KDM-265 — a transition this input started must COMPLETE
+		this.runDeferredMapGen();   // a transition this input started must COMPLETE
 		return res;
 	}
 
 	/**
-	 * KDM-163 (option A): run an input for real and REPORT whether it advanced the shared turn.
+	 * Run an input for real and REPORT whether it advanced the shared turn.
 	 *
 	 * This is what lets the server route every input without a whitelist — the game itself says
 	 * whether an input is turn-consuming, by calling KinkyDungeonAdvanceTime. The caller caches that
@@ -3474,14 +3474,14 @@ class HeadlessHost {
 			finally { KinkyDungeonAdvanceTime = orig; }
 			return { advanced: advanced, result: (typeof res === 'string') ? res : null, error: err, unknownType: !known };
 		})()`);
-		// KDM-265 — AFTER the eval, so the generation runs outside this method's own
+		// AFTER the eval, so the generation runs outside this method's own
 		// KinkyDungeonAdvanceTime wrapper and cannot inflate this input's `advanced` count.
 		this.runDeferredMapGen();
 		return out;
 	}
 
 	/**
-	 * KDM-243 — load a player's SINGLE-PLAYER SAVE into this world, through KD's own loader.
+	 * Load a player's SINGLE-PLAYER SAVE into this world, through KD's own loader.
 	 *
 	 * Takes the compressed-base64 string the browser keeps in `localStorage.KinkyDungeonSave`, i.e.
 	 * exactly what KD's async save loop wrote (`KinkyDungeon.ts:1520-1525`). Nothing here parses the
@@ -3499,9 +3499,9 @@ class HeadlessHost {
 	 * `!KDToggles.OverrideOutfit && saveData.saveStat` the loader ASSIGNS through the paper-doll
 	 * container — `KDCurrentModels.get(KinkyDungeonPlayer).Poses = …` (`KinkyDungeon.ts:7305`) — which
 	 * `_neuterRendering` deliberately never builds. Same family as the autosave crash `_neuterAutosave`
-	 * exists for (KDM-240/267). With the container seeded, the whole loader runs headless with no
+	 * exists for. With the container seeded, the whole loader runs headless with no
 	 * further stubbing: floor, map, entities, worn restraints and inventory all arrive (measured in
-	 * KDM-243's POC, against a pre-load control).
+	 * a proof of concept, against a pre-load control).
 	 *
 	 * The save travels through the CONTEXT SLOT, never interpolated into the eval'd source. It is
 	 * player-supplied data reaching an eval'd realm, which is precisely the shape that has broken this
@@ -3531,7 +3531,7 @@ class HeadlessHost {
 	}
 
 	/**
-	 * KDM-244 — this world as a SINGLE-PLAYER save string, ready for a browser's save slot.
+	 * This world as a SINGLE-PLAYER save string, ready for a browser's save slot.
 	 *
 	 * The exact counterpart of `loadSave` above, and it produces what that function consumes: the
 	 * compressed-base64 form KD's own async save loop writes to `localStorage.KinkyDungeonSave`
@@ -3549,8 +3549,8 @@ class HeadlessHost {
 	 * for the same reason: `KinkyDungeonGenerateSaveData` reads
 	 * `KDCurrentModels.get(KinkyDungeonPlayer).Poses` with no null guard (`KinkyDungeon.ts:6968`) off
 	 * a container `_neuterRendering` deliberately never builds. This is also why the README long said
-	 * headless save GENERATION was unsupported: it is supported, and has been since KDM-160 seeded
-	 * the container.
+	 * headless save GENERATION was unsupported: it is supported, and has been since the swap layer
+	 * seeded the container.
 	 *
 	 * ⚠️⚠️ EXCLUDING THE AVATARS IS WHAT MAKES THE SAVE LOADABLE — it is NOT tidiness.
 	 * `KDUnPackEnemies` re-resolves every entity's def BY NAME on load
@@ -3565,7 +3565,7 @@ class HeadlessHost {
 	 * `&&` binds tighter than `||`, so an undefined `Enemy` falls past the guarded first term into the
 	 * unguarded second one and throws. (Its sibling at `:353` is parenthesised correctly — this is an
 	 * upstream missing-paren bug, recorded in UPSTREAM_ISSUES.md. The game tree is read-only, so we
-	 * work around it rather than patch it.) MEASURED in KDM-244's POC: leaving even ONE avatar in
+	 * work around it rather than patch it.) MEASURED in a proof of concept: leaving even ONE avatar in
 	 * makes the save refuse to load, with any unknown def name reproducing it.
 	 *
 	 * Marking the avatars `modified` would ALSO make it load (measured) — by carrying the def inline.
@@ -3605,7 +3605,7 @@ class HeadlessHost {
 						return false;
 					});
 				}
-				// KDM-244 A2a: NPCRestraints is keyed by ENTITY ID and rides in KDGameData, so a removed
+				// NPCRestraints is keyed by ENTITY ID and rides in KDGameData, so a removed
 				// avatar would leave its ties behind as a record pointing at nothing.
 				var ties = save.KDGameData && save.KDGameData.NPCRestraints;
 				if (ties) { for (var k in ties) { if (gone[k]) delete ties[k]; } }
@@ -3641,7 +3641,7 @@ class HeadlessHost {
 module.exports = {
 	HeadlessHost, loadSources, REPO_ROOT, BUNDLE_PATH,
 	WORLD_KEYS, KDGAMEDATA_WORLD_KEYS,
-	// KDM-239 A4 — re-exported so callers have ONE import for "what does the world own".
+	// Re-exported so callers have ONE import for "what does the world own".
 	MODE_WORLD_KEYS, MODE_PLAYER_KEYS,
 	deriveBundleGlobals, GLOBAL_BLACKLIST, WORLD_GLOBALS_CLIENT, MIN_EXPECTED_GLOBALS, HOST_RESERVED,
 	BASELINE_MAX_LEN, OVERSIZE_AUDIT_EVERY, OVERSIZE_AUDIT_BUDGET_MS,

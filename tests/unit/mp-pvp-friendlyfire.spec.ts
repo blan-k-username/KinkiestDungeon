@@ -1,12 +1,12 @@
 /**
- * KD-096 co-op AOE friendly-fire, on the REAL bullet path (KDM-164).
+ * Co-op AOE friendly-fire, on the REAL bullet path.
  *
  * This file used to test an approximation: a Chebyshev square radius around the target tile, applying
  * the spell's nominal `power` to any peer inside it — ignoring walls, line of sight and the actual
- * bullet. That is a gameplay rule invented in the gateway, and KDM-164's whole point is that the MP
+ * bullet. That is a gameplay rule invented in the gateway, and the real-pipeline rework's whole point is that the MP
  * layer owns none.
  *
- * It is now unnecessary. Measured (`KDM-164/probes/aoe-real-path.spec.ts`): a real AOE cast in the
+ * It is now unnecessary. Measured (an AOE real-path probe): a real AOE cast in the
  * headless world creates a real bullet, `KinkyDungeonUpdateBullets` runs (16 ticks over the turns), and
  * the blast damages a peer AVATAR through `KinkyDungeonDamageEnemy` — the very function the peer-damage
  * recorder wraps. So the splash is captured like any other hit and applied through that player's own
@@ -28,7 +28,7 @@ import { bundleGiveMana } from './helpers/bundle';
 const BOOT_TIMEOUT = 240_000;
 const AOE_SPELL = 'Firecracker'; // tags: aoe; aoe:1, power:3.5
 
-describe('Co-op AOE friendly-fire via the real bullet path (KD-096 / KDM-164)', () => {
+describe('Co-op AOE friendly-fire via the real bullet path', () => {
 	let s: any;
 	beforeEach(async () => {
 		s = new SwapSession({ requiredPlayers: 2, seed: 'pvp-ff-seed', pvp: true });

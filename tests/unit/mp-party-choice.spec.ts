@@ -1,9 +1,9 @@
 /**
- * KDM-242 A1 — the propose/confirm state machine, extracted so it exists ONCE.
+ * The propose/confirm state machine, extracted so it exists ONCE.
  *
  * ── WHY THIS FILE EXISTS ──────────────────────────────────────────────────────────────────────────
- * KDM-263 built "either player proposes, the other agrees" for the journey route. KDM-242 needs the
- * identical rules for the perk card. The task's own Notes call that out as a DRY obligation: build the
+ * The journey route was built as "either player proposes, the other agrees". The perk card needs the
+ * identical rules. The task's own Notes call that out as a DRY obligation: build the
  * arbitration once and reuse it, or say why not. `PartyChoice` is the once — five hooks (`isValid`,
  * `sameAs`, `commit`, `uncommit`, `announce`) are all that differed between the two.
  *
@@ -51,7 +51,7 @@ function make(seatCount = 2) {
 	};
 }
 
-describe('KDM-242 A1 — PartyChoice', () => {
+describe('PartyChoice', () => {
 	let t: ReturnType<typeof make>;
 	beforeEach(() => { t = make(2); });
 

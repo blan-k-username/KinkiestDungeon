@@ -1,5 +1,5 @@
 /**
- * tools/mp-server/transport/protocol.js  (KD-081)
+ * tools/mp-server/transport/protocol.js 
  *
  * The message protocol + the transport-agnostic instance dispatcher.
  *
@@ -9,7 +9,7 @@
  * process), so the only thing that differs between transports is the thin
  * adapter that moves bytes — never the game code, never this handler.
  *
- * Each command maps 1:1 to a HeadlessHost method (the same surface the KD-079
+ * Each command maps 1:1 to a HeadlessHost method (the same surface the orchestrator's
  * reconciler already used). All args and results are plain JSON.
  */
 'use strict';
@@ -59,13 +59,13 @@ async function dispatch(state, msg) {
 		case 'runsEnemyAI':    return { value: h.runsEnemyAI() };
 		case 'step':           return { tick: h.step(a.n || 1) };
 		case 'tick':           return { tick: h.tick() };
-		// --- KD-080 features: PvP + server-side mods ---
+		// --- features: PvP + server-side mods ---
 		case 'loadMod':        return h.loadMod(a.code);
 		case 'getEnemyByName': return h.getEnemyByName(a.name);
 		case 'getVitals':      return h.getVitals();
 		case 'dealDamage':     return h.dealDamage(a.amount, a.type);
 		case 'addRestraint':   return h.addRestraint(a.name);
-		// --- KD-082 real in-game integration ---
+		// --- real in-game integration ---
 		case 'spawnAvatar':    return h.spawnAvatar(a.x, a.y);
 		case 'moveAvatar':     return h.moveAvatar(a.entityId, a.x, a.y);
 		case 'listEntities':   return h.listEntities();

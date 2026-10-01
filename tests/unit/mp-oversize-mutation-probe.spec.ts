@@ -1,5 +1,5 @@
 /**
- * KDM-195 diagnostic — what is inside the oversize set, what does it cost, and what actually moves?
+ * Oversize-audit diagnostic — what is inside the oversize set, what does it cost, and what actually moves?
  *
  * `_auditOversize` re-hashes the globals excluded from the watch set by `BASELINE_MAX_LEN`. This
  * prints the per-global cost that sizes OVERSIZE_AUDIT_BUDGET_MS, and re-checks the classification
@@ -17,7 +17,7 @@ const { SwapSession } = require('../../tools/mp-server/swap-session');
 const BOOT_TIMEOUT = 300_000;
 const TURNS = 6;
 
-describe('KDM-195 — the oversize set: cost and stability', () => {
+describe('the oversize set: cost and stability', () => {
 	it('prints the per-global audit cost and any global that moves over real turns', () => {
 		const s: any = new SwapSession({ requiredPlayers: 2, seed: 'oversize-probe', seedInputKinds: true });
 		s.join('A');
@@ -59,7 +59,7 @@ describe('KDM-195 — the oversize set: cost and stability', () => {
 		// eslint-disable-next-line no-console
 		console.log([
 			'',
-			`KDM-195 oversize set: ${rows.length} globals, one full pass ${total.toFixed(1)} ms`,
+			`oversize set: ${rows.length} globals, one full pass ${total.toFixed(1)} ms`,
 			'-'.repeat(78),
 			...rows.map((r) => `${r.n.padEnd(34)} ${r.kb.toFixed(0).padStart(7)} KB  ${r.dt.toFixed(2).padStart(8)} ms`),
 			'-'.repeat(78),

@@ -1,5 +1,5 @@
 /**
- * KDM-268 (browser) — an input whose dispatch THREW must reach the player's client, not just a
+ * An input whose dispatch THREW must reach the player's client, not just a
  * server-side list.
  *
  * The unit spec (`tests/unit/mp-failed-input.spec.ts`) proves the session records it and puts it in
@@ -9,7 +9,7 @@
  * sibling this one was modelled on.
  *
  * ⚠️ THE THROW IS INJECTED SERVER-SIDE, and it has to be. A dispatch failure is by definition an
- * engine-side exception — there is no browser action that reliably produces one, and KDM-267 removed
+ * engine-side exception — there is no browser action that reliably produces one, and a later fix removed
  * the one real cause we knew about (KD's own autosave at the tail of `KinkyDungeonDefeat`). Injecting
  * it keeps the REPORTING path under test whatever produces the next exception.
  *

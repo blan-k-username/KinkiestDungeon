@@ -1,5 +1,5 @@
 /**
- * KDM-249 Phase A — where the mod pre-seed script sits in the injected list, and why it matters.
+ * Mod sync, phase A — where the mod pre-seed script sits in the injected list, and why it matters.
  *
  * `client/coop-mods.js` sets `KDGetMods = true` (`KDMods.ts:9`) — KD's own "the auto-loader has been
  * handled" latch — so that KD's per-frame auto-load-and-execute stands down and `KDExecuted` stays
@@ -34,7 +34,7 @@ const REPO_ROOT = path.resolve(__dirname, '../..');
 const MODS_SCRIPT = '/tools/mp-server/client/coop-mods.js';
 const BOOTSTRAP = '/tools/mp-server/client/coop-bootstrap.js';
 
-describe('KDM-249 Phase A — the pre-seed script is injected (R7, risk 4)', () => {
+describe('mod sync phase A — the pre-seed script is injected (R7)', () => {
 	it('coop-mods.js is in the injected list', () => {
 		expect(INJECT).toContain(MODS_SCRIPT);
 	});

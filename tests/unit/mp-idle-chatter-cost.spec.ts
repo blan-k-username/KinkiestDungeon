@@ -1,5 +1,5 @@
 /**
- * Node-layer (Vitest): KDM-203 — REPEATED IDENTICAL per-frame chatter must cost a bare ack, not state.
+ * Node-layer (Vitest): REPEATED IDENTICAL per-frame chatter must cost a bare ack, not state.
  *
  * WHY THIS FILE EXISTS. `tests/e2e/mp-real-input.spec.ts:112` ("idle per-frame input costs no state
  * traffic") is red with the byte-identical value **234 KB** against a 100 KB budget, on three separate
@@ -10,7 +10,7 @@
  *
  *     __coop.sendAction({ kdType: 'setMoveDirection', data: { dir: {x:1,y:0}, delta: 1 } })
  *
- * KDM-186 RULE 2 (`ws-bridge.js`) says an input that moves no state gets a bare `ack`:
+ * RULE 2 (`ws-bridge.js`) says an input that moves no state gets a bare `ack`:
  *
  *     if (res.changed === false) { send({type:'ack', …}); return; }
  *     send({type:'state', kind:'ui', …, snapshot: session.snapshotFor(clientId)});   // ~40 KB
@@ -19,12 +19,12 @@
  * first apply, 199 IDENTICAL move-directions cannot have moved the player's state — so the steady
  * state must be `changed === false`. If it is not, some field in the captured bundle churns on every
  * apply regardless of input, which defeats RULE 2 wholesale: every frame of mouse chatter then ships a
- * full snapshot. That is the same defect class as KDM-196/KDM-186 (consume-once presentation
+ * full snapshot. That is the same defect class as the earlier damage-queue and event-queue bugs (consume-once presentation
  * replicated as state), and it plausibly also explains the 6-8 fps co-op client in `mp-fps-control`
  * (the client applies a full snapshot every frame) and the >120 ms round-trip in `mp-uat-repro:496`
  * (each reply pays capture + JSON.stringify of the whole bundle).
  *
- * ⚠️ NOT A BUDGET TEST. The owner's constraint on KDM-203 is explicit: the fix may not be a raised
+ * ⚠️ NOT A BUDGET TEST. The owner's constraint on this fix is explicit: the fix may not be a raised
  * threshold or timeout. This asserts the INVARIANT ("identical input ⇒ no state on the wire"), which
  * no amount of host contention can change, rather than a number that a slow machine can miss.
  *
@@ -67,7 +67,7 @@ function diffPaths(a: any, b: any, path = '', out: string[] = [], depth = 0): st
 	return out;
 }
 
-describe('KDM-203 — repeated identical chatter must not ship state', () => {
+describe('repeated identical chatter must not ship state', () => {
 	let s: any;
 	let kinds: string[] = [];
 	let changes: boolean[] = [];
@@ -88,7 +88,7 @@ describe('KDM-203 — repeated identical chatter must not ship state', () => {
 
 	/**
 	 * ANTI-VACUITY. If the chatter never reaches the immediate `ui` path at all, every assertion below
-	 * is trivially satisfied by a code path that does nothing. (Same trap KDM-196 documents.)
+	 * is trivially satisfied by a code path that does nothing. (The same trap is documented for the consume-once presentation queues.)
 	 */
 	it('ANTI-VACUITY: the chatter is actually applied on the immediate ui path', () => {
 		expect(kinds.length).toBeGreaterThan(0);
@@ -104,7 +104,7 @@ describe('KDM-203 — repeated identical chatter must not ship state', () => {
 		const changedCount = changes.filter(Boolean).length;
 		expect(changedCount,
 			`${changedCount} of ${changes.length} IDENTICAL repeats reported a state change, so the ` +
-			`bridge answers each with a ~40 KB snapshot instead of a bare ack (KDM-186 RULE 2). ` +
+			`bridge answers each with a ~40 KB snapshot instead of a bare ack (RULE 2). ` +
 			`changed=${JSON.stringify(changes)}`).toBe(0);
 	}, BOOT_TIMEOUT);
 

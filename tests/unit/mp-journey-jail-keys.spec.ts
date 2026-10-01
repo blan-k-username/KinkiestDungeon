@@ -1,5 +1,5 @@
 /**
- * Node-layer (Vitest) — KDM-277 slice 3: the flagged keys that needed a judgement call rather than a
+ * Node-layer (Vitest) — the last slice of the KDGameData key audit: the flagged keys that needed a judgement call rather than a
  * mechanical criterion.
  *
  * Five of the seven are settled here on evidence. The other two are NOT, deliberately, and the reason
@@ -13,8 +13,8 @@
  *                                     the INPUT to `KDInitializeJourney(KDGameData.Journey, level)`
  *                                     (KDStairActions.ts:188, KDMapGen.ts:681), which builds
  *                                     `KDGameData.JourneyMap` — and JourneyMap is ALREADY a declared
- *                                     world key (KDM-265). Leaving the input per-player while its
- *                                     output is world is the half-classified pair KDM-228 warns
+ *                                     world key. Leaving the input per-player while its
+ *                                     output is world is the half-classified pair the world-key rule warns
  *                                     about: two players holding different journey types would
  *                                     generate different journey maps for one party.
  *
@@ -45,7 +45,7 @@
  *                       in slice 2. Blacklisting it would be speculative.
  *
  * ── THE TWO JAIL KEYS: THE FLAG WAS OVER-EAGER, AND THE SWAP MODEL IS WHY ─────────────────────────
- * KDM-273 flagged `PrisonerState` on the reasoning "the jail is world furniture". True, and beside
+ * The key audit flagged `PrisonerState` on the reasoning "the jail is world furniture". True, and beside
  * the point. The deciding read is `KinkyDungeonAggressive(enemy, player)`
  * (KinkyDungeonFactions.ts:8-16): the `PrisonerState` branches sit inside `if (!player ||
  * player.player)`, the function's own `// Player mode` branch. It answers "is this enemy aggressive
@@ -61,7 +61,7 @@
  * because no transition site writes it. They are read together in one expression
  * (KinkyDungeonJailList.ts:149) and `PriorJailbreaks` is incremented when THIS player breaks out
  * (KinkyDungeonDialogue.ts:1625), feeding that player's reinforcement count. Both stay per-player;
- * splitting the pair is the failure KDM-228 names.
+ * splitting the pair is the failure the world-key rule names.
  *
  * Imports the harness under tools/mp-server/** only — never Game/src/** or Scripts/**.
  */
@@ -78,7 +78,7 @@ const KEPT_PER_PLAYER = ['MiniGameVictory', 'KinkyDungeonRep', 'KDRestraintsCach
 /** A key no game code writes, so its arrival can only mean "this bundle really was restored". */
 const CONTROL_GAMEDATA = '__kdm277JourneyProbe';
 
-describe('KDM-277 · slice 3 classifications are declared in production code', () => {
+describe('the key audit judgement-call classifications are declared in production code', () => {
 	it('the journey type and the enemy jail timer are declared world', () => {
 		for (const k of NOW_WORLD) {
 			expect(KDGAMEDATA_WORLD_KEYS, `KDGameData.${k}`).toContain(k);
@@ -118,7 +118,7 @@ describe('KDM-277 · slice 3 classifications are declared in production code', (
 	});
 
 	it('PriorJailbreaksDecay is not split from the counter it is read with', () => {
-		// KDM-228's rule: a pair written/read together classifies together. PriorJailbreaks is outside
+		// The world-key rule: a pair written/read together classifies together. PriorJailbreaks is outside
 		// the audit's reach (no transition site writes it), so this is the only place the coupling is
 		// recorded — if someone moves one, this says the other must move too.
 		const decayIsWorld = KDGAMEDATA_WORLD_KEYS.includes('PriorJailbreaksDecay');
@@ -130,7 +130,7 @@ describe('KDM-277 · slice 3 classifications are declared in production code', (
 	});
 });
 
-describe('KDM-277 · a stale bundle does not rewrite the journey type or the jail timer', () => {
+describe('a stale bundle does not rewrite the journey type or the jail timer', () => {
 	let h: any;
 
 	beforeAll(() => {

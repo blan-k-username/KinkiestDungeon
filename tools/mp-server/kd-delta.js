@@ -1,5 +1,5 @@
 /**
- * tools/mp-server/kd-delta.js  (KDM-206)
+ * tools/mp-server/kd-delta.js 
  *
  * THE structural diff/merge for carrying a render snapshot as a DELTA instead of a whole capture.
  *
@@ -33,7 +33,7 @@
  * ⚠️ CONSUME-ONCE CHANNELS MUST NOT BE DIFFED. `snapshotFor` DRAINS pending events
  * (`_takePendingEvents`), so a one-shot event exists in exactly one snapshot. If such a channel were
  * diffed and the delta carrying it were lost, the event would be gone for good — the anti-deletion
- * trap KDM-196 documents. The caller passes those paths in `opts.verbatim`; they are copied whole into
+ * trap. The caller passes those paths in `opts.verbatim`; they are copied whole into
  * every patch. This module refuses to guess which they are: naming them is the caller's job.
  */
 'use strict';
