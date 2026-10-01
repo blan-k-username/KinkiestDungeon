@@ -3,7 +3,7 @@
  *
  * Starts the real demo server (static game + WS bridge on one port) and drives TWO
  * independent browser windows against it, exactly as a human would:
- *   window A → /#coop=A , window B → /#coop=B → the shared dungeon starts.
+ *   window A hosts, window B joins through the lobby, the host approves → the shared dungeon starts.
  * Asserts both render the SAME server-owned world and that a lockstep move (both
  * submit) advances the shared turn — proving the two-browser UAT path works.
  */

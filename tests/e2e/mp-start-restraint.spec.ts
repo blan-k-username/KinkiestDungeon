@@ -1,6 +1,6 @@
 /**
  * E2E (KD-101 UAT aid) — a carryable starting restraint item.
- *  - Client: `#coop=<id>&startitem=HingedCuffs` adds a loose-restraint ITEM to that client's Items
+ *  - Client: `#startitem=HingedCuffs` in the page URL adds a loose-restraint ITEM to that client's Items
  *    inventory (coop-bootstrap ensureStartItem) — the inventory is client-local, snapshots don't sync it.
  *  - Server: KD_START_RESTRAINT=HingedCuffs gives each player's bundle the same loose item so an apply
  *    also runs server-side.

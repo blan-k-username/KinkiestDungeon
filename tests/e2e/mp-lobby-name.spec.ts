@@ -102,7 +102,7 @@ test.describe('KDM-237 — the name you type is the name you get', () => {
 			await press(host, 'KDMPHost');
 
 			await expect.poll(() => bridge.gate.host, { timeout: 30_000 }).toBeTruthy();
-			// The `#coop=` path and the whole MP e2e suite depend on this: an empty name field is
+			// The whole MP e2e suite depends on this: an empty name field is
 			// not a name, and the seat records nothing. KDM-280 made the id per-tab; KDM-282 then
 			// gave the label below a seat to use instead of that id.
 			expect(bridge.gate.nameOf(bridge.gate.host)).toBe('');

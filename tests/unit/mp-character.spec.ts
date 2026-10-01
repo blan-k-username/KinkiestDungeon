@@ -229,7 +229,7 @@ describe('KDM-256 — a declared character, against a world that has one', () =>
 	}, BOOT_TIMEOUT);
 
 	it('R4 — the two undeclared seats are unchanged: KD\'s own default, and identical', () => {
-		// The `#coop=<id>` road, which the whole MP e2e suite runs on. "Declared nothing" must have
+		// A seat that declared no character — the common case. "Declared nothing" must have
 		// exactly one answer and it must be KD's.
 		expect(s.characterOf('A'), 'no declaration, no package').toBeNull();
 		expect(declaredIn('A')).toEqual(declaredIn('B'));

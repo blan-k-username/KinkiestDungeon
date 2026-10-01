@@ -13,10 +13,9 @@
 # contention failures land — measured: `co-op boot TIMEOUT` and `Target crashed`
 # in the back half, while the same specs pass alone in ~3 min.
 #
-# Per-spec isolation is the lever that worked in the sibling mods repo for the
-# same class of problem (its WebKit RAM-death was fixed with a per-mod process
-# plus tab recycling). Each spec here gets a fresh container, so nothing carries
-# over from the spec before it.
+# Per-spec isolation is the usual lever for this class of problem (a browser
+# suite whose memory pressure builds up over a long run). Each spec here gets a
+# fresh container, so nothing carries over from the spec before it.
 #
 # COST: one docker start (~5 s) per spec. `npm i` is skipped when node_modules
 # exists and `tsc` runs ONCE up front, so the overhead is small next to a 2–3

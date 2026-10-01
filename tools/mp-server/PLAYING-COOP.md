@@ -41,7 +41,7 @@ That serves the game **and** the co-op connection together on port **8090**. Whe
 see:
 
 ```
-  Co-op demo running:  http://localhost:8090/  — start a new game, then Host Game (or Join Game)
+  Co-op server running:  http://localhost:8090/  — start a new game, then Host Game (or Join Game)
 ```
 
 > **Port 8090, not 8080.** The co-op server does not use 8080 at all. If a browser tab is pointed at

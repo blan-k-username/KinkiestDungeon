@@ -95,8 +95,8 @@ describe('KDM-287 — lanAddresses', () => {
 /* ══════════════════════════════════════════════════════════════════════════════════════════════════
  * publicAddresses — the same question, asked from inside a container
  *
- * This is the half that decides whether co-op's SHIPPING path works. `--mp` runs the gateway behind
- * `-p ${KD_MP_PORT:-8090}:8090`, so its own interfaces are the docker bridge and its own port is the
+ * This is the half that decides whether co-op works from Docker. Published with
+ * `-p <host port>:8090`, the gateway's own interfaces are the docker bridge and its own port is the
  * container's. Detection there produces a plausible address that routes nowhere — which is a worse
  * answer than the `localhost` this task removes, because the host has no way to tell it is wrong.
  * ═════════════════════════════════════════════════════════════════════════════════════════════════ */

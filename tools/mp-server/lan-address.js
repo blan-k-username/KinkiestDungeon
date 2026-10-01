@@ -81,17 +81,17 @@ function lanAddresses(port, ifaces) {
 /**
  * KDM-287 — the address to publish, once the CONTAINER is taken into account.
  *
- * ⚠️ `lanAddresses` ALONE IS WRONG FOR THE WAY CO-OP ACTUALLY SHIPS, and quietly so. `--mp` runs the
- * gateway in docker with `-p ${KD_MP_PORT:-8090}:8090`, so inside the container both halves of the
+ * ⚠️ `lanAddresses` ALONE IS WRONG WHEN THE GATEWAY RUNS IN DOCKER, and quietly so. Published with
+ * `-p <host port>:8090`, inside the container both halves of the
  * answer are the container's own: `os.networkInterfaces()` reports a bridge address like
  * `192.168.215.2` that nothing outside the machine can route to, and `localPort` is the CONTAINER
  * port, not the published one. Auto-detection would have swapped `localhost:8090` — obviously
  * useless — for something that looks right and is not, which is a worse bug than the one being fixed.
  *
- * Only the launcher can see the real machine, so it tells us: `KD_MP_PUBLIC_HOST` is the host's own
- * LAN address (discovered on the host, in `kd-mods-src/tools/lib/kd-game.sh`) and `KD_MP_HOST_PORT`
- * is the port it published. `tools/check-launcher-env.sh` fails the commit if the launcher stops
- * forwarding either — this file being read by that scan is the point of naming them here.
+ * Only whoever starts the container can see the real machine, so it tells us: `KD_MP_PUBLIC_HOST` is
+ * the host's own LAN address (looked up on the host) and `KD_MP_HOST_PORT` is the port it published.
+ * A launcher script that forwards environment variables must forward both — reading them here, by
+ * name, is what lets such a launcher check that it does.
  *
  * THE THIRD CASE IS THE CAREFUL ONE: published (`KD_MP_HOST_PORT` set) but nothing declared means
  * the launcher looked and could not find one. Our own interfaces are then known to be the wrong
