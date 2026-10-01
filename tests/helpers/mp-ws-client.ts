@@ -69,6 +69,9 @@ export class MPClient {
 	/** Play dead without closing the socket — the failure a socket-close handler cannot see. */
 	stopPong() { this._pong = false; }
 
+	/** KDM-313 — and come back to life on the SAME socket, as a page that was merely frozen does. */
+	resumePong() { this._pong = true; }
+
 	send(obj: any) { this.ws.send(JSON.stringify(obj)); }
 
 	/** Has a matching message ALREADY arrived? Non-consuming, unlike `next`. */

@@ -550,6 +550,20 @@ class WSBridge {
 		// merely the one we can count on when the player is doing nothing. Recorded before the
 		// dispatch below so a slow handler cannot make its own sender look dead.
 		if (clientId) this.presence.saw(clientId, now());
+		/*
+		 * KDM-313 — …and a MISSING seat speaking on its CURRENT socket was frozen, not gone: it is back.
+		 *
+		 * The heartbeat cannot tell a wedged page from a dead one while it lasts, and both are reported.
+		 * But a socket that closed never speaks again, so a message on the seat's live socket ends the
+		 * question. Before this, the only road back to `connected` was a RECONNECT — and a page that had
+		 * merely frozen kept its socket, so the session stayed paused for good, refusing every move
+		 * `peer-missing` (captured: a 34 s page freeze in the browser, past the 30 s window). The same
+		 * report a reconnect makes (`_reportBack`): resume, close the dialogue, stop the host grace.
+		 */
+		if (clientId && this.presence.state(clientId) === 'missing' && this.sockets.get(clientId) === socket
+			&& this.presence.back(clientId, now())) {
+			this._reportBack(clientId);
+		}
 		// A `pong` is liveness and nothing else. It must NOT produce a state frame: KD's draw loop
 		// already emits an input every frame, and KDM-186 measured what answering cheap traffic with
 		// ~40 KB snapshots costs (809 MB egress, one core pegged, lockstep never completing).

@@ -121,6 +121,37 @@ describe('KDM-250 — heartbeat and the drop report', () => {
 		});
 	});
 
+	/*
+	 * KDM-313 — a peer that was only FROZEN comes back on the socket it never lost.
+	 *
+	 * Captured in the browser: a page froze 34 s (longer than the heartbeat), was correctly reported
+	 * missing and the session paused — then resumed on the same socket, and the session stayed paused
+	 * for good, refusing every move `peer-missing`. The only road back to `connected` was a RECONNECT.
+	 */
+	describe('a FROZEN peer that answers again is back (KDM-313)', () => {
+		const isBack = (m: any) => m.type === 'peer_back';
+
+		it('the survivor is told it is back, and the seat is connected again', async () => {
+			const { A, B } = await seatTwo();
+			B.stopPong();
+			await A.next(isMissing, 5_000);
+			expect(bridge.presence.state('B'), 'precondition: reported missing').toBe('missing');
+			B.resumePong();                                    // same socket — it never closed
+			const m = await A.next(isBack, 5_000);
+			expect(m.clientId).toBe('B');
+			expect(bridge.presence.state('B')).toBe('connected');
+			expect(B.ws.readyState, 'no reconnect happened — the same socket').toBe(1);
+		});
+
+		it('control — a peer that stays silent is NOT reported back', async () => {
+			const { A, B } = await seatTwo();
+			B.stopPong();
+			await A.next(isMissing, 5_000);
+			await A.never(isBack, HB_TIMEOUT * 3);
+			expect(bridge.presence.state('B')).toBe('missing');
+		});
+	});
+
 	describe('the server actually pings (A2)', () => {
 		it('sends pings on its own, without being asked', async () => {
 			const { A } = await seatTwo();
