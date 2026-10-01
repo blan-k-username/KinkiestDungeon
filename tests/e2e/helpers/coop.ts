@@ -397,6 +397,12 @@ export async function coopRealKeyMove(
 	await A.mouse.click(200, 200);
 	await A.keyboard.down(key);
 	await A.waitForTimeout(opts.holdMs ?? 2000);
+	// KDM-313 — …and keep holding until the move has actually LEFT A (`submitted` = the server answered
+	// `waiting`; a moved tick also counts). KD reads a held key once per FRAME, and a loaded host was
+	// measured rendering one frame every 5-6 s: a 2 s press fell entirely between two frames, no move was
+	// ever sent, and the assertion blamed the session. A real player holds a key until something happens.
+	await A.waitForFunction((t) => (window as any).__coop.submitted === true
+		|| (window as any).__coop.lastTick !== t, t0, { timeout }).catch(() => { /* `advanced` reports it */ });
 	await A.keyboard.up(key);
 	// Lockstep: the turn cannot resolve until B acts too.
 	await B.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
