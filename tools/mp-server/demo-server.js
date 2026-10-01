@@ -7,12 +7,14 @@
  *   - runs the local WebSocket bridge (WSBridge → SwapSession) on the SAME port, so
  *     the browser client connects same-origin (ws://<host>/).
  *
- * It injects two scripts into index.html on the fly (the stock index.html is left
- * untouched on disk): the thin-client core (render-client.js) and a co-op bootstrap
- * (coop-bootstrap.js) that the co-op column on the class screen drives (`__coopConnect`) to wire render + input.
+ * It injects the co-op client scripts (the `INJECT` list below) into index.html on the fly (the
+ * stock index.html is left untouched on disk) — among them the thin-client core (render-client.js)
+ * and the co-op bootstrap (coop-bootstrap.js) that the co-op column on the class screen drives
+ * (`__coopConnect`) to wire render + input.
  *
- * UAT flow (in Docker, port mapped to your host — `./run-kd-game.sh --mp` in the kd-mods-src
- * sibling, which is the one launcher; KDM-255):
+ * How to start it (directly or in Docker) is in `README.md` → "Quick start" in this folder.
+ *
+ * Play flow:
  *   1. window 1 → http://localhost:8090/ → new game → Host Game  (creates the session, waits)
  *   2. window 2 → the address the Host screen names → new game → Join Game; window 1 lets them in
  *   3. WASD moves; BOTH must move to advance a turn (lockstep co-op). You see
@@ -162,7 +164,7 @@ const INJECT = [
  *
  * Rewriting the compiled bundle on the way out is the LAST resort in the plugin rule's preference
  * order (runtime wrapping > stock API/data > text rewrite). It stays, but it is not open-ended:
- * every entry is governed by the policy in `README.md` → "Bundle-patch policy", enforced by
+ * every entry is governed by the policy in `DESIGN-NOTES.md` → "Bundle-patch policy", enforced by
  * `tests/unit/mp-bundle-patch-policy.spec.ts`.
  *
  *   id          stable handle a verdict is reported against

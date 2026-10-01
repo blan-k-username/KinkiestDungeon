@@ -41,6 +41,7 @@
 /tests/_artifacts/
 !/tools/mp-server/**/*.js
 !/tools/mp-server/**/*.md
+!/MULTIPLAYER.md
 
 .DS_Store
 */.DS_Store

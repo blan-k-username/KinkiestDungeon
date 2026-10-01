@@ -22,33 +22,38 @@ host's address in a browser and that is all.
 
 ## Starting the server (host only)
 
-From the `kd-mods-src` folder next to this one:
+**First, build the game** once, as the main [`README.md`](../../README.md#build) describes. Then,
+from the game folder:
 
 ```bash
-./run-kd-game.sh --mp
+node tools/mp-server/demo-server.js
+```
+
+or, if you use Docker (replace the address with your machine's own — see step 6 below):
+
+```bash
+docker run --rm -it --name kdcoop -v "$PWD":/usr/src/app -w /usr/src/app -p 8090:8090 \
+  -e KD_MP_HOST_PORT=8090 -e KD_MP_PUBLIC_HOST=192.168.1.24 \
+  node:24-slim node tools/mp-server/demo-server.js
 ```
 
 That serves the game **and** the co-op connection together on port **8090**. When it is up you will
 see:
 
 ```
-→ Co-op on http://localhost:8090/ — start a new game, then Host Game names the address to share
+  Co-op demo running:  http://localhost:8090/  — start a new game, then Host Game (or Join Game)
 ```
 
-If you have only this game checkout and no sibling folder, this does the same job:
-
-```bash
-node tools/mp-server/demo-server.js
-```
-
-> **Port 8090, not 8080.** In co-op mode nothing is served on 8080 at all. If a browser tab is
-> pointed at 8080 it will simply refuse to connect.
+> **Port 8090, not 8080.** The co-op server does not use 8080 at all. If a browser tab is pointed at
+> 8080 it is talking to a plain single-player server, or to nothing.
 >
-> If something else on your machine is already using 8090, move it with
-> `KD_MP_PORT=8099 ./run-kd-game.sh --mp` (or `PORT=8099` for the `node` line) — and then use that
-> number everywhere below instead of 8090, including in the address you send your friend.
+> If something else on your machine is already using 8090, move it with `PORT=8099` on the `node`
+> line (with Docker, change the published port instead: `-p 8099:8090 -e KD_MP_HOST_PORT=8099`) —
+> and then use that number everywhere below instead of 8090, including in the address you send your
+> friend.
 
-Co-op is opt-in. Start the server the normal way and nothing is listening for a second player.
+Co-op is opt-in. Start the server the normal way (`npm run serve`) and nothing is listening for a
+second player.
 
 ---
 
@@ -107,11 +112,9 @@ network, and what it is showing is only good on this computer. Find it by hand:
 | Windows | `ipconfig` | *IPv4 Address* under your active adapter |
 
 Send your friend that address with `:8090` on the end — for example `192.168.1.24:8090`. To make the
-screen show it next time, start the game with it set:
-
-```bash
-KD_MP_PUBLIC_HOST=192.168.1.24 ./run-kd-game.sh --mp
-```
+screen show it next time, start the server with it set — `KD_MP_PUBLIC_HOST=192.168.1.24` in front
+of the `node` line, or `-e KD_MP_PUBLIC_HOST=192.168.1.24` in the Docker command (see
+[Starting the server](#starting-the-server-host-only)).
 
 **7. Wait.** The screen says *Waiting for someone to join…* until they do.
 
@@ -316,6 +319,6 @@ Stated plainly so you find out here rather than mid-run:
 
 ## For developers
 
-Architecture, the transport comparison, the upstream bug write-ups and everything about how this is
-built are in [`README.md`](README.md), [`TRANSPORTS.md`](TRANSPORTS.md) and
-[`UPSTREAM_ISSUES.md`](UPSTREAM_ISSUES.md) in this folder.
+How this is built — the architecture, every file, configuration and tests — is in
+[`README.md`](README.md) in this folder; [`DESIGN-NOTES.md`](DESIGN-NOTES.md) goes deeper one area
+at a time, and [`UPSTREAM_ISSUES.md`](UPSTREAM_ISSUES.md) lists the game bugs co-op works around.
