@@ -111,8 +111,8 @@
 		 */
 		seed: '',
 		/**
-		 * The ONE declaration this lobby sends: class, outfit and perks, read from KD's own
-		 * globals at the moment of declaring.
+		 * The ONE declaration this lobby sends: class, outfit, perks and the player's own
+		 * appearance, read from KD's own globals at the moment of declaring.
 		 *
 		 * ⚠️ THERE IS NOTHING TO CACHE ANY MORE, and that is the whole shape of this slice. The lobby
 		 * used to send the player to KD's perk and character screens and BORROW their buttons to get
@@ -137,7 +137,9 @@
 			try {
 				return characterPackage(KinkyDungeonClassMode, KinkyDungeonCurrentDress,
 					(typeof KinkyDungeonStatsChoice !== 'undefined' && KinkyDungeonStatsChoice)
-						? Array.from(KinkyDungeonStatsChoice) : []);
+						? Array.from(KinkyDungeonStatsChoice) : [],
+					(typeof KinkyDungeonPlayer !== 'undefined' && KinkyDungeonPlayer)
+						? KinkyDungeonPlayer.Appearance : null);
 			} catch (e) { return null; }
 		},
 		/**
@@ -447,19 +449,45 @@
 			if (!d || typeof d !== 'object') return null;
 			var name = (d.KDGameData && d.KDGameData.PlayerName) || (d.saveStat && d.saveStat.name) || '';
 			return {
-				character: characterPackage(d.startingClass, d.dress, Array.isArray(d.statchoice) ? d.statchoice : []),
+				character: characterPackage(d.startingClass, d.dress,
+					Array.isArray(d.statchoice) ? d.statchoice : [],
+					d.saveStat && d.saveStat.appearance),
 				name: String(name || ''),
 			};
 		} catch (e) { return null; }
 	}
 
 	/**
-	 * The ONE character package: `{class?, outfit?, perks?}`, or `null` for "declared
+	 * This player's OWN look, as KD's own wardrobe-revert already serialises it
+	 * (`KinkyDungeonCollection.ts` ~:514/:558 — `LZString.compressToBase64(AppearanceItemStringify(…))`).
+	 * One format, reused rather than invented: the receiving end decompresses with `DecompressB64`
+	 * and feeds the result straight to `CharacterAppearanceRestore`, exactly as a Collection NPC's
+	 * `customOutfit` does. KD-native both ways — never a BondageClub `Character`/`Player` call.
+	 *
+	 * `items` is a live `Appearance` array (from `KinkyDungeonPlayer`) or one already round-tripped
+	 * through a save (`JSON.parse(JSON.stringify(...))`, so plain data either way) — `AppearanceItemStringify`
+	 * does not care which. Best-effort: a player who has none, or whose bundle lacks the helper
+	 * (an older build), declares nothing rather than a half-built string.
+	 */
+	function appearanceString(items) {
+		try {
+			if (!Array.isArray(items) || !items.length) return '';
+			if (typeof AppearanceItemStringify !== 'function' || typeof LZString === 'undefined') return '';
+			return LZString.compressToBase64(AppearanceItemStringify(items));
+		} catch (e) { return ''; }
+	}
+
+	/**
+	 * The ONE character package: `{class?, outfit?, perks?, appearance?}`, or `null` for "declared
 	 * nothing" (never `{}` — see `playerCharacter`'s note on what `null` means downstream).
 	 * `entries` are `[key, on]` pairs, which is what both `Array.from(KinkyDungeonStatsChoice)` and a
 	 * save's `statchoice` are.
+	 *
+	 * `appearance` is what makes the PEER's avatar look like the peer, rather than a style preset
+	 * auto-generated for them (`HeadlessHost.spawnAvatar` otherwise has nothing of the player's own to
+	 * draw from). `apItems` is the raw `Appearance` array; `appearanceString` does the one conversion.
 	 */
-	function characterPackage(klass, outfit, entries) {
+	function characterPackage(klass, outfit, entries, apItems) {
 		var pkg = {};
 		if (typeof klass === 'string' && klass) pkg.class = klass;
 		if (typeof outfit === 'string' && outfit) pkg.outfit = outfit;
@@ -469,6 +497,8 @@
 			if (e && e[1]) chosen.push(String(e[0]));
 		}
 		if (chosen.length) pkg.perks = chosen;
+		var appearance = appearanceString(apItems);
+		if (appearance) pkg.appearance = appearance;
 		return Object.keys(pkg).length ? pkg : null;
 	}
 

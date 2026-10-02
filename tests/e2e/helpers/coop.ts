@@ -137,13 +137,25 @@ async function waitForCoop(page: Page, label: string, stage: 'connected' | 'star
  */
 export async function coopJoinPage(
 	P: Page, port: number, id: string, role: 'host' | 'guest', timeout = COOP_BOOT_TIMEOUT,
+	// `character` rides `__coopConnect`'s own `opts.character` — the same field the lobby's Host/Join
+	// buttons fill from `KDMPLobby.playerCharacter()`. Optional and undefined by every existing
+	// caller, so a spec that wants KD's defaults (the common case) is unaffected. A FUNCTION runs on
+	// the page once it is loaded but before connecting — the hook a spec needs to set up KD's own
+	// wardrobe/class-screen state live (the bundle is only in scope at that point) and then read
+	// `KDMPLobby.playerCharacter()` back, exactly as the real lobby buttons do.
+	character?: unknown | ((page: Page) => Promise<unknown>),
 ): Promise<void> {
 	await P.goto(`http://127.0.0.1:${port}/`);
 	await P.waitForFunction(() => typeof (window as any).__coopConnect === 'function'
 		// @ts-ignore bare let-global — set on the Consent screen, which a normal boot passes through
 		&& typeof KDLoadingFinished !== 'undefined' && KDLoadingFinished === true,
 	undefined, { timeout });
-	await P.evaluate(({ i, r }) => { (window as any).__coopConnect({ role: r, clientId: i }); }, { i: id, r: role });
+	const resolved = (typeof character === 'function')
+		? await (character as (page: Page) => Promise<unknown>)(P)
+		: character;
+	await P.evaluate(({ i, r, c }) => {
+		(window as any).__coopConnect({ role: r, clientId: i, character: c });
+	}, { i: id, r: role, c: resolved });
 }
 
 /**
@@ -174,13 +186,16 @@ export async function bootCoopPair(
 	A: Page,
 	B: Page,
 	port: number,
-	opts: { timeout?: number; settleMs?: number } = {},
+	opts: {
+		timeout?: number; settleMs?: number;
+		characters?: { A?: unknown | ((page: Page) => Promise<unknown>); B?: unknown | ((page: Page) => Promise<unknown>) };
+	} = {},
 ): Promise<void> {
 	const timeout = opts.timeout ?? COOP_BOOT_TIMEOUT;
-	await coopJoinPage(A, port, 'A', 'host', timeout);
+	await coopJoinPage(A, port, 'A', 'host', timeout, opts.characters?.A);
 	await waitForCoop(A, 'A', 'connected', timeout);
 
-	await coopJoinPage(B, port, 'B', 'guest', timeout);
+	await coopJoinPage(B, port, 'B', 'guest', timeout, opts.characters?.B);
 	await coopAcceptPending(A, timeout);
 	// both seated → server starts the shared world → both receive their first state
 	await waitForCoop(A, 'A', 'started', timeout);
@@ -270,7 +285,21 @@ export async function coopMoveAnyDirection(
 	for (let index = 0; index < dirs.length; index++) {
 		const [dx, dy] = dirs[index];
 		const t0 = await A.evaluate(() => (window as any).__coop.lastTick);
-		await A.evaluate((d) => (window as any).__coop.sendMove(d.dx, d.dy), { dx, dy });
+		// `AllowInteract: false` — deliberately NOT the value a real key/mouse move sends
+		// (`__coop.sendMove` hardcodes `true`). This is a PROBE across several candidate
+		// directions: a probe direction landing squarely on the peer avatar is now, by product
+		// design, a legitimate bump that opens KD's own ally dialogue (`GenericAlly` — the owner's
+		// revised rule, needed for the co-op untie feature). That dialogue also disables
+		// `KinkyDungeonControlsEnabled()` for the rest of the session — correct for one real,
+		// deliberate keypress, but fatal for a multi-direction probe whose later legs would never
+		// run again. Measured: with `AllowInteract: true` here, `mp-real-input.spec.ts`'s real-W-key
+		// test went red (A's probe bumped B, opened the dialogue, and the session never advanced
+		// again). `installPeerAllyDialogueGuard` only hides NPC-only dialogue OPTIONS for a peer —
+		// it does not, and must not, suppress the dialogue itself. Real keypresses elsewhere in the
+		// suite still exercise the product path unprobed.
+		await A.evaluate((d) => (window as any).__coop.sendAction({
+			kdType: 'move', data: { dir: { x: d.dx, y: d.dy }, delta: 1, AllowInteract: false },
+		}), { dx, dy });
 		await B.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
 		const turned = await A.waitForFunction((t) => (window as any).__coop.lastTick !== t, t0, { timeout })
 			.then(() => true).catch(() => false);

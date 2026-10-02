@@ -116,4 +116,56 @@ test.describe('a character is built on KD\'s own screens, from the co-op lobby',
 		// nothing honest to read (the server supports the field for the avatar; see the task).
 		expect(committed).not.toHaveProperty('style');
 	});
+
+	/*
+	 * ── A PEER'S AVATAR MUST WEAR THE PEER'S OWN LOOK ─────────────────────────────────────────────
+	 * Players saw each other differently from how each looks to themselves: the peer's avatar was drawn from
+	 * `style` — a RANDOM preset (`KDQuickGenNPC`), never the player's real look — because nothing
+	 * carried the player's own `Appearance`. `appearance` is the fix: the player's own serialised
+	 * look, read live, exactly as KD's own wardrobe already serialises a Collection NPC's
+	 * `customOutfit` (`AppearanceItemStringify` + `LZString.compressToBase64`).
+	 */
+	test('R5 — and the player\'s OWN appearance travels too, not a generated one', async ({ isolatedPage: page }) => {
+		await bootKD(page);
+		await injectLobby(page);
+		await onClassScreen(page, true);
+
+		const result = await page.evaluate(() => {
+			// @ts-ignore
+			KDButtonsCache['startGame'].func({});
+			// @ts-ignore
+			const committed = window.KDMPLobby.playerCharacter();
+			// The SAME KD-native round trip the gateway expects on the other end
+			// (`CharacterAppearanceRestore(npc, DecompressB64(wire), ...)`), taken independently of the
+			// lobby so this is a comparison, not a tautology against the code under test.
+			// @ts-ignore
+			const liveStringified = AppearanceItemStringify(KinkyDungeonPlayer.Appearance);
+			return {
+				committed,
+				// @ts-ignore
+				decompressed: committed ? DecompressB64(committed.appearance) : null,
+				liveStringified,
+			};
+		});
+
+		expect(result.committed, 'a committed pick is a package, not null').toBeTruthy();
+		expect(typeof result.committed.appearance, 'the player\'s own look, as a string').toBe('string');
+		expect(result.committed.appearance.length, 'a real player always has SOME appearance').toBeGreaterThan(0);
+		// Round-trips to exactly what KD's own serialiser says about the LIVE player — not a canned
+		// preset, not an empty/placeholder string.
+		expect(result.decompressed).toBe(result.liveStringified);
+
+		// CONTROL: committing a SECOND TIME after the player's own look actually changed must change
+		// the wire string too — otherwise the assertion above could be satisfied by a value frozen at
+		// load time rather than one read live.
+		const after = await page.evaluate(() => {
+			// @ts-ignore — a real wardrobe edit: recolour the first worn/appearance item.
+			const item = KinkyDungeonPlayer.Appearance[0];
+			if (item) item.Color = (item.Color === '#FF8000') ? '#2244AA' : '#FF8000';
+			// @ts-ignore
+			return window.KDMPLobby.playerCharacter().appearance;
+		});
+		expect(after, 'a real wardrobe change must be reflected, not cached from the first commit')
+			.not.toBe(result.committed.appearance);
+	});
 });

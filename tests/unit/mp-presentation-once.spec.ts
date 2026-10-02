@@ -48,7 +48,12 @@ describe('consume-once presentation queues', () => {
 		s.join('A');
 		s.join('B');
 		// Six real turns — the exact sequence the diagnostic measured six undrained shockwaves for.
-		for (let i = 0; i < 6; i++) walkTurn(s, 1, 0);
+		// Oscillate rather than walk one direction continuously: the per-enemy slot switch re-derives
+		// its target by LIVE distance every round (anti-flicker slack aside), so a human who keeps
+		// walking away from the enemy legitimately hands the engagement to whichever other human is
+		// closer — this test's point is the consume-once event plumbing, not engagement handoff, so A
+		// stays near where it started instead of drifting out of range.
+		for (let i = 0; i < 6; i++) walkTurn(s, i % 2 ? -1 : 1, 0);
 		firstEvents = (s.snapshotFor('A').events || []).filter(isShock);
 	}, BOOT_TIMEOUT);
 

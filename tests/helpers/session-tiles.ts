@@ -43,6 +43,15 @@ export function freeNeighbour(s: any, id: string): { x: number, y: number, dx: n
 	return null;
 }
 
+/** Move a joined player's authoritative position (bundle + avatar), by id, exactly. */
+export function placePlayerAt(s: any, id: string, x: number, y: number): void {
+	s.world.restorePlayer(s.bundles.get(id));
+	s.world.eval(`(function(){ KinkyDungeonPlayerEntity.x = ${x | 0}; KinkyDungeonPlayerEntity.y = ${y | 0}; })()`);
+	s.bundles.set(id, s.world.capturePlayer());
+	const avId = s.avatars.get(id);
+	if (avId != null) s.world.moveAvatar(avId, x, y);
+}
+
 /**
  * Free tiles between `min` and `max` steps (Chebyshev) from `id` — candidate spots for something the
  * player should HEAR but not see (KD draws an enemy's noise ripple only when it is out of sight). A

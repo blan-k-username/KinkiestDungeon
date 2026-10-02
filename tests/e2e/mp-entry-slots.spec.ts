@@ -90,6 +90,13 @@ test.describe('the join entry on KD\'s save-slot screen', () => {
 	test('#3 pressing it declares the SAVE\'s character, not whatever the page last touched', async ({ isolatedPage: page }) => {
 		await withSelectedSave(page, async ({ klass, code }) => {
 			await recordConnects(page);
+			// A second control, alongside the class/name one `withSelectedSave` already set up: mutate
+			// the page's LIVE appearance after the save was taken, so a declaration that (wrongly) read
+			// live globals instead of the save's own snapshot would be caught here too.
+			await page.evaluate(() => {
+				// eslint-disable-next-line no-eval
+				(0, eval)('KinkyDungeonPlayer.Appearance = KinkyDungeonPlayer.Appearance.slice().reverse();');
+			});
 			await press(page, ENTRY);
 			expect(await where(page)).toBe('Multiplayer');
 			const st = await lobbyState(page);
@@ -114,10 +121,33 @@ test.describe('the join entry on KD\'s save-slot screen', () => {
 			expect(sent[0].character?.perks || []).toEqual(fromSave.perks);
 			// The name defaults to the save's character, not the page's.
 			expect(sent[0].name).toBe('Mira');
+
+			// Appearance: the SAVE's own snapshot (`saveStat.appearance`), not the live reversed one the
+			// control above just set. Computed both ways with KD's own round-trip (`AppearanceItemStringify`
+			// + `LZString.compressToBase64`) so the comparison is against KD's actual serialisation, not a
+			// hand-rolled guess at it.
+			const appearanceCheck = await page.evaluate((c: string) => {
+				// @ts-ignore
+				const d = JSON.parse(DecompressB64(c));
+				const stringify = (items: any) => (Array.isArray(items) && items.length)
+					// @ts-ignore
+					? LZString.compressToBase64(AppearanceItemStringify(items)) : '';
+				return {
+					fromSave: stringify(d.saveStat && d.saveStat.appearance),
+					// @ts-ignore
+					fromLive: stringify(typeof KinkyDungeonPlayer !== 'undefined' ? KinkyDungeonPlayer.Appearance : null),
+				};
+			}, code);
+			expect(appearanceCheck.fromSave, 'the save must have an appearance to compare against').not.toBe('');
+			expect(appearanceCheck.fromSave, 'the control (reversed live appearance) must actually differ')
+				.not.toBe(appearanceCheck.fromLive);
+			expect(sent[0].character?.appearance, 'the SAVE\'s appearance, not the page\'s reversed live one')
+				.toBe(appearanceCheck.fromSave);
+
 			// …and nothing of the RUN travels: the package has exactly the character's fields.
 			expect(Object.keys(sent[0].character).sort()).toEqual(
 				expect.arrayContaining(['class', 'outfit']));
-			expect(Object.keys(sent[0].character).every((k: string) => ['class', 'outfit', 'perks'].includes(k)),
+			expect(Object.keys(sent[0].character).every((k: string) => ['class', 'outfit', 'perks', 'appearance'].includes(k)),
 				'only character fields may be declared').toBe(true);
 		});
 	});

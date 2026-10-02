@@ -134,11 +134,36 @@ function sanitizeSave(raw) {
  * its own limits is `PERKS_MAX 64 × PERK_KEY_MAX 64` ≈ 4 KB of keys BEFORE the JSON quotes and
  * commas, so at 4 KB a lawful declaration would have pushed the package over the line and had the
  * WHOLE thing refused — class and outfit included — with no error anywhere and KD's default seated
- * instead. 32 KB clears the worst lawful case several times over and is still nothing on a LAN.
+ * instead.
+ *
+ * ⚠️ IT HAD TO GROW AGAIN WHEN `appearance` MOVED IN, for the same reason: that field alone can run
+ * past `APPEARANCE_MAX` (below) before JSON quoting, so a package with a lawful appearance AND the
+ * 4 KB of lawful perks would have tripped the old 32 KB ceiling and lost class/outfit/perks too, with
+ * the appearance as the only cause. 160 KB clears appearance + the worst lawful perk case several
+ * times over and is still nothing on a LAN.
  */
-const CHAR_MAX = 32 * 1024;
+const CHAR_MAX = 160 * 1024;
 const CHAR_FIELD_MAX = 64;
 const CHAR_FIELDS = Object.freeze(['class', 'outfit', 'style']);
+
+/**
+ * The one place a player-supplied APPEARANCE is made safe to seat.
+ *
+ * This is what lets the peer's avatar look like the peer: `LZString.compressToBase64(
+ * AppearanceItemStringify(KinkyDungeonPlayer.Appearance))`, the same opaque blob KD's own wardrobe
+ * writes for a Collection NPC's `customOutfit` (`KinkyDungeonCollection.ts:558`). Same shape as a
+ * save, so the same two structural rules apply — nothing here parses it, it is just LZString-base64
+ * riding inside an eval'd realm — and `APPEARANCE_MAX` is sized like a compact outfit export, not a
+ * whole run: far above a fully-decorated player, far below `SAVE_MAX`.
+ */
+const APPEARANCE_MAX = 64 * 1024;
+
+function sanitizeAppearance(raw) {
+	if (typeof raw !== 'string') return '';
+	const cleaned = raw.replace(/[^A-Za-z0-9+/=$\-_]/g, '');
+	if (cleaned.length > APPEARANCE_MAX) return '';
+	return cleaned;
+}
 
 function sanitizeCharacter(raw) {
 	if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
@@ -159,6 +184,14 @@ function sanitizeCharacter(raw) {
 		// with no error anywhere.
 		const v = stripControls(raw[f]).slice(0, CHAR_FIELD_MAX);
 		if (v) out[f] = v;
+	}
+	// `appearance` is NOT one of `CHAR_FIELDS`: it is an opaque LZString-base64 blob, not an
+	// identifier, so it gets `sanitizeAppearance`'s rule (structural, unbounded alphabet-wise up to
+	// its own cap) rather than `stripControls`' 64-char identifier cap, which would silently mangle it
+	// into a string `DecompressB64` cannot read back.
+	if (Object.prototype.hasOwnProperty.call(raw, 'appearance')) {
+		const appearance = sanitizeAppearance(raw.appearance);
+		if (appearance) out.appearance = appearance;
 	}
 	/*
 	 * The perks, through the sanitiser that has always cleaned them. `sanitizePerks` is
@@ -712,6 +745,6 @@ class JoinGate {
 }
 
 module.exports = {
-	JoinGate, sanitizeName, sanitizePerks, sanitizeSave, sanitizeCharacter, stripControls,
-	NAME_MAX, PERKS_MAX, PERK_KEY_MAX, SAVE_MAX, CHAR_MAX, CHAR_FIELD_MAX, HOST_SLOT, GUEST_SLOT,
+	JoinGate, sanitizeName, sanitizePerks, sanitizeSave, sanitizeCharacter, sanitizeAppearance, stripControls,
+	NAME_MAX, PERKS_MAX, PERK_KEY_MAX, SAVE_MAX, CHAR_MAX, CHAR_FIELD_MAX, APPEARANCE_MAX, HOST_SLOT, GUEST_SLOT,
 };

@@ -253,6 +253,20 @@ class SwapSession {
 		this.required = opts.requiredPlayers || 2;
 		this.seed = opts.seed || 'swap-session-seed';
 		this.enemyType = opts.enemyType || null;
+		// Which joined player each real shared enemy is engaged with — persists ACROSS rounds (sticky:
+		// an enemy keeps its target rather than re-contesting "nearest" every round, so it does not
+		// visibly flicker between players). Written by `_updateStickyTargets` after each round's one
+		// unmuted apply; read back as the `stickyTarget` handed to `HeadlessHost.armSlotSwitch` for
+		// the NEXT round. Keyed by enemy entity id.
+		this._enemyTarget = new Map();
+		// Companion entity ids this session has itself re-factioned for a PvP war — so the undo
+		// (`_reconcilePeers`) only ever reverts what THIS mechanism stamped, never a genuine
+		// engine-native faction change that happens to coincide. Keyed by entity id.
+		this._warFactionCompanions = new Set();
+		// Owner-pair keys ("A|B", sorted) THIS mechanism has set up a mutual war-faction relation for
+		// — so peace can clear exactly that relation, and only that one, leaving no residual entry in
+		// KD's own faction-relation table once nobody is at war through it any more.
+		this._warFactionPairs = new Set();
 		this.maxLog = opts.maxLog || 100;
 		this.pvp = !!opts.pvp;        // global PvP toggle — OFF by default (co-op)
 		// The per-pair relationship, and the offer/answer handshake that changes it.
@@ -548,6 +562,16 @@ class SwapSession {
 		 */
 		this._baseStats = this.world.statsChoiceSnapshot();
 		this.world.setServerMode('world');
+		// One-engine-tick-per-round turn model (world mute + per-enemy slot switch). Installed for
+		// every session, multi-player or not; `_advanceTurn` only ever ARMS either knob when 2+
+		// players are joined, so a 1-player session never exercises them (see its doc comment).
+		this.world.installTurnModel();
+		// Companions get their own war-team faction during a PvP war (`_armPeerEnemies`) — this guard
+		// keeps that stamp from being silently reverted by KD's own per-tick party-faction-reset
+		// statement (see `HeadlessHost.setEntityFaction`'s doc comment). Installed for every session,
+		// multi-player or not; it is a no-op unless `setEntityFaction` ever registers a companion.
+		this.world.installCompanionFactionGuard();
+		this.world.setSlotSwapCallback((cid) => this._slotSwapTo(cid));
 		// ALWAYS run the classifier. `seedInputKinds` gates whether its VERDICTS are applied
 		// (that switch is about client routing); its CONFIDENCE is needed
 		// either way, because "may this observation demote the type?" is a question every session asks.
@@ -563,6 +587,10 @@ class SwapSession {
 		// …and the same treatment for an ally UNTYING a peer: taken from the call, never from a
 		// standing bind-level delta (see installPeerUntieRecorder for what that cost).
 		this.world.installPeerUntieRecorder();
+		// A peer avatar IS a talk target in peace (needed for the co-op untie dialogue); most of the
+		// ally dialogue's OTHER options are hidden for a peer target instead — see
+		// installPeerAllyDialogueGuard's own doc comment.
+		this.world.installPeerAllyDialogueGuard();
 		// And the death gate itself refuses to remove an avatar — the backstop for the ~30
 		// places KD assigns enemy.hp directly, which the damage wrapper above never sees.
 		this.world.installAvatarDeathGuard();
@@ -1897,11 +1925,71 @@ class SwapSession {
 		return { advanced: true, turn: t, exportDue: t.exportDue || null };
 	}
 
-	/** Apply every player's action on the shared world, in random order (R8/R9). */
+	/**
+	 * Apply every player's action on the shared world, in random order (R8/R9), inside ONE real
+	 * engine turn: every human still acts simultaneously from the enemy/engine's point of view —
+	 * no freezing, no skipped or half turns (the two-phase stun-gate model this replaced was
+	 * rejected for exactly that shape of shortcut).
+	 *
+	 * ONE WORLD TICK PER ROUND. Every apply but the LAST runs with the world muted
+	 * (`HeadlessHost.setWorldMuted(true)`): that player's own real dispatch still runs KD's full,
+	 * unmodified per-player pipeline (their own per-turn effects — item checks, stats, sound decay —
+	 * tick exactly once, in their own apply), but every world-shared system (`WORLD_MUTE_FNS`, plus
+	 * enemies/the clock, which get their own handling) is a no-op for that call, so the round's world
+	 * does not advance N times for N joined players. The LAST apply runs unmuted — it IS the round's
+	 * one real engine turn, hosting every world-shared system exactly once, same as a 1-player round.
+	 *
+	 * PER-ENEMY SLOT SWITCH, inside that one unmuted apply. Armed only around it
+	 * (`HeadlessHost.armSlotSwitch`): before each real enemy decides its target, the player slot is
+	 * switched to whichever joined human that enemy is ENGAGED with (its own sticky current target,
+	 * else nearest by that round's FINAL positions — `this._enemyTarget`, read/written by
+	 * `_updateStickyTargets`), so the enemy meets a REAL player through KD's own full pipeline (binds,
+	 * grabs, tease, dialogue — never an NPC-style hp-only hit on a parked avatar), regardless of which
+	 * human happened to apply last. Enemies are grouped by chosen human before each pass, so this
+	 * costs at most one swap out + one back per OTHER human per pass, not one per enemy (owner-approved
+	 * trade-off). The slot is handed back to the LAST apply's own player before
+	 * `KinkyDungeonUpdateEnemies` returns, so that apply's own post-enemy tail (stats, tile, delayed
+	 * actions) still runs for ITS player — the one accepted trade-off of this model: a human an enemy
+	 * faced who did NOT apply last has their own per-turn tail processed one round later than a true
+	 * simultaneous engine would (the accepted "post-world phase shift" trade-off; nested ticks that
+	 * remove it entirely are a follow-up, not attempted here).
+	 *
+	 * A 1-player session never arms either knob — its one real apply already runs a full, unmuted
+	 * `KinkyDungeonAdvanceTime`, identical to single-player KD and to this method before any co-op
+	 * turn model existed. That is deliberate: it is what keeps a 1-player `SwapSession` byte-identical
+	 * to a reference single-player run (`mp-parity-oracle`).
+	 *
+	 * NOT every world-shared system collapses to once per round here — `WORLD_MUTE_FNS`
+	 * (`headless-host.js`) is derived from `turn-classification.js`'s verdicts and excludes anything
+	 * still classified `mixed` (a function that runs a step for the ACTING player alongside its
+	 * world-wide loop, under one name, with no bespoke wrap). Four former `mixed` entries —
+	 * `KDUpdateEffectTiles`, `KinkyDungeonUpdateTileEffects`, `KinkyDungeonUpdateBullets`,
+	 * `KinkyDungeonUpdateBulletsCollisions` — are now `split`: `installTurnModel` wraps each so its
+	 * world-wide loop/physics runs once per round while the acting player's own step is replicated
+	 * every apply via KD's own smaller functions (see those wraps' own doc comments). Bullet owner
+	 * tagging (`tagOwnedBullets`, called below for every apply) and the `KinkyDungeonPlayerEffect`
+	 * wrap (replays the AOE player-effect test against every OTHER joined human) close the two
+	 * player-targeting gaps `turn-classification.js` flagged for bullets specifically. The pure-
+	 * `world` systems — `KinkyDungeonUpdateJailKeys`, `KDCommanderUpdate`, `KDTickMaps`, plus enemies
+	 * and the clock (their own handling) — run once per round as before.
+	 *
+	 * `KinkyDungeonUpdateEnemies` and `KinkyDungeonUpdateTether` are also now `split`: the former
+	 * replicates the player-only pre/post code (dialogue tick, leashed-to-jail countdown) its own
+	 * wholesale mute used to drop for every apply but the host's; the latter routes the round's one
+	 * real npc-side tether tick to the LEASH'S OWN OWNER (tagged "first touch" by `tagOwnedTethers`,
+	 * called below for every apply, same shape as `tagOwnedBullets`) rather than whoever hosts the
+	 * round. Still tracked as a separate follow-up, not folded into this change:
+	 * `KinkyDungeonSendEnemyEvent`/`SendBulletEvent`'s dispatch is mixed along the triggering Event
+	 * NAME (periodic world-tick vs. a player's own one-shot cast), not the data it reads — see that
+	 * pair's own `turn-classification.js` entries for why a blanket mute would be wrong.
+	 */
 	_advanceTurn() {
 		const order = this._shuffle(this._joined.slice());
-		const applied = [];
+		const applied = new Array(order.length);
 		this.actionMsgOf.clear();   // floating combat text is per-turn transient
+		// The world-mute + slot-switch knobs only make sense with more than one player applying —
+		// see the method doc comment for why solo stays on the original, single-apply path.
+		const multi = this._joined.length >= 2;
 		// Where everyone stood at TURN START — the world each player actually acted against.
 		//
 		// R9's doc comment above claimed collision blocked the loser of a contested tile. It did not:
@@ -1919,148 +2007,11 @@ class SwapSession {
 			if (p) startPos.set(cid, { x: p.x, y: p.y });
 		}
 		const arrived = new Set();   // avatar entity ids that changed tile THIS turn
-		for (const id of order) {
-			const action = this._pending.get(id) || { kind: 'wait' };
-			// Revised: a downed player is NOT incapacitated by us. KD has no
-			// "Will = 0 ⇒ you cannot act" rule — KinkyDungeonMove has no Will check and
-			// KDPlayerCanMove is terrain-only; low Will only makes enemies grab you more
-			// (KinkyDungeonEnemyTeaseAttacks.ts:746) and immobility comes from bondage/stun
-			// (KinkyDungeonIsDisabled = stunned || KDBoundEffects > 3). So being worn down leads to
-			// being TIED, and the tie — mirrored into the victim's bundle and enforced by the real
-			// pipeline — is what limits them. Escapable by struggling, exactly like single-player.
-			// `defeated` therefore survives only as the bindability signal (_armPeerEnemies stuns the
-			// avatar so KD's own KDCanApplyBondage gate passes) and the HUD marker.
-			const { kdType, data } = this._toInput(id, action);
-			// swap this player in; park their avatar so it doesn't block their own move
-			this._restorePlayer(id, this.bundles.get(id));
-			const avId = this.avatars.get(id);
-			if (avId != null) this.world.moveAvatar(avId, PARK.x, PARK.y);
-			// Arm every PvP peer as a REAL hostile enemy (hp = their Will) so this player's
-			// stock attack pipeline can hit them for real (no synthetic interception).
-			this._armPeerEnemies(id);
-			// …but a peer who only got here because they were applied first is not a target.
-			this.world.setBumpVeto([...this.avatars.entries()]
-				.filter(([cid, eid]) => cid !== id && arrived.has(eid))
-				.map(([, eid]) => eid));
-			// And tell the world who else is in this party and where they are standing, so
-			// the co-located level goal can be decided from inside KD's own stair cancellation. Pushed
-			// per APPLY, not per turn: the facts are relative to whoever is acting, and a peer position
-			// from the previous apply is a gate that answers about a world that has moved on.
-			this._pushPartyGate(id);
-			// …and whether anybody ELSE is still up, which is the whole capture rule. Written
-			// per APPLY, from two CONSTANT source strings so V8's eval compilation cache serves both
-			// for free — interpolating a per-call value into a hot eval costs ~8.7x (measured in this
-			// layer, and the same reason `setPartyGate` splits its two payloads).
-			this.world.eval(this._anyPartnerFree(id)
-				? 'globalThis.__kdCoopPartnerFree = true;'
-				: 'globalThis.__kdCoopPartnerFree = false;');
-			// Capture this player's message-log delta (messages pushed while THEY
-			// are the swapped-in player are theirs — incl. enemy-AI lines aimed at them).
-			const logLen0 = this.world.messageLogLength();
-			let result = null;
-			let cancelled = false;
-			// The synthetic `pvpAttack` / `pvpBind` primitive is GONE. It computed its own
-			// attack and wrote the result onto the target's bundle, bypassing the game entirely — a
-			// second, parallel combat model kept alive "for tests". There is now exactly one path:
-			// the player's real action through KD's own pipeline.
-			if (kdType) {
-				// Run the player's REAL action. A move/attack/spell INTO a peer's avatar (armed
-				// as a real hostile enemy above) auto-runs KD's real attack pipeline — real damage, real
-				// combat text + floaters, real defeat/capture. No interception. Reconciled after the turn.
-				// Apply for real, and LEARN whether this input type consumes a turn. The
-				// classification comes from a genuine application — never a speculative one, which
-				// would double-apply world-mutating actions (measured, probes/probe11).
-				const obs = this.world.applyInputObserved(kdType, data) || {};
-				result = obs.result;
-				// Did the contested-tile veto fire for this action? Read it before anything else
-				// can, and RECORD it — a cancelled move is a real input that produced nothing, exactly the
-				// class of silent drop that is made reportable.
-				// Did the dispatch THROW? applyInputObserved caught it into obs.error; until now
-				// nothing on this path read that, so the action was truncated in silence.
-				this._noteFailedInput(id, kdType, obs);
-				cancelled = (this.world.takeBumpVetoes() || 0) > 0;
-				if (cancelled) {
-					this._recordDrop(this.cancelledMoves, { clientId: id, turn: this.turn, kdType });
-					this._dbg(`CANCELLED contested move for ${id} ("${kdType}") in turn ${this.turn} — ` +
-						`a peer arrived on the target tile earlier in this same turn`);
-				}
-				// This player is swapped in, so whatever the game just queued for its draw layer
-				// is theirs. Harvest it as EVENTS now — it is presentation output, not state, and is no
-				// longer captured (it used to be replicated and re-delivered forever).
-				this._harvestFloaters(id);
-				this._noteUnknown(kdType, obs);
-				// Fold this occurrence into what we know about the type. Asymmetric on
-				// purpose — see `_learnInputKind`. The contested-tile veto's `!cancelled` guard is now one instance of
-				// the general rule "an action we stopped is not a measurement of the type".
-				this._learnInputKind(kdType, obs, cancelled);
-				// The hand-rolled friendly-fire splash is GONE. KD's own AOE already reaches
-				// peer avatars — measured: an AOE cast produced a real bullet whose blast damaged a peer
-				// avatar via `KinkyDungeonDamageEnemy`, which the peer-damage recorder captures like any
-				// other hit, so `_reconcilePeers` applies it through that player's real pipeline
-				// (measured by an aoe-real-path probe — Will 10 → 6.5, `updateBullets` 16).
-				// Splash is now whatever the GAME does: real bullet travel, real walls, real LoS.
-			}
-			// Capture the delta; if the log was reset this turn (e.g. a floor transition
-			// clears it), take the whole new log as the delta.
-			const newLen = this.world.messageLogLength();
-			const added = (newLen >= logLen0) ? this.world.messagesSince(logLen0) : this.world.messageLog();
-			// The delta captured while THIS player was swapped in is THIS player's. No text is
-			// inspected to guess an audience — the swap window is engine truth, and it is what the game
-			// means by emitting those lines at that moment.
-			//
-			// The old rule ran `/^you\b|^your\b/i` over the rendered text and broadcast everything else.
-			// It was English-only, so in CN/DE/ES/JP/KR/RU nothing matched and every private line leaked
-			// to the peer. It was also wrong in the other direction: KD gates messages by VISION at the
-			// source (`KinkyDungeonGame.ts:2602`), so a line only reaches the log if the ACTING player
-			// can see its subject — broadcasting it showed the peer things they may not be able to see.
-			//
-			// Genuinely session-level events are broadcast EXPLICITLY (see `_markDefeated`,
-			// `_markRecovered`, `_onMapChanged`) — a concern the proxy legitimately owns, and one
-			// that never depends on reading game content.
-			if (added && added.length) this._pushLog(id, added);
-			// Did KD's capture just get held in place because a partner is still up? Said
-			// ONCE, to everyone, in the proxy's own words — a partner who never hears it cannot come
-			// and free them, and KD's own "KinkyDungeonLeashed" line is the captured player's, not a
-			// broadcast. Read AFTER the delta above so the announcement is not also folded
-			// into the acting player's personal log twice.
-			if (this._takeCoopFlag('__kdCoopCaptureHeld') === true) {
-				// KD kicked the other players' avatars off the board on its way through
-				// (`KDKickEnemies`, `KinkyDungeonJail.ts:1888`) — put them back exactly where they
-				// were standing. Nobody MOVES: that is the whole point of holding the capture.
-				this._reseatParty(id, null, false);
-				this._announceCaptureHeld(id);
-			}
-			// The party has moved to another MAP, so say so and put everyone on it.
-			//
-			// This replaces a `getLevel()` comparison. The level number is not the map: a capture
-			// regenerates the map at an unchanged level (`KinkyDungeonDefeat` → `KinkyDungeonCreateMap`,
-			// KinkyDungeonJail.ts:1725) and relocates the WHOLE party, because there is one world. That
-			// went entirely undetected, so the partner kept an old-map coordinate and lost their avatar
-			// with nothing said. Comparing the map itself detects a descent, a side room, the hub and a
-			// capture with one rule — and it needs no stairs hook, so it never meets the doubled
-			// `afterHandleStairs` signal.
-			//
-			// The baseline is SESSION-level, not per-apply, so a map change that happened outside any
-			// apply window is still caught on the next one instead of being silently adopted.
-			const mapNow = this.world.mapId();
-			if (this._lastMapId !== undefined && mapNow !== this._lastMapId) this._onMapChanged(id, mapNow);
-			this._lastMapId = mapNow;
-			// swap out: persist this player's new state + move their avatar to its new spot
-			this.bundles.set(id, this.world.capturePlayer());
-			this.vitalsOf.set(id, this.world.getVitals());   // refresh for the HP bar
-			const p = this.world.getPlayerPos();
-			// …and re-spawn it if it is gone. `moveAvatar` answers `null` for an entity
-			// that no longer exists and that answer used to be dropped on the floor, which is how a
-			// map change made the players permanently invisible to each other.
-			const liveAvId = this._ensureAvatar(id, p.x, p.y);
-			// This avatar now stands somewhere it did not stand at turn start, so for everyone
-			// applied AFTER it, it is an arrival — present enough to block, not to be bumped.
-			// Read the id back from `_ensureAvatar`, not from `avId` captured before the apply —
-			// a re-spawn changes it, and a stale id here would silently stop marking arrivals.
-			const s0 = startPos.get(id);
-			if (liveAvId != null && s0 && (p.x !== s0.x || p.y !== s0.y)) arrived.add(liveAvId);
-			applied.push({ id, kdType, result, pos: p, cancelled });
-		}
+		// NESTED TICKS (removing the one-round post-world delay — see `_applyOne`'s own doc comment):
+		// one real tick per round can now genuinely advance the clock from INSIDE a muted apply's own
+		// call, so the round-wide accumulator the clock hand-back reads must start fresh each round.
+		if (multi) this.world.eval('globalThis.__kdRoundRealTickDelta = 0;');
+		this._applyOne(order, 0, { applied, startPos, arrived, multi });
 		// The veto is per-apply. Leave the world with it off, or the immediate ("ui") apply
 		// path — which runs outside this loop — would inherit a stale set from the last turn.
 		this.world.setBumpVeto([]);
@@ -2107,6 +2058,333 @@ class SwapSession {
 		const exportDue = this._exportDue;
 		this._exportDue = null;
 		return { turn: this.turn, applied, exportDue };
+	}
+
+	/**
+	 * Apply ONE player's action (`order[idx]`), then move on to the next — by genuine recursion, not a
+	 * loop, so a non-last apply's own dispatch can hand control to the next player from the MIDDLE of
+	 * its own `KinkyDungeonAdvanceTime` call (nested ticks). `ctx` ({applied, startPos, arrived, multi})
+	 * is the state every level of the recursion shares, exactly as the old flat loop's own locals were
+	 * shared across iterations.
+	 *
+	 * WHY NESTING. The one-world-tick-per-round model's own accepted trade-off was a one-round delay:
+	 * a non-last apply's own post-enemy tail (`KinkyDungeonUpdateStats`, `KinkyDungeonHandleMoveToTile`,
+	 * delayed actions, flags, …) ran BEFORE the round's one real tick even existed, so the player-local
+	 * consequences of being hit this round only showed up on that human's NEXT round. Nesting removes
+	 * it: a non-last apply arms a ONE-SHOT callback (`HeadlessHost.setNestedDispatchCallback`) that the
+	 * engine fires from inside `installTurnModel`'s `KinkyDungeonUpdateEnemies` wrap, at the round's
+	 * first per-round world call — before this apply's own tail runs, but after its own move/attack
+	 * already resolved. The callback:
+	 *   1. commits this apply so far exactly like a normal end-of-apply swap-out (log delta, floaters,
+	 *      bundle, avatar reseat + arrival tracking) — so whichever player applies next (and the round's
+	 *      eventual per-enemy slot switch) sees this apply's REAL, final-so-far position and state, not
+	 *      a stale pre-move one;
+	 *   2. recurses into `_applyOne` for the next player — all the way down to the round's last apply,
+	 *      which is unchanged: it still unmutes, arms the per-enemy slot switch and hosts the one real
+	 *      tick exactly as before nesting existed;
+	 *   3. once that returns (the whole rest of the round has now genuinely happened), hands the slot
+	 *      BACK to this apply's own human and lets its own remaining `KinkyDungeonAdvanceTime` execution
+	 *      continue — now AFTER the round's real tick, in engine order, the same "I act, the world acts,
+	 *      my own turn finishes" sequence single-player already guarantees for the host.
+	 * If the hook never fires (no `kdType` to dispatch, or the dispatch didn't consume a turn and so
+	 * never reached `KinkyDungeonAdvanceTime` at all), this falls back to recursing AFTER this apply's
+	 * own bookkeeping — the same order the old flat loop always used for that transition, so a round
+	 * that never triggers nesting is unaffected by its existence.
+	 *
+	 * The slot-switch/defeat-routing/bullet/tether mechanisms the LAST apply arms are entirely unchanged
+	 * by nesting — they still only ever run once, inside the one real tick, wherever it ends up nested.
+	 */
+	_applyOne(order, idx, ctx) {
+		const { applied, startPos, arrived, multi } = ctx;
+		const id = order[idx];
+		// The round's ONE real engine turn is hosted by the LAST apply — see this method's own doc
+		// comment. Unused (always false) on a 1-player round, where `multi` gates every use of it.
+		const last = (idx === order.length - 1);
+		const action = this._pending.get(id) || { kind: 'wait' };
+		// Revised: a downed player is NOT incapacitated by us. KD has no
+		// "Will = 0 ⇒ you cannot act" rule — KinkyDungeonMove has no Will check and
+		// KDPlayerCanMove is terrain-only; low Will only makes enemies grab you more
+		// (KinkyDungeonEnemyTeaseAttacks.ts:746) and immobility comes from bondage/stun
+		// (KinkyDungeonIsDisabled = stunned || KDBoundEffects > 3). So being worn down leads to
+		// being TIED, and the tie — mirrored into the victim's bundle and enforced by the real
+		// pipeline — is what limits them. Escapable by struggling, exactly like single-player.
+		// `defeated` therefore survives only as the bindability signal (_armPeerEnemies stuns the
+		// avatar so KD's own KDCanApplyBondage gate passes) and the HUD marker.
+		const { kdType, data } = this._toInput(id, action);
+		// swap this player in; park their avatar so it doesn't block their own move
+		this._restorePlayer(id, this.bundles.get(id));
+		const avId = this.avatars.get(id);
+		if (avId != null) this.world.moveAvatar(avId, PARK.x, PARK.y);
+		// Arm every PvP peer as a REAL hostile enemy (hp = their Will) so this player's
+		// stock attack pipeline can hit them for real (no synthetic interception).
+		this._armPeerEnemies(id);
+		// …but a peer who only got here because they were applied first is not a target.
+		this.world.setBumpVeto([...this.avatars.entries()]
+			.filter(([cid, eid]) => cid !== id && arrived.has(eid))
+			.map(([, eid]) => eid));
+		// Pushed per APPLY, not per turn: the facts are relative to whoever is acting, and a peer
+		// position from the previous apply is a gate that answers about a world that has moved on.
+		this._assertHumanContext(id);
+		// Capture this player's message-log delta (messages pushed while THEY
+		// are the swapped-in player are theirs — incl. enemy-AI lines aimed at them). `let`, not
+		// `const`: the nested-dispatch hand-back (below) advances this checkpoint past whatever the
+		// rest of the round just logged, so THIS apply's own final delta (captured after its own tail
+		// runs) does not re-include lines that already went into its own mid-pass commit.
+		let logLen0 = this.world.messageLogLength();
+		let result = null;
+		let cancelled = false;
+		// Set true the instant the nested-dispatch hook actually fires — distinguishes "the rest of the
+		// round already happened, nested inside this dispatch" from "nothing to nest into yet" below.
+		let nestedFired = false;
+		// The synthetic `pvpAttack` / `pvpBind` primitive is GONE. It computed its own
+		// attack and wrote the result onto the target's bundle, bypassing the game entirely — a
+		// second, parallel combat model kept alive "for tests". There is now exactly one path:
+		// the player's real action through KD's own pipeline.
+		if (kdType) {
+			// Run the player's REAL action. A move/attack/spell INTO a peer's avatar (armed
+			// as a real hostile enemy above) auto-runs KD's real attack pipeline — real damage, real
+			// combat text + floaters, real defeat/capture. No interception. Reconciled after the turn.
+			//
+			// ONE WORLD TICK PER ROUND: every apply but the LAST runs muted (world-shared systems
+			// are no-ops; this player's own per-turn effects are untouched). The LAST apply runs
+			// unmuted, with the per-enemy slot switch armed — see the method doc comment. A
+			// 1-player round never arms either knob, so its one apply is byte-identical to today.
+			if (multi) {
+				this.world.setWorldMuted(!last);
+				if (last) {
+					const roster = order.map((cid) => ({ cid, avatarId: this.avatars.get(cid) }));
+					const sticky = {};
+					for (const [eid, cid] of this._enemyTarget) {
+						if (this._joined.includes(cid)) sticky[eid] = cid;
+					}
+					// First "outgoing" the slot switch could ever flush is `id` itself — the log
+					// checkpoint starts at `logLen0`, not "now", or the delta since turn start would
+					// be double-counted into both this player's own log AND the first switch target.
+					this._slotLogCheckpoint = logLen0;
+					this.world.armSlotSwitch(id, roster, sticky, this._computeCompanionOwners());
+				} else {
+					// NESTED TICKS: see this method's own doc comment. Armed fresh for every non-last
+					// apply; the engine consumes it at most once (`installTurnModel`'s
+					// KinkyDungeonUpdateEnemies wrap takes-and-clears it), so re-arming it here every
+					// call is correct even though the global is never explicitly cleared on the
+					// "never fired" path below (disarmed unconditionally right after dispatch instead).
+					this.world.setNestedDispatchCallback(() => {
+						nestedFired = true;
+						// Leaving this slot MID-DISPATCH: commit exactly like a normal end-of-apply
+						// swap-out (log delta, floaters, bundle, avatar reseat + arrival tracking) so
+						// whoever applies next — and the round's eventual per-enemy slot switch — sees
+						// this apply's real, final-so-far position and state, not a stale pre-move one.
+						const newLen = this.world.messageLogLength();
+						const midAdded = (newLen >= logLen0)
+							? this.world.messagesSince(logLen0) : this.world.messageLog();
+						if (midAdded && midAdded.length) this._pushLog(id, midAdded);
+						this._harvestFloaters(id);
+						this.bundles.set(id, this.world.capturePlayer());
+						const midPos = this.world.getPlayerPos();
+						const midAvId = this._ensureAvatar(id, midPos.x, midPos.y);
+						const s0mid = startPos.get(id);
+						if (midAvId != null && s0mid && (midPos.x !== s0mid.x || midPos.y !== s0mid.y)) {
+							arrived.add(midAvId);
+						}
+
+						// The rest of the round — every remaining player's own apply, down to and
+						// including the round's one real tick — happens HERE, fully, before this call
+						// returns.
+						this._applyOne(order, idx + 1, ctx);
+
+						// Hand the slot back to ME: my own remaining execution (below, once this
+						// dispatch returns) continues as myself, not as whoever the recursion left
+						// behind. Re-read from `this.bundles` rather than the `capturePlayer()` taken
+						// above — a real per-enemy engagement during the nested real tick may have
+						// swapped ME in and updated my own bundle via `_slotSwapTo`'s own swap-out
+						// commit, and that newer snapshot is exactly the post-hit state this whole
+						// mechanism exists to surface within the same round.
+						this._restorePlayer(id, this.bundles.get(id));
+						if (avId != null) this.world.moveAvatar(avId, PARK.x, PARK.y);
+						// RE-DERIVE the party gate and the capture rule's "partner free" fact for ME —
+						// same reason and same pattern as `_slotSwapTo`'s own end-of-pass hand-back
+						// (its own doc comment: "`_pushPartyGate` must run AFTER `_restorePlayer` — a
+						// restore wipes the registry the gate re-asserts"). Without this, the rest of
+						// the round (the next player's own apply, and the round's one real tick) left
+						// `__KD_PARTY_GATE`/`__kdCoopPartnerFree` pointing at whoever held the slot
+						// LAST, not at me — so anything in MY OWN remaining execution that reads either
+						// (KD's own stair-cancel party gate, the capture rule) would decide against a
+						// stranger's facts instead of mine.
+						this._assertHumanContext(id);
+						// My own final log delta (captured after my own tail, below) must start from
+						// here, not from before the rest of the round ran.
+						logLen0 = this.world.messageLogLength();
+					});
+				}
+			}
+			// Apply for real, and LEARN whether this input type consumes a turn. The
+			// classification comes from a genuine application — never a speculative one, which
+			// would double-apply world-mutating actions (measured, probes/probe11).
+			const obs = this.world.applyInputObserved(kdType, data) || {};
+			// Disarm unconditionally: consumed already if the hook fired (it self-clears on the engine
+			// side the instant it runs), a plain no-op write otherwise if it never reached the hook
+			// (e.g. the dispatch threw before `KinkyDungeonAdvanceTime`, or never consumed a turn) — a
+			// stale armed callback must never survive into a LATER, unrelated apply.
+			if (multi && !last) this.world.setNestedDispatchCallback(null);
+			// Tag any followPlayer bullet THIS apply just cast with its owner's clientId, every
+			// apply (muted or not) — the player's own real dispatch (and any spell it casts) runs
+			// regardless of world-mute; see `HeadlessHost.tagOwnedBullets` for why this is a
+			// side-channel, not a property on the bullet object itself.
+			this.world.tagOwnedBullets(id);
+			// Same "first touch" owner-tag as tagOwnedBullets, for a leash this apply's own real
+			// dispatch just created (KinkyDungeonAttachTetherToEntity) — see HeadlessHost.tagOwnedTethers.
+			this.world.tagOwnedTethers(id);
+			if (multi && last) {
+				this.world.disarmSlotSwitch();
+				// `installTurnModel`'s KinkyDungeonUpdateEnemies wrap hands the slot back to `id`
+				// before returning every time it ran — this only guards the case where the switch
+				// armed but the enemy pass never ran at all (e.g. the dispatch threw before reaching
+				// it; applyInputObserved catches that into obs.error, so this call still returns).
+				if (this._slotOccupant !== id) this._slotSwapTo(id);
+				this._updateStickyTargets(this.world.slotChoiceLog());
+			}
+			result = obs.result;
+			// Did the contested-tile veto fire for this action? Read it before anything else
+			// can, and RECORD it — a cancelled move is a real input that produced nothing, exactly the
+			// class of silent drop that is made reportable.
+			// Did the dispatch THROW? applyInputObserved caught it into obs.error; until now
+			// nothing on this path read that, so the action was truncated in silence.
+			this._noteFailedInput(id, kdType, obs);
+			cancelled = (this.world.takeBumpVetoes() || 0) > 0;
+			if (cancelled) {
+				this._recordDrop(this.cancelledMoves, { clientId: id, turn: this.turn, kdType });
+				this._dbg(`CANCELLED contested move for ${id} ("${kdType}") in turn ${this.turn} — ` +
+					`a peer arrived on the target tile earlier in this same turn`);
+			}
+			// This player is swapped in, so whatever the game just queued for its draw layer
+			// is theirs. Harvest it as EVENTS now — it is presentation output, not state, and is no
+			// longer captured (it used to be replicated and re-delivered forever).
+			this._harvestFloaters(id);
+			this._noteUnknown(kdType, obs);
+			// Fold this occurrence into what we know about the type. Asymmetric on
+			// purpose — see `_learnInputKind`. The contested-tile veto's `!cancelled` guard is now one instance of
+			// the general rule "an action we stopped is not a measurement of the type".
+			this._learnInputKind(kdType, obs, cancelled);
+			// The hand-rolled friendly-fire splash is GONE. KD's own AOE already reaches
+			// peer avatars — measured: an AOE cast produced a real bullet whose blast damaged a peer
+			// avatar via `KinkyDungeonDamageEnemy`, which the peer-damage recorder captures like any
+			// other hit, so `_reconcilePeers` applies it through that player's real pipeline
+			// (measured by an aoe-real-path probe — Will 10 → 6.5, `updateBullets` 16).
+			// Splash is now whatever the GAME does: real bullet travel, real walls, real LoS.
+		}
+		// Capture the delta; if the log was reset this turn (e.g. a floor transition
+		// clears it), take the whole new log as the delta.
+		const newLen = this.world.messageLogLength();
+		const added = (newLen >= logLen0) ? this.world.messagesSince(logLen0) : this.world.messageLog();
+		// The delta captured while THIS player was swapped in is THIS player's. No text is
+		// inspected to guess an audience — the swap window is engine truth, and it is what the game
+		// means by emitting those lines at that moment.
+		//
+		// The old rule ran `/^you\b|^your\b/i` over the rendered text and broadcast everything else.
+		// It was English-only, so in CN/DE/ES/JP/KR/RU nothing matched and every private line leaked
+		// to the peer. It was also wrong in the other direction: KD gates messages by VISION at the
+		// source (`KinkyDungeonGame.ts:2602`), so a line only reaches the log if the ACTING player
+		// can see its subject — broadcasting it showed the peer things they may not be able to see.
+		//
+		// Genuinely session-level events are broadcast EXPLICITLY (see `_markDefeated`,
+		// `_markRecovered`, `_onMapChanged`) — a concern the proxy legitimately owns, and one
+		// that never depends on reading game content.
+		if (added && added.length) this._pushLog(id, added);
+		// Did KD's capture just get held in place because a partner is still up? Said
+		// ONCE, to everyone, in the proxy's own words — a partner who never hears it cannot come
+		// and free them, and KD's own "KinkyDungeonLeashed" line is the captured player's, not a
+		// broadcast. Read AFTER the delta above so the announcement is not also folded
+		// into the acting player's personal log twice.
+		if (this._takeCoopFlag('__kdCoopCaptureHeld') === true) {
+			// KD kicked the other players' avatars off the board on its way through
+			// (`KDKickEnemies`, `KinkyDungeonJail.ts:1888`) — put them back exactly where they
+			// were standing. Nobody MOVES: that is the whole point of holding the capture.
+			this._reseatParty(id, null, false);
+			this._announceCaptureHeld(id);
+		}
+		// The party has moved to another MAP, so say so and put everyone on it.
+		//
+		// This replaces a `getLevel()` comparison. The level number is not the map: a capture
+		// regenerates the map at an unchanged level (`KinkyDungeonDefeat` → `KinkyDungeonCreateMap`,
+		// KinkyDungeonJail.ts:1725) and relocates the WHOLE party, because there is one world. That
+		// went entirely undetected, so the partner kept an old-map coordinate and lost their avatar
+		// with nothing said. Comparing the map itself detects a descent, a side room, the hub and a
+		// capture with one rule — and it needs no stairs hook, so it never meets the doubled
+		// `afterHandleStairs` signal.
+		//
+		// The baseline is SESSION-level, not per-apply, so a map change that happened outside any
+		// apply window is still caught on the next one instead of being silently adopted.
+		const mapNow = this.world.mapId();
+		if (this._lastMapId !== undefined && mapNow !== this._lastMapId) this._onMapChanged(id, mapNow);
+		this._lastMapId = mapNow;
+		// swap out: persist this player's new state + move their avatar to its new spot
+		this.bundles.set(id, this.world.capturePlayer());
+		this.vitalsOf.set(id, this.world.getVitals());   // refresh for the HP bar
+		const p = this.world.getPlayerPos();
+		// …and re-spawn it if it is gone. `moveAvatar` answers `null` for an entity
+		// that no longer exists and that answer used to be dropped on the floor, which is how a
+		// map change made the players permanently invisible to each other.
+		const liveAvId = this._ensureAvatar(id, p.x, p.y);
+		// This avatar now stands somewhere it did not stand at turn start, so for everyone
+		// applied AFTER it, it is an arrival — present enough to block, not to be bumped.
+		// Read the id back from `_ensureAvatar`, not from `avId` captured before the apply —
+		// a re-spawn changes it, and a stale id here would silently stop marking arrivals.
+		const s0 = startPos.get(id);
+		if (liveAvId != null && s0 && (p.x !== s0.x || p.y !== s0.y)) arrived.add(liveAvId);
+		applied[idx] = { id, kdType, result, pos: p, cancelled };
+		// Fallback: the nested-dispatch hook never fired this apply (nothing to dispatch, or the
+		// dispatch never reached KinkyDungeonAdvanceTime) — move on to the next player directly, after
+		// this apply's own bookkeeping above, exactly the order the old flat loop always used.
+		if (multi && !last && !nestedFired) {
+			this._applyOne(order, idx + 1, ctx);
+		}
+	}
+
+	/**
+	 * Host half of the per-enemy slot switch (`HeadlessHost.setSlotSwapCallback`'s callback): called
+	 * synchronously, from INSIDE the engine's `KinkyDungeonNearestPlayer`/`KinkyDungeonUpdateEnemies`
+	 * wraps, mid-dispatch, during the round's one unmuted apply. Moves the real player slot between
+	 * two joined humans — only ever MOVES avatars, never adds or removes one mid-loop (the re-entrant
+	 * floor-swap crash class: `KinkyDungeonPlayerEntity` changes object identity on restore, but
+	 * `KDMapData.Entities` never shrinks or grows here).
+	 *
+	 * The OUTGOING occupant's message-log delta and floaters since the last checkpoint are captured
+	 * as THEIRS before swapping — an enemy's line aimed at a human reaches that human's own log, not
+	 * whoever owns this apply — then the INCOMING human's bundle is restored and their own avatar
+	 * parked so they don't block themselves, same as every other player-phase swap-in.
+	 *
+	 * RE-DERIVES the same two per-human facts `_advanceTurn`'s own per-apply loop pushes before every
+	 * OUTER dispatch — the party-gate registry (`_pushPartyGate`) and the capture rule's
+	 * `__kdCoopPartnerFree` (`_anyPartnerFree`) — for the INCOMING human, not just the outer applicant.
+	 * Without this, a real enemy engaged with a human the mid-pass switch brings in decides against the
+	 * OUTER applicant's own view of both facts instead of its own: a capture made of a non-driving human
+	 * would read whether the DRIVING human's partner is free, not theirs (found by the slot-swap global
+	 * write audit, flagged there as a residual gap). Both are re-pushed on every call — including the
+	 * end-of-pass hand-back to the outer applicant — not only the first swap away from them, so whoever
+	 * is left holding the slot always has their OWN facts live, never a stale copy left over from
+	 * whoever held it before. `_pushPartyGate` must run AFTER `_restorePlayer` (see its own "CALL THIS
+	 * AFTER restorePlayer" note — a restore wipes the registry the gate re-asserts).
+	 */
+	_slotSwapTo(targetId) {
+		const outgoing = this._slotOccupant;
+		if (outgoing === targetId) return;
+		if (outgoing != null) {
+			const newLen = this.world.messageLogLength();
+			const added = (newLen >= this._slotLogCheckpoint)
+				? this.world.messagesSince(this._slotLogCheckpoint) : this.world.messageLog();
+			if (added && added.length) this._pushLog(outgoing, added);
+			this._harvestFloaters(outgoing);
+			this.bundles.set(outgoing, this.world.capturePlayer());
+			const p = this.world.getPlayerPos();
+			const outAvId = this.avatars.get(outgoing);
+			if (outAvId != null) this.world.moveAvatar(outAvId, p.x, p.y);   // leave them standing put
+		}
+		this._restorePlayer(targetId, this.bundles.get(targetId));
+		const inAvId = this.avatars.get(targetId);
+		if (inAvId != null) this.world.moveAvatar(inAvId, PARK.x, PARK.y);
+		this.world.setSlotCurrent(targetId);
+		this._assertHumanContext(targetId);
+		this._slotLogCheckpoint = this.world.messageLogLength();
 	}
 
 	/**
@@ -2839,6 +3117,70 @@ class SwapSession {
 		this.world.setAvatarBondage(eid, (vitals && vitals.bondage) || 0);
 	}
 
+	/**
+	 * Persist this round's enemy-to-human decisions — `HeadlessHost.slotChoiceLog()`, read right after
+	 * the round's one unmuted apply — as the NEXT round's sticky target (`this._enemyTarget`). This is
+	 * the only place engagement can change which human an enemy is engaged with; `installTurnModel`'s
+	 * in-engine chooser only ever reads `this._enemyTarget` back (via the `stickyTarget` passed to
+	 * `armSlotSwitch`), it never writes it — keeping "which human is this enemy engaged with" a single
+	 * source of truth, decided once per round, here.
+	 *
+	 * Dead enemies (killed/despawned this round) are pruned so a long session cannot leak an
+	 * unbounded map.
+	 */
+	_updateStickyTargets(log) {
+		const liveIds = new Set(this.world.eval(`(function(){
+			var out = [];
+			for (var i = 0; i < KDMapData.Entities.length; i++) {
+				var e = KDMapData.Entities[i];
+				if (e.Enemy && e.Enemy.name && e.Enemy.name.indexOf('RemotePlayer_') === 0) continue;
+				out.push(e.id);
+			}
+			return out;
+		})()`) || []);
+		for (const [eid, cid] of Object.entries(log || {})) {
+			const id = Number(eid);
+			if (liveIds.has(id)) this._enemyTarget.set(id, cid);
+		}
+		for (const eid of [...this._enemyTarget.keys()]) if (!liveIds.has(eid)) this._enemyTarget.delete(eid);
+	}
+
+	/**
+	 * Which joined player owns each real companion/ally entity on the map — `{entityId: clientId}`,
+	 * computed fresh (never cached) from every joined player's own `KDGameData.Party`. `Party` is a
+	 * captured-bundle field, not a world one (`KDGAMEDATA_WORLD_KEYS` does not list it), so each
+	 * player's roster lives in their own bundle untouched by the others — already private, never
+	 * merged, without this method doing anything to enforce it (see mp-companion-ownership-tests'
+	 * "parties stay separate" case).
+	 *
+	 * Reads `this.bundles` directly (each entry is the plain object `HeadlessHost.capturePlayer()`
+	 * returns, not a wire string) rather than swapping every joined player into the slot to ask — the
+	 * whole point is to settle ownership WITHOUT an engine round-trip, so it is cheap enough to call
+	 * once per apply.
+	 */
+	_computeCompanionOwners() {
+		const owners = {};
+		for (const cid of this._joined) {
+			const b = this.bundles.get(cid);
+			const party = (b && b.gameData && Array.isArray(b.gameData.Party)) ? b.gameData.Party : [];
+			for (const pm of party) {
+				if (pm && pm.id != null) owners[pm.id] = cid;
+			}
+		}
+		return owners;
+	}
+
+	/** The per-owner "war team" faction string for a client id — deterministic, never persisted
+	 *  anywhere but KD's own faction tables (see `HeadlessHost.ensureWarFaction`). */
+	_warFactionFor(cid) {
+		return 'MPWarTeam_' + cid;
+	}
+
+	/** A stable, order-independent key for an unordered pair of client ids. */
+	_pairKey(a, b) {
+		return [a, b].sort().join('|');
+	}
+
 	_armPeerEnemies(actorId) {
 		for (const [cid, eid] of this.avatars.entries()) {
 			if (cid === actorId) continue;
@@ -2894,6 +3236,49 @@ class SwapSession {
 			// crits against a vulnerable target (KinkyDungeonFight.ts:886) — and measured: it killed the
 			// avatar outright, which broke a downed peer keeping agency. The client is where the tie gate
 			// runs, so the flag belongs on the object the client evaluates and nowhere else.
+		}
+		// SEPARATE TEAMS AT WAR: a PvP peer's own companions are just as much the enemy team as the
+		// peer themselves — "A + A's companions vs B + B's companions", not "A vs B's avatar only".
+		//
+		// NOT `KDMakeHostile`/`setAvatarHostile(eid, true)` (stamping `faction = 'Enemy'` + the
+		// instance `hostile` flag) — tried first, and MEASURED unsafe: `KinkyDungeonAggressive`'s
+		// "Player mode" branch (taken whenever the candidate IS the literal real human in the slot,
+		// `KinkyDungeonFactions.ts`) reads `enemy.hostile > 0` ALONE, with no faction check at all. A
+		// companion's owner is forced into the slot for its OWN companion's every decision (this task's
+		// own step 1), so a `hostile`-stamped companion read ITS OWN OWNER as aggressive the instant
+		// they were engaged — the original companion-attacks-owner bug, reproduced during war in
+		// `mp-companion-teams.spec.ts` > "war owner-safety". A single scalar `hostile` flag cannot be
+		// relative to "hostile to THIS human, not that one" — both humans are the same literal engine
+		// player identity when swapped in (the turn model's own deep-investigation finding) — so
+		// hostility has to come from something that CAN differ per candidate: the faction STRING.
+		//
+		// Per-owner custom faction (`HeadlessHost.ensureWarFaction`/`setWarFactionRelation`/
+		// `setEntityFaction`), engine-native: `KDGetFaction` reads an entity's own `.faction` BEFORE the
+		// "party member -> Player" short-circuit, so a companion keeps its party membership (still
+		// follows/obeys/helps its owner) while reading as a DIFFERENT faction to KD's own hostility
+		// rules. `ensureWarFaction` seeds the new faction as a full copy of `'Player'`'s own relation
+		// row (every monster hostility a real player already has — this task's own "monster-side" test
+		// below), and the two owners' war factions get ONE explicit mutual relation. Neither custom
+		// faction is ever related to literal `'Player'` at all, so `KinkyDungeonAggressive`'s "Player
+		// mode" branch (which falls through to `KDFactionHostile("Player", companion)` once `hostile`
+		// is 0) finds no relation and no hard-coded rule — never hostile to a real human, EITHER
+		// owner's. `_warFactionCompanions`/`_warFactionPairs` record exactly what THIS mechanism set up,
+		// so the undo in `_reconcilePeers` only ever reverts its own doing.
+		for (const [eidStr, ownerCid] of Object.entries(this._computeCompanionOwners())) {
+			if (ownerCid === actorId || !this._isPvP(actorId, ownerCid)) continue;
+			const eid = Number(eidStr);
+			const ownerTeam = this._warFactionFor(ownerCid);
+			const actorTeam = this._warFactionFor(actorId);
+			// Re-asserted fresh every apply while at war — see `ensureWarFaction`'s own doc comment for
+			// why (the relation TABLE is per-player-watched state and can be reverted by an ordinary
+			// `restorePlayer` between applies; the live entity's own `.faction` is world state and does
+			// not need re-asserting, but costs nothing to repeat).
+			this.world.ensureWarFaction(ownerTeam);
+			this.world.ensureWarFaction(actorTeam);
+			this.world.setWarFactionRelation(ownerTeam, actorTeam, -1.0);
+			this._warFactionPairs.add(this._pairKey(actorId, ownerCid));
+			this.world.setEntityFaction(eid, ownerTeam);
+			this._warFactionCompanions.add(eid);
 		}
 	}
 
@@ -3011,13 +3396,33 @@ class SwapSession {
 				 * (the `hostile` half is no longer stamped here at all — see above. The
 				 * `faction` half still is, which is what the truce undo below exists for.)
 				 */
-				// Scoped to pairs that NEGOTIATED a truce, not to "not at war with anyone". Plain co-op
-				// has always left avatars stamped Enemy by this call, and that is load-bearing world
-				// state: making them Player faction changes who the dungeon's own monsters fight, which
-				// showed up immediately as `mp-presentation-once` losing its noise events. Undoing our
-				// own stamp after a truce is the fix that was asked for; quietly re-factioning every
-				// co-op session is a different change, and not this one.
-				if (this._joined.some((other) => other !== id && this.rel.atPeace(id, other))) {
+				// NOT SCOPED TO A NEGOTIATED TRUCE ANY MORE. Leaving the Enemy stamp standing for
+				// EVERY plain co-op avatar — the previous reasoning here — is a SEPARATE, confirmed
+				// bug: KD hard-codes `KDFactionHostile('Player', 'Enemy') === true`
+				// (`KinkyDungeonFactions.ts`), so the player's own real ally/companion (a recruited
+				// follower, Player-faction) reads every Enemy-stamped avatar as a valid hostile
+				// target through the same nearby-entity scan a real hostile monster uses
+				// (`KinkyDungeonNearestPlayer`) — not a bump collision, a real AI decision, landing
+				// real damage on the victim's Will via the same `takePeerHits` channel a PvP attack
+				// uses. Reported co-op UAT: a player's own companion attacking its owner and the
+				// other player, with reputation still reading "likes you" (measured, reproduced:
+				// `mp-companion-avatar-immunity.spec.ts`).
+				//
+				// The "load-bearing" worry this comment used to record — that a non-Enemy avatar
+				// changes who the dungeon's OWN monsters fight — does not hold under the one-tick
+				// turn model either (see `_slotSwapTo`/`_updateStickyTargets`): a real shared enemy
+				// still ALWAYS acts through the REAL, slot-switched-in player it is engaged with,
+				// never against an ambient avatar, so it never needed the avatar's faction at all.
+				// Re-verified against `mp-presentation-once` (still green — its noise events come
+				// from the ACTING player's own movement, not from an avatar's faction) and the
+				// acceptance suite in the task's regression run.
+				//
+				// So: undo the Enemy stamp whenever this player is not CURRENTLY armed for PvP
+				// against anyone (`_isPvP`, which already covers both a negotiated truce and the
+				// global PvP toggle) — not only after a truce. A PvP pair is re-armed as Enemy by
+				// `_armPeerEnemies` right before the attacker's own turn, so nothing that still wants
+				// the stamp loses it.
+				if (!this._joined.some((other) => other !== id && this._isPvP(id, other))) {
 					this.world.setAvatarHostile(eid, false);
 				}
 			}
@@ -3029,6 +3434,46 @@ class SwapSession {
 				// well clear of the floor the player acts again. Hysteresis (a fraction of WillMax,
 				// not the defeat line) so a sliver of regen doesn't flap them up and down.
 				this._markRecovered(id, `will=${cur.will.toFixed(2)}`);
+			}
+		}
+		// WAR -> PEACE, fully reversible: undo exactly what `_armPeerEnemies` stamped, the moment that
+		// companion's OWNER is no longer PvP-armed against anyone — same "not currently at war with
+		// anyone" rule the avatar undo above uses, same `_isPvP` authority. Only entities THIS
+		// mechanism re-factioned are touched (`_warFactionCompanions`), so a companion's own, unrelated
+		// engine-native state is never clobbered.
+		if (this._warFactionCompanions.size) {
+			const owners = this._computeCompanionOwners();
+			for (const eid of [...this._warFactionCompanions]) {
+				const ownerCid = owners[eid];
+				const stillAtWar = ownerCid != null
+					&& this._joined.some((other) => other !== ownerCid && this._isPvP(ownerCid, other));
+				if (!stillAtWar) {
+					try { this.world.setEntityFaction(eid, null); } catch (e) { /* companion gone */ }
+					this._warFactionCompanions.delete(eid);
+				}
+			}
+		}
+		// …and the war-team RELATION itself: once a pair is no longer at war on either side, remove
+		// their mutual relation entirely (not merely zero it) — "no residual faction relations" is
+		// explicit in this task's own requirements, and a stale negative relation between two team
+		// strings that may be reused by a LATER war (the same two owners, or a `requiredPlayers > 2`
+		// session reusing client ids) must not silently carry over.
+		//
+		// KNOWN, ACCEPTED GAP: `KDFactionRelations` is per-player-watched state (same mechanism
+		// `ensureWarFaction`'s doc comment describes for the arm side) — a LATER apply's own
+		// `restorePlayer` from a bundle captured mid-round, BEFORE this clear ran, can transiently
+		// reintroduce the stale value onto the live Map. Unlike the arm side, this is not self-healed
+		// per-apply, because nothing is still being armed once peace holds. Judged harmless: no LIVE
+		// entity carries either war-team faction string once `_warFactionCompanions` above has cleared
+		// them, so a transient reappearance of the NUMBER has no entity left to make it matter, and the
+		// next real war (`_armPeerEnemies`) freshly overwrites it regardless. Not pursued further.
+		if (this._warFactionPairs.size) {
+			for (const key of [...this._warFactionPairs]) {
+				const [x, y] = key.split('|');
+				if (!this._isPvP(x, y)) {
+					this.world.setWarFactionRelation(this._warFactionFor(x), this._warFactionFor(y), null);
+					this._warFactionPairs.delete(key);
+				}
 			}
 		}
 	}
@@ -3095,6 +3540,26 @@ class SwapSession {
 			'#ff8844', 12);
 		this._emitEvent(id, { text: 'Overpowered!', color: '#ff8844' });
 		this._dbg(`CAPTURE HELD for ${id} (a partner is still free — no jail move)`);
+	}
+
+	/**
+	 * Re-assert the facts that are relative to the human in the player slot: who else is in the
+	 * party and where (`_pushPartyGate`, read by KD's own stair cancellation), and whether anybody
+	 * ELSE is still up (`__kdCoopPartnerFree`, the whole capture rule).
+	 *
+	 * Must run every time a human ENTERS the slot, after `_restorePlayer` (a restore wipes the
+	 * registry the gate re-asserts): a player's own apply, a per-enemy slot switch, and the nested
+	 * hand-back. Any one of those that skips it leaves the slot deciding against a stranger's facts.
+	 *
+	 * Written from two CONSTANT source strings so V8's eval compilation cache serves both for free —
+	 * interpolating a per-call value into a hot eval costs ~8.7x (measured in this layer, and the
+	 * same reason `setPartyGate` splits its two payloads).
+	 */
+	_assertHumanContext(id) {
+		this._pushPartyGate(id);
+		this.world.eval(this._anyPartnerFree(id)
+			? 'globalThis.__kdCoopPartnerFree = true;'
+			: 'globalThis.__kdCoopPartnerFree = false;');
 	}
 
 	/**
@@ -3595,6 +4060,46 @@ class SwapSession {
 		if (!shockwaves.length && !sounddesc.length && !hadSound) return;
 		this._sentSoundDesc.set(clientId, sounddesc.length > 0);
 		this._emitEvent(clientId, { kind: 'noise', shockwaves, sounddesc });
+		if (shockwaves.length || sounddesc.length) this._broadcastNoiseToOthers(clientId, shockwaves, sounddesc);
+	}
+
+	/**
+	 * Noise is WORLD presentation, not per-slot-occupant state. `KDEnemyAddSound`
+	 * (KinkyDungeonEnemies.ts) decides whether to queue a shockwave/sounddesc by checking ONE
+	 * listener — whoever currently holds the slot — against `KDCanHearSound`. In single-player that
+	 * is the only human there is; before design B, every joined human's own apply ran the enemy pass
+	 * for real too, so each of them got this same check against THEIR OWN position independently.
+	 * Now that enemies act only once, inside the round's one real tick, `clientId` (whoever holds the
+	 * slot when this fires) is the only human the engine ever actually asked — so re-ask it here for
+	 * every OTHER joined human, from their own live position, using the SAME rule
+	 * (`HeadlessHost.canHearFrom`) against the real noise origin (`takeNoiseSources` — one `{x,y,sound}`
+	 * per real `KDEnemyAddSound` call this harvest, matched back to each queued entry by position).
+	 *
+	 * An entry with no matching source (should not happen — every entry this harvest drained came
+	 * from a `KDEnemyAddSound` call in the SAME harvest window) is conservatively NOT broadcast rather
+	 * than guessed at; it still reached `clientId` via the normal path above, unaffected.
+	 */
+	_broadcastNoiseToOthers(clientId, shockwaves, sounddesc) {
+		const sources = this.world.takeNoiseSources();
+		if (!sources.length) return;
+		const soundAt = (x, y) => {
+			const hit = sources.find((s) => s.x === x && s.y === y);
+			return hit ? hit.sound : null;
+		};
+		for (const otherId of this._joined) {
+			if (otherId === clientId) continue;
+			const pos = this.posOf(otherId);
+			if (!pos) continue;
+			const audible = (e) => {
+				const sound = soundAt(e.x, e.y);
+				return sound != null && this.world.canHearFrom(pos.x, pos.y, e.x, e.y, sound, 1.5) > 0;
+			};
+			const heardShockwaves = shockwaves.filter(audible);
+			const heardSounddesc = sounddesc.filter(audible);
+			if (heardShockwaves.length || heardSounddesc.length) {
+				this._emitEvent(otherId, { kind: 'noise', shockwaves: heardShockwaves, sounddesc: heardSounddesc });
+			}
+		}
 	}
 
 	/** Events not yet delivered to this client. Take-once: delivered is delivered. */

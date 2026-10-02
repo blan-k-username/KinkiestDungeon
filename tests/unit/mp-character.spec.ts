@@ -37,7 +37,7 @@ const fs = require('fs');
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const path = require('path');
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { JoinGate, sanitizeCharacter, CHAR_MAX } = require('../../tools/mp-server/join-gate');
+const { JoinGate, sanitizeCharacter, CHAR_MAX, APPEARANCE_MAX } = require('../../tools/mp-server/join-gate');
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { SwapSession } = require('../../tools/mp-server/swap-session');
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -158,6 +158,53 @@ describe('sanitizeCharacter', () => {
 		expect(sanitizeCharacter({ class: '\u0000\u0001' }), 'emptied by sanitising is still nothing')
 			.toBeNull();
 	});
+
+	/*
+	 * ── `appearance` — what makes the PEER's avatar look like the peer ───────────────────────────────
+	 * `style` only ever seeds a RANDOM preset (see `HeadlessHost.spawnAvatar`); it was never a way to
+	 * carry a player's own look. `appearance` is the player's serialised `Appearance`
+	 * (`LZString.compressToBase64(AppearanceItemStringify(...))`, the same opaque blob KD's own
+	 * wardrobe writes for a Collection NPC's `customOutfit`), so it gets `sanitizeSave`'s STRUCTURAL
+	 * rule (an LZString-base64 alphabet floor, capped by its own `APPEARANCE_MAX`) rather than the
+	 * CHARACTER-field identifier rule (64 chars, `stripControls`) the other string fields use — that
+	 * cap would truncate a real appearance blob into something `DecompressB64` cannot read back.
+	 */
+	describe('appearance — the player\'s own look, not a style preset', () => {
+		it('is kept, and is not capped at the 64-char CHARACTER field length', () => {
+			const blob = 'AbCd09+/='.repeat(50);   // 450 chars — well past CHAR_FIELD_MAX (64)
+			const out = sanitizeCharacter({ ...CHAR_A, appearance: blob });
+			expect(out!.appearance, 'a real appearance blob must survive whole').toBe(blob);
+			// CONTROL: the identifier fields right beside it are still capped at 64 — proves the longer
+			// survival above is a deliberate rule for this field, not a sanitiser that stopped capping.
+			expect(out!.class!.length).toBeLessThanOrEqual(64);
+		});
+
+		it('strips characters outside the LZString-base64 alphabet, like a save', () => {
+			const out = sanitizeCharacter({ appearance: 'AbC\u0007 <script>XyZ' });
+			expect(out!.appearance).toBe('AbCscriptXyZ');
+		});
+
+		it('refuses (drops the field, not the package) past APPEARANCE_MAX', () => {
+			expect(APPEARANCE_MAX, 'a wire cap, not a gameplay constant').toBeGreaterThan(0);
+			const huge = 'A'.repeat(APPEARANCE_MAX + 1);
+			const out = sanitizeCharacter({ ...CHAR_A, appearance: huge });
+			expect(out, 'an oversized appearance must not be truncated into a corrupt blob')
+				.not.toHaveProperty('appearance');
+			// The REST of the package is unaffected — a bad appearance must not cost class/outfit too.
+			expect(out!.class).toBe(CHAR_A.class);
+		});
+
+		it('an appearance declared ALONE is still a package', () => {
+			// A player may keep every KD default and still have their own look.
+			expect(sanitizeCharacter({ appearance: 'AbCd' })).toEqual({ appearance: 'AbCd' });
+		});
+
+		it('declaring nothing has exactly one answer, with or without appearance', () => {
+			expect(sanitizeCharacter({ appearance: '' })).toBeNull();
+			expect(sanitizeCharacter({ appearance: '   ' }), 'whitespace is not base64 and strips to nothing')
+				.toBeNull();
+		});
+	});
 });
 
 describe('the declaration travels the perks road', () => {
@@ -239,7 +286,7 @@ describe('a declared character, against a world that has one', () => {
 		const before = declaredIn('A');
 		// Declared BEFORE the seat exists — `setCharacter` is order-independent by design, and this
 		// is the order the bridge really uses (`_carrySeat` runs before the session seats anyone).
-		s.setCharacter('C', { class: real.cls, outfit: real.dress, style: 'StyleC' });
+		s.setCharacter('C', { class: real.cls, outfit: real.dress, style: 'StyleC', appearance: 'PeerAppearanceC' });
 		expect(s.joinInProgress('C')).toEqual({ seated: true, deferred: false });
 
 		const c = declaredIn('C');
@@ -282,6 +329,65 @@ describe('a declared character, against a world that has one', () => {
 		expect(plain, 'precondition: B is an undeclared avatar A can see').toBeTruthy();
 		expect(plain.style, 'B declared nothing and keeps the default look').not.toBe(peer.style);
 		expect(plain.outfit, 'and carries no outfit key at all').toBeUndefined();
+	}, BOOT_TIMEOUT);
+
+	/*
+	 * ── A PEER'S AVATAR MUST WEAR THE PEER'S OWN LOOK ─────────────────────────────────────────────
+	 * `style` (R2 above) only ever seeds a RANDOM preset — it was never the mechanism for "the peer
+	 * looks like the peer". This pins the field that actually carries the owner's own look onto the
+	 * wire, the same way R2 pins `style`/`outfit`: declared ⇒ on the peer's entity; undeclared ⇒ absent.
+	 */
+	it('R7 — the peer\'s avatar carries the owner\'s OWN appearance, not a generated one', () => {
+		const ents = ((s.snapshotFor('A') || {}).map || {}).Entities || [];
+		const peer = ents.find((e: any) => e.id === s.avatars.get('C'));
+		expect(peer, 'precondition: C\'s avatar must be in A\'s snapshot').toBeTruthy();
+		expect(peer.appearance, 'C declared this look; A must be able to see it').toBe('PeerAppearanceC');
+		// CONTROL: an UNDECLARED avatar carries no appearance key at all — one shared value (or a
+		// default string) cannot satisfy both sides of this assertion.
+		const plain = ents.find((e: any) => e.id === s.avatars.get('B'));
+		expect(plain, 'precondition: B is an undeclared avatar A can see').toBeTruthy();
+		expect(plain.appearance, 'B declared nothing and carries no appearance key').toBeUndefined();
+	}, BOOT_TIMEOUT);
+
+	/*
+	 * ── A DECLARING SEAT MUST SEE THEIR OWN LOOK TOO, NOT ONLY THEIR AVATAR ───────────────────────────
+	 * R7 above pins the AVATAR a PARTNER sees. This pins the seat's OWN live `KinkyDungeonPlayer`:
+	 * `applyCharacter` (`headless-host.js`) must apply `appearance` to whoever it seats, the same way
+	 * it already applies `class`/`outfit` — otherwise a player who customised their look would see
+	 * THEMSELVES as KD's fresh default while their partner correctly sees the customised avatar, which
+	 * is the other half of "players see each other differently of their appearance".
+	 *
+	 * A REAL appearance blob is required here (unlike R1/R5/R7's opaque `'StyleC'`/`'PeerAppearanceC'`
+	 * placeholders): `CharacterAppearanceRestore` genuinely parses it against KD's own `ModelDefs`, so
+	 * a placeholder string would silently fail to apply and this test would pass for the wrong reason.
+	 */
+	it('R8 — a declaring seat\'s OWN live Appearance matches what they declared, not a fresh default', () => {
+		// The headless test world's `KinkyDungeonPlayer.Appearance` is `[]` (no screen ever dresses
+		// it), so — unlike the real-browser e2e specs — a valid item is built straight from KD's own
+		// `ModelDefs` table rather than cloned off the live player.
+		s.world.restorePlayer(s.bundles.get('A'));
+		const built = s.world.eval(`(function(){
+			// AppearanceItemStringify's replacer reads Model.Name — a real item carries the resolved
+			// MODEL OBJECT, never a bare name string.
+			var name = Object.keys(ModelDefs)[0];
+			var str = AppearanceItemStringify([{ Model: ModelDefs[name], Color: '#112233' }]);
+			return { stringified: str, wire: LZString.compressToBase64(str) };
+		})()`);
+		expect(built.wire, 'precondition: a real appearance produces a non-empty wire blob').toBeTruthy();
+
+		s.setCharacter('D', { appearance: built.wire });
+		expect(s.joinInProgress('D')).toEqual({ seated: true, deferred: false });
+
+		s.world.restorePlayer(s.bundles.get('D'));
+		const seated = s.world.eval('AppearanceItemStringify(KinkyDungeonPlayer.Appearance)');
+		expect(seated, 'D\'s own live character must match exactly what D declared').toBe(built.stringified);
+
+		// CONTROL: A declared no appearance and must be unaffected — applyCharacter writes into the
+		// world's ONE shared player slot, so a call outside the restore/capture window would land on
+		// everybody (the same control R1/R5 make for class/outfit).
+		s.world.restorePlayer(s.bundles.get('A'));
+		const stillA = s.world.eval('AppearanceItemStringify(KinkyDungeonPlayer.Appearance)');
+		expect(stillA, 'A declared nothing and must not have been touched').not.toBe(built.stringified);
 	}, BOOT_TIMEOUT);
 });
 

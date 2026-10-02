@@ -25,7 +25,7 @@
 
 	function clone(o) { try { return (o === undefined) ? undefined : JSON.parse(JSON.stringify(o)); } catch (e) { return null; } }
 
-	var ENT_FIELDS = ['id', 'x', 'y', 'visual_x', 'visual_y', 'offX', 'offY', 'scaleX', 'scaleY', 'flip', 'hp', 'visual_hp', 'boundLevel', 'distraction', 'revealed', 'player', 'CustomSprite', 'CustomName', 'CustomNameColor', 'style', 'outfit', 'outfitBound'];
+	var ENT_FIELDS = ['id', 'x', 'y', 'visual_x', 'visual_y', 'offX', 'offY', 'scaleX', 'scaleY', 'flip', 'hp', 'visual_hp', 'boundLevel', 'distraction', 'revealed', 'player', 'CustomSprite', 'CustomName', 'CustomNameColor', 'style', 'outfit', 'outfitBound', 'appearance'];
 
 	function entSnap(e) {
 		var o = {};
@@ -147,6 +147,45 @@
 	}
 
 	/**
+	 * A co-op partner's avatar is a talk target client-side too — the sibling of
+	 * `HeadlessHost.installPeerAllyDialogueGuard` (see its doc comment for the full "why": the
+	 * dialogue itself stays reachable, since it is how a partner gets untied, but most of its OTHER
+	 * options are NPC-only and hidden the same way, by wrapping each one's `prerequisiteFunction`).
+	 * This browser draws its own dialogue buttons from its own bundle's `KDDialogue`, so it needs the
+	 * identical wrap to offer the same options the server would act on.
+	 *
+	 * DRY note: this duplicates `HeadlessHost.installPeerAllyDialogueGuard` verbatim, same as
+	 * `RemotePlayer`'s def and `KDParseStartRestraints` already do between these two files — a
+	 * second instance of the same tracked debt, not fixed here.
+	 */
+	function installPeerAllyDialogueGuard() {
+		if (typeof KDDialogue === 'undefined' || !KDDialogue.GenericAlly || !KDDialogue.GenericAlly.options) return;
+		var opts = KDDialogue.GenericAlly.options;
+		var hide = ['Leash', 'ReleaseLeash', 'Shop', 'ShopBuy', 'Attack', 'AttackPlay',
+			'AttackUnaware', 'Food', 'JoinParty', 'Flirt', 'LetMePass', 'StopFollowingMe',
+			'FollowMe', 'DontStayHere', 'StayHere', 'Aggressive', 'Defensive', 'HelpMe',
+			'HelpMeCommandWord', 'HelpMeKey', 'DontHelpMe', 'RemoveParty'];
+		function isPeerAvatarTarget() {
+			var enemy = (typeof KinkyDungeonFindID === 'function') ? KinkyDungeonFindID(KDGameData.CurrentDialogMsgID) : null;
+			var nm = (enemy && enemy.Enemy && enemy.Enemy.name) || '';
+			return nm.indexOf('RemotePlayer') === 0;
+		}
+		function wrapEntry(entry) {
+			var _prereq = entry.prerequisiteFunction;
+			entry.prerequisiteFunction = function (gagged, player) {
+				if (isPeerAvatarTarget()) return false;
+				return _prereq ? _prereq(gagged, player) : true;
+			};
+			entry.__kdPeerAllyGuard = 1;
+		}
+		for (var i = 0; i < hide.length; i++) {
+			var entry = opts[hide[i]];
+			if (!entry || entry.__kdPeerAllyGuard) continue;
+			wrapEntry(entry);
+		}
+	}
+
+	/**
 	 * Ensure the `RemotePlayer` avatar enemy-def exists in THIS browser. The server
 	 * represents each other player as a `RemotePlayer` ally entity; the snapshot only
 	 * carries `enemyName`, and apply() re-links the def by name. The stock browser
@@ -155,6 +194,7 @@
 	 */
 	function ensureAvatarDef() {
 		if (typeof KinkyDungeonEnemies === 'undefined' || typeof KinkyDungeonGetEnemyByName !== 'function') return;
+		installPeerAllyDialogueGuard();
 		if (KinkyDungeonGetEnemyByName('RemotePlayer')) return;
 		KinkyDungeonEnemies.push({
 			name: 'RemotePlayer', faction: 'Player', tags: KDMapInit(['peaceful']),
@@ -195,6 +235,219 @@
 			en.Enemy = KinkyDungeonGetEnemyByName(nm);   // re-link to the real def (real tags Map)
 		}
 		if (added && typeof KinkyDungeonRefreshEnemiesCache === 'function') KinkyDungeonRefreshEnemiesCache();
+	}
+
+	// Last `appearance` string successfully applied, per entity id — so a peer who has not
+	// changed how they look is not re-dressed every snapshot, and so a peer whose NPC model does
+	// not exist YET (KDQuickGenNPC builds it lazily, on its first DRAW) is retried on a later one
+	// instead of being silently skipped forever.
+	var _appliedAppearance = {};
+
+	// The declared `appearance` blob for every generated NPC we have ever restored one onto, keyed
+	// by the NPC OBJECT itself (`installPeerDressGuard`'s wrap is handed the character object, not
+	// an entity id, by every caller — including KD's own). A `WeakMap` so a despawned avatar's NPC
+	// can be collected normally instead of leaking for the life of the page.
+	var _peerAppearanceByNPC = (typeof WeakMap !== 'undefined') ? new WeakMap() : null;
+
+	/**
+	 * Put the declared look's items onto `Character`, WITHOUT touching anything KD's own dress/bind
+	 * step put there that the declared look never claimed — a worn restraint above all.
+	 *
+	 * ── WHY NOT A WHOLESALE `CharacterAppearanceRestore(..., false, true)` ────────────────────────
+	 * That call is `Character.Appearance = declared` — every item not in the declared array is gone,
+	 * restraints included. Measured (`mp-peer-restraint-and-appearance.spec.ts`): tying a restraint
+	 * onto an avatar with `KDSetNPCRestraint` (the exact call KD's own "Tie Up" submenu makes) arms
+	 * `KDRefreshCharacter` for that NPC, which makes `KinkyDungeonDressPlayer`'s gated rebuild lay the
+	 * restraint onto `Character.Appearance` via `KDApplyItem` — and a wholesale restore on ANY later
+	 * call (even one `KDRefreshCharacter` did not arm, which per-frame draw calls mostly are) discards
+	 * it again, because nothing about "declared nothing for this slot" is distinguishable from
+	 * "KD put something here that was never ours to overwrite" in a flat array replace.
+	 *
+	 * This keeps an existing item only when it is KD's OWN signal for "a worn item/restraint slot, not
+	 * a look slot": a `Group` starting with `"Item"`, or `model.Restraint` — the exact pair
+	 * `KinkyDungeonDressPlayer`'s OWN rebuild uses to decide the same question
+	 * (`!model.Group?.startsWith("Item") && !model.Restraint`, `KinkyDungeonEnemies.ts`). Everything
+	 * else (hair, body, face, eyes, earrings, base clothing) is fully replaced by the declared set, so
+	 * a random generated item in one of THOSE groups is removed even when the declared look has
+	 * nothing in that exact group (an avatar is identity-complete from the declared array alone; it is
+	 * never a patchwork of "whatever wasn't a worn item").
+	 */
+	function mergeDeclaredLook(Character, declaredItems) {
+		var current = Character.Appearance || [];
+		var kept = [];
+		for (var j = 0; j < current.length; j++) {
+			var cm = current[j] && current[j].Model;
+			var cg = cm && cm.Group;
+			if (cm && (cm.Restraint || (cg && cg.indexOf('Item') === 0))) kept.push(current[j]);
+		}
+		Character.Appearance = kept.concat(declaredItems);
+		if (typeof KDRefreshSelectedModel === 'function') KDRefreshSelectedModel(Character);
+	}
+
+	/**
+	 * Decompress + resolve a declared `appearance` wire string into the shape `mergeDeclaredLook`
+	 * needs (real `Model` objects, not name strings) — the same resolution
+	 * `CharacterAppearanceRestore` does internally (`AppearanceItemParse`), exposed here because that
+	 * function's own wholesale assignment is exactly what `mergeDeclaredLook` replaces.
+	 */
+	function applyDeclaredLook(Character, declaredWire) {
+		if (typeof AppearanceItemParse !== 'function' || typeof DecompressB64 !== 'function') return;
+		var backup = DecompressB64(declaredWire);
+		var declaredItems = AppearanceItemParse(backup);
+		if (Array.isArray(declaredItems)) mergeDeclaredLook(Character, declaredItems);
+	}
+
+	/**
+	 * Re-assert a peer avatar's declared look immediately BEFORE KD's OWN dress pass runs for it —
+	 * never after, and the ordering is load-bearing, not cosmetic. See the long note below.
+	 *
+	 * ── WHY THIS EXISTS: KD KEEPS RE-DRESSING THE AVATAR FROM ITS OWN DEFAULT ─────────────────────
+	 * `KinkyDungeonDressPlayer` is what the real per-frame NPC sprite-draw calls for a visible avatar
+	 * (`KinkyDungeonEnemies.ts`, the `KDToggles.ShowPatronNPCSprites` branch, right after
+	 * `KDQuickGenNPC`) — every real frame, for as long as the avatar is on screen. For a generated NPC
+	 * it derives its clothing from `KDCharacterDress.get(Character) || "Bandit"` (our avatar never
+	 * sets one) — a fixed, wrong default, independent of whatever `applyPeerAppearances` wrote a
+	 * moment earlier. A one-shot restore therefore loses to the very next real draw frame; a co-op
+	 * session draws forever, so the peer avatar reverts to KD's default costume almost immediately
+	 * (measured: a two-browser session shows the declared clothing for one apply, then KD's own
+	 * default from the next real frame on).
+	 *
+	 * ── WHY BEFORE `_prev`, AND WHY A MERGE NOT A REPLACE (two regressions, both caught before ship) ──
+	 * V1 called `_prev` first and restored (wholesale) after: "KD's dress pass runs in full, then we
+	 * put the declared look back". Backwards for a restraint tied THIS frame — `_prev` had just laid
+	 * it on, and the wholesale restore threw it straight off again, every frame, forever.
+	 *
+	 * V2 moved the (still wholesale) restore BEFORE `_prev`, reasoning `_prev`'s own gated rebuild
+	 * would re-apply any worn restraint on top. True only on the frame `KDRefreshCharacter` happens to
+	 * be armed — a one-shot flag KD's own `KDSetNPCRestraints` sets and the gated rebuild consumes.
+	 * The NEXT frame, the flag is no longer armed, `_prev` does nothing, and the wholesale restore
+	 * (which runs on EVERY call, armed or not) had already overwritten `Character.Appearance` back to
+	 * the declared array with no restraint in it — so a bound peer was drawn bound for exactly one
+	 * frame and untied from the next one on. Both measured by
+	 * `mp-peer-restraint-and-appearance.spec.ts`, which drives a real `KDSetNPCRestraint` +
+	 * `KinkyDungeonDressPlayer` call and checks the result, not the mechanism's description.
+	 *
+	 * V3 (this one) replaces the wholesale restore with `applyDeclaredLook`'s group-based MERGE: it
+	 * never removes an item outside the groups the declared look itself covers, so a restraint already
+	 * sitting in `Character.Appearance` (from an earlier armed frame, or about to be added by `_prev`
+	 * on this one) is never a candidate for removal, on ANY frame, armed or not.
+	 */
+	function installPeerDressGuard() {
+		if (typeof KinkyDungeonDressPlayer !== 'function' || KinkyDungeonDressPlayer.__kdPeerDressGuard) return;
+		var _prev = KinkyDungeonDressPlayer;
+		KinkyDungeonDressPlayer = function (Character) {
+			try {
+				var declared = (_peerAppearanceByNPC && Character) ? _peerAppearanceByNPC.get(Character) : null;
+				if (declared) applyDeclaredLook(Character, declared);
+			} catch (e) { /* a redress must never break a frame */ }
+			// eslint-disable-next-line prefer-rest-params
+			return _prev.apply(this, arguments);
+		};
+		KinkyDungeonDressPlayer.__kdPeerDressGuard = true;
+	}
+
+	// The last declared `appearance` blob per ENTITY ID — unlike `_peerAppearanceByNPC` (keyed by the
+	// generated NPC object, which `installPeerGenGuard` below can replace), this key never changes
+	// for the lifetime of an avatar, so it is what lets the gen-guard re-establish the NPC mapping
+	// for a freshly (re)generated object it has never seen before.
+	var _declaredByEntityId = {};
+
+	/**
+	 * Re-assert a peer avatar's declared look immediately after KD (re)generates its NPC model.
+	 *
+	 * ── WHY THIS EXISTS, NEXT TO `installPeerDressGuard` ──────────────────────────────────────────
+	 * `installPeerDressGuard` corrects drift on the NPC OBJECT it already knows about. Measured on a
+	 * real two-browser session (not reproducible in a single-page harness, where nothing ever
+	 * regenerates the NPC): an eye/earring filter could still drift even with that guard installed,
+	 * because `KDQuickGenNPC` (`KinkyDungeonEnemies.ts`) can hand back a DIFFERENT NPC OBJECT for the
+	 * same entity id than the one `applyPeerAppearances` last restored — its own generation branch
+	 * only fires `if (!KDNPCChar.get(id))`, but whatever causes that condition to go true again (a
+	 * sprite/NPC-cache invalidation this project does not own or re-implement) produces an object
+	 * `_peerAppearanceByNPC` has never seen, so `installPeerDressGuard`'s lookup misses it until the
+	 * NEXT `applyPeerAppearances` (server-snapshot rate, not every frame) repopulates the map. This
+	 * closes that window at the SOURCE: the moment a (re)generation happens, re-key immediately from
+	 * the entity id — which never changes — rather than waiting for the next snapshot.
+	 */
+	function installPeerGenGuard() {
+		if (typeof KDQuickGenNPC !== 'function' || KDQuickGenNPC.__kdPeerGenGuard) return;
+		var _prev = KDQuickGenNPC;
+		KDQuickGenNPC = function (enemy) {
+			// eslint-disable-next-line prefer-rest-params
+			var result = _prev.apply(this, arguments);
+			try {
+				var declared = enemy ? _declaredByEntityId[enemy.id] : null;
+				var npc = (declared && typeof KDNPCChar !== 'undefined') ? KDNPCChar.get(enemy.id) : null;
+				if (npc) {
+					if (_peerAppearanceByNPC) _peerAppearanceByNPC.set(npc, declared);
+					applyDeclaredLook(npc, declared);
+				}
+			} catch (e) { /* a redress must never break a frame */ }
+			return result;
+		};
+		KDQuickGenNPC.__kdPeerGenGuard = true;
+	}
+
+	/**
+	 * Make a peer's avatar look like the peer, not like the random preset `KDQuickGenNPC` would
+	 * otherwise hand it.
+	 *
+	 * ── WHY THIS EXISTS: A PEER'S AVATAR MUST WEAR THE PEER'S OWN LOOK ────────────────────────────
+	 * `enemy.style` only ever seeds `KDQuickGenNPC`'s RANDOM choice of hairstyle/bodystyle/facestyle
+	 * out of a small preset table (`KinkyDungeonEnemies.ts` ~:11378-11391) — it was never a way to
+	 * carry a player's own look. So every avatar was generated from a coin flip over a handful of
+	 * presets, unrelated to how its owner actually looks on their own screen — the report this task
+	 * fixes ("the peer … does not match how that peer looks to themselves").
+	 *
+	 * `appearance` (`HeadlessHost.spawnAvatar`, carried as an entity field like `style`/`outfit`) is
+	 * the player's own serialised `Appearance`, in the SAME format KD's own wardrobe already uses
+	 * to restore a Collection NPC's `customOutfit` (`KinkyDungeonCollection.ts` ~:514-547): decompress
+	 * with `DecompressB64`, feed straight to `CharacterAppearanceRestore`. KD-native both ends; this
+	 * file invents no format of its own.
+	 *
+	 * ── WHY CLIENT-SIDE, AND WHY LAZY ─────────────────────────────────────────────────────────────
+	 * The headless server never draws (rendering neutered), so `KDQuickGenNPC` never runs there and
+	 * `KDNPCChar` never gets an entry for an avatar — there is nothing server-side to apply this to.
+	 * On a real browser the NPC model is built the first time the entity is actually DRAWN, so
+	 * `KDNPCChar.get(id)` can be empty for a frame or two after the avatar first appears; this is
+	 * called every `apply()` and simply retries (via `_appliedAppearance` NOT being set for that id)
+	 * until the model exists.
+	 */
+	function applyPeerAppearances(entities) {
+		if (!Array.isArray(entities) || typeof AppearanceItemParse !== 'function'
+			|| typeof DecompressB64 !== 'function' || typeof KDNPCChar === 'undefined') return;
+		installPeerDressGuard();
+		installPeerGenGuard();
+		for (var i = 0; i < entities.length; i++) {
+			var en = entities[i];
+			if (!en || !en.appearance || !isPeerAvatar(en)) continue;
+			// Kept current for EVERY avatar that ever declared a look, by entity id — the one key that
+			// survives `KDQuickGenNPC` handing back a different NPC object (`installPeerGenGuard`).
+			_declaredByEntityId[en.id] = en.appearance;
+			var npc = KDNPCChar.get(en.id);
+			if (!npc) continue;   // not drawn yet; retry next apply()
+			// Kept current on EVERY avatar that ever declared a look, even once `_appliedAppearance`
+			// below stops re-restoring below — `installPeerDressGuard`'s wrap needs this mapping alive
+			// for as long as the avatar exists, or a later real draw frame's own dress pass would win
+			// back with nothing here to correct it.
+			if (_peerAppearanceByNPC) _peerAppearanceByNPC.set(npc, en.appearance);
+			if (_appliedAppearance[en.id] === en.appearance) continue;   // already matches — no re-dress
+			try {
+				applyDeclaredLook(npc, en.appearance);
+				if (typeof CharacterRefresh === 'function') CharacterRefresh(npc);
+				if (typeof KDInitProtectedGroups === 'function') KDInitProtectedGroups(npc);
+				/*
+				 * Deliberately NOT `KDRefreshCharacter.set(npc, true)`, unlike the Collection
+				 * wardrobe-revert flow this is otherwise copied from. That flag is a one-shot
+				 * "please redress me" request `KinkyDungeonDressPlayer` consumes on its NEXT call —
+				 * which also recomputes a faction/palette-driven recolour across hair/body/face,
+				 * not merely clothing. Leaving the flag alone means hair/body/face is never
+				 * disturbed after this restore; `installPeerDressGuard` above handles clothing
+				 * (KD's own per-frame redress keeps re-deriving it from a default regardless of
+				 * this flag, so the wrap — not the flag — is what has to correct it).
+				 */
+				_appliedAppearance[en.id] = en.appearance;
+			} catch (e) { /* a malformed/old-build blob must not break a frame */ }
+		}
 	}
 
 	/**
@@ -329,6 +582,45 @@
 	var CLIENT_OWNED_GAMEDATA_KEYS = ['LogFilters'];
 
 	/**
+	 * `KDGameData.BulletWarnings[].scale` is the same category as `CLIENT_OWNED_ENTITY_FIELDS`
+	 * above, one level deeper: a per-ENTRY field the DRAW loop eases from 0 to 1 while an AOE warning
+	 * tile (an incoming spell or trap's affected area — a rope trap's burst among them) grows in
+	 * (`KinkyDungeonFight.ts` `KinkyDungeonDrawFight`, `t.scale += delta * 0.005`). The array itself
+	 * is rebuilt by the SIM once per real turn and must keep being replicated — the client cannot
+	 * recompute which tiles are warned — but the headless host never runs that draw loop, so every
+	 * entry it ships is frozen at its creation-time `scale` (0 for an area tile). The plain
+	 * key-by-key adopt below installs `KDGameData` wholesale on every reply, including a UI-only one
+	 * a mouse hover triggers mid-turn with no new turn behind it, so each reply clobbered the
+	 * client's own eased-up `scale` back to 0 and the grow-in (and the burst drawn over the same
+	 * tiles) replayed on every reply — UAT: "the rope trap animation and affected cells are replayed
+	 * again and again on my mouse movements".
+	 *
+	 * Matched by position (`x,y` — the one stable identity an area-warning entry has), a scale never
+	 * regresses: a tile re-sent mid-turn keeps whatever the client already eased it to, a genuinely
+	 * new tile (no match) keeps the server's own value and grows in normally, and a tile the server
+	 * stops sending is simply absent from the result (the array itself is replaced wholesale, not
+	 * merged by identity, so nothing here can keep an expired tile alive).
+	 */
+	function mergeBulletWarningScale(prevArr, nextArr) {
+		if (!Array.isArray(prevArr) || !Array.isArray(nextArr)) return nextArr;
+		var byPos = {};
+		for (var pi = 0; pi < prevArr.length; pi++) {
+			var p = prevArr[pi];
+			if (p && p.scale !== undefined && p.x !== undefined && p.y !== undefined) {
+				byPos[p.x + ',' + p.y] = p.scale;
+			}
+		}
+		for (var ni = 0; ni < nextArr.length; ni++) {
+			var e = nextArr[ni];
+			if (e && e.scale !== undefined && e.x !== undefined && e.y !== undefined) {
+				var prevScale = byPos[e.x + ',' + e.y];
+				if (prevScale !== undefined && prevScale > e.scale) e.scale = prevScale;
+			}
+		}
+		return nextArr;
+	}
+
+	/**
 	 * WHOLE globals that belong to the person at this browser. The third granularity of the
 	 * same idea as the two lists above: a field within a global (`CLIENT_OWNED_ENTITY_FIELDS`), a key
 	 * within `KDGameData` (`CLIENT_OWNED_GAMEDATA_KEYS`), and now the global itself.
@@ -383,6 +675,61 @@
 	 */
 	var _bundleDefaults = {};
 	var _bundleDirty = {};
+
+	/**
+	 * A pure NO-OP OPTIMISATION, not a protection mechanism: skip re-decoding/re-assigning a `gameData`
+	 * key when there is nothing to do on EITHER side — the incoming server value is byte-identical to
+	 * the last one this client adopted, AND the live value still equals it too. Cheap (one extra
+	 * string compare on the hit path; every key already pays one for the raw signature either way),
+	 * which matters because it is the common case every UI-only reply hits.
+	 *
+	 * ── REVISED DECISION (I4 wins for every key) ──────────────────────────────────────────────────
+	 * An earlier version of this cache skipped whenever the SERVER's value was unchanged, full stop —
+	 * on the theory that this also "protected" any client/draw-owned mutation of the same key from
+	 * being clobbered by an identical resend (the `BulletWarnings[].scale` grow-in below was the
+	 * motivating case). That theory directly contradicts the render-completeness invariant (I4): the
+	 * client's `KDGameData` must match the server's bundle, for every key the server carries, per
+	 * player — with no exceptions the server cannot see. The two are incompatible for any key the
+	 * GAME's OWN ENGINE locally re-derives between replies without this file's knowledge
+	 * (`KinkyDungeonUpdateStats` recomputing `Restriction`, a fresh `KinkyDungeonStartNewGame`
+	 * resetting `ListenerList` — neither is a `tools/mp-server/**` write, so the old version's own
+	 * grep of this codebase never saw the risk): the drifted value got stuck wrong for the rest of the
+	 * session, because the server's own value never changed again to force a re-adopt.
+	 *
+	 * So: I4 wins by default, for every key. Protection from an unchanged resend is granted ONLY to
+	 * state EXPLICITLY DECLARED client/draw-owned — `CLIENT_OWNED_GAMEDATA_KEYS` /
+	 * `CLIENT_OWNED_ENTITY_FIELDS` (skipped on adopt by NAME, never reaching this cache at all), and
+	 * the `BulletWarnings[].scale` merge below (a NAMED per-entry mechanism, not an instance of this
+	 * generic one). This cache itself declares nothing and protects nothing — the live-value check is
+	 * what makes that true: a key nobody has touched locally skips harmlessly (nothing to reassign,
+	 * nothing to correct), while a key that HAS drifted locally — declared or not — fails the
+	 * live-value check and is reasserted from the server's answer, exactly as I4 requires.
+	 *
+	 * Keyed by the RAW (pre-decode) value, same shape as the host's own divergence hashing. Scoped to
+	 * `gameData` only, not `KDMapData`/entity or bullet arrays — `KDMapData` is a far larger, more
+	 * varied structure (`ensureAvatarDefsFor`, `applyPeerAppearances`, `av.boundLevel = 0`, below, all
+	 * rely on a fresh wholesale map every apply), and the one draw-owned animation state for BULLETS
+	 * specifically (`KinkyDungeonBulletsVisual`) lives in a SEPARATE global this file never
+	 * references — confirmed by probe, not assumed — so it cannot be clobbered by `KDMapData = s.map`
+	 * in the first place and extending this cache there bought nothing. See the "does the same clobber
+	 * hit the rope burst ANIMATION itself" tests.
+	 *
+	 * Two local `gameData` mutations elsewhere in this file were checked by name (both still fine
+	 * under the revised rule — neither depends on this cache to be correct):
+	 *   - `KDGameData.NPCRestraints` (peer-avatar reset, below, `KDSetNPCRestraints(av.id, {})`) runs
+	 *     UNCONDITIONALLY after this loop, every apply, regardless of whether this cache skipped the
+	 *     key this round.
+	 *   - `KDGameData.JourneyTarget` (`kd-journey-choice.js`, the `KDRenderJourneyMap` wrap) reverts a
+	 *     local write back to its PRE-write value synchronously, before any apply() can run — so by
+	 *     the time this cache's comparison runs, the live value already equals what was last adopted.
+	 *
+	 * Does NOT replace the `BulletWarnings` per-entry merge below: this cache is keyed on the WHOLE
+	 * value, so it only helps when the array is byte-identical to last time. A real new turn that adds
+	 * one newly-warned tile alongside an already-growing one changes the whole array's bytes (it must
+	 * — a brand new tile is real content), so this cache does NOT skip that reply, and the per-entry
+	 * merge is still what keeps the already-eased tile's progress while the new one starts at 0.
+	 */
+	var _lastAdoptedGameData = {};
 
 	var _adoptVal;                       // transfer slot for the direct eval below
 	var _kdDec = null;                   // memoised codec decoder (window.KDCodec loads later)
@@ -440,7 +787,22 @@
 				// — see CLIENT_OWNED_GAMEDATA_KEYS. Skipped on ADOPT rather than stripped on capture,
 				// because the server is entitled to hold a value here; it just is not the authority.
 				if (CLIENT_OWNED_GAMEDATA_KEYS.indexOf(gk) >= 0) continue;
-				try { KDGameData[gk] = dec(b.gameData[gk]); n++; } catch (e) { /* not assignable */ }
+				try {
+					// GENERIC layer first: nothing to do on EITHER side — skip entirely rather than
+					// re-run decode/merge/assign for nothing. See `_lastAdoptedGameData` above for the
+					// full reasoning (a NO-OP optimisation, not protection — I4 wins for every key; the
+					// live-value check is what makes that true rather than assumed).
+					var rawGameDataSig = JSON.stringify(b.gameData[gk]);
+					if (_lastAdoptedGameData[gk] === rawGameDataSig
+						&& JSON.stringify(KDGameData[gk]) === rawGameDataSig) continue;
+					var decodedGameDataVal = dec(b.gameData[gk]);
+					if (gk === 'BulletWarnings' && Array.isArray(decodedGameDataVal)) {
+						decodedGameDataVal = mergeBulletWarningScale(KDGameData.BulletWarnings, decodedGameDataVal);
+					}
+					KDGameData[gk] = decodedGameDataVal;
+					_lastAdoptedGameData[gk] = rawGameDataSig;
+					n++;
+				} catch (e) { /* not assignable */ }
 			}
 		}
 		var g = b.globals;
@@ -484,6 +846,37 @@
 					n++;
 				} catch (e) { /* not assignable — same as adoption */ }
 			}
+		}
+
+		/*
+		 * KDModalArea NEVER ROUND-TRIPS, SO THE ABSENT-RULE ABOVE CANNOT CLOSE IT.
+		 *
+		 * A tile-object modal's close "X" (`KinkyDungeonDraw.ts:1094`) draws from `KDModalArea` alone,
+		 * independently of `KinkyDungeonTargetTile`. Every stock call site OPENS it only from per-frame
+		 * DRAW code gated on `KinkyDungeonTargetTile` being truthy (`KDObjectDraw[...]`,
+		 * `KinkyDungeonHUD.ts:402-405`) — only a real browser runs that loop — and CLOSES it in
+		 * lock-step with `KinkyDungeonTargetTile = null` from INPUT-HANDLER code (e.g. the Heart
+		 * Tablet's "heart" purchase, `KinkyDungeonInput.ts:1053-1094`), which in co-op is
+		 * turn-consuming and therefore runs on the authoritative SERVER. The server has no draw loop,
+		 * so its own `KDModalArea` never diverges from its post-init baseline (`false`) and the
+		 * generic capture never ships it either way (`headless-host.js` `_captureGlobals`): it is
+		 * never adopted above, so it is never in `_bundleDirty`, so `kdAbsentResets` never considers
+		 * it. The browser's own locally-latched `true` (set by last frame's draw call) then survives
+		 * forever — UAT: the Heart Tablet's "X" stayed on screen, with no modal body, blocking the
+		 * move-path preview under it.
+		 *
+		 * Every stock open/close pair treats the two as inseparable (grep `KDModalArea = ` across
+		 * `Game/src`: every `= true` is reached only via a truthy `KinkyDungeonTargetTile`, and every
+		 * `= false` sits beside a `KinkyDungeonTargetTile = null` in the same statement list), so
+		 * deriving the flag from that invariant — rather than replicating it — is the one place this
+		 * client can see the server's real answer without a server-side change (the game tree is
+		 * never edited). Only ever CLEARS: a modal that is still legitimately open
+		 * (`KinkyDungeonTargetTile` still truthy) is left exactly as the draw loop set it.
+		 */
+		if (typeof KDModalArea !== 'undefined' && KDModalArea
+			&& typeof KinkyDungeonTargetTile !== 'undefined' && !KinkyDungeonTargetTile) {
+			KDModalArea = false;
+			n++;
 		}
 		return n;
 	}
@@ -620,6 +1013,7 @@
 			// Register/re-link a real def for each peer's unique name so the draw path
 			// (KDEnemyRank → .tags) doesn't crash on the renamed/JSON-mangled avatar Enemy.
 			if (KDMapData && Array.isArray(KDMapData.Entities)) ensureAvatarDefsFor(KDMapData.Entities);
+			if (KDMapData && Array.isArray(KDMapData.Entities)) applyPeerAppearances(KDMapData.Entities);
 			// The "Tie Up" submenu runs LOCALLY on the attacker and writes the avatar's NPC
 				// restraints into KDGameData.NPCRestraints — which the snapshot does NOT reset (it only
 				// syncs KDMapData). Over several ties those local slots accumulate and the stock apply

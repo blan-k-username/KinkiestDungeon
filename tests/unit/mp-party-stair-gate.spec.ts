@@ -207,15 +207,25 @@ describe('the stairs wait for the whole party', () => {
 		s.submit('A', { kind: 'wait' });
 		s.submit('B', { kind: 'wait' });
 
-		expect(calls.length, 'the gate facts must be refreshed for EVERY apply — a stale peer ' +
-			'position is a gate that answers about last turn').toBe(2);
+		// NESTED TICKS (`_applyOne`'s own doc comment): a non-last apply's dispatch hands control to
+		// the next player from the MIDDLE of its own `KinkyDungeonAdvanceTime` call, and when the rest
+		// of the round returns control to it, it re-derives its OWN party-gate facts before its own
+		// tail continues — the same pattern `_slotSwapTo` already uses on every hand-back, and for the
+		// same reason (a restore wipes the registry the gate re-asserts; the rest of the round left it
+		// pointing at whoever held the slot last, not at this apply's own human). For a 2-player round
+		// that is exactly one extra push, on top of the one push every apply gets: 2 applies + 1
+		// hand-back = 3, not 2.
+		expect(calls.length, 'the gate facts must be refreshed for EVERY apply AND re-asserted when ' +
+			'a non-last apply resumes after the rest of the round — a stale peer position is a gate ' +
+			'that answers about last turn').toBe(3);
 		for (const f of calls) {
 			expect(f.peers.length,
 				'exactly one peer is pushed: the party minus the player whose action is being applied. ' +
 				'Including the actor would make them block their own descent forever.').toBe(1);
 		}
-		const names = calls.map((f) => f.peers[0].name).sort();
-		expect(names, 'each player is the OTHER one\'s peer, so across the two applies both names appear')
+		const names = [...new Set(calls.map((f) => f.peers[0].name))].sort();
+		expect(names, 'each player is the OTHER one\'s peer, so across every push (including the ' +
+			'hand-back re-assertion) both names appear and no third name ever does')
 			.toEqual([s.displayNameOf('A'), s.displayNameOf('B')].sort());
 	});
 });

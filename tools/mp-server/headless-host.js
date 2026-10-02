@@ -201,6 +201,41 @@ const KDGAMEDATA_WORLD_KEYS = Object.freeze([
 ]);
 
 /**
+ * KDGameData keys that are reset and fully recomputed by EVERY real engine pass — NOT genuinely
+ * cross-turn/cross-player SHARED state the way `KDGAMEDATA_WORLD_KEYS` is — but that still must
+ * survive a MID-PASS slot-swap restore, because the one real pass accumulates them across several
+ * enemies/engaged humans before it is done. Restoring an earlier-captured bundle over one of these
+ * mid-pass would silently drop an earlier-processed group's contribution — the same clobber shape
+ * `__kdWorldMuted` and `KDCustomDefeat`/`KDCustomDefeatEnemy` were found by (per-enemy slot-switch
+ * global write audit, tests/unit/mp-slot-swap-global-audit.spec.ts, turn-classification.js
+ * SLOT_SWAP_GAMEDATA_KEYS). Deliberately a SEPARATE list from `KDGAMEDATA_WORLD_KEYS`: a value the
+ * engine resets to a fresh baseline at the top of every pass has nothing left to legitimately bleed
+ * from one player's bundle into another's by the END of a round, so it does not belong in the
+ * "declared, genuinely shared" contract `mp-noninterference.spec.ts` checks, nor in the client's
+ * `worldGameData` snapshot. `restorePlayer` skips both lists via `KDGAMEDATA_RESTORE_SKIP_KEYS` below
+ * — that merged set is the actual protection mechanism and what `mp-slot-swap-global-audit.spec.ts`
+ * checks a `pass-world` KDGameData key against.
+ *
+ *   tickAlertTimer   reset false at the top of the pass, set true by any enemy's own alert
+ *                    escalation mid-loop (KinkyDungeonEnemies.ts:4266/4908/4915), read at the END
+ *                    of the SAME pass (:5027) to decide a floor-wide alert.
+ *   HostileFactions  the floor's own provoked-faction list for THIS pass (KinkyDungeonFactions.ts:161-162).
+ *   otherPlaying     reset to 0 then tallied across ALL enemies THIS pass
+ *                    (KinkyDungeonEnemies.ts:4669/4759), read by the jail play-chance roll in the
+ *                    SAME pass (KinkyDungeonJail.ts:153).
+ */
+const KDGAMEDATA_PASS_SCOPED_KEYS = Object.freeze(['tickAlertTimer', 'HostileFactions', 'otherPlaying']);
+
+/**
+ * The full set of KDGameData keys `restorePlayer` must never overwrite from an incoming bundle: the
+ * genuinely shared world state (`KDGAMEDATA_WORLD_KEYS`) plus the pass-scoped accumulators above that
+ * would otherwise be clobbered mid-pass. This merged set is the single source of truth the restore
+ * mechanism reads — `KDGAMEDATA_WORLD_KEYS` alone is the narrower "genuinely cross-player shared"
+ * subset that client-facing code (`worldGameData`) and the noninterference sharing guard use.
+ */
+const KDGAMEDATA_RESTORE_SKIP_KEYS = Object.freeze([...KDGAMEDATA_WORLD_KEYS, ...KDGAMEDATA_PASS_SCOPED_KEYS]);
+
+/**
  * How many top-level bindings we expect to derive from the bundle.
  * Measured 2026-08-14: 2,254 `let` + 121 `const` + 6 `var` = 2,381 unique names.
  * A materially smaller number means the regex no longer matches upstream's output shape — that MUST
@@ -336,6 +371,13 @@ const GLOBAL_BLACKLIST = Object.freeze([
 	'KinkyDungeonSeed',
 	'AIData', 'KDAwareEnemies', 'KDEnemiesTargetingPlayer', 'KDPathfindingCacheFails',
 	'KDPathfindingCacheHits', 'KDPathCache', 'KDUpdateEnemyCache',
+	// Same category: a memoisation cache keyed by the last ENEMY argument (not the player), and a
+	// dirty-flag for a cache rebuilt from KDMapData.Entities. Found by the per-enemy slot-switch
+	// global write audit (tests/unit/mp-slot-swap-global-audit.spec.ts, turn-classification.js
+	// SLOT_SWAP_GLOBALS) — a mid-pass restore of a stale per-player bundle would otherwise clobber
+	// these with whichever human's earlier value, the same clobber shape __kdWorldMuted and
+	// KDCustomDefeat/KDCustomDefeatEnemy were found by previously.
+	'geteligrest_lastTagsEnemy', 'geteligrest_lastExtraTags', 'KDUpdateEntityFlagCache',
 	// Derived lookup caches over the world's ENTITIES — same category as KDPathCache above, and the
 	// same criterion (a) as KDGAMEDATA_WORLD_KEYS' entity-keyed entries: they describe world entities,
 	// not a player. They only became visible when the capture layer learned about Map, and they
@@ -351,6 +393,17 @@ const GLOBAL_BLACKLIST = Object.freeze([
 	// player in. Excluded before this only by its 386 KB size, which meant a one-time append warned
 	// forever (the audit never re-baselines) while costing 3.9 ms of every audit.
 	'KinkyDungeonEnemies',
+	// DEFEAT FINALISATION, in flight. `KinkyDungeonUpdateEnemies` (KinkyDungeonEnemies.ts:5070) sets
+	// `KDCustomDefeatEnemy`/`KDCustomDefeat` the instant one enemy's own decision comes back a defeat,
+	// and reads them back only once, at the END of the SAME pass — the two writes can straddle a
+	// LATER enemy's own per-enemy slot switch (`installTurnModel`'s `armSlotSwitch`/`_slotSwapTo`),
+	// which restores a per-player bundle mid-pass. Same failure shape as the turn-model's own flags
+	// above (a stale per-player copy overwrites the live value): MEASURED, a forced defeat on an enemy
+	// engaged with one human was silently DROPPED — not merely misrouted — because a second enemy's
+	// own swap (to a different human, later in the same pass) restored that human's bundle with their
+	// own stale `KDCustomDefeatEnemy: null` on top of the live one, so by the time the end-of-pass
+	// check ran there was no defeat left to route anywhere.
+	'KDCustomDefeat', 'KDCustomDefeatEnemy',
 	// The enemy COMMANDER ROLE table, `Map<number, string>` keyed by `enemy.id`
 	// (KDCommander.ts:174/179, deleted at :205/:209). A number key in KD is an entity id, so this is
 	// criterion (a) verbatim — the same argument KDIDCache and KDEntityFlagCache below already rest
@@ -433,6 +486,62 @@ const GLOBAL_BLACKLIST = Object.freeze([
 	'KDGameData',
 	// --- debug noise ---------------------------------------------------------
 	'KDRestraintDebugLog',
+	// --- turn-model control flags (installTurnModel) -------------------------
+	// Session-level control state for the one-engine-tick-per-round mechanism, not a PLAYER'S state —
+	// MEASURED, the hard way: left off this list, the generic per-player capture/restore swept these
+	// up like any other new global, so `_slotSwapTo`'s mid-tick `restorePlayer` (swapping a human IN
+	// to let an enemy face them) silently restored a STALE `__kdWorldMuted` from that human's own
+	// bundle (captured true, from their own earlier muted apply this round) back over the live flag —
+	// flipping the round's one real tick muted partway through and reverting its own clock increment.
+	// `__kdSlotChoose` is a function (installed once, never diverges) but is listed anyway so a
+	// future capture-layer change that starts walking functions cannot regress this silently.
+	'__kdTurnModelInstalled', '__kdWorldMuted', '__kdInTick', '__kdSlotSwitch', '__kdSlotHost',
+	'__kdSlotCurrent', '__kdSlotHumans', '__kdSlotAvatarIds', '__kdStickyTarget', '__kdSlotChoiceLog',
+	'__kdSlotChoose',
+	// A companion/ally always acts with its OWNER in the slot, never the sticky/nearest fallback the
+	// hostile-enemy chooser uses — `{entityId: ownerClientId}`, computed fresh each round from every
+	// joined player's own `KDGameData.Party` (SwapSession._computeCompanionOwners). Session-level
+	// control state, same reasoning and same risk as the rest of this block.
+	'__kdSlotOwner',
+	// Per-owner war-team faction bookkeeping (`setEntityFaction`/`installCompanionFactionGuard`):
+	// `__kdCompanionWarFaction` is `{entityId: factionName}`, the registry the persistent-NPC-update
+	// hook reads to self-heal a companion's faction stamp every real tick (see `setEntityFaction`'s own
+	// doc comment); `__kdCompanionFactionGuardInstalled` is the one-time wrap sentinel. Both session
+	// control state, same bucket and same reasoning as the turn-model flags above.
+	'__kdCompanionWarFaction', '__kdCompanionFactionGuardInstalled',
+	// Nested ticks (removing the one-round delay for a non-host human's own post-enemy tail): a
+	// non-last apply's own `KinkyDungeonAdvanceTime` call hands control to the NEXT player's own apply
+	// before its own tail runs, recursively, down to the round's one real tick — so a MUTED apply can
+	// now have a REAL clock advance happen nested inside its own call, not only at its own (reverted)
+	// level. `__kdRoundRealTickDelta` accumulates that real advance across the whole round so every
+	// muted level's own clock hand-back restores to "before MY OWN fake increment" without also erasing
+	// the nested real one — session-level control state, same reasoning as `__kdWorldMuted` above, not
+	// a player's own value. `__kdNestedDispatch` is the one-shot callback itself (a function, installed
+	// fresh per apply by `setNestedDispatchCallback`'s caller) — listed for the same defensive reason as
+	// `__kdSlotChoose`/`__kdReplayPlayerHit`.
+	'__kdRoundRealTickDelta', '__kdNestedDispatch',
+	// `KDEnemyAddSound`'s own wrap (`installTurnModel`) records `{x, y, sound}` per call so
+	// `SwapSession._harvestNoise` can re-offer the SAME hearing decision to every joined human, not
+	// only whoever holds the slot — session-level, drained once per harvest by `takeNoiseSources`,
+	// never a player's own value.
+	'__kdPendingNoiseSources',
+	// `__kdReplayPlayerHit` is a function (installed once, never diverges) — same reasoning as
+	// `__kdSlotChoose` above: listed anyway so a future capture-layer change that starts walking
+	// functions cannot regress this silently. Shared by the AOE replay and the direct-hit bullet
+	// reroute (both in `installTurnModel`) to work around `bulletObj.alreadyHit`'s single shared
+	// "player" dedup key — see that helper's own doc comment for why this cannot be made per-player.
+	'__kdReplayPlayerHit',
+	// `tagOwnedBullets`'s side-channel (spriteID -> clientId), NOT a property on the bullet objects
+	// themselves — keeping it off KDMapData.Bullets means a 1-player session's bullets are byte-
+	// identical to a reference run with no turn-model code involved at all (mp-parity-oracle).
+	// Session-level, same reasoning as the rest of this block: listed here, not left to diverge.
+	'__kdBulletOwner',
+	// `tagOwnedTethers`'s side-channel (leashed enemy id -> clientId), same shape and same reasoning as
+	// `__kdBulletOwner` above: a tether's own `leash.entity` is the generic `-1` "the player" marker
+	// (KDTethers.ts:203-210, KinkyDungeonAttachTetherToEntity), so there is no engine-native way to
+	// tell which HUMAN a leash belongs to once more than one exists. Kept off the enemy entity itself
+	// (would diverge a 1-player session's KDMapData.Entities from a reference run — mp-parity-oracle).
+	'__kdTetherOwner',
 ]);
 
 
@@ -483,6 +592,10 @@ const { KD_CODEC } = require('./kd-codec');
 // The world/player classification of KD's game-mode keys. Own module so the
 // lightweight join-gate can validate a declaration without loading this engine host.
 const { MODE_WORLD_KEYS, MODE_PLAYER_KEYS, MODE_SOURCE, isModeKey } = require('./game-modes');
+// The world/player/mixed classification of KinkyDungeonAdvanceTime's and KinkyDungeonUpdateEnemies'
+// own direct callees — the single source of truth `WORLD_MUTE_FNS` (below) is DERIVED from, not a
+// second hand-kept list that could silently disagree with it.
+const { TURN_CALL_CLASSIFICATION } = require('./turn-classification');
 
 /**
  * Entity re-resolution + the dispatch call, shared by applyInput and applyInputObserved.
@@ -601,6 +714,62 @@ function loadSources() {
 }
 
 let _instanceCounter = 0;
+
+/**
+ * Candidate OUTER, once-per-tick world system entry points `KinkyDungeonAdvanceTime` calls directly —
+ * the set a blanket "mute = no-op" is even the right SHAPE of fix for (a void-returning, side-effect-
+ * only step, not a getter whose return value the caller reads back the same tick). This is a separate
+ * question from the world/player/mixed VERDICT (below): most of `turn-classification.js`'s ~100
+ * `world` entries are per-enemy helpers (faction lookups, stat getters) that run many times per tick
+ * by design and are never meant to collapse to once per round — muting THOSE would corrupt the very
+ * call that reads their return value, not just reduce a count.
+ *
+ * `KinkyDungeonUpdateEnemies` is deliberately NOT here — it gets its own wrap in `installTurnModel`
+ * (grouping + the slot switch, not a plain no-op).
+ */
+const WORLD_MUTE_CANDIDATES = Object.freeze([
+	'KinkyDungeonUpdateBullets', 'KinkyDungeonUpdateBulletsCollisions',
+	'KDUpdateEffectTiles', 'KinkyDungeonUpdateTileEffects', 'KinkyDungeonUpdateJailKeys',
+	'KDCommanderUpdate', 'KDTickMaps',
+]);
+
+/**
+ * The actual mute list: `WORLD_MUTE_CANDIDATES` filtered down to the ones `turn-classification.js` —
+ * the single source of truth the audit spec (`tests/unit/mp-turn-world-player-audit.spec.ts`) keeps
+ * honest against the live engine — verdicts as pure `world`. A candidate the table calls `mixed`
+ * (currently `KDUpdateEffectTiles`, `KinkyDungeonUpdateTileEffects`, `KinkyDungeonUpdateBullets`,
+ * `KinkyDungeonUpdateBulletsCollisions` — each runs a step for the ACTING player before or alongside
+ * its world-wide loop) is EXCLUDED, not force-muted: wholesale-muting a mixed function would silently
+ * drop the non-host player's own per-turn step, a real regression this list refuses to introduce.
+ * Those four keep running once per player-phase apply, same as before this change — a recorded,
+ * deliberate residue (the mixed-function split is its own follow-up), not a silent gap: a candidate
+ * missing from the table, or no longer classified at all, throws at require time rather than being
+ * guessed about.
+ */
+const WORLD_MUTE_FNS = Object.freeze(WORLD_MUTE_CANDIDATES.filter((name) => {
+	const verdict = TURN_CALL_CLASSIFICATION[name] && TURN_CALL_CLASSIFICATION[name].verdict;
+	if (!verdict) {
+		throw new Error(`turn-classification.js has no entry for mute candidate "${name}" — ` +
+			'classify it (world/player/mixed/split) before deciding whether to mute it');
+	}
+	return verdict === 'world';
+}));
+
+/**
+ * `WORLD_MUTE_CANDIDATES` members `turn-classification.js` now calls `split` rather than `world` —
+ * a mixed function `installTurnModel` has a bespoke wrap for (below) instead of a plain no-op, so it
+ * is excluded from `WORLD_MUTE_FNS` (a blanket no-op would also silence its replicated player step)
+ * but still derived from the same table, not hand-duplicated. Thrown error mirrors `WORLD_MUTE_FNS`'s
+ * own guard: a candidate missing a verdict, or no longer `split`, must not be silently ignored.
+ */
+const SPLIT_MUTE_FNS = Object.freeze(WORLD_MUTE_CANDIDATES.filter((name) => {
+	const verdict = TURN_CALL_CLASSIFICATION[name] && TURN_CALL_CLASSIFICATION[name].verdict;
+	if (!verdict) {
+		throw new Error(`turn-classification.js has no entry for mute candidate "${name}" — ` +
+			'classify it (world/player/mixed/split) before deciding whether to mute it');
+	}
+	return verdict === 'split';
+}));
 
 class HeadlessHost {
 	constructor(opts = {}) {
@@ -1466,6 +1635,45 @@ class HeadlessHost {
 	}
 
 	/**
+	 * Drain this harvest's noise ORIGINS — `[{x, y, sound}]`, one entry per real `KDEnemyAddSound`
+	 * call since the last drain (the `installTurnModel` wrap, not a copy of its engine math) — so
+	 * `SwapSession._harvestNoise` can decide, per OTHER joined human, whether they would ALSO have
+	 * perceived the same ambient sound from their own position. Always drains in the same call that
+	 * drains `takeNoisePresentation`, so one harvest's sources batch corresponds 1:1 with that same
+	 * harvest's shockwaves/sounddesc batch.
+	 */
+	takeNoiseSources() {
+		const out = this.eval('(globalThis.__kdPendingNoiseSources || []).slice()');
+		this.eval('globalThis.__kdPendingNoiseSources = [];');
+		return out || [];
+	}
+
+	/**
+	 * KD's own hearing/distance rule (`KDCanHearSound`, KinkyDungeonEnemies.ts), evaluated for a
+	 * listener at `(listenerX, listenerY)` who is NOT necessarily the current slot occupant —
+	 * `KDCanHearSound` takes an explicit listener argument, so a plain `{x, y, player: true}`
+	 * stand-in works without swapping anyone into the slot. `sourceX`/`sourceY`/`sound` are the noise
+	 * origin (`HeadlessHost.takeNoiseSources`'s own entries); `mult` matches the 1.5 constant
+	 * `KDEnemyAddSound`'s own call site uses for a player listener, so this is the SAME threshold the
+	 * engine already applied to decide whether the current occupant could hear it — just re-asked for
+	 * a different position.
+	 *
+	 * Deliberately does not attempt the DEAF-LEVEL half of `KinkyDungeonGetHearingRadius` for the
+	 * other human specifically — that function reads deafness off the CURRENT global player
+	 * (`KinkyDungeonAllRestraintDynamic`) regardless of the entity argument passed to it, so it is
+	 * already only an approximation for anyone but the slot occupant, including in the single
+	 * evaluation this mirrors. Fixing that would need a real slot swap per listener; out of scope
+	 * here and no worse than the existing single-listener check's own fidelity.
+	 */
+	canHearFrom(listenerX, listenerY, sourceX, sourceY, sound, mult) {
+		return this.eval(`(function(){
+			if (typeof KDCanHearSound !== 'function') return 0;
+			return KDCanHearSound({ x: ${+listenerX}, y: ${+listenerY}, player: true },
+				${+sound}, ${+sourceX}, ${+sourceY}, ${+mult}) || 0;
+		})()`);
+	}
+
+	/**
 	 * Record every untie performed on a peer avatar — the sibling of `installPeerDamageRecorder`.
 	 *
 	 * WHY A RECORDER AND NOT A LEVEL DELTA. The obvious reading of "someone untied this peer" is the
@@ -1503,6 +1711,60 @@ class HeadlessHost {
 			KDUntieEnemy.__kdPeerUntie = 1;
 			KDUntieEnemy.__unties = {};
 			return { ok: true };
+		})()`);
+	}
+
+	/**
+	 * A co-op partner's avatar IS a talk target — the owner's revised rule: bumping your partner in
+	 * peace opens KD's own ally dialogue (`GenericAlly`), the same branch stock KD offers for any
+	 * `Player`-faction, non-hostile entity (`KinkyDungeonLaunchAttack` -> `KDTalkToEnemy` ->
+	 * `KDStartDialog`). That dialogue is how a partner's bondage gets UNTIED (`KDGetPlayerUntieBindAmt`
+	 * / `KDUntieEnemy`, `KinkyDungeonDialogue.ts:851-896`) — the earlier "do nothing" guard
+	 * (`installPeerTalkGuard`) blocked that along with everything else, which is the regression
+	 * `mp-coop-untie` caught. In PvP the armed peer is `faction: 'Enemy'` and `KDTalkToEnemy` is
+	 * already false for a hostile entity, so the dialogue never opens there regardless.
+	 *
+	 * Most of `GenericAlly`'s OTHER options are NPC-only and either do nothing for a peer avatar (it
+	 * is rebuilt from the real player every turn, so a leash/tie/follow-stay flag written onto it is
+	 * gone by the next turn) or actively misrepresent a real second player (recruiting your partner
+	 * into your own party, "feeding" hp that is not theirs, an out-of-band attack bypassing the real
+	 * PvP arm). This hides those the KD-native way: wrap each one's own `prerequisiteFunction` — the
+	 * same gate KD's own dialogue renderer already calls per entry before drawing its button
+	 * (`KDCheckDialoguePrereq`, `KinkyDungeonDialogue.ts:80-90,169`) — so it reports false whenever
+	 * the dialogue's current entity is a peer avatar; the button simply never appears. `Untie` and
+	 * `Leave` are untouched.
+	 */
+	installPeerAllyDialogueGuard() {
+		return this.eval(`(function(){
+			if (typeof KDDialogue === 'undefined' || !KDDialogue.GenericAlly || !KDDialogue.GenericAlly.options) {
+				return { ok: false, error: 'no GenericAlly dialogue' };
+			}
+			var opts = KDDialogue.GenericAlly.options;
+			var hide = ['Leash', 'ReleaseLeash', 'Shop', 'ShopBuy', 'Attack', 'AttackPlay',
+				'AttackUnaware', 'Food', 'JoinParty', 'Flirt', 'LetMePass', 'StopFollowingMe',
+				'FollowMe', 'DontStayHere', 'StayHere', 'Aggressive', 'Defensive', 'HelpMe',
+				'HelpMeCommandWord', 'HelpMeKey', 'DontHelpMe', 'RemoveParty'];
+			function isPeerAvatarTarget() {
+				var enemy = (typeof KinkyDungeonFindID === 'function') ? KinkyDungeonFindID(KDGameData.CurrentDialogMsgID) : null;
+				var nm = (enemy && enemy.Enemy && enemy.Enemy.name) || '';
+				return nm.indexOf('RemotePlayer') === 0;
+			}
+			function wrapEntry(entry) {
+				var _prereq = entry.prerequisiteFunction;
+				entry.prerequisiteFunction = function (gagged, player) {
+					if (isPeerAvatarTarget()) return false;
+					return _prereq ? _prereq(gagged, player) : true;
+				};
+				entry.__kdPeerAllyGuard = 1;
+			}
+			var hidden = [];
+			for (var i = 0; i < hide.length; i++) {
+				var entry = opts[hide[i]];
+				if (!entry || entry.__kdPeerAllyGuard) continue;
+				wrapEntry(entry);
+				hidden.push(hide[i]);
+			}
+			return { ok: true, hidden: hidden };
 		})()`);
 	}
 
@@ -1923,6 +2185,7 @@ class HeadlessHost {
 			var want = ${JSON.stringify({
 		class: typeof pkg.class === 'string' ? pkg.class : '',
 		outfit: typeof pkg.outfit === 'string' ? pkg.outfit : '',
+		appearance: typeof pkg.appearance === 'string' ? pkg.appearance : '',
 	})};
 			var got = {};
 			// CLASS. KDClassStart is KD's own class table, and assigning KinkyDungeonClassMode from
@@ -1943,6 +2206,30 @@ class HeadlessHost {
 				&& typeof KDGetDressList === 'function' && (KDGetDressList() || {})[want.outfit]) {
 				KinkyDungeonSetDress(want.outfit, want.outfit);
 				got.outfit = want.outfit;
+			}
+			/*
+			 * APPEARANCE. Without this, the seated player's OWN look (what they see when they look
+			 * at themselves) is whatever the fresh template/new-game happened to generate -- NOT what
+			 * they declared -- even though the exact same declaration already makes their AVATAR look
+			 * right on a PARTNER's screen (spawnAvatar, below). The bug report is about both sides
+			 * agreeing, so this layer must put the two in the same place: the player's live state.
+			 *
+			 * CharacterAppearanceRestore is KD's own call (the wardrobe's revert path) and, same as
+			 * AppearanceItemParse inside it, resolves every model by NAME against KD's own
+			 * ModelDefs table -- an unresolvable name is silently dropped by that function, not by
+			 * this layer, so an unrecognised/corrupt blob degrades to "nothing applied" rather than a
+			 * thrown error reaching the caller.
+			 *
+			 * NOTE: no backticks in this comment -- it lives inside the eval() template literal below
+			 * (memory: a stray backtick here terminates that literal at FILE-PARSE time, not at the
+			 * call this method makes, which is exactly how this broke the first time it was written).
+			 */
+			if (want.appearance && typeof CharacterAppearanceRestore === 'function'
+				&& typeof DecompressB64 === 'function' && typeof KinkyDungeonPlayer !== 'undefined') {
+				try {
+					CharacterAppearanceRestore(KinkyDungeonPlayer, DecompressB64(want.appearance), false, true);
+					got.appearance = true;
+				} catch (e) { /* a malformed/old-build blob must not break seating */ }
 			}
 			return got;
 		})()`);
@@ -1965,9 +2252,17 @@ class HeadlessHost {
 		 * `'BlueHair'` stays as the fallback — it is what every avatar has always looked like,
 		 * so a player who declared nothing keeps exactly the look they had (R4). An unknown style is
 		 * left to KD, which falls back on its own; nothing here judges the value (epic AC2).
+		 *
+		 * `style` only ever picks a RANDOM preset (`KDModelStyles[style].Hairstyle[Math.random() * …]`
+		 * — `KinkyDungeonEnemies.ts` ~:11378-11391) — it was never the mechanism for "look like the
+		 * player really looks". `appearance` is: the player's own serialised `Appearance` (hair item,
+		 * colour, everything the wardrobe sets), carried verbatim for the client to apply onto the
+		 * generated NPC once it exists (`render-client.js`). Still nothing here judges the value — an
+		 * opaque blob is passed through exactly like `outfit`, never decoded.
 		 */
 		const style = (character && character.style) || 'BlueHair';
 		const outfit = (character && character.outfit) || '';
+		const appearance = (character && character.appearance) || '';
 		// Combat text reads TextGet("Name"+Enemy.Enemy.name) — the def name, NOT CustomName —
 		// so give each avatar its OWN def clone with a unique name + registered name key, so a hit reads
 		// the real peer ("Your attack hits Player A …") instead of the shared "the Rival".
@@ -1994,6 +2289,10 @@ class HeadlessHost {
 			// would cross the wire as a change on a session that declared nothing.
 			var outfit = ${JSON.stringify(outfit)};
 			if (outfit) ent.outfit = outfit;
+			// Same reasoning as outfit: only set when declared, so an avatar whose owner sent
+			// nothing does not cross the wire as "changed" every snapshot.
+			var appearance = ${JSON.stringify(appearance)};
+			if (appearance) ent.appearance = appearance;
 			KDAddNewEntity(ent);
 			KDUpdateEnemyCache = true;
 			return { entityId: ent.id, x: ent.x, y: ent.y };
@@ -2408,6 +2707,878 @@ class HeadlessHost {
 	}
 
 	/**
+	 * Idempotently register a per-owner "war team" faction string, copying KD's own `'Player'`
+	 * faction's full relation row (every monster/faction hostility a real player already has) so a
+	 * companion stamped with it keeps fighting the ordinary dungeon exactly as it did as `'Player'`.
+	 *
+	 * Mirrors into BOTH the live relation Map (`KDFactionRelations`, what `KDFactionRelation()`
+	 * actually reads) and the declared tables (`KinkyDungeonFactionRelationsBase`/
+	 * `KinkyDungeonFactionRelations`) that `KDInitFactions()` rebuilds the Map FROM — a faction absent
+	 * from `KinkyDungeonFactionRelationsBase` is silently dropped the next time anything calls
+	 * `KDInitFactions()` (`KDSetFactionRelation`/`KDChangeFactionRelation` do, on any reputation-
+	 * changing event; a fresh game calls it with `Reset=true`).
+	 *
+	 * Also self-healing against a DIFFERENT, measured risk: `KDFactionRelations` (the Map) is itself
+	 * per-player WATCHED state in the generic global-divergence capture (`BASELINE_MAX_LEN`'s own doc
+	 * comment names it, ~12 KB, deliberately NOT excluded — a real player's own faction REPUTATION is
+	 * legitimately per-player). So a plain `restorePlayer` can revert this table to a DIFFERENT
+	 * player's baseline between applies. Never blacklisted for that reason (blacklisting it would
+	 * resurrect the exact contamination bug that comment warns against, for reputation drift that has
+	 * nothing to do with this feature). Instead this method is called fresh every apply a war round
+	 * arms a companion (`SwapSession._armPeerEnemies`), the same "re-assert every apply" pattern this
+	 * file already uses for a peer's mirrored bondage/defences — so a mid-round revert heals itself
+	 * before the next real dispatch runs. Idempotent and cheap either way.
+	 */
+	ensureWarFaction(name) {
+		return this.eval(`(function(){
+			var name = ${JSON.stringify(String(name))};
+			var base = KinkyDungeonFactionRelationsBase['Player'] || {};
+			if (!KinkyDungeonFactionRelationsBase[name]) KinkyDungeonFactionRelationsBase[name] = Object.assign({}, base);
+			if (!KinkyDungeonFactionRelations[name]) KinkyDungeonFactionRelations[name] = Object.assign({}, base);
+			if (!KDFactionRelations.get(name)) KDFactionRelations.set(name, new Map());
+			var mine = KDFactionRelations.get(name);
+			var playerMap = KDFactionRelations.get('Player');
+			if (playerMap) {
+				playerMap.forEach(function(value, otherFaction){
+					mine.set(otherFaction, value);
+					var otherMap = KDFactionRelations.get(otherFaction);
+					if (otherMap) otherMap.set(name, value);
+				});
+			}
+			return true;
+		})()`);
+	}
+
+	/**
+	 * Set (`value` a number) or clear (`value` null/undefined) the mutual relation between two war-team
+	 * factions — both the live Map and the declared tables, same reasoning as `ensureWarFaction`.
+	 * Clearing removes the pair entirely (not merely zeroes it), so a peace negotiation leaves no
+	 * residual faction-relation entry for either team string, matching "fully reversible".
+	 */
+	setWarFactionRelation(a, b, value) {
+		const clear = value === null || value === undefined;
+		return this.eval(`(function(){
+			var a = ${JSON.stringify(String(a))}, b = ${JSON.stringify(String(b))};
+			${clear ? `
+			if (KDFactionRelations.get(a)) KDFactionRelations.get(a).delete(b);
+			if (KDFactionRelations.get(b)) KDFactionRelations.get(b).delete(a);
+			if (KinkyDungeonFactionRelationsBase[a]) delete KinkyDungeonFactionRelationsBase[a][b];
+			if (KinkyDungeonFactionRelationsBase[b]) delete KinkyDungeonFactionRelationsBase[b][a];
+			if (KinkyDungeonFactionRelations[a]) delete KinkyDungeonFactionRelations[a][b];
+			if (KinkyDungeonFactionRelations[b]) delete KinkyDungeonFactionRelations[b][a];
+			` : `
+			var v = ${Number(value)};
+			if (KDFactionRelations.get(a)) KDFactionRelations.get(a).set(b, v);
+			if (KDFactionRelations.get(b)) KDFactionRelations.get(b).set(a, v);
+			if (KinkyDungeonFactionRelationsBase[a]) KinkyDungeonFactionRelationsBase[a][b] = v;
+			if (KinkyDungeonFactionRelationsBase[b]) KinkyDungeonFactionRelationsBase[b][a] = v;
+			if (KinkyDungeonFactionRelations[a]) KinkyDungeonFactionRelations[a][b] = v;
+			if (KinkyDungeonFactionRelations[b]) KinkyDungeonFactionRelations[b][a] = v;
+			`}
+			return true;
+		})()`);
+	}
+
+	/**
+	 * Stamp (`name` a string) or clear (`name` null/undefined, falling back to the def's own default —
+	 * `'Player'` for a party member, via `KDGetFaction`'s `KDIsInParty` check) an entity's own faction
+	 * string directly.
+	 *
+	 * Deliberately NO `hostile`/`rage`/`ceasefire` side effect (unlike `setAvatarHostile`/
+	 * `KDMakeHostile`): a companion's cross-player hostility must come ONLY from the faction-relation
+	 * table, never from the instance `hostile` flag. MEASURED why: `KinkyDungeonAggressive`'s "Player
+	 * mode" branch (`KinkyDungeonFactions.ts`, taken whenever the candidate IS the literal real human in
+	 * the slot) reads `enemy.hostile > 0` alone, with NO faction check at all — so a companion with
+	 * `hostile` set would read as aggressive toward ANY human in the slot, including its own owner,
+	 * regardless of which custom faction it carries. Reproduced in
+	 * `mp-companion-teams.spec.ts` > "war owner-safety" before this fix (a companion armed via
+	 * `setAvatarHostile(id,true)`/`KDMakeHostile` hurt its own owner's real Will).
+	 *
+	 * ALSO maintains `__kdCompanionWarFaction` (`{entityId: factionName}`), the registry
+	 * `installCompanionFactionGuard`'s hook reads to self-heal a DIFFERENT, measured engine behaviour:
+	 * `KinkyDungeonAdvanceTime` replaces `KDGameData.Party`'s entries with LIVE entity references on
+	 * EVERY real tick (`KinkyDungeonGame.ts` ~3500-3507, `KDGameData.Party = neww` built from
+	 * `KDGetGlobalEntity`), and `KinkyDungeonUpdateEnemies`'s own very first statement then does, for
+	 * every one of those (now-live) party members with no `hostile` countdown: `if (en.faction !=
+	 * "Player") en.faction = "Player"`. That is unconditional and runs on the LIVE entity — MEASURED
+	 * directly (`mp-companion-teams.spec.ts`'s own bisection): a plain `faction` stamp with `hostile`
+	 * left at 0 (required for owner safety, above) is silently reverted to `'Player'` by the very next
+	 * real tick, before the per-enemy decision loop in the SAME call ever reads it.
+	 */
+	setEntityFaction(entityId, name) {
+		return this.eval(`(function(){
+			var e = KDMapData.Entities.find(function(en){ return en.id === ${entityId | 0}; });
+			if (!e) return null;
+			var reg = globalThis.__kdCompanionWarFaction || (globalThis.__kdCompanionWarFaction = {});
+			${name ? `
+			e.faction = ${JSON.stringify(String(name))};
+			reg[${entityId | 0}] = ${JSON.stringify(String(name))};
+			` : `
+			delete e.faction;
+			delete reg[${entityId | 0}];
+			`}
+			KDUpdateEnemyCache = true;
+			return { id: e.id, faction: (typeof KDGetFaction === 'function') ? KDGetFaction(e) : e.faction };
+		})()`);
+	}
+
+	/**
+	 * Idempotent, sentinel-gated (same style as `installTurnModel`): wraps `KDUpdatePersistentNPC`, the
+	 * ONE function `KinkyDungeonUpdateEnemies`'s own party-faction-reset statement calls right after it
+	 * writes `en.faction = "Player"` onto a live party member — see `setEntityFaction`'s own doc comment
+	 * for the full chain of measured behaviour this works around. Re-applying the intended faction
+	 * SYNCHRONOUSLY, inside this same call, restores it before the per-enemy decision loop (later in the
+	 * same `KinkyDungeonUpdateEnemies` pass) ever reads the reverted value — no timing window, because
+	 * nothing yields between the reset statement and this hook.
+	 *
+	 * Scoped to `__kdCompanionWarFaction` only — any OTHER call to `KDUpdatePersistentNPC` (there are
+	 * several, for unrelated persistent-NPC bookkeeping) passes through untouched, including for a
+	 * companion that ISN'T currently war-factioned.
+	 */
+	installCompanionFactionGuard() {
+		this.eval(`(function(){
+			if (globalThis.__kdCompanionFactionGuardInstalled) return;
+			globalThis.__kdCompanionFactionGuardInstalled = true;
+			globalThis.__kdCompanionWarFaction = globalThis.__kdCompanionWarFaction || {};
+			var _upn = KDUpdatePersistentNPC;
+			KDUpdatePersistentNPC = function(id, force){
+				var r = _upn.apply(this, arguments);
+				var want = (globalThis.__kdCompanionWarFaction || {})[id];
+				if (want) {
+					var e = KDGetGlobalEntity(id);
+					if (e) e.faction = want;
+				}
+				return r;
+			};
+		})()`);
+	}
+
+	/**
+	 * Install the one-engine-tick-per-round turn model's engine hooks — cooperative wraps, same style
+	 * as `_installServerRoleShim` (reassign a named global to a wrapper that calls the previous value
+	 * first, sentinel-gated on the wrapper function itself so a second call is a no-op). Idempotent;
+	 * call once per world (`SwapSession._start`).
+	 *
+	 * REPLACES the earlier two-phase stun-gate mechanism (`gateEnemiesExcept`/`ungateEnemies`/
+	 * `stepEnemiesOnly`) entirely — nothing is stunned, frozen or skipped, no turn is split in two.
+	 * Every player's own dispatch still runs KD's real, unmodified per-player pipeline exactly once;
+	 * what these hooks add is two independent knobs the caller arms around exactly ONE dispatch per
+	 * round (see `setWorldMuted`/`armSlotSwitch` below and `SwapSession._advanceTurn`):
+	 *
+	 *   1. WORLD MUTE — every world-shared system in `WORLD_MUTE_FNS` becomes a no-op while muted, and the
+	 *      world clock's INLINE increment (`KinkyDungeonAdvanceTime` cannot be muted by wrapping it —
+	 *      the clock write is a bare statement inside the function body) is handed back by the
+	 *      `KinkyDungeonAdvanceTime` wrapper itself. The round's LAST apply runs unmuted, so the world
+	 *      (enemies, bullets, effect tiles, jail keys, commander update, the map tick, the clock)
+	 *      advances exactly once per round, regardless of player count — every other apply still runs
+	 *      the player's own per-turn work (item checks, stats, …) untouched, since none of that is in
+	 *      `WORLD_MUTE_FNS`.
+	 *   2. SLOT SWITCH — armed only around the round's one unmuted `KinkyDungeonUpdateEnemies` call(s).
+	 *      Before each real enemy decides its target (`KinkyDungeonNearestPlayer`'s 5-argument caller —
+	 *      Loop 2's own per-enemy AI step; the only other caller passes one argument), the engine asks
+	 *      the host-supplied choice (sticky target, else nearest by live position — `SwapSession`
+	 *      computes neither; it only hands in the sticky map, "nearest" is resolved here because it
+	 *      needs the LIVE slot position, not a position captured before the apply started) which human
+	 *      that enemy should face, and if it is not whoever currently holds the slot, calls back into
+	 *      the host (`setSlotSwapCallback`, synchronous) to swap them in. Entities are regrouped
+	 *      (stable sort by chosen human) before each pass so the cost is at most one swap out + one
+	 *      back per OTHER human per pass, not one per enemy (an approved cost trade-off). The slot is handed back to the apply's OWN player before
+	 *      `KinkyDungeonUpdateEnemies` returns, so the dispatch's post-enemy tail (stats, tile, delayed
+	 *      actions) still runs for the player who owns this apply — the accepted "one-round-delayed"
+	 *      phase shift for whoever an enemy faced instead (accepted for this version).
+	 *
+	 * `WORLD_MUTE_FNS` (module scope, above this class) is DERIVED from `turn-classification.js` — the
+	 * declared, audited (`tests/unit/mp-turn-world-player-audit.spec.ts`) table of every direct callee
+	 * `KinkyDungeonAdvanceTime`/`KinkyDungeonUpdateEnemies` actually has — not a second, independently
+	 * hand-kept list that could silently disagree with it; see its own doc comment for which outer
+	 * systems are even candidates and why a `mixed` verdict excludes one rather than muting it anyway.
+	 * Also deliberately NOT muted (left ticking once per PLAYER-PHASE apply, same as before this
+	 * change, per that table's own `mixed` verdicts): `KinkyDungeonSendEnemyEvent`/
+	 * `KinkyDungeonSendBulletEvent` (mixed player/world event fan-out) and anything bullet-targeting-
+	 * specific (owner-tag + per-avatar collision switch + AOE fan-out). Both are recorded follow-ups,
+	 * not silently dropped.
+	 *
+	 * ORDERING: `HeadlessHost.boot()` already reassigns `KinkyDungeonUpdateEnemies` once, permanently
+	 * (`_installServerRoleShim`'s server/player/world role gate, unrelated to the turn model) — this
+	 * method always runs AFTER `boot()` (`SwapSession._start`), so `_ue` below captures that
+	 * already-shimmed function and wraps OUTSIDE it: this wrap's own logic (grouping, the switch) runs
+	 * first, then falls through to the role gate, then to the real engine function. Calling this
+	 * before `boot()` would capture nothing (the global would not exist yet); calling it twice is a
+	 * no-op (the top-level sentinel).
+	 */
+	installTurnModel() {
+		this.eval(`(function(){
+			if (globalThis.__kdTurnModelInstalled) return true;
+			globalThis.__kdTurnModelInstalled = true;
+			globalThis.__kdWorldMuted = false;     // mute WORLD_FNS for the next KinkyDungeonAdvanceTime call
+			globalThis.__kdInTick = 0;             // AdvanceTime re-entrancy depth — nested ticks recurse one level per remaining non-last player
+			globalThis.__kdRoundRealTickDelta = 0; // how much the round's one real tick has advanced the clock so far (nested ticks)
+			globalThis.__kdNestedDispatch = null;  // one-shot callback: dispatch the NEXT player's apply from inside this one (nested ticks)
+			globalThis.__kdSlotSwitch = false;     // arm the per-enemy slot switch for the next UpdateEnemies call(s)
+			globalThis.__kdSlotHost = null;        // clientId this apply belongs to (hand-back target)
+			globalThis.__kdSlotCurrent = null;     // clientId currently holding the slot
+			globalThis.__kdSlotHumans = [];        // [{cid, avatarId}], this round's roster
+			globalThis.__kdSlotAvatarIds = [];      // avatar entity ids — never themselves assigned a target
+			globalThis.__kdStickyTarget = {};      // enemy id -> clientId, host-supplied persisted target
+			globalThis.__kdSlotChoiceLog = {};      // enemy id -> clientId, this call's decision (host reads back)
+			globalThis.__kdBulletOwner = {};       // bullet spriteID -> clientId, who cast it (tagOwnedBullets)
+			globalThis.__kdTetherOwner = {};       // leashed enemy id -> clientId, who caused the tether (tagOwnedTethers)
+			globalThis.__kdPendingNoiseSources = []; // [{x,y,sound}] this harvest's noise origins (KDEnemyAddSound wrap)
+
+			var WORLD_FNS = ${JSON.stringify(WORLD_MUTE_FNS)};
+			WORLD_FNS.forEach(function(name){
+				var prev = eval(name);
+				if (prev.__kdTurnModelWrapped) return;
+				var wrapped = function(){
+					if (globalThis.__kdWorldMuted && globalThis.__kdInTick > 0) return undefined;
+					return prev.apply(this, arguments);
+				};
+				wrapped.__kdTurnModelWrapped = true;
+				eval(name + ' = wrapped;');
+			});
+
+			var _adv = KinkyDungeonAdvanceTime;
+			if (!_adv.__kdTurnModelWrapped) {
+				var advWrapped = function(){
+					var t0 = KinkyDungeonCurrentTick;
+					var mutedAtEntry = globalThis.__kdWorldMuted;
+					globalThis.__kdInTick++;
+					try { return _adv.apply(this, arguments); }
+					finally {
+						globalThis.__kdInTick--;
+						// The clock increment is INLINE in KinkyDungeonAdvanceTime, so no wrapper can mute
+						// it directly: a muted apply hands back its OWN increment instead.
+						//
+						// NESTED TICKS make this two-layered: a muted apply's nested-dispatch hook (the
+						// KinkyDungeonUpdateEnemies wrap, below) can recurse into further players before
+						// this call's own increment runs — and the round's one real (unmuted) tick, however
+						// deep it is nested, genuinely advances the clock for real. Resetting flatly to t0
+						// would erase that real advance too, not just this level's own fake one. Instead,
+						// the real (unmuted) call records how much it actually advanced into
+						// __kdRoundRealTickDelta (accumulated across the whole round, reset once per round
+						// by _advanceTurn), and every muted level restores to "my own entry tick PLUS
+						// whatever the round's real tick has advanced so far" — correct regardless of
+						// nesting depth, since every muted level in one round's chain is entered before the
+						// real tick fires (same world-start tick value).
+						if (mutedAtEntry) {
+							KinkyDungeonCurrentTick = t0 + (globalThis.__kdRoundRealTickDelta || 0);
+						} else {
+							globalThis.__kdRoundRealTickDelta =
+								(globalThis.__kdRoundRealTickDelta || 0) + (KinkyDungeonCurrentTick - t0);
+						}
+					}
+				};
+				advWrapped.__kdTurnModelWrapped = true;
+				KinkyDungeonAdvanceTime = advWrapped;
+			}
+
+			// Per-ENTITY world systems: an NPC's buff decay / tether is world-shared; a human's is not —
+			// muting the whole function would also silence the apply's OWN player, so these two split by
+			// entity instead of joining WORLD_FNS above.
+			var _tickBuffs = KinkyDungeonTickBuffs;
+			if (!_tickBuffs.__kdTurnModelWrapped) {
+				var tickBuffsWrapped = function(entity){
+					var npc = entity && entity !== KinkyDungeonPlayerEntity && !entity.player;
+					if (npc && globalThis.__kdWorldMuted && globalThis.__kdInTick > 0) return undefined;
+					return _tickBuffs.apply(this, arguments);
+				};
+				tickBuffsWrapped.__kdTurnModelWrapped = true;
+				KinkyDungeonTickBuffs = tickBuffsWrapped;
+			}
+			// An enemy's leash targets the generic -1 "the player" marker (KDTethers.ts:203-210) —
+			// KDLookupID(-1) always resolves to whoever currently holds the slot, not necessarily the
+			// human that actually got leashed. Once this call is routed to once-per-round (the mute
+			// below), that one real call must also be routed to the leash's OWN owner
+			// (__kdTetherOwner, tagged by tagOwnedTethers) — the same owner-tag + swap-and-back
+			// shape as the bullet owner-tag mechanism above, not a reimplementation of the tether math.
+			var _tether = KinkyDungeonUpdateTether;
+			if (!_tether.__kdTurnModelWrapped) {
+				var tetherWrapped = function(delta, msg, entity){
+					var npc = entity && entity !== KinkyDungeonPlayerEntity && !entity.player;
+					if (npc && globalThis.__kdWorldMuted && globalThis.__kdInTick > 0) return false;
+					if (npc && globalThis.__kdSlotSwitch && entity.leash && entity.leash.entity === -1) {
+						var owners = globalThis.__kdTetherOwner || {};
+						var ownerCid = owners[entity.id];
+						var current = globalThis.__kdSlotCurrent;
+						if (ownerCid != null && ownerCid !== current) {
+							globalThis.__kdSlotSwapTo(ownerCid);
+							var r = _tether.apply(this, arguments);
+							globalThis.__kdSlotSwapTo(current);
+							return r;
+						}
+					}
+					return _tether.apply(this, arguments);
+				};
+				tetherWrapped.__kdTurnModelWrapped = true;
+				KinkyDungeonUpdateTether = tetherWrapped;
+			}
+
+			// tagOwnedTethers (below, called every apply from SwapSession._advanceTurn) tags a new
+			// leash "first touch, owned by whoever is applying" — correct for every leash created
+			// through a human's OWN input dispatch, since KinkyDungeonPlayerEntity is them for the
+			// whole apply in that case. It is WRONG for a leash an enemy attaches to a SWITCHED-IN,
+			// non-applying human: the per-enemy slot switch (KinkyDungeonNearestPlayer's wrap, below)
+			// can swap the slot to any joined human mid-pass, entirely inside the round's one real
+			// apply, and a successful grab/tease attack against THAT human can attach a tether right
+			// there -- by the time the whole apply returns and tagOwnedTethers runs, there is no record
+			// left that the leash was ever anchored to anyone but whoever is applying. Found and proved
+			// with a test (not guessed): a leash attached while B held the slot, with A hosting the
+			// round, was mis-tagged owned by A. Fixed by tagging at CREATION time instead, from the
+			// LIVE slot identity (__kdSlotCurrent is exactly who KinkyDungeonPlayerEntity resolves to
+			// at this exact call) rather than from the apply's own client id. Guarded on
+			// __kdSlotSwitch: outside an armed slot switch (a muted apply, a 1-player session, or no
+			// switch yet armed this round) the acting player IS the only human any leash here could
+			// ever anchor to, so tagOwnedTethers' own per-apply sweep already handles that case
+			// correctly and this wrap intentionally does nothing extra. tagOwnedTethers' own
+			// "only if not yet owned" check means whichever of the two tags this leash first always
+			// wins, and creation-time (synchronous, inside the apply) always runs before the sweep
+			// (called by SwapSession after the whole apply returns).
+			var _attachTether = KinkyDungeonAttachTetherToEntity;
+			if (!_attachTether.__kdTurnModelWrapped) {
+				var attachTetherWrapped = function(dist, entity, player){
+					var r = _attachTether.apply(this, arguments);
+					if (globalThis.__kdSlotSwitch && r && player && !player.player && entity === KinkyDungeonPlayerEntity) {
+						var owners = globalThis.__kdTetherOwner || (globalThis.__kdTetherOwner = {});
+						owners[player.id] = globalThis.__kdSlotCurrent;
+					}
+					return r;
+				};
+				attachTetherWrapped.__kdTurnModelWrapped = true;
+				KinkyDungeonAttachTetherToEntity = attachTetherWrapped;
+			}
+
+			// NOISE IS WORLD PRESENTATION, NOT PER-SLOT-OCCUPANT STATE. KDEnemyAddSound
+			// (KinkyDungeonEnemies.ts) decides whether to queue a shockwave/sounddesc by checking ONE
+			// listener -- whoever currently holds the slot (KinkyDungeonPlayerEntity) -- against
+			// KDCanHearSound. In single-player that is the only human there is, so it is correct by
+			// construction; in co-op it is only ONE of possibly several humans who would genuinely
+			// perceive the same ambient sound. SwapSession._harvestNoise (swap-session.js) needs to
+			// re-offer the SAME decision to every OTHER joined human from THEIR OWN position, using
+			// KD's own hearing rule -- but it cannot re-derive the sound amount KDCanHearSound was fed
+			// (enemy.sound) from the already-baked vol/radius the queued entry carries, and
+			// re-deriving it would mean copying the engine's own math a second time. So this wrap
+			// records the one fact the harvest actually needs -- {x, y, sound} -- from the SAME call
+			// that queued the entry, by reading enemy.sound straight back AFTER _prev sets it
+			// (KDEnemyAddSound's own enemy.sound = Math.max(data.base, data.amount)), never
+			// duplicating the hearing/visibility logic itself. One array, drained once per harvest by
+			// HeadlessHost.takeNoiseSources below, the same shape as takeNoisePresentation's own drain.
+			var _kdEas = KDEnemyAddSound;
+			if (!_kdEas.__kdTurnModelWrapped) {
+				var kdEasWrapped = function(enemy){
+					var r = _kdEas.apply(this, arguments);
+					if (enemy) {
+						var list = globalThis.__kdPendingNoiseSources || (globalThis.__kdPendingNoiseSources = []);
+						list.push({ x: enemy.x, y: enemy.y, sound: enemy.sound || 0 });
+					}
+					return r;
+				};
+				kdEasWrapped.__kdTurnModelWrapped = true;
+				KDEnemyAddSound = kdEasWrapped;
+			}
+
+			// SPLIT functions (turn-classification.js verdict 'split'): each does a step for the
+			// ACTING player alongside a world-wide loop under one name. Wholesale-muting them (like
+			// WORLD_FNS above) would silently drop the non-host player's own per-turn step; leaving
+			// them unwrapped would run the world-wide loop once per PLAYER-PHASE apply instead of once
+			// per round. Each gets its own wrap: the world-wide work is skipped while muted, and the
+			// acting player's own step is replicated every apply by calling KD's own smaller
+			// functions directly — the same ones the engine itself calls for that step, never a copy
+			// of their logic.
+			var _kdUet = KDUpdateEffectTiles;
+			if (!_kdUet.__kdTurnModelWrapped) {
+				var kdUetWrapped = function(delta){
+					if (globalThis.__kdWorldMuted && globalThis.__kdInTick > 0) {
+						// Replicate only the acting-player-at-position step (KinkyDungeonTiles.ts:517-518).
+						var tiles = KDGetEffectTiles(KinkyDungeonPlayerEntity.x, KinkyDungeonPlayerEntity.y);
+						for (var k in tiles) { if (tiles[k]) KinkyDungeonUpdateSingleEffectTile(delta, KinkyDungeonPlayerEntity, tiles[k]); }
+						return undefined;
+					}
+					return _kdUet.apply(this, arguments);
+				};
+				kdUetWrapped.__kdTurnModelWrapped = true;
+				KDUpdateEffectTiles = kdUetWrapped;
+			}
+			var _kUte = KinkyDungeonUpdateTileEffects;
+			if (!_kUte.__kdTurnModelWrapped) {
+				var kUteWrapped = function(delta){
+					if (globalThis.__kdWorldMuted && globalThis.__kdInTick > 0) {
+						// Replicate only the acting-player-under-foot step (KinkyDungeonTiles.ts:90-95).
+						var tile = KinkyDungeonMapGet(KinkyDungeonPlayerEntity.x, KinkyDungeonPlayerEntity.y);
+						if (!(KDTileUpdateFunctions[tile] && KDTileUpdateFunctions[tile](delta))) {
+							KDPeripheralTileEffects(delta);
+						}
+						return undefined;
+					}
+					return _kUte.apply(this, arguments);
+				};
+				kUteWrapped.__kdTurnModelWrapped = true;
+				KinkyDungeonUpdateTileEffects = kUteWrapped;
+			}
+
+			// Bullets. Physics (movement/lifetime/collision resolution) is world-shared and must run
+			// once per round — muted wholesale on every apply but the round's one real tick, same as
+			// WORLD_FNS. Two residual player-targeting gaps this closes without touching Game/src:
+			//   - a followPlayer bullet OWNED by a non-slot human (tagged by tagOwnedBullets, below)
+			//     is snapped to the SLOT occupant by the engine (KinkyDungeonFight.ts:1864/:1898) —
+			//     corrected here, after the real call, to its own owner's live avatar position.
+			//   - the AOE player-effect test only ever reaches the slot occupant — closed by the
+			//     KinkyDungeonPlayerEffect wrap further below, not here.
+			var _kUb = KinkyDungeonUpdateBullets;
+			if (!_kUb.__kdTurnModelWrapped) {
+				var kUbWrapped = function(delta, Allied){
+					if (globalThis.__kdWorldMuted && globalThis.__kdInTick > 0) return undefined;
+					var r = _kUb.apply(this, arguments);
+					if (globalThis.__kdSlotSwitch) {
+						var humans = globalThis.__kdSlotHumans || [];
+						var owners = globalThis.__kdBulletOwner || {};
+						var keep = {};
+						for (var bi = 0; bi < KDMapData.Bullets.length; bi++) {
+							var b = KDMapData.Bullets[bi];
+							var ownerCid = owners[b.spriteID];
+							if (ownerCid != null) keep[b.spriteID] = ownerCid;
+							if (b.bullet && b.bullet.followPlayer && ownerCid != null && ownerCid !== globalThis.__kdSlotCurrent) {
+								var owner = null;
+								for (var hi = 0; hi < humans.length; hi++) { if (humans[hi].cid === ownerCid) { owner = humans[hi]; break; } }
+								var av = owner && KDMapData.Entities.find(function(en){ return en.id === owner.avatarId; });
+								if (av) { b.x = av.x; b.y = av.y; }
+							}
+						}
+						globalThis.__kdBulletOwner = keep; // prune entries for bullets that no longer exist
+					}
+					return r;
+				};
+				kUbWrapped.__kdTurnModelWrapped = true;
+				KinkyDungeonUpdateBullets = kUbWrapped;
+			}
+			var _kUbc = KinkyDungeonUpdateBulletsCollisions;
+			if (!_kUbc.__kdTurnModelWrapped) {
+				var kUbcWrapped = function(){
+					if (globalThis.__kdWorldMuted && globalThis.__kdInTick > 0) return undefined;
+					return _kUbc.apply(this, arguments);
+				};
+				kUbcWrapped.__kdTurnModelWrapped = true;
+				KinkyDungeonUpdateBulletsCollisions = kUbcWrapped;
+			}
+
+			// Shared dedup workaround for both the AOE replay below and the direct-hit reroute
+			// further down. bulletObj.alreadyHit (KDBulletAlreadyHit, KinkyDungeonStats.ts:545) is a
+			// property on the WORLD bullet object (KDMapData.Bullets), not a script global, so no
+			// amount of slot-swapping (which only swaps PER-PLAYER globals, via capturePlayer/
+			// restorePlayer) can make it per-human -- it keys a human's dedup entry by the LITERAL
+			// STRING "player" (entity.player ? "player" : String(entity.id)), never by WHICH human, so
+			// the real call for the slot occupant already marks "player" hit on this bullet before any
+			// extra per-human call runs -- replaying straight through would see "already hit" and
+			// silently no-op for every other human (measured: KinkyDungeonDealDamage returned
+			// happened:0 for a swapped-in second human until this was found). Unmark it for the ONE
+			// extra call, then put it straight back -- this bullet's own dedup for the NEXT real tick
+			// must stay exactly as it already was, this just lets ONE extra human through on THIS tick.
+			// This is the one piece of this mechanism that CANNOT be replaced by routing through the
+			// slot switch, because it is not per-player state to begin with.
+			globalThis.__kdReplayPlayerHit = function(bulletObj, fn){
+				var hit = bulletObj && bulletObj.alreadyHit;
+				var markIdx = hit ? hit.indexOf('player') : -1;
+				if (markIdx >= 0) hit.splice(markIdx, 1);
+				try { fn(); }
+				finally {
+					if (markIdx >= 0 && bulletObj.alreadyHit && bulletObj.alreadyHit.indexOf('player') < 0) {
+						bulletObj.alreadyHit.push('player');
+					}
+				}
+			};
+
+			// The AOE player-effect sink (KinkyDungeonPlayerEffect) is always called by its engine
+			// call sites with KinkyDungeonPlayerEntity (the slot) as the target (the pinned
+			// aoePlayerEffectFanOut text-coupled site, turn-classification.js — KinkyDungeonFight.ts
+			// :2434/:2694). After the real call lets the slot occupant's own effect resolve, replay
+			// the SAME AOE test (AOECondition + KDBulletAoEMod, the engine's own functions, not a
+			// reimplementation) against every OTHER joined human's avatar position, swapping them
+			// (the real per-enemy slot switch, __kdSlotSwapTo — not a position-only move) into the
+			// slot for exactly one extra call each if in range. KDPlayerHitBy (a hitTag's own dedup
+			// array, magic/KinkyDungeonMagic.ts:44) is a plain script GLOBAL, not blacklisted, so this
+			// real swap already carries each human their OWN copy via the generic capturePlayer/
+			// restorePlayer bundle — no extra handling needed for a hitTag effect to dedupe per human
+			// rather than once for the whole round.
+			var _kPe = KinkyDungeonPlayerEffect;
+			if (!_kPe.__kdTurnModelWrapped) {
+				var kPeWrapped = function(target, damage, playerEffect, spell, faction, bulletObj, entityArg){
+					var r = _kPe.apply(this, arguments);
+					if (globalThis.__kdSlotSwitch && bulletObj && bulletObj.x != null) {
+						var aoe = (bulletObj.bullet && bulletObj.bullet.spell && bulletObj.bullet.spell.aoe) || 0.5;
+						var mod = KDBulletAoEMod(bulletObj);
+						var humans = globalThis.__kdSlotHumans || [];
+						var current = globalThis.__kdSlotCurrent;
+						for (var i = 0; i < humans.length; i++) {
+							var h = humans[i];
+							if (h.cid === current) continue;
+							var av = KDMapData.Entities.find(function(en){ return en.id === h.avatarId; });
+							if (!av) continue;
+							if (AOECondition(bulletObj.x, bulletObj.y, av.x, av.y, aoe, mod)) {
+								globalThis.__kdSlotSwapTo(h.cid);
+								globalThis.__kdReplayPlayerHit(bulletObj, function(){
+									_kPe(target, damage, playerEffect, spell, faction, bulletObj, entityArg);
+								});
+								globalThis.__kdSlotSwapTo(current);
+							}
+						}
+					}
+					return r;
+				};
+				kPeWrapped.__kdTurnModelWrapped = true;
+				KinkyDungeonPlayerEffect = kPeWrapped;
+			}
+
+			// DIRECT (non-AOE) bullet hits. The engine's own per-round collision pass
+			// (KinkyDungeonBulletsCheckCollision, KinkyDungeonFight.ts:3118) always tests the slot
+			// occupant through KDBulletHitPlayer (:3134), then separately walks EVERY entity in
+			// KDMapData.Entities — including a joined human's AVATAR stand-in — through
+			// KDBulletHitEnemy (:3142), which only ever does NPC-style damage (KinkyDungeonDamageEnemy)
+			// plus a restraint bind-tag shortcut, never the real player pipeline
+			// (KinkyDungeonPlayerEffect) a slot occupant gets. Reroute: when the "enemy" KDBulletHitEnemy
+			// was called for is actually one of this round's avatar stand-ins, swap that human into the
+			// slot (the same __kdSlotSwapTo mechanism the per-enemy switch and the AOE replay above
+			// both use) and let the bullet resolve through the real KDBulletHitPlayer instead — exactly
+			// as it would if they already held the slot — rather than reimplementing any part of what a
+			// hit does. Needs the same alreadyHit workaround as the AOE case above, for the same reason
+			// (it is bullet-object state, not per-player global state).
+			var _kdbhe = KDBulletHitEnemy;
+			if (!_kdbhe.__kdTurnModelWrapped) {
+				var kdbheWrapped = function(bullet, enemy){
+					if (globalThis.__kdSlotSwitch && enemy && (globalThis.__kdSlotAvatarIds || []).indexOf(enemy.id) >= 0) {
+						var humans = globalThis.__kdSlotHumans || [];
+						var owner = null;
+						for (var i = 0; i < humans.length; i++) { if (humans[i].avatarId === enemy.id) { owner = humans[i]; break; } }
+						if (owner) {
+							var current = globalThis.__kdSlotCurrent;
+							globalThis.__kdSlotSwapTo(owner.cid);
+							globalThis.__kdReplayPlayerHit(bullet, function(){
+								KDBulletHitPlayer(bullet, KinkyDungeonPlayerEntity);
+							});
+							globalThis.__kdSlotSwapTo(current);
+							return;
+						}
+					}
+					return _kdbhe.apply(this, arguments);
+				};
+				kdbheWrapped.__kdTurnModelWrapped = true;
+				KDBulletHitEnemy = kdbheWrapped;
+			}
+
+			// THE SLOT SWITCH. Resolve each real enemy's human (sticky, else nearest by LIVE position —
+			// the apply owner's position is read off the slot itself since their own move this tick may
+			// not be captured to their avatar yet; everyone else's is read off their avatar, already
+			// final from their own earlier apply this round).
+			// STICKY IS AN ANTI-FLICKER PREFERENCE FOR AN ACTIVELY ENGAGED ENEMY, NOT A PERMANENT
+			// LOCK FOR ANY ENEMY. _updateStickyTargets (swap-session.js) just persists whatever this
+			// function decides, round after round. Returning the sticky value whenever its distance
+			// was merely TIED with (or close to) the true nearest human -- tried first -- still locked
+			// an enemy onto whichever human won the very first round's tie-break forever in this
+			// codebase's own co-op spawn (players start ADJACENT, one tile apart --
+			// tests/e2e/helpers/coop.ts): with A and B one tile apart, EVERY free tile in a 6-10 tile
+			// ring around either one of them ties in Chebyshev distance to both (measured: 45 of 45
+			// candidate tiles around A also tied exactly with B's own distance) -- so any tie-honoring
+			// rule reduces to "whichever human the FIRST round's tie-break happened to favour, forever",
+			// exactly the original bug's symptom. That is why the noise-ripple e2e repro
+			// (mp-presentation-once.spec.ts) could cycle an idle, non-chasing Rat through 24 spots near
+			// A and still deliver zero ripples to A.
+			//
+			// The actual distinction the doc comment's "sticky current target" always meant is REAL
+			// engagement, not a cached distance comparison: enemy.aware is KD's own flag for "this
+			// enemy is actively tracking/chasing a target", set by the same per-enemy AI loop that
+			// calls this chooser (KinkyDungeonEnemies.ts). An AWARE enemy mid-chase must not ping-pong
+			// targets just because a human one tile closer briefly edges it out -- that is the real
+			// flicker this mechanism exists to prevent, and ties never arise there because the chasing
+			// enemy's own position converges toward its target over the chase, not a static ring around
+			// a human who never moves. An ambient/idle (!enemy.aware) enemy -- ANY out-of-sight noise,
+			// including this ring-of-ties case -- has no engagement to protect, so it always uses the
+			// freshly computed nearest human (natural tie-break: whichever human is first in this
+			// round's own roster order, which genuinely varies round to round with the turn shuffle).
+			globalThis.__kdSlotChoose = function(enemy){
+				// A recruited companion/ally always engages its OWNER, never whichever human it
+				// happens to stand closest to -- checked before the sticky/nearest fallback below,
+				// which exist only for real hostile enemies that have no owner at all.
+				var owner = (globalThis.__kdSlotOwner || {})[enemy.id];
+				if (owner) return owner;
+				var humans = globalThis.__kdSlotHumans || [];
+				var best = null, bestDist = Infinity;
+				for (var i = 0; i < humans.length; i++) {
+					var h = humans[i], x, y;
+					if (h.cid === globalThis.__kdSlotHost) { x = KinkyDungeonPlayerEntity.x; y = KinkyDungeonPlayerEntity.y; }
+					else {
+						var av = KDMapData.Entities.find(function(en){ return en.id === h.avatarId; });
+						if (!av) continue;
+						x = av.x; y = av.y;
+					}
+					var d = Math.max(Math.abs(enemy.x - x), Math.abs(enemy.y - y));
+					if (d < bestDist) { bestDist = d; best = h.cid; }
+				}
+				var fallback = best || (humans[0] && humans[0].cid) || null;
+				if (enemy.aware) {
+					var sticky = globalThis.__kdStickyTarget || {};
+					var want = sticky[enemy.id];
+					if (want && humans.some(function(h){ return h.cid === want; })) return want;
+				}
+				return fallback;
+			};
+
+			var _np = KinkyDungeonNearestPlayer;
+			if (!_np.__kdTurnModelWrapped) {
+				var npWrapped = function(enemy){
+					if (globalThis.__kdSlotSwitch && arguments.length >= 5 && enemy && enemy.Enemy
+						&& (globalThis.__kdSlotAvatarIds || []).indexOf(enemy.id) < 0) {
+						var want = globalThis.__kdSlotChoiceLog[enemy.id] || globalThis.__kdSlotChoose(enemy);
+						globalThis.__kdSlotChoiceLog[enemy.id] = want;
+						if (want && want !== globalThis.__kdSlotCurrent) globalThis.__kdSlotSwapTo(want);
+					}
+					return _np.apply(this, arguments);
+				};
+				npWrapped.__kdTurnModelWrapped = true;
+				KinkyDungeonNearestPlayer = npWrapped;
+			}
+
+			// Regroup entities (stable sort by chosen human) before each real pass, and mute/hand the
+			// slot back to the apply's own player when the pass returns. This is the one WORLD_FNS-style
+			// entry NOT in the generic list above because it needs the grouping + hand-back, not a plain
+			// no-op.
+			//
+			// This function is ALSO called twice per real tick with different Allied values
+			// (KinkyDungeonGame.ts:3596/3607) and interleaves PLAYER-ONLY pre/post work with its per-
+			// enemy world loops (turn-classification.js's own citation,
+			// KinkyDungeonEnemies.ts:4305-4341): wholesale-muting the whole call (as below) silently
+			// dropped that player-only half for every apply but the round's host. Replicated here, one
+			// call each, by calling the SAME smaller functions/statements the engine itself uses for
+			// that step — never a copy of unrelated per-enemy logic, which stays muted (it is already
+			// routed once-per-round by the slot switch above):
+			//   Allied===true  -> KinkyDungeonUpdateDialogue(KinkyDungeonPlayerEntity, maindelta), the
+			//                     acting player's own dialogue-duration decay (KinkyDungeonEnemies.ts:4306).
+			//                     The enemy loop's OWN dialogue ticks + summon decay a few lines below
+			//                     stay muted — per-enemy world state, already once-per-round correct.
+			//   Allied===false -> the acting player's own leashed-to-jail countdown + nearby jail-door
+			//                     auto-unlock (KinkyDungeonEnemies.ts:4321-4336): KDGameData.
+			//                     KinkyDungeonLeashedPlayer is per-player (not in KDGAMEDATA_WORLD_KEYS).
+			//                     KinkyDungeonTorsoGrabCD, the other statement in the SAME "else" branch,
+			//                     is a bare world counter (no entity at all) and stays muted — it must
+			//                     decay once per ROUND, not once per player.
+			var _ue = KinkyDungeonUpdateEnemies;
+			if (!_ue.__kdTurnModelWrapped) {
+				var ueWrapped = function(maindelta, Allied){
+					if (globalThis.__kdWorldMuted && globalThis.__kdInTick > 0) {
+						// NESTED TICKS: this is the engine's FIRST per-round world call (allied pass fires
+						// before the hostile one) — the designated hand-off point. A non-last apply arms
+						// exactly one nested-dispatch callback (setNestedDispatchCallback's caller) before
+						// its own applyInputObserved; firing it here, before this apply's own post-enemy
+						// tail runs below, hands control to the NEXT player's own apply — recursively, down
+						// to the round's one real (unmuted) tick — so that tail (KinkyDungeonUpdateStats,
+						// HandleMoveToTile, delayed actions, flags, ...) sees the round's FINAL, post-world
+						// state once control returns, the same order single-player already guarantees for
+						// the host. Taken and cleared immediately (one-shot: never fires twice for one
+						// apply, and a 1-player round or the round's own last apply never arms it at all).
+						// __kdWorldMuted is saved/restored around the call because the nested chain's own
+						// setWorldMuted calls (for players further down the round) overwrite the single
+						// shared flag — this apply's OWN remaining muted work (below, and the WORLD_FNS
+						// no-ops still to come this call) needs ITS OWN value back, not whatever the
+						// innermost apply left behind.
+						if (Allied && typeof globalThis.__kdNestedDispatch === 'function') {
+							var nestedFn = globalThis.__kdNestedDispatch;
+							globalThis.__kdNestedDispatch = null;
+							var mutedForMe = globalThis.__kdWorldMuted;
+							nestedFn();
+							globalThis.__kdWorldMuted = mutedForMe;
+						}
+						if (Allied) {
+							KinkyDungeonUpdateDialogue(KinkyDungeonPlayerEntity, maindelta);
+						} else if (KDGameData.KinkyDungeonLeashedPlayer > 0) {
+							KDGameData.KinkyDungeonLeashedPlayer -= 1;
+							var nearestJail = KinkyDungeonNearestJailPoint(KinkyDungeonPlayerEntity.x, KinkyDungeonPlayerEntity.y);
+							if (nearestJail) {
+								var jaildoor = KDGetJailDoor(nearestJail.x, nearestJail.y).tile;
+								if (jaildoor && jaildoor.Lock && jaildoor.Type == "Door" && KDShouldUnLock(nearestJail.x, nearestJail.y, jaildoor)) {
+									jaildoor.OGLock = jaildoor.Lock;
+									if (jaildoor.LockSeen) jaildoor.LockSeen = jaildoor.Lock;
+									jaildoor.Lock = undefined;
+								}
+							}
+						}
+						return undefined;
+					}
+					if (globalThis.__kdSlotSwitch) {
+						var humans = globalThis.__kdSlotHumans || [];
+						var rank = {};
+						for (var i = 0; i < humans.length; i++) rank[humans[i].cid] = i;
+						var avatarIds = globalThis.__kdSlotAvatarIds || [];
+						var idx = new Map();
+						KDMapData.Entities.forEach(function(e, i){
+							idx.set(e, i);
+							if (avatarIds.indexOf(e.id) < 0 && e.Enemy) {
+								var want = globalThis.__kdSlotChoiceLog[e.id] || globalThis.__kdSlotChoose(e);
+								globalThis.__kdSlotChoiceLog[e.id] = want;
+							}
+						});
+						KDMapData.Entities.sort(function(a, b){
+							var ra = rank[globalThis.__kdSlotChoiceLog[a.id]]; if (ra === undefined) ra = -1;
+							var rb = rank[globalThis.__kdSlotChoiceLog[b.id]]; if (rb === undefined) rb = -1;
+							return (ra - rb) || (idx.get(a) - idx.get(b));
+						});
+					}
+					var r = _ue.apply(this, arguments);
+					if (globalThis.__kdSlotSwitch && globalThis.__kdSlotCurrent !== globalThis.__kdSlotHost) {
+						globalThis.__kdSlotSwapTo(globalThis.__kdSlotHost);
+					}
+					return r;
+				};
+				ueWrapped.__kdTurnModelWrapped = true;
+				KinkyDungeonUpdateEnemies = ueWrapped;
+			}
+
+			// THE DEFEAT ROUTE. KDRunDefeatForEnemy finalises a defeat with whoever currently
+			// holds the slot — called from the end of THIS pass (KinkyDungeonEnemies.ts:5070,
+			// still inside _ue.apply above, before the hand-back-to-host two lines up runs) and
+			// again as a backstop at the very end of KinkyDungeonAdvanceTime itself
+			// (KinkyDungeonGame.ts:3636). Once the per-enemy loop has moved on to a LATER group
+			// (a different human), the slot is no longer necessarily the one the DEFEATING enemy
+			// faced. KDCustomDefeatEnemy always names that enemy (set the instant its ret.defeat
+			// came back true; cleared only once KDRunDefeatForEnemy itself runs), so this swaps the
+			// slot to that enemy's own choice-log entry — the SAME decision already made for it this
+			// pass, never re-decided — before calling through. A defeat caused by the round's host
+			// is already on the right human by construction (the host's own group is always
+			// processed last), so this is a no-op swap in that case.
+			var _rdfe = (typeof KDRunDefeatForEnemy === 'function') ? KDRunDefeatForEnemy : null;
+			if (_rdfe && !_rdfe.__kdTurnModelWrapped) {
+				var rdfeWrapped = function(){
+					if (globalThis.__kdSlotSwitch) {
+						var enemy = KDCustomDefeatEnemy;
+						if (enemy) {
+							var want = globalThis.__kdSlotChoiceLog[enemy.id] || globalThis.__kdSlotChoose(enemy);
+							globalThis.__kdSlotChoiceLog[enemy.id] = want;
+							if (want && want !== globalThis.__kdSlotCurrent) globalThis.__kdSlotSwapTo(want);
+						}
+					}
+					return _rdfe.apply(this, arguments);
+				};
+				rdfeWrapped.__kdTurnModelWrapped = true;
+				KDRunDefeatForEnemy = rdfeWrapped;
+			}
+			return true;
+		})()`);
+	}
+
+	/**
+	 * Register the host's own slot-swap logic (`SwapSession._slotSwapTo`) as the function the engine
+	 * calls back into, synchronously, from inside `KinkyDungeonNearestPlayer`'s wrapper above. This is
+	 * a real cross-realm function reference (not `eval`'d text), set directly on the vm context —
+	 * the same mechanism the investigation probe used (`world._context.__kdProbeSwapTo`).
+	 */
+	setSlotSwapCallback(fn) {
+		this._context.__kdSlotSwapTo = fn;
+	}
+
+	/**
+	 * Arm the ONE-SHOT nested-dispatch hook (nested ticks): `fn` is called synchronously, at most once,
+	 * from inside `installTurnModel`'s `KinkyDungeonUpdateEnemies` wrap, the moment THIS apply's own
+	 * `KinkyDungeonAdvanceTime` call reaches the round's first per-round world call. The caller is
+	 * expected to set this fresh before every non-last apply's own dispatch (`SwapSession._advanceTurn`)
+	 * — a real cross-realm function reference, same mechanism as `setSlotSwapCallback`, not `eval`'d
+	 * text. Reading it back as `null`/`undefined` (never armed, or already consumed) is how the engine
+	 * wrap knows not to fire — see that wrap's own doc comment for why it is taken-and-cleared rather
+	 * than a boolean flag.
+	 */
+	setNestedDispatchCallback(fn) {
+		this._context.__kdNestedDispatch = fn;
+	}
+
+	/** Mute (or unmute) every `WORLD_MUTE_FNS` system for the NEXT `KinkyDungeonAdvanceTime` call. */
+	setWorldMuted(muted) {
+		this.eval(`globalThis.__kdWorldMuted = ${!!muted};`);
+	}
+
+	/**
+	 * Arm the per-enemy slot switch for the round's one unmuted `KinkyDungeonUpdateEnemies` call(s).
+	 * `hostCid` is the apply's own player (who the slot is handed back to); `roster` is
+	 * `[{cid, avatarId}]` for every joined player; `stickyTarget` is `{enemyId: clientId}` for enemies
+	 * with a persisted current target that is still joined — `installTurnModel`'s chooser falls back
+	 * to nearest-by-live-position for everything else.
+	 */
+	armSlotSwitch(hostCid, roster, stickyTarget, companionOwners) {
+		this._context.__kdSlotHost = hostCid;
+		this._context.__kdSlotCurrent = hostCid;
+		this._context.__kdSlotHumans = roster;
+		this._context.__kdSlotAvatarIds = roster.map((h) => h.avatarId).filter((id) => id != null);
+		this._context.__kdStickyTarget = stickyTarget || {};
+		// A companion's owner is not a preference, it is the rule — checked before sticky/nearest in
+		// `__kdSlotChoose` below.
+		this._context.__kdSlotOwner = companionOwners || {};
+		this._context.__kdSlotChoiceLog = {};
+		this._context.__kdSlotSwitch = true;
+	}
+
+	/** Disarm the slot switch. Always call after the round's one unmuted dispatch, win or throw. */
+	disarmSlotSwitch() {
+		this._context.__kdSlotSwitch = false;
+	}
+
+	/** Who the engine-side switch currently believes holds the slot (defensive read-back). */
+	slotCurrent() {
+		return this.eval('globalThis.__kdSlotCurrent');
+	}
+
+	/** Tell the engine-side switch who now holds the slot — `SwapSession._slotSwapTo` calls this
+	 *  every time it actually moves the slot, so the two sides of the switch never disagree. */
+	setSlotCurrent(cid) {
+		this._context.__kdSlotCurrent = cid;
+	}
+
+	/**
+	 * Stamp any newly-created, not-yet-owned `followPlayer` bullet with `cid` — the clientId of the
+	 * apply that is finishing right now. Every human is id -1 on the slot, so a bullet's own
+	 * `bullet.source` (an entity id) cannot tell which human cast it; this is the owner tag the
+	 * `KinkyDungeonUpdateBullets` wrap (`installTurnModel`) reads to correct a followPlayer bullet to
+	 * its OWN owner's avatar position instead of the slot occupant's. Deliberately NOT a property on
+	 * the bullet object (would diverge a 1-player session's KDMapData.Bullets from a reference run —
+	 * see GLOBAL_BLACKLIST's `__kdBulletOwner` note); call this after EVERY apply, muted or not — a
+	 * player's own cast runs through their own real dispatch regardless of the world-mute state.
+	 */
+	tagOwnedBullets(cid) {
+		this.eval(`(function(){
+			var owners = globalThis.__kdBulletOwner || (globalThis.__kdBulletOwner = {});
+			(KDMapData.Bullets || []).forEach(function(b){
+				if (b.bullet && b.bullet.followPlayer && b.bullet.faction === 'Player' && owners[b.spriteID] == null) {
+					owners[b.spriteID] = ${JSON.stringify(cid)};
+				}
+			});
+			return true;
+		})()`);
+	}
+
+	/**
+	 * Tag any newly-leashed enemy (`leash.entity === -1`, the generic "tethered to the player" marker
+	 * — KDTethers.ts:203-210) as owned by `cid`, the SAME "first touch wins" shape as `tagOwnedBullets`:
+	 * a leash with no owner yet was created by THIS apply's own real dispatch (grabs/binds only ever
+	 * happen through the acting player's own pipeline), so whoever is applying right now is its owner.
+	 * `installTurnModel`'s `KinkyDungeonUpdateTether` wrap reads this to swap the right human into the
+	 * slot for the round's one real tether tick. Prunes entries whose leash no longer exists, same as
+	 * `tagOwnedBullets` prunes bullets — call this after EVERY apply, muted or not.
+	 */
+	tagOwnedTethers(cid) {
+		this.eval(`(function(){
+			var owners = globalThis.__kdTetherOwner || (globalThis.__kdTetherOwner = {});
+			var seen = {};
+			(KDMapData.Entities || []).forEach(function(e){
+				if (e.leash && e.leash.entity === -1) {
+					seen[e.id] = true;
+					if (owners[e.id] == null) owners[e.id] = ${JSON.stringify(cid)};
+				}
+			});
+			Object.keys(owners).forEach(function(k){ if (!seen[k]) delete owners[k]; });
+			return true;
+		})()`);
+	}
+
+	/** Which human each real enemy was decided for this call — for the caller to persist as the next
+	 *  round's sticky target. `{}` if the switch never armed (nothing decided). */
+	slotChoiceLog() {
+		return this.eval('globalThis.__kdSlotChoiceLog') || {};
+	}
+
+	/**
 	 * Mirror a peer's own defensive stats onto their stand-in, so KD evaluates an incoming
 	 * PvP attack against the REAL defender's build.
 	 *
@@ -2524,6 +3695,11 @@ class HeadlessHost {
 				// terminate the payload (see reference: backtick-in-template-literal, 3rd recurrence).
 				delete e.faction;
 				delete e.ceasefire;
+				// KDMakeHostile (the "on" branch above) records the pre-hostile faction as
+				// factionorig so other engine rules can still tell a turned ally apart from a real
+				// enemy. Leaving it standing after a truce is a residual-memory leak for a companion
+				// that was never a real enemy to begin with -- drop it so nothing is left to read.
+				delete e.factionorig;
 			}
 			return { hostile: e.hostile || 0, rage: e.rage || 0,
 				faction: (typeof KDGetFaction === 'function') ? KDGetFaction(e) : e.faction };
@@ -2677,7 +3853,7 @@ class HeadlessHost {
 			// evaluates the gate — never saw the state the server had computed, so no server-side fix
 			// could ever take effect. The old code hid this by stamping ent.stun onto the snapshot AFTER
 			// serialisation, bypassing this list; with the stamping gone the omission became visible.
-			var ENT_FIELDS = ['id','x','y','visual_x','visual_y','offX','offY','scaleX','scaleY','flip','hp','visual_hp','boundLevel','specialBoundLevel','stun','freeze','vulnerable','distraction','revealed','player','CustomSprite','CustomName','CustomNameColor','style','outfit','outfitBound'];
+			var ENT_FIELDS = ['id','x','y','visual_x','visual_y','offX','offY','scaleX','scaleY','flip','hp','visual_hp','boundLevel','specialBoundLevel','stun','freeze','vulnerable','distraction','revealed','player','CustomSprite','CustomName','CustomNameColor','style','outfit','outfitBound','appearance'];
 			function entSnap(e){
 				var o = {};
 				for (var i=0;i<ENT_FIELDS.length;i++){ var k=ENT_FIELDS[i]; if (e[k] !== undefined) o[k] = e[k]; }
@@ -3352,10 +4528,13 @@ class HeadlessHost {
 	 *
 	 *   globals  — everything that DIVERGED from the post-init baseline, minus a category blacklist
 	 *              (world / render / audio). New state, including a mod's, is carried without being named.
-	 *   gameData — KDGameData whole, minus KDGAMEDATA_WORLD_KEYS on restore. Its own path
-	 *              because no mechanical rule can split per-player Guilt from world GuardSpawnTimer,
-	 *              and because at 27 KB it is over the divergence path's size threshold. This is the
-	 *              epic's one declared, bounded exception — not a whitelist reintroduced.
+	 *   gameData — KDGameData whole, minus KDGAMEDATA_RESTORE_SKIP_KEYS on restore (the genuinely
+	 *              shared KDGAMEDATA_WORLD_KEYS plus the pass-scoped accumulators that must survive a
+	 *              mid-pass swap without being genuinely shared — see KDGAMEDATA_PASS_SCOPED_KEYS).
+	 *              Its own path because no mechanical rule can split per-player Guilt from world
+	 *              GuardSpawnTimer, and because at 27 KB it is over the divergence path's size
+	 *              threshold. This is the epic's one declared, bounded exception — not a whitelist
+	 *              reintroduced.
 	 */
 	capturePlayer() {
 		return {
@@ -3378,13 +4557,14 @@ class HeadlessHost {
 		this._context.__KD_PB = bundle;
 		return this.eval(`(function(){
 			var b = globalThis.__KD_PB; if (!b) return false;
-			// Restore every captured KDGameData key EXCEPT the world-scoped ones.
-			// Inverted from a 12-key allow-list; see capturePlayer and KDGAMEDATA_WORLD_KEYS.
+			// Restore every captured KDGameData key EXCEPT the world-scoped and pass-scoped ones.
+			// Inverted from a 12-key allow-list; see capturePlayer, KDGAMEDATA_WORLD_KEYS and
+			// KDGAMEDATA_PASS_SCOPED_KEYS.
 			if (b.gameData && typeof KDGameData !== 'undefined') {
-				var __world = ${JSON.stringify(KDGAMEDATA_WORLD_KEYS)};
+				var __world = ${JSON.stringify(KDGAMEDATA_RESTORE_SKIP_KEYS)};
 				for (var gk in b.gameData) {
 					if (b.gameData[gk] === undefined) continue;
-					if (__world.indexOf(gk) >= 0) continue;   // shared floor/world state — leave the world's
+					if (__world.indexOf(gk) >= 0) continue;   // shared floor/world or pass-scoped state — leave the world's
 					KDGameData[gk] = b.gameData[gk];
 				}
 			}
@@ -3640,7 +4820,7 @@ class HeadlessHost {
 
 module.exports = {
 	HeadlessHost, loadSources, REPO_ROOT, BUNDLE_PATH,
-	WORLD_KEYS, KDGAMEDATA_WORLD_KEYS,
+	WORLD_KEYS, KDGAMEDATA_WORLD_KEYS, KDGAMEDATA_PASS_SCOPED_KEYS, KDGAMEDATA_RESTORE_SKIP_KEYS,
 	// Re-exported so callers have ONE import for "what does the world own".
 	MODE_WORLD_KEYS, MODE_PLAYER_KEYS,
 	deriveBundleGlobals, GLOBAL_BLACKLIST, WORLD_GLOBALS_CLIENT, MIN_EXPECTED_GLOBALS, HOST_RESERVED,

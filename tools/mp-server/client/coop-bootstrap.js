@@ -1600,9 +1600,18 @@
 				// it and touch NO bookkeeping: `_sentRoute` / `_inFlight` track replies to inputs WE
 				// sent, and unwinding a slot here would free one that no reply ever filled. Nor is it a
 				// turn: `lastTick`, `submitted` and the route are all left exactly as they were.
-				var pushSnap = resolveState(m);
-				if (pushSnap) window.KDRenderClient.apply(pushSnap);
+				// `pinGameScreen()` BEFORE `apply()`: on the very first state frame it is what calls
+				// `forceGameScreen()` -> `KinkyDungeonStartNewGame(false)`, a LOCAL, wholesale reset of
+				// `KDGameData` (fresh defaults — no `SpeciesChecker` listener, `Restriction` back to 0,
+				// a freshly-rolled `MaidKnightFloor`). Applying the bundle first and resetting after threw
+				// the just-adopted server values away, and `adoptBundle`'s own skip-if-unchanged cache
+				// (`_lastAdoptedGameData`, render-client.js) then believed those keys were already correct
+				// and never re-sent them — so a key the server never changes again (true of all three above
+				// across a round) stayed wrong for the rest of the session. Reset first, adopt last, so the
+				// bundle is always the final, authoritative write and the cache is primed on the right value.
+				var pushSnap = resolveState(m);   // sets `coop.screen` BEFORE pinGameScreen reads it
 				pinGameScreen();
+				if (pushSnap) window.KDRenderClient.apply(pushSnap);
 			}
 			else if (m.type === 'state' && m.kind === 'ui') {
 				// A UI input of OURS was applied — no turn resolved. Adopt the fresh state so
@@ -1614,8 +1623,11 @@
 				// The per-frame path now carries a delta; resolve it against our copy. A null
 				// means we asked for a resync — apply nothing rather than render a half-merged state.
 				var uiSnap = resolveState(m);
-				if (uiSnap) window.KDRenderClient.apply(uiSnap);
+				// `pinGameScreen()` before `apply()` — see the push branch above for why: on the first
+				// state frame it resets `KDGameData` wholesale, and that reset must land BEFORE the
+				// bundle, not after, or the server's own values are the ones discarded.
 				pinGameScreen();
+				if (uiSnap) window.KDRenderClient.apply(uiSnap);
 			}
 			else if (m.type === 'state') {
 				coop.started = true;
@@ -1651,6 +1663,10 @@
 				var turnSnap = resolveState(m);
 				if (!turnSnap) return;             // resync requested — do not render a partial state
 				coop._lastSnapshot = turnSnap;     // kept so a test can re-apply it verbatim
+				// `pinGameScreen()` before `apply()` — see the push branch above for why: on the first
+				// state frame it resets `KDGameData` wholesale, and that reset must land BEFORE the
+				// bundle, not after, or the server's own values are the ones discarded.
+				pinGameScreen();
 				window.KDRenderClient.apply(turnSnap);
 				// Seed the server-configured carryable restraint item once (the Items inventory
 				// is client-local, so it must be added here even though the server bundle already has it).
@@ -1660,7 +1676,8 @@
 					addStartItem(turnSnap.startItem);
 					coop._startItemAdded = true;
 				}
-				pinGameScreen();   // keep the dungeon on screen (don't let the menu steal it)
+				// (`pinGameScreen()` already ran above, before `apply()` — keeps the dungeon on screen
+				// without a second, redundant call.)
 				if (coop.route) stepRoute();   // advance a click-to-move route by one tile this turn
 				setStatus('Co-op ' + id + '  turn ' + m.tick + controlHint());
 			} else if (m.type === 'waiting') {
