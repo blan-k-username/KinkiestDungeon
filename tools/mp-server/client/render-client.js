@@ -731,6 +731,44 @@
 	 */
 	var _lastAdoptedGameData = {};
 
+	/**
+	 * Bullet SPRITES. KD draws a bullet only from `KinkyDungeonBulletsVisual`
+	 * (`Game/src/fight/KinkyDungeonFight.ts:53`), a module-scope Map the snapshot does not carry, and
+	 * the only writer of it is the turn simulation (`KinkyDungeonUpdateSingleBulletVisual`, from
+	 * launch / update / hit), which this client does not run. Without this, every projectile and spell
+	 * is in the adopted `KDMapData.Bullets` and never on screen.
+	 *
+	 * Mirrors KD's own per-tick order, through KD's own functions:
+	 *   1. every bullet of the adopted map is registered (`end` false). KD's function KEEPS an existing
+	 *      entry's scale / alpha / visual position, so a UI-only reply restarts nothing;
+	 *   2. a bullet the world has dropped is handed to KD's fade-out (`end`), ONCE — re-marking it
+	 *      `updated` on every reply would keep KD's housekeeping from ever deleting it;
+	 *   3. on a NEW TURN only (the snapshot's tick moved), KD's per-tick housekeeping
+	 *      `KinkyDungeonUpdateBulletVisuals` clears `updated` and deletes what has faded.
+	 */
+	var _lastBulletTick;
+	function syncBulletVisuals(tick) {
+		if (typeof KinkyDungeonBulletsVisual === 'undefined' || !KinkyDungeonBulletsVisual
+			|| typeof KinkyDungeonUpdateSingleBulletVisual !== 'function') return;
+		var live = {};
+		var bs = (KDMapData && Array.isArray(KDMapData.Bullets)) ? KDMapData.Bullets : [];
+		for (var i = 0; i < bs.length; i++) {
+			var b = bs[i];
+			if (!b || !b.spriteID || !b.bullet) continue;
+			live[b.spriteID] = 1;
+			try { KinkyDungeonUpdateSingleBulletVisual(b, false); } catch (e) { /* one bad bullet must not stop the frame */ }
+		}
+		KinkyDungeonBulletsVisual.forEach(function (v, id) {
+			if (!live[id] && v && !v.end) { v.end = true; v.updated = true; }
+		});
+		if (tick !== undefined && tick !== _lastBulletTick) {
+			if (_lastBulletTick !== undefined && typeof KinkyDungeonUpdateBulletVisuals === 'function') {
+				try { KinkyDungeonUpdateBulletVisuals(1); } catch (e) { /* housekeeping only */ }
+			}
+			_lastBulletTick = tick;
+		}
+	}
+
 	var _adoptVal;                       // transfer slot for the direct eval below
 	var _kdDec = null;                   // memoised codec decoder (window.KDCodec loads later)
 
@@ -1010,6 +1048,7 @@
 			// carry their full Enemy defs in the clone, so no def re-link is needed.
 			// Vision/light (KDMapExtraData) is recomputed locally (pinGameScreen flags it).
 			if (s.map) KDMapData = s.map;
+			if (s.map) syncBulletVisuals(s.tick);
 			// Register/re-link a real def for each peer's unique name so the draw path
 			// (KDEnemyRank → .tags) doesn't crash on the renamed/JSON-mangled avatar Enemy.
 			if (KDMapData && Array.isArray(KDMapData.Entities)) ensureAvatarDefsFor(KDMapData.Entities);
