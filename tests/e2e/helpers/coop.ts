@@ -681,9 +681,17 @@ export interface CoopContextMenu {
  *
  * The option callbacks are stashed on `window.__coopMenu` so `pickMenuOption` can invoke one exactly
  * as a click would.
+ *
+ * `'self'` aims at the player's OWN tile, read in the SAME task that builds the menu. Reading
+ * `KDPlayer()` in one evaluate and building in the next is a race: a state frame landing in between
+ * (the page entering the co-op game, a correction) moves the player, the menu is built on an EMPTY
+ * tile — KD's `Wait,Special` without `Inventory` — and the own-tile entries read as missing. `aimed`
+ * still equals `at`, because both are the stale tile, so that precondition cannot catch it.
  */
-export async function contextMenuAt(P: Page, tile: { x: number; y: number }): Promise<CoopContextMenu> {
-	const menu = await P.evaluate((t: { x: number; y: number }) => {
+export async function contextMenuAt(P: Page, tile: { x: number; y: number } | 'self'): Promise<CoopContextMenu> {
+	const menu = await P.evaluate((asked: { x: number; y: number } | 'self') => {
+		// @ts-ignore bare let-global
+		const t = asked === 'self' ? { x: KDPlayer().x, y: KDPlayer().y } : asked;
 		// @ts-ignore bare let-globals — these are bundle `let`s, not properties of window
 		const grid = KinkyDungeonGridSizeDisplay;
 		// @ts-ignore

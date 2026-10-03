@@ -27,12 +27,8 @@ const { start } = require('../../tools/mp-server/demo-server');
  * belong on a shared primitive.
  */
 async function ownMenu(P: any) {
-	const me = await P.evaluate(() => {
-		// @ts-ignore bare let-global
-		const p = KDPlayer();
-		return { x: p.x, y: p.y };
-	});
-	const menu = await contextMenuAt(P, me);
+	// 'self': the player's tile is read in the same task that builds the menu (see contextMenuAt).
+	const menu = await contextMenuAt(P, 'self');
 	const wrapped = await P.evaluate(() =>
 		// @ts-ignore — the peace entries are added by a cooperative wrap AROUND KDGetContextActions.Game,
 		// so `KDGetGameContextActionsVanilla` never sees them. (Measured: vanilla returned

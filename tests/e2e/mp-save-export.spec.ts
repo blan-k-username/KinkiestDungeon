@@ -27,7 +27,7 @@
  *     happened to contain a run".
  */
 import { test, expect } from '@playwright/test';
-import { press, openLobby, settle, guestJoinsAndIsAccepted } from '../helpers/mp-lobby';
+import { press, openLobby, settle, guestJoinsAndIsAccepted, enteredCoop } from '../helpers/mp-lobby';
 import { contextMenuAt } from './helpers/coop';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
@@ -46,15 +46,11 @@ const SAVE_RUN = 'CoopSaveRun';
  * coordinates straight in, so the gate was false and the entry was reported missing while being
  * perfectly present. That is the fourth spec to need these eight lines, and precisely why the helper
  * exists; `aimed` vs `at` is asserted below so a future miscalculation fails as a precondition
- * instead of as a missing feature.
+ * instead of as a missing feature. `'self'` reads the player's tile in the same task that builds the
+ * menu; a separate read is a race that `aimed` vs `at` cannot see (both would be the stale tile).
  */
 async function ownMenu(P: any) {
-	const me = await P.evaluate(() => {
-		// @ts-ignore bare let-global
-		const p = KDPlayer();
-		return { x: p.x, y: p.y };
-	});
-	return contextMenuAt(P, me);
+	return contextMenuAt(P, 'self');
 }
 
 /** The pre-co-op single-player run's marker — what the slot holds BEFORE any export. */
@@ -170,6 +166,14 @@ test.describe('leave co-op and continue the run alone', () => {
 			await settle(host);
 			await press(host, 'KDMPHost');
 			await guestJoinsAndIsAccepted(host, guest, port, bridge);
+			/*
+			 * The host must be PLAYING the co-op session before its menu means anything. "Seated" is a
+			 * server fact and lands first: measured, at that moment the host page still had
+			 * `_entered: false` and sat on the lobby screen, so the menu was built on the pre-co-op
+			 * run, and whether the entry then moved the player under it was luck — the flake that
+			 * reported "menu had: Wait,Special", KD's menu for an EMPTY tile.
+			 */
+			await enteredCoop(host);
 
 			const hostId = markHost(bridge, COOP_GOLD);
 			// The residue this feature has to remove is genuinely present at export time.
@@ -241,6 +245,9 @@ test.describe('leave co-op and continue the run alone', () => {
 			await settle(host);
 			await press(host, 'KDMPHost');
 			await guestJoinsAndIsAccepted(host, guest, port, bridge);
+			// As in the test above — and it matters here too: the window below must watch a host that
+			// is IN the co-op game, not one still on the lobby screen where nothing could write yet.
+			await enteredCoop(host);
 			markHost(bridge, COOP_GOLD);
 
 			// Give the session real time to misbehave before concluding that it did not.
