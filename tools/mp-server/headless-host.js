@@ -595,7 +595,7 @@ const { MODE_WORLD_KEYS, MODE_PLAYER_KEYS, MODE_SOURCE, isModeKey } = require('.
 // The world/player/mixed classification of KinkyDungeonAdvanceTime's and KinkyDungeonUpdateEnemies'
 // own direct callees — the single source of truth `WORLD_MUTE_FNS` (below) is DERIVED from, not a
 // second hand-kept list that could silently disagree with it.
-const { TURN_CALL_CLASSIFICATION } = require('./turn-classification');
+const { TURN_CALL_CLASSIFICATION, PERIODIC_EVENTS } = require('./turn-classification');
 
 /**
  * Entity re-resolution + the dispatch call, shared by applyInput and applyInputObserved.
@@ -770,6 +770,20 @@ const SPLIT_MUTE_FNS = Object.freeze(WORLD_MUTE_CANDIDATES.filter((name) => {
 	}
 	return verdict === 'split';
 }));
+
+/**
+ * The world event dispatchers `installTurnModel` gates by Event CADENCE (`EVENT_CADENCE` /
+ * `PERIODIC_EVENTS` in `turn-classification.js`) instead of muting wholesale. Each must be classified
+ * `split` there — checked at require time, the same way `SPLIT_MUTE_FNS` is, so the table and the wrap
+ * cannot silently disagree.
+ */
+const CADENCE_SPLIT_DISPATCHERS = Object.freeze(['KinkyDungeonSendBulletEvent', 'KinkyDungeonSendEnemyEvent']);
+for (const name of CADENCE_SPLIT_DISPATCHERS) {
+	const v = TURN_CALL_CLASSIFICATION[name] && TURN_CALL_CLASSIFICATION[name].verdict;
+	if (v !== 'split') {
+		throw new Error(`turn-classification.js classifies cadence dispatcher "${name}" as "${v}", not "split"`);
+	}
+}
 
 class HeadlessHost {
 	constructor(opts = {}) {
@@ -2892,11 +2906,9 @@ class HeadlessHost {
 	 * `KinkyDungeonAdvanceTime`/`KinkyDungeonUpdateEnemies` actually has — not a second, independently
 	 * hand-kept list that could silently disagree with it; see its own doc comment for which outer
 	 * systems are even candidates and why a `mixed` verdict excludes one rather than muting it anyway.
-	 * Also deliberately NOT muted (left ticking once per PLAYER-PHASE apply, same as before this
-	 * change, per that table's own `mixed` verdicts): `KinkyDungeonSendEnemyEvent`/
-	 * `KinkyDungeonSendBulletEvent` (mixed player/world event fan-out) and anything bullet-targeting-
-	 * specific (owner-tag + per-avatar collision switch + AOE fan-out). Both are recorded follow-ups,
-	 * not silently dropped.
+	 * `KinkyDungeonSendEnemyEvent`/`KinkyDungeonSendBulletEvent` are not muted wholesale either: they
+	 * are gated by Event CADENCE (`CADENCE_SPLIT_DISPATCHERS`, `EVENT_CADENCE`) — periodic names once
+	 * per round, one-shot names on every apply.
 	 *
 	 * ORDERING: `HeadlessHost.boot()` already reassigns `KinkyDungeonUpdateEnemies` once, permanently
 	 * (`_installServerRoleShim`'s server/player/world role gate, unrelated to the turn model) — this
@@ -2971,6 +2983,21 @@ class HeadlessHost {
 				advWrapped.__kdTurnModelWrapped = true;
 				KinkyDungeonAdvanceTime = advWrapped;
 			}
+
+			// EVENT CADENCE (turn-classification.js EVENT_CADENCE): the world event dispatchers fire a
+			// PERIODIC name (sent by AdvanceTime itself, once per tick) only in the round's one real tick;
+			// a one-shot name (a hit, a cast, a kill) passes through for whichever apply caused it.
+			var PERIODIC = ${JSON.stringify(PERIODIC_EVENTS)};
+			${JSON.stringify(CADENCE_SPLIT_DISPATCHERS)}.forEach(function(name){
+				var prev = eval(name);
+				if (prev.__kdTurnModelWrapped) return;
+				var wrapped = function(Event){
+					if (globalThis.__kdWorldMuted && globalThis.__kdInTick > 0 && PERIODIC.indexOf(Event) >= 0) return undefined;
+					return prev.apply(this, arguments);
+				};
+				wrapped.__kdTurnModelWrapped = true;
+				eval(name + ' = wrapped;');
+			});
 
 			// Per-ENTITY world systems: an NPC's buff decay / tether is world-shared; a human's is not —
 			// muting the whole function would also silence the apply's OWN player, so these two split by

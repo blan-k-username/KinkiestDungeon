@@ -1978,10 +1978,9 @@ class SwapSession {
 	 * wholesale mute used to drop for every apply but the host's; the latter routes the round's one
 	 * real npc-side tether tick to the LEASH'S OWN OWNER (tagged "first touch" by `tagOwnedTethers`,
 	 * called below for every apply, same shape as `tagOwnedBullets`) rather than whoever hosts the
-	 * round. Still tracked as a separate follow-up, not folded into this change:
-	 * `KinkyDungeonSendEnemyEvent`/`SendBulletEvent`'s dispatch is mixed along the triggering Event
-	 * NAME (periodic world-tick vs. a player's own one-shot cast), not the data it reads — see that
-	 * pair's own `turn-classification.js` entries for why a blanket mute would be wrong.
+	 * round. `KinkyDungeonSendEnemyEvent`/`SendBulletEvent` are split by Event CADENCE instead: a
+	 * periodic name (sent by AdvanceTime itself) fires once per round, a one-shot name (a player's own
+	 * cast or hit) on every apply — see `EVENT_CADENCE` in `turn-classification.js`.
 	 */
 	_advanceTurn() {
 		const order = this._shuffle(this._joined.slice());

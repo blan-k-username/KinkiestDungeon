@@ -88,7 +88,7 @@ const ADVANCE_TIME = {
 	KinkyDungeonUpdateBullets:   entry('split', 'per-bullet AOE player-effect check tests only KinkyDungeonPlayerEntity (the slot), while enemy-targeted effects iterate KDMapData.Entities — design doc risk #3 (Game/src/fight/KinkyDungeonFight.ts:2434); followPlayer bullets snap to the slot (Game/src/fight/KinkyDungeonFight.ts:1864). SPLIT: installTurnModel wraps the function — bullet physics (movement/lifetime) runs once per round (muted on every apply but the last); a followPlayer bullet tagged with a non-slot owner (tagOwnedBullets) is corrected to its own owner\'s avatar position after the real call returns; KinkyDungeonPlayerEffect (below) is wrapped separately to replay the AOE player-effect test against every OTHER joined human'),
 	KinkyDungeonUpdateBulletsCollisions: entry('split', 'direct hits branch on entity.player per collided entity (player path vs enemy path) — design doc risk #3 (Game/src/fight/KinkyDungeonFight.ts:2287-2301). SPLIT: installTurnModel mutes the function wholesale on every apply but the round\'s one real tick (bullet/entity collision resolution is world physics, run once per round); the per-entity player/enemy branch inside is closed by a separate, one-level-deeper wrap on KDBulletHitEnemy (NAMED_BY_DESIGN_DOC, below) — see that entry'),
 	KinkyDungeonUpdateEnemies:   entry('split', 'player-only pre/post code (dialogue tick, TorsoGrabCD, leashed-player jail door, alert/hostile-faction distance checks against KinkyDungeonPlayerEntity, KDRunDefeatForEnemy at the end) interleaved with the per-enemy world loops — design doc risk #2 (Game/src/enemy/KinkyDungeonEnemies.ts:4305-4341, 4905-4918, 5070-5072). The per-enemy loops (target choice, defeat routing) already have their own bespoke wraps (KinkyDungeonNearestPlayer/KDRunDefeatForEnemy, below). SPLIT (this task): installTurnModel\'s own KinkyDungeonUpdateEnemies wrap (called twice per real tick with Allied true/false) now also replicates the two PLAYER-only statements the wholesale mute was silently dropping for every apply but the host\'s — KinkyDungeonUpdateDialogue(KinkyDungeonPlayerEntity, maindelta) when Allied, and the KDGameData.KinkyDungeonLeashedPlayer countdown + nearby jail-door auto-unlock when not Allied — by calling the SAME statements the engine itself runs for that step. KinkyDungeonTorsoGrabCD, the other half of the same "else" branch, is a bare world counter (no entity) and correctly stays muted to once per round'),
-	KinkyDungeonSendEvent:       entry('mixed', 'fans out to player dispatchers (magic/weapon/inventory*/buff/outfit) and world ones (bullet/enemy/generic/alt/facility/listener) under one call (Game/src/effect/KinkyDungeonEvents.ts:62-78). Investigated per-dispatcher (see EVENT_DISPATCH below, this task): every child is now independently classified world/player, or — for KinkyDungeonSendBulletEvent/KinkyDungeonSendEnemyEvent — documented as mixed along a DIFFERENT axis (the triggering Event NAME, not the data it reads). KinkyDungeonSendEvent itself is a flat, unconditional dispatcher with no behaviour of its own besides calling its 14 children in sequence, so it needs no wrap of its own once each child is handled correctly — left mixed here only as a label for "composed of both kinds", same precedent as KinkyDungeonUpdateBuffs'),
+	KinkyDungeonSendEvent:       entry('mixed', 'fans out to player dispatchers (magic/weapon/inventory*/buff/outfit) and world ones (bullet/enemy/generic/alt/facility/listener) under one call (Game/src/effect/KinkyDungeonEvents.ts:62-78). Investigated per-dispatcher (see EVENT_DISPATCH below, this task): every child is now independently classified world/player, or — for KinkyDungeonSendBulletEvent/KinkyDungeonSendEnemyEvent — split along a DIFFERENT axis (the triggering Event NAME\'s cadence, EVENT_CADENCE), not the data it reads. KinkyDungeonSendEvent itself is a flat, unconditional dispatcher with no behaviour of its own besides calling its 14 children in sequence, so it needs no wrap of its own once each child is handled correctly — left mixed here only as a label for "composed of both kinds", same precedent as KinkyDungeonUpdateBuffs'),
 
 	// player: player-local work; correctly runs once per player's own apply and must stay that way.
 	KinkyDungeonItemCheck:        entry('player', 'the acting player\'s own item/equip pass — measured once-per-player-correct by the probe (Game/src/item/KinkyDungeonItem.ts:279)'),
@@ -237,26 +237,16 @@ const EVENT_DISPATCH = {
 	KinkyDungeonSendInventoryIconEvent: entry('player', 'player inventory-icon event dispatch (Game/src/effect/KinkyDungeonEvents.ts:67)'),
 	KinkyDungeonSendInventoryEvent:   entry('player', 'player inventory event dispatch (Game/src/effect/KinkyDungeonEvents.ts:68)'),
 	KDSendNPCRestraintEvent:          entry('world', 'NPC-restraint event dispatch, conditional on data.NPCRestraintEvents (Game/src/effect/KinkyDungeonEvents.ts:69-70)'),
-	// KinkyDungeonSendBulletEvent/KinkyDungeonSendEnemyEvent: investigated by reading the bodies (this
-	// task), not guessed. Neither function's OWN body ever reads player-slot state — both are purely
-	// keyed by WORLD entities (KDMapData.Bullets / KDMapData.Entities, already world under criterion
-	// (a)), so by DATA alone each would classify as plain `world`. The real mixing is along a
-	// DIFFERENT axis, confirmed live: `KinkyDungeonSendAltEvent`'s own native "tick" handler
-	// (KDEventMapAlt.tick.PerkRoom, KinkyDungeonEvents.ts:13973-13979) proves the generic "tick" Event
-	// fires through SendEvent on every apply today (never muted), so a periodic world-tick-driven
-	// bullet/enemy event dispatch currently fires once per PLAYER, not once per round — the same bug
-	// shape as the four names already split. But the SAME dispatcher also carries player-ACTION-
-	// triggered Event names (a spell's own "oncast"/"onhit" firing synchronously inside the CASTING
-	// player's one real apply) which MUST keep running on every apply, not be muted to once per round —
-	// wholesale-muting these two names (adding them to WORLD_MUTE_CANDIDATES) would silently drop a
-	// player's own spell/weapon bullet or enemy event the instant it is cast. Correctly splitting this
-	// pair needs enumerating which Event NAME strings are periodic-world-cadence versus per-action
-	// one-shot across the whole codebase — a separate, larger problem than this task's per-FUNCTION
-	// scope; filed as a precise follow-up rather than guessed at; event-cadence split is still open.
-	KinkyDungeonSendBulletEvent:      entry('mixed', 'purely WORLD-keyed by DATA (KDMapData.Bullets), but mixed along the Event-NAME axis instead — a periodic "tick" dispatch must be once-per-round, a player-action-triggered one ("oncast"/"onhit") must run on every apply; see EVENT_DISPATCH\'s own header comment above this entry (Game/src/effect/KinkyDungeonEvents.ts:71)'),
+	// KinkyDungeonSendBulletEvent/KinkyDungeonSendEnemyEvent: neither body reads player-slot state —
+	// both are keyed by WORLD entities (KDMapData.Bullets / KDMapData.Entities) — but they are mixed along
+	// the triggering Event NAME's CADENCE: KinkyDungeonAdvanceTime itself sends a few names once per tick
+	// (periodic: once per ROUND in co-op), while every other name is sent from inside an action (one-shot:
+	// for the player whose apply caused it). SPLIT: installTurnModel wraps both so a PERIODIC_EVENTS name
+	// is a no-op inside a muted apply, and everything else passes through — see EVENT_CADENCE below.
+	KinkyDungeonSendBulletEvent:      entry('split', 'world-keyed by DATA (KDMapData.Bullets), mixed along Event-name cadence — SPLIT by installTurnModel\'s cadence wrap: PERIODIC_EVENTS names fire once per round, one-shot names on every apply (Game/src/fight/KinkyDungeonFight.ts:3651)'),
 	KinkyDungeonSendBuffEvent:        entry('player', 'player buff event dispatch (Game/src/effect/KinkyDungeonEvents.ts:72)'),
 	KinkyDungeonSendOutfitEvent:      entry('player', 'player outfit event dispatch (Game/src/effect/KinkyDungeonEvents.ts:73)'),
-	KinkyDungeonSendEnemyEvent:       entry('mixed', 'purely WORLD-keyed by DATA (KDMapData.Entities), but mixed along the SAME Event-NAME axis as KinkyDungeonSendBulletEvent above — see that entry\'s own reason and the EVENT_DISPATCH header comment (Game/src/effect/KinkyDungeonEvents.ts:74)'),
+	KinkyDungeonSendEnemyEvent:       entry('split', 'world-keyed by DATA (KDMapData.Entities), mixed along the SAME Event-name cadence as KinkyDungeonSendBulletEvent above — SPLIT by the same cadence wrap (Game/src/enemy/KinkyDungeonEnemies.ts:8539)'),
 	// KinkyDungeonHandleGenericEvent/KinkyDungeonHandleListenerEvent: investigated by reading the
 	// bodies (this task), not guessed. Both dispatch purely through their own registries
 	// (KDEventMapGeneric / KDEventMapListener + KDGameData.ListenerIndex/ListenerList), and
@@ -288,6 +278,53 @@ const NAMED_BY_DESIGN_DOC = {
 const TURN_CALL_CLASSIFICATION = Object.freeze(
 	Object.assign({}, ADVANCE_TIME, UPDATE_ENEMIES, EVENT_DISPATCH, NAMED_BY_DESIGN_DOC),
 );
+
+/**
+ * ── EVENT CADENCE (a different axis from the function verdicts above) ────────────────────────────────
+ * Every trigger NAME registered in KDEventMapBullet / KDEventMapEnemy, by how often the engine sends it:
+ *   periodic — sent by KinkyDungeonAdvanceTime ITSELF, once per tick. In co-op every apply runs its own
+ *              AdvanceTime, so these must fire only in the round's one real (unmuted) tick.
+ *   oneshot  — sent from inside an action or a once-per-round world system (a hit, a cast, a kill, the
+ *              bullet pass). Fires for whichever apply caused it; never gated.
+ * `mp-turn-event-cadence.spec.ts` keeps this honest: every live trigger name is classified, and the
+ * periodic set is exactly the names the LIVE KinkyDungeonAdvanceTime body sends. A new upstream name
+ * therefore fails loudly instead of defaulting to either cadence.
+ */
+const EVENT_CADENCE = Object.freeze({
+	tick:              entry('periodic', 'KinkyDungeonSendEvent("tick") inline in KinkyDungeonAdvanceTime (Game/src/base/game/KinkyDungeonGame.ts:3567)'),
+	afterEnemyTick:    entry('periodic', 'sent twice inline in KinkyDungeonAdvanceTime, after the allied and the hostile enemy pass (Game/src/base/game/KinkyDungeonGame.ts:3597, :3608)'),
+	tickAfter:         entry('periodic', 'KinkyDungeonSendEvent("tickAfter") inline in KinkyDungeonAdvanceTime, after the clock increment (Game/src/base/game/KinkyDungeonGame.ts:3724)'),
+	// bullet triggers — sent per bullet from the bullet pass (already once per round) or from a hit
+	bulletTick:        entry('oneshot', 'per bullet, inside KinkyDungeonUpdateBullets — that pass is already once per round (Game/src/fight/KinkyDungeonFight.ts:1880)'),
+	bulletAfterTick:   entry('oneshot', 'per bullet, inside KinkyDungeonUpdateBullets — already once per round (Game/src/fight/KinkyDungeonFight.ts:2032)'),
+	bulletDestroy:     entry('oneshot', 'when one bullet is destroyed (Game/src/fight/KinkyDungeonFight.ts:2021)'),
+	beforeBulletHit:   entry('oneshot', 'one bullet hitting (Game/src/fight/KinkyDungeonFight.ts:2350)'),
+	afterBulletHit:    entry('oneshot', 'one bullet hitting (Game/src/fight/KinkyDungeonFight.ts:2913)'),
+	bulletHitEnemy:    entry('oneshot', 'one bullet hitting one enemy (Game/src/fight/KinkyDungeonFight.ts:3321)'),
+	countRune:         entry('oneshot', 'a rune count query from a spell (Game/src/effect/KinkyDungeonEvents.ts:12987)'),
+	// enemy triggers — all action- or entity-lifecycle-driven
+	orgasm:            entry('oneshot', 'the acting player orgasms (Game/src/player/KinkyDungeonStats.ts:2452)'),
+	enemyMove:         entry('oneshot', 'one enemy moves onto a tile (Game/src/map/KinkyDungeonTiles.ts:634)'),
+	passout:           entry('oneshot', 'the acting player passes out (Game/src/prison/KinkyDungeonJail.ts:1233)'),
+	defeat:            entry('oneshot', 'the acting player is defeated (Game/src/prison/KinkyDungeonJail.ts:1657)'),
+	enemyCast:         entry('oneshot', 'one enemy casts (Game/src/enemy/KinkyDungeonEnemies.ts:7843)'),
+	calcManaPool:      entry('oneshot', 'the acting player\'s own stat recompute (Game/src/player/KinkyDungeonStats.ts:1792)'),
+	kill:              entry('oneshot', 'one enemy dies to an attacker (Game/src/enemy/KinkyDungeonEnemies.ts:3475)'),
+	enemyKnockdown:    entry('oneshot', 'one attack knocks an enemy down (Game/src/fight/KinkyDungeonFight.ts:1391)'),
+	addEntity:         entry('oneshot', 'one entity is added to a map (Game/src/enemy/KinkyDungeonEnemies.ts:10523)'),
+	getLights:         entry('oneshot', 'a lighting query from the draw path (Game/src/base/game/KinkyDungeonDraw.ts:5226)'),
+	getCustomDefeat:   entry('oneshot', 'one enemy resolving a custom defeat (Game/src/enemy/KinkyDungeonEnemies.ts:4787)'),
+	beforeDamage:      entry('oneshot', 'one enemy attack about to deal damage (Game/src/enemy/KinkyDungeonEnemies.ts:7460)'),
+	death:             entry('oneshot', 'one enemy dies (Game/src/enemy/KinkyDungeonEnemies.ts:3362)'),
+	spellCast:         entry('oneshot', 'the acting player casts (Game/src/magic/KinkyDungeonMagic.ts:1594)'),
+	afterDamageEnemy:  entry('oneshot', 'one hit on an enemy resolved (Game/src/fight/KinkyDungeonFight.ts:1452)'),
+	duringDamageEnemy: entry('oneshot', 'one hit on an enemy resolving (Game/src/fight/KinkyDungeonFight.ts:1075)'),
+	afterPlayerAttack: entry('oneshot', 'the acting player\'s own attack (Game/src/fight/KinkyDungeonFight.ts:1797)'),
+	NPCHitNPC:         entry('oneshot', 'one NPC hits another (Game/src/enemy/KinkyDungeonEnemies.ts:7610)'),
+});
+
+/** The names `installTurnModel`'s cadence wrap gates to once per round — derived, never hand-listed. */
+const PERIODIC_EVENTS = Object.freeze(Object.keys(EVENT_CADENCE).filter((n) => EVENT_CADENCE[n].verdict === 'periodic'));
 
 /**
  * ── text-coupled sites that cannot be wrapped (inline statements, not functions) ──
@@ -489,6 +526,7 @@ const SLOT_SWAP_GAMEDATA_KEYS = {
 
 module.exports = {
 	TURN_CALL_CLASSIFICATION, TEXT_COUPLED_SITES, entry, worldHelper,
+	EVENT_CADENCE, PERIODIC_EVENTS,
 	SLOT_SWAP_GLOBALS, SLOT_SWAP_GAMEDATA_KEYS,
 	// Test-only: the guard spec needs each entry's PROVENANCE (which audited function it was found
 	// under) to check R2 (an entry whose source function no longer calls it). The merged table is the
