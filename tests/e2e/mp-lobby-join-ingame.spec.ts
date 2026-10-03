@@ -13,7 +13,7 @@
  * shows the question" is a change of value, not something that was always there.
  */
 import { test, expect } from '@playwright/test';
-import { press, openLobby, lobbyState, guestAsks } from '../helpers/mp-lobby';
+import { press, openLobby, lobbyState, guestAsks, bootToMenu, enteredCoop } from '../helpers/mp-lobby';
 import { answerCoopDialogue, MP_TEST_TIMEOUT, reportedPageErrors } from './helpers/coop';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
@@ -46,11 +46,7 @@ async function hostDialogue(P: any) {
 async function hostIsPlaying(host: any, port: number) {
 	await openLobby(host, port, '127.0.0.1', { preload: true });
 	await press(host, 'KDMPHost');
-	await host.waitForFunction(() => {
-		const c = (window as any).__coop;
-		// @ts-ignore bare let-global
-		return !!c && c.started && c._entered && KinkyDungeonState === 'Game';
-	}, undefined, { timeout: 240_000 });
+	await enteredCoop(host);
 }
 
 for (const option of ['Accept', 'Decline'] as const) {
@@ -65,12 +61,24 @@ for (const option of ['Accept', 'Decline'] as const) {
 		const crashes: string[] = [];
 		host.on('pageerror', (e: any) => crashes.push(`host: ${(e && e.message) || String(e)}`));
 		try {
+			/*
+			 * Accept needs the guest's page able to ENTER the game afterwards, so it preloads — and it
+			 * preloads BEFORE the host is in the dungeon, which is not a convenience.
+			 *
+			 * Both pages share ONE headless browser, and a page rendering a KD dungeon starves the
+			 * other page's asset preload. Measured on the same host: the host's boot+preload took
+			 * 21-22 s with the guest page idle; the guest's took 119-158 s with the host in the game,
+			 * against a 120 s preload budget — red 4/4 on a loaded machine. Two real players are two
+			 * machines, so that contention is the harness's, not the game's. The claim under test
+			 * (the host is asked IN THE GAME) only needs the host in the dungeon when the guest ASKS,
+			 * and that ordering is unchanged.
+			 */
+			if (option === 'Accept') await bootToMenu(guest, port, '127.0.0.1', { preload: true });
 			await hostIsPlaying(host, port);
 			expect(bridge.session.players, 'control: the host is playing alone').toEqual([bridge.gate.host]);
 			expect((await hostDialogue(host)).name, 'control: nobody has asked yet').not.toBe(JOIN_ASK_DIALOGUE);
 
-			// Accept needs the guest's page able to ENTER the game afterwards, so it preloads.
-			await guestAsks(guest, port, 'Bee', undefined, { preload: option === 'Accept' });
+			await guestAsks(guest, port, 'Bee', undefined, { booted: option === 'Accept' });
 			await expect.poll(async () => (await lobbyState(guest)).status, { timeout: 30_000 })
 				.toMatch(/Waiting for the host/);
 
@@ -92,10 +100,7 @@ for (const option of ['Accept', 'Decline'] as const) {
 			if (option === 'Accept') {
 				await expect.poll(() => bridge.session.players.length,
 					{ timeout: 60_000, message: 'the guest is seated into the running game' }).toBe(2);
-				await guest.waitForFunction(() => {
-					const c = (window as any).__coop;
-					return !!c && c.started && c._entered;
-				}, undefined, { timeout: 240_000 });
+				await enteredCoop(guest);
 			} else {
 				await expect.poll(async () => (await lobbyState(guest)).error,
 					{ timeout: 30_000, message: 'refused in words, not silence' }).toContain('declined');

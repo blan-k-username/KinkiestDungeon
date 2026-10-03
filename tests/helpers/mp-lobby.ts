@@ -58,6 +58,9 @@ export async function press(page: any, button: string) {
 	await settle(page);
 }
 
+/** How a page is brought to the lobby. See `bootToMenu` (preload, briefing) and `openLobby` (booted). */
+export type LobbyOpts = { preload?: boolean; briefing?: boolean; booted?: boolean };
+
 /**
  * Open the Multiplayer lobby on a page served by the demo server.
  *
@@ -78,8 +81,10 @@ export async function press(page: any, button: string) {
  * So: assert the state every frame until the menu is really on screen. Idempotent and cheap.
  */
 
-export async function openLobby(page: any, port: number, host = '127.0.0.1', opts: { preload?: boolean; briefing?: boolean } = {}) {
-	await bootToMenu(page, port, host, opts);
+export async function openLobby(page: any, port: number, host = '127.0.0.1', opts: LobbyOpts = {}) {
+	// `booted`: the caller already ran `bootToMenu` on this page (and so already preloaded, if it
+	// asked to). Booting again would reload the page and throw that preload away.
+	if (!opts.booted) await bootToMenu(page, port, host, opts);
 	// The co-op entries moved from a Multiplayer menu of ours onto KD's own class screen.
 	// The BUTTON IDS did not change (`KDMPHost`, `KDMPContinue`, `KDMPJoin`), so every caller that
 	// already knows which one it wants needs only this different way of arriving — which is why this
@@ -228,7 +233,7 @@ export const lobbyState = (page: any) => page.evaluate(() => ({
 }));
 
 /** Open the lobby, fill the join form and press Join. `address` defaults to the server's own. */
-export async function guestAsks(page: any, port: number, name: string, address?: string, opts: { preload?: boolean; briefing?: boolean } = {}) {
+export async function guestAsks(page: any, port: number, name: string, address?: string, opts: LobbyOpts = {}) {
 	await openLobby(page, port, '127.0.0.1', opts);
 	await press(page, 'KDMPJoin');
 	await page.locator('#KDMPAddress').fill(address ?? `127.0.0.1:${port}`);
@@ -257,6 +262,24 @@ export async function waitAssetsPreloaded(page: any, timeout = 120_000) {
 		() => typeof KDLoadingFinished !== 'undefined' && KDLoadingFinished === true,
 		undefined, { timeout },
 	);
+}
+
+/**
+ * Wait until this page is PLAYING the co-op session: started, entered, and on KD's game screen.
+ *
+ * Being seated is a SERVER fact (`bridge.session.players`) and arrives first; the page enters
+ * afterwards, when its first state frame lands. Anything read off the page's own game in between —
+ * `KDPlayer()`, a context menu on its own tile — describes the run the page had BEFORE co-op, and
+ * changes under the reader the moment the entry happens. Wait here before reading the page's game.
+ *
+ * Only a page that preloaded can get here: `enterGame()` requeues until `KDLoadingFinished`.
+ */
+export async function enteredCoop(page: any, timeout = 240_000) {
+	await page.waitForFunction(() => {
+		const c = (window as any).__coop;
+		// @ts-ignore bare let-global
+		return !!c && c.started && c._entered && KinkyDungeonState === 'Game';
+	}, undefined, { timeout });
 }
 
 /**

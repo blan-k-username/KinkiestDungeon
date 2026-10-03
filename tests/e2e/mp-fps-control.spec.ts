@@ -57,6 +57,7 @@
 import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import { MP_TEST_TIMEOUT, coopJoinPage } from './helpers/coop';
+import { enteredCoop } from '../helpers/mp-lobby';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
 
@@ -146,8 +147,7 @@ test('frame-rate controls: plain game vs co-op client', async ({ browser }) => {
 		 */
 		const coop = await ctx.newPage();
 		await coopJoinPage(coop, port, 'SOLO', 'host');
-		await coop.waitForFunction(() => { const c = (window as any).__coop; return !!(c && c.started && c._entered); },
-			undefined, { timeout: 240_000 });
+		await enteredCoop(coop);
 		await coop.bringToFront();
 		await coop.waitForTimeout(2000);
 		out.coopScreen = await screen(coop);

@@ -28,6 +28,7 @@
 import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import { MP_TEST_TIMEOUT, coopJoinPage } from './helpers/coop';
+import { enteredCoop } from '../helpers/mp-lobby';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
 
@@ -190,8 +191,7 @@ test('attribute the co-op client extra frame cost by script', async ({ browser }
 		// real input/ack traffic. Profiles before 2026-09-28 are not directly comparable.
 		const coop = await ctx.newPage();
 		await coopJoinPage(coop, port, 'SOLO', 'host');
-		await coop.waitForFunction(() => { const c = (window as any).__coop; return !!(c && c.started && c._entered); },
-			undefined, { timeout: 240_000 });
+		await enteredCoop(coop);
 		await coop.bringToFront();
 		// WAIT for the proxy to be live, don't sample and hope. The validity gate below
 		// asserts `coopConnected`, and a fixed sleep would make that a race on a contended host —
