@@ -383,6 +383,9 @@ class SwapSession {
 		// Whether this client's last delivered `sounddesc` list was non-empty, so a list that
 		// has just emptied is still sent once (to clear theirs) and silence stays silent afterwards.
 		this._sentSoundDesc = new Map();
+		// Each human's OWN hearing (`HeadlessHost.hearingProfile`, deafness included), taken while they
+		// held the slot — `_broadcastNoiseToOthers` judges them by it, not by the occupant's.
+		this._hearingOf = new Map();
 		/*
 		 * THE PARTY'S ROUTE NEGOTIATION. One pending proposal, and who made it.
 		 *
@@ -2983,6 +2986,8 @@ class SwapSession {
 			// and all, must leave with them, or a later seat reusing that id would be dressed as
 			// somebody who has gone.
 			this.charOf, this.worldOf, this.saveOf, this._templateOf,
+			// A departed player's hearing must not judge a later seat reusing that id.
+			this._hearingOf,
 			this._eventSeq, this.pendingEvents, this._sentSoundDesc, this.vitalsOf,
 			this.defeated, this.tiedOf, this._pending, this._stateFp,
 		];
@@ -4119,13 +4124,18 @@ class SwapSession {
 	_harvestNoise(clientId) {
 		let p;
 		try { p = this.world.takeNoisePresentation(); } catch (e) { return; }
+		// `clientId` holds the slot at every harvest, so this is THEIR hearing (deafness included) —
+		// what `_broadcastNoiseToOthers` judges them by when someone else holds the slot.
+		this._hearingOf.set(clientId, this.world.hearingProfile());
 		const shockwaves = (p && p.shockwaves) || [];
 		const sounddesc = (p && p.sounddesc) || [];
 		const hadSound = this._sentSoundDesc.get(clientId) || false;
-		if (!shockwaves.length && !sounddesc.length && !hadSound) return;
-		this._sentSoundDesc.set(clientId, sounddesc.length > 0);
-		this._emitEvent(clientId, { kind: 'noise', shockwaves, sounddesc });
-		if (shockwaves.length || sounddesc.length) this._broadcastNoiseToOthers(clientId, shockwaves, sounddesc);
+		if (shockwaves.length || sounddesc.length || hadSound) {
+			this._sentSoundDesc.set(clientId, sounddesc.length > 0);
+			this._emitEvent(clientId, { kind: 'noise', shockwaves, sounddesc });
+		}
+		// Unconditionally: a DEAFENED occupant queues nothing, yet a hearing partner may still hear it.
+		this._broadcastNoiseToOthers(clientId, shockwaves, sounddesc);
 	}
 
 	/**
@@ -4140,27 +4150,36 @@ class SwapSession {
 	 * (`HeadlessHost.canHearFrom`) against the real noise origin (`takeNoiseSources` — one `{x,y,sound}`
 	 * per real `KDEnemyAddSound` call this harvest, matched back to each queued entry by position).
 	 *
-	 * An entry with no matching source (should not happen — every entry this harvest drained came
-	 * from a `KDEnemyAddSound` call in the SAME harvest window) is conservatively NOT broadcast rather
-	 * than guessed at; it still reached `clientId` via the normal path above, unaffected.
+	 * EACH HEARER'S OWN HEARING. The listener is judged with their OWN `{radius, mult}` (`_hearingOf`,
+	 * recorded by `_harvestNoise` while they last held the slot) — never the occupant's, whose deafness
+	 * is theirs alone. Driven by the noise SOURCES, not the occupant's queued entries: a deafened
+	 * occupant queues nothing, so a hearing partner gets the entry KD would have queued for them
+	 * (`HeadlessHost.noiseEntryFor`). Such a source is offered only when the sound ROSE — a repeated
+	 * sound is a random roll the engine made for the occupant alone, and re-rolling it here would be
+	 * inventing a second lottery. Not mirrored for the other human: the occupant's vision gate (KD shows
+	 * a ripple only for an enemy you cannot see) — same as before this change.
 	 */
 	_broadcastNoiseToOthers(clientId, shockwaves, sounddesc) {
 		const sources = this.world.takeNoiseSources();
 		if (!sources.length) return;
-		const soundAt = (x, y) => {
-			const hit = sources.find((s) => s.x === x && s.y === y);
-			return hit ? hit.sound : null;
-		};
+		const at = (list, s) => list.find((e) => e.x === s.x && e.y === s.y);
 		for (const otherId of this._joined) {
 			if (otherId === clientId) continue;
 			const pos = this.posOf(otherId);
 			if (!pos) continue;
-			const audible = (e) => {
-				const sound = soundAt(e.x, e.y);
-				return sound != null && this.world.canHearFrom(pos.x, pos.y, e.x, e.y, sound, 1.5) > 0;
-			};
-			const heardShockwaves = shockwaves.filter(audible);
-			const heardSounddesc = sounddesc.filter(audible);
+			const hearing = this._hearingOf.get(otherId) || null;
+			const heardShockwaves = [], heardSounddesc = [];
+			const seen = new Set();
+			for (const s of sources) {
+				const key = `${s.x},${s.y},${s.desc || ''}`;
+				if (seen.has(key)) continue;
+				const own = at(s.desc ? sounddesc : shockwaves, s);
+				if (!own && !s.rose) continue;
+				const vol = this.world.canHearFrom(pos.x, pos.y, s.x, s.y, s.sound, 1.5, hearing);
+				if (!(vol > 0)) continue;
+				seen.add(key);
+				(s.desc ? heardSounddesc : heardShockwaves).push(own || this.world.noiseEntryFor(s, vol));
+			}
 			if (heardShockwaves.length || heardSounddesc.length) {
 				this._emitEvent(otherId, { kind: 'noise', shockwaves: heardShockwaves, sounddesc: heardSounddesc });
 			}

@@ -520,7 +520,7 @@ const GLOBAL_BLACKLIST = Object.freeze([
 	// fresh per apply by `setNestedDispatchCallback`'s caller) — listed for the same defensive reason as
 	// `__kdSlotChoose`/`__kdReplayPlayerHit`.
 	'__kdRoundRealTickDelta', '__kdNestedDispatch',
-	// `KDEnemyAddSound`'s own wrap (`installTurnModel`) records `{x, y, sound}` per call so
+	// `KDEnemyAddSound`'s own wrap (`installTurnModel`) records `{x, y, sound, rose, desc}` per call so
 	// `SwapSession._harvestNoise` can re-offer the SAME hearing decision to every joined human, not
 	// only whoever holds the slot — session-level, drained once per harvest by `takeNoiseSources`,
 	// never a player's own value.
@@ -1672,18 +1672,49 @@ class HeadlessHost {
 	 * engine already applied to decide whether the current occupant could hear it — just re-asked for
 	 * a different position.
 	 *
-	 * Deliberately does not attempt the DEAF-LEVEL half of `KinkyDungeonGetHearingRadius` for the
-	 * other human specifically — that function reads deafness off the CURRENT global player
-	 * (`KinkyDungeonAllRestraintDynamic`) regardless of the entity argument passed to it, so it is
-	 * already only an approximation for anyone but the slot occupant, including in the single
-	 * evaluation this mirrors. Fixing that would need a real slot swap per listener; out of scope
-	 * here and no worse than the existing single-listener check's own fidelity.
+	 * THE LISTENER'S OWN HEARING. `KDCanHearSound` gets its radius from `KinkyDungeonGetHearingRadius()`,
+	 * which reads deafness (`KDDeafLevel` → `KinkyDungeonAllRestraintDynamic`) and the `calcHearing`
+	 * modifiers off the CURRENT global player, whatever listener is passed in. `hearing` is that
+	 * listener's own `{radius, mult}`, taken by `hearingProfile()` while THEY held the slot; it stands in
+	 * for `KinkyDungeonGetHearingRadius` for this one call. Omitted, the occupant's own value is used.
+	 *
+	 * Arguments travel through a context slot, so the eval'd source is one constant string.
 	 */
-	canHearFrom(listenerX, listenerY, sourceX, sourceY, sound, mult) {
+	canHearFrom(listenerX, listenerY, sourceX, sourceY, sound, mult, hearing) {
+		this._context.__kdHearArgs = {
+			lx: +listenerX, ly: +listenerY, sx: +sourceX, sy: +sourceY, sound: +sound, mult: +mult,
+			radius: hearing ? +hearing.radius : null, hmult: hearing ? +hearing.mult : null,
+		};
 		return this.eval(`(function(){
 			if (typeof KDCanHearSound !== 'function') return 0;
-			return KDCanHearSound({ x: ${+listenerX}, y: ${+listenerY}, player: true },
-				${+sound}, ${+sourceX}, ${+sourceY}, ${+mult}) || 0;
+			var a = globalThis.__kdHearArgs;
+			var prev = KinkyDungeonGetHearingRadius;
+			if (a.radius != null) KinkyDungeonGetHearingRadius = function(){ return { radius: a.radius, mult: a.hmult }; };
+			try {
+				return KDCanHearSound({ x: a.lx, y: a.ly, player: true }, a.sound, a.sx, a.sy, a.mult) || 0;
+			} finally { KinkyDungeonGetHearingRadius = prev; }
+		})()`);
+	}
+
+	/** The slot occupant's own hearing — `{radius, mult}`, deafness and `calcHearing` included. */
+	hearingProfile() {
+		return this.eval('(function(){ var h = KinkyDungeonGetHearingRadius(); return { radius: h.radius, mult: h.mult }; })()');
+	}
+
+	/**
+	 * The noise entry KD's `KDEnemyAddSound` would have queued for a listener who hears `source` at
+	 * volume `vol` — needed only when the slot occupant did not hear it, so there is no engine-made
+	 * entry to forward. This MIRRORS the engine's own literal (KinkyDungeonEnemies.ts, the shockwave /
+	 * sounddesc pushes in `KDEnemyAddSound`), which is presentation, not a game rule; the
+	 * `noiseEntryShape` text-coupled site in `turn-classification.js` pins it so upstream drift is loud.
+	 */
+	noiseEntryFor(source, vol) {
+		this._context.__kdNoiseArgs = { x: +source.x, y: +source.y, desc: source.desc || null, vol: +vol };
+		return this.eval(`(function(){
+			var a = globalThis.__kdNoiseArgs;
+			var wave = { x: a.x, y: a.y, radius: Math.min(4, a.vol) * 0.3 + 0.25, sprite: "Particles/ShockwaveEnemy.png" };
+			if (!a.desc) return wave;
+			return { x: a.x, y: a.y, desc: a.desc, shockwave: wave, shockwavePeriod: 1500, lastShockwave: CommonTime() };
 		})()`);
 	}
 
@@ -2935,7 +2966,7 @@ class HeadlessHost {
 			globalThis.__kdSlotChoiceLog = {};      // enemy id -> clientId, this call's decision (host reads back)
 			globalThis.__kdBulletOwner = {};       // bullet spriteID -> clientId, who cast it (tagOwnedBullets)
 			globalThis.__kdTetherOwner = {};       // leashed enemy id -> clientId, who caused the tether (tagOwnedTethers)
-			globalThis.__kdPendingNoiseSources = []; // [{x,y,sound}] this harvest's noise origins (KDEnemyAddSound wrap)
+			globalThis.__kdPendingNoiseSources = []; // [{x,y,sound,rose,desc}] this harvest's noise origins (KDEnemyAddSound wrap)
 
 			var WORLD_FNS = ${JSON.stringify(WORLD_MUTE_FNS)};
 			WORLD_FNS.forEach(function(name){
@@ -3091,11 +3122,17 @@ class HeadlessHost {
 			// HeadlessHost.takeNoiseSources below, the same shape as takeNoisePresentation's own drain.
 			var _kdEas = KDEnemyAddSound;
 			if (!_kdEas.__kdTurnModelWrapped) {
-				var kdEasWrapped = function(enemy){
+				// Recorded whether or not the OCCUPANT heard it: a deafened occupant queues nothing, and
+				// a hearing partner must still be offered the noise (SwapSession._broadcastNoiseToOthers).
+				// rose = KD's deterministic "the sound went up" gate; a repeat sound is instead a random
+				// roll the engine made for the occupant only. novisual calls never queue anything.
+				var kdEasWrapped = function(enemy, amount, novisual, desc){
+					var prevSound = (enemy && enemy.sound) || 0;
 					var r = _kdEas.apply(this, arguments);
-					if (enemy) {
+					if (enemy && !novisual) {
 						var list = globalThis.__kdPendingNoiseSources || (globalThis.__kdPendingNoiseSources = []);
-						list.push({ x: enemy.x, y: enemy.y, sound: enemy.sound || 0 });
+						list.push({ x: enemy.x, y: enemy.y, sound: enemy.sound || 0,
+							rose: (enemy.sound || 0) > prevSound, desc: desc || null });
 					}
 					return r;
 				};

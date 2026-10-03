@@ -369,6 +369,20 @@ const TEXT_COUPLED_SITES = Object.freeze({
 		expectedCount: 1,
 		why: 'the nearby jail-door auto-unlock condition the leashed-player countdown above gates — replicated verbatim by ueWrapped (same wrap, same branch) so a non-host human\'s own nearby jail door still auto-unlocks on their own apply (KinkyDungeonEnemies.ts:4327)',
 	}),
+	// HeadlessHost.noiseEntryFor MIRRORS (does not call) the entry KDEnemyAddSound queues, for a hearing
+	// partner when the slot occupant did not hear the noise and so no engine-made entry exists to forward.
+	noiseEntryShape: Object.freeze({
+		file: 'Game/src/enemy/KinkyDungeonEnemies.ts',
+		pattern: 'radius: Math.min(4, vol) * 0.3 + 0.25,',
+		expectedCount: 2,
+		why: 'the shockwave radius KDEnemyAddSound gives a heard noise (the plain shockwave and the sounddesc shockwave) — mirrored by HeadlessHost.noiseEntryFor; if upstream changes it, change the mirror (KinkyDungeonEnemies.ts, KDEnemyAddSound)',
+	}),
+	noiseEntryPeriod: Object.freeze({
+		file: 'Game/src/enemy/KinkyDungeonEnemies.ts',
+		pattern: 'shockwavePeriod: 1500,',
+		expectedCount: 1,
+		why: 'the sounddesc repeat period KDEnemyAddSound queues — mirrored by HeadlessHost.noiseEntryFor (KinkyDungeonEnemies.ts, KDEnemyAddSound)',
+	}),
 });
 
 /**
