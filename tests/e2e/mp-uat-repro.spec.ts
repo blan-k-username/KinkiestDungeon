@@ -631,10 +631,12 @@ test('a presentation input round-trips quickly', async ({ browser }) => {
 			`frames (period ${framePeriod.toFixed(0)} ms from ${lat.frames} frames / ${lat.seconds}s); ` +
 			`${win.bytes} B over ${win.replies} replies ${JSON.stringify(win.byKind)}; samples ${JSON.stringify(lat.samples)}`);
 
-		// MEASURED, not guessed. A green run reports the samples sitting on a clean staircase of 1–5
-		// frame periods (296 / 636 / 913 / 1163 / 1425 ms at a 300 ms period) with the median at ~3.2 —
-		// one frame to dispatch the send, the server's turn, one to dispatch the reply, and whatever
-		// chatter KD's own draw loop has queued ahead of it. Six frames is above that staircase and
+		// MEASURED, not guessed. Each sample is one wire send to the reply that answers it
+		// (`mp-diag-roundtrip.spec.ts` pins that pairing): medians of 1.2–2.0 frame periods at load
+		// 24–29 — one frame to dispatch the send, the server's turn, one to dispatch the reply. The older
+		// "staircase to 5, median ~3.2" figures were inflated by a mis-paired diagnostic clock that
+		// credited replies to superseded, never-sent inputs; that is also what read 6–8 frames on a
+		// loaded host and went red here. Six frames is above the real round-trip and
 		// below anything the staircase no longer explains, so this goes red when the round-trip stops
 		// being a small multiple of the frame period, not when the host has one bad second. The payload
 		// regression this test guards is caught in BYTES below, which is why this budget does not have

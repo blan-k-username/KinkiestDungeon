@@ -88,7 +88,9 @@
 		// Rule 1 v3: unacknowledged sends per type, the types in flight in ORDER, the newest
 		// superseded action per STREAM type awaiting a free slot, and what the SERVER said each type is
 		// ('ui' = presentation stream, anything else = command). Learned, never enumerated.
-		_inFlight: {}, _sentTypes: [], _pending: {}, _kindOf: {},
+		// `_sentAt` is when each in-flight send went on the wire — the round-trip clock, kept on the
+		// same queue as `_sentTypes` so a reply always stops the clock of the send it answers.
+		_inFlight: {}, _sentTypes: [], _sentAt: [], _pending: {}, _kindOf: {},
 		// Test hooks (deterministic). Real play uses KD's default controls → the routed
 		// KDSendInput wrapper → submit(). These build the same {kdType,data} actions.
 		sendMove: function (dx, dy) {
@@ -124,7 +126,7 @@
 		var d = {
 			enabled: true, _quiet: false, _verbose: false,
 			rollups: [], inputs: [],           // ring buffers, bounded below
-			_win: null, _pending: [], _lastPos: {},
+			_win: null, _lastPos: {},
 		};
 		function freshWindow() {
 			return {
@@ -135,25 +137,32 @@
 		}
 		d._win = freshWindow();
 
-		/** An input was sent — count it and start its round-trip clock. Every type is measured the
-		 * same way; the ring is bounded, so a high-rate type costs memory, not a special case. */
+		/** The game asked to send an input — count it. It may still be superseded and never reach
+		 * the wire, so this does NOT start a round-trip clock; `rawSend` does. */
 		d.noteSend = function (action) {
 			var type = (action && action.kdType) || (action && action.kind) || 'unknown';
 			d._win.sends[type] = (d._win.sends[type] || 0) + 1;
-			d._pending.push({ type: type, t: (window.performance || Date).now() });
-			while (d._pending.length > 32) d._pending.shift();
 			return type;
 		};
-		/** A reply arrived. `kind` is 'ui' (no turn) or 'turn' (lockstep resolved). */
+		/** A frame arrived. `kind` is 'ui' (no turn) or 'turn' (lockstep resolved). Counts the wire
+		 * cost of EVERY frame, server-started pushes included; pairing is `noteReply`'s job. */
 		d.noteRecv = function (kind, bytes) {
 			d._win.recv[kind] = (d._win.recv[kind] || 0) + 1;
 			d._win.recvBytes += bytes || 0;
-			var p = d._pending.shift();
-			if (p) {
-				var ms = (window.performance || Date).now() - p.t;
-				d.inputs.push({ type: p.type, kind: kind, ms: Math.round(ms) });
-				while (d.inputs.length > 50) d.inputs.shift();
-			}
+		};
+		/**
+		 * One reply answered one wire send, `ms` after it left. Called only from `ackOne`, the one
+		 * place the transport pairs a reply with its send.
+		 *
+		 * ⚠️ NOT from the message switch. The clock used to start in `submit` and stop on the next
+		 * `state`/`ack` frame: a superseded stream input (never sent) still started one, so every later
+		 * reply was credited to an older, unsent input — the "round-trip" grew with how much was
+		 * superseded, i.e. with how slow the page was; and a `blocked` reply stopped no clock while a
+		 * server `push` (answering nothing) did. The latency budget read that as a slow transaction.
+		 */
+		d.noteReply = function (type, kind, ms) {
+			d.inputs.push({ type: type, kind: kind, ms: Math.round(ms) });
+			while (d.inputs.length > 50) d.inputs.shift();
 		};
 		/** Cost of adopting a snapshot — the thing that runs per frame if hover chatter is routed. */
 		d.noteApply = function (ms) {
@@ -254,7 +263,7 @@
 			return JSON.stringify({
 				id: id, quiet: d._quiet, noHover: !!d._noHover, inFlight: coop._inFlight, kinds: coop._kindOf, pending: Object.keys(coop._pending),
 				started: coop.started, lastTick: coop.lastTick, submitted: coop.submitted,
-				pendingSends: d._pending.length, sentRouteQueue: coop._sentRoute.length,
+				pendingSends: coop._sentTypes.length, sentRouteQueue: coop._sentRoute.length,
 				rollups: d.rollups, recentInputs: d.inputs,
 			}, null, 1);
 		};
@@ -1309,6 +1318,7 @@
 		coop._snapBase = null;
 		coop._snapSeq = 0;
 		coop._sentTypes.length = 0;
+		coop._sentAt.length = 0;
 		coop._sentRoute.length = 0;
 		coop._waitRoute = undefined;
 		coop._inFlight = {};
@@ -1819,10 +1829,11 @@
 	function rawSend(type, action, fromRoute) {
 		coop._inFlight[type] = (coop._inFlight[type] || 0) + 1;
 		coop._sentTypes.push(type);
+		coop._sentAt.push((window.performance || Date).now());
 		// Queue this send's route-ness. The bridge replies to each input EXACTLY once and in
 		// order, so shifting on each reply tells us the route-ness of the input the server acted on.
 		coop._sentRoute.push(!!fromRoute);
-		while (coop._sentRoute.length > 64) { coop._sentRoute.shift(); coop._sentTypes.shift(); }
+		while (coop._sentRoute.length > 64) { coop._sentRoute.shift(); coop._sentTypes.shift(); coop._sentAt.shift(); }
 		// Rate-limited logging, by observation rather than by name: the first few sends of any type in
 		// each second are printed, the rest counted in the HUD. A per-frame type stops flooding the
 		// console without the client knowing which type that is. __coopDiag.verbose(true) prints all.
@@ -1852,7 +1863,9 @@
 	 */
 	function ackOne(kind) {
 		var t = coop._sentTypes.shift();
+		var sentAt = coop._sentAt.shift();
 		if (!t) return;
+		if (typeof sentAt === 'number') diag.noteReply(t, kind || 'other', (window.performance || Date).now() - sentAt);
 		coop._inFlight[t] = Math.max(0, (coop._inFlight[t] || 1) - 1);
 		// Rule 1 v3: the server just told us what this type IS. 'ui' means it was applied without
 		// consuming a turn — presentation, safe to sample. Anything else is a command: deliver it all.
