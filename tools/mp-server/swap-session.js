@@ -2012,6 +2012,11 @@ class SwapSession {
 		// call, so the round-wide accumulator the clock hand-back reads must start fresh each round.
 		if (multi) this.world.eval('globalThis.__kdRoundRealTickDelta = 0;');
 		this._applyOne(order, 0, { applied, startPos, arrived, multi });
+		// Leave the world UNMUTED between rounds. The engine's nested hand-back restores each outer
+		// apply's own (muted) value after the inner chain returns, so a nested round otherwise ends with
+		// the flag still `true` — and the immediate ("ui") apply path, which runs between rounds, would
+		// then find every world system muted the moment anything in it advanced time.
+		if (multi) this.world.setWorldMuted(false);
 		// The veto is per-apply. Leave the world with it off, or the immediate ("ui") apply
 		// path — which runs outside this loop — would inherit a stale set from the last turn.
 		this.world.setBumpVeto([]);
@@ -2093,8 +2098,66 @@ class SwapSession {
 	 *
 	 * The slot-switch/defeat-routing/bullet/tether mechanisms the LAST apply arms are entirely unchanged
 	 * by nesting — they still only ever run once, inside the one real tick, wherever it ends up nested.
+	 *
+	 * CONTAINMENT. Every level of the recursion owns its own failures and NEVER throws to its caller.
+	 * The caller of a nested level is the ENGINE (an outer player's `KinkyDungeonAdvanceTime`, via the
+	 * nested-dispatch callback), so an exception escaping here would unwind through that outer player's
+	 * dispatch into THEIR `applyInputObserved` catch: blamed on the wrong human, their own tail skipped,
+	 * and their swap-out committing whoever still held the slot into their bundle. The player's own
+	 * dispatch was always guarded (`applyInputObserved`); what this adds is the host-side work around it.
+	 * See `_containFailedApply` for what recovery means.
 	 */
 	_applyOne(order, idx, ctx) {
+		// `kdType` and `handedOn` are written by the unguarded body as it goes, so the catch knows what
+		// the failing input was and whether the rest of the round already ran (nested, or by fallback).
+		const st = { kdType: null, handedOn: false };
+		try {
+			this._applyOneUnguarded(order, idx, ctx, st);
+		} catch (e) {
+			this._containFailedApply(order, idx, ctx, st, e);
+		}
+	}
+
+	/**
+	 * Put the round back together after `order[idx]`'s apply threw outside its own guarded dispatch.
+	 *
+	 *   1. BLAME — recorded against THIS player, through the same `failedInputs` channel a thrown
+	 *      dispatch uses (`_noteFailedInput`), so a consumer cannot tell the two paths apart.
+	 *   2. DISARM — whatever this apply armed for the engine (the one-shot nested callback, or the
+	 *      round's per-enemy slot switch) must not survive into a later, unrelated apply.
+	 *   3. ROLL BACK — the player's bundle stays at its last COMMITTED snapshot (the swap-in copy, or a
+	 *      mid-dispatch commit), never a half-applied slot; their avatar is re-seated from it, so a
+	 *      player whose swap-out never ran is not left parked off the board.
+	 *   4. CARRY ON — if the round had not yet been handed to the next player, hand it on now: the
+	 *      remaining players still act and the round's one real tick still runs. If THIS was the round's
+	 *      host and it failed before dispatching, that round's world tick is lost — reported, not faked.
+	 * Recovery itself is guarded: a second failure is logged, never thrown into the engine.
+	 */
+	_containFailedApply(order, idx, ctx, st, e) {
+		const id = order[idx];
+		const last = (idx === order.length - 1);
+		const { applied, multi } = ctx;
+		const error = String((e && e.message) || e);
+		this._noteFailedInput(id, st.kdType, { error });
+		try {
+			if (multi && last) this.world.disarmSlotSwitch();
+			if (multi && !last) this.world.setNestedDispatchCallback(null);
+			if (this._restorePlayer(id)) {
+				const p = this.world.getPlayerPos();
+				this._ensureAvatar(id, p.x, p.y);
+				applied[idx] = { id, kdType: st.kdType, result: null, pos: p, cancelled: false, error };
+			}
+		} catch (e2) {
+			this._dbg(`RECOVERY FAILED for ${id} in turn ${this.turn}: ${String((e2 && e2.message) || e2)}`);
+		}
+		if (multi && !last && !st.handedOn) {
+			st.handedOn = true;
+			this._applyOne(order, idx + 1, ctx);
+		}
+	}
+
+	/** `_applyOne`'s body, unguarded — call `_applyOne`, never this (see CONTAINMENT there). */
+	_applyOneUnguarded(order, idx, ctx, st) {
 		const { applied, startPos, arrived, multi } = ctx;
 		const id = order[idx];
 		// The round's ONE real engine turn is hosted by the LAST apply — see this method's own doc
@@ -2111,6 +2174,7 @@ class SwapSession {
 		// `defeated` therefore survives only as the bindability signal (_armPeerEnemies stuns the
 		// avatar so KD's own KDCanApplyBondage gate passes) and the HUD marker.
 		const { kdType, data } = this._toInput(id, action);
+		st.kdType = kdType;
 		// swap this player in; park their avatar so it doesn't block their own move
 		this._restorePlayer(id, this.bundles.get(id));
 		const avId = this.avatars.get(id);
@@ -2133,9 +2197,9 @@ class SwapSession {
 		let logLen0 = this.world.messageLogLength();
 		let result = null;
 		let cancelled = false;
-		// Set true the instant the nested-dispatch hook actually fires — distinguishes "the rest of the
-		// round already happened, nested inside this dispatch" from "nothing to nest into yet" below.
-		let nestedFired = false;
+		// `st.handedOn` is set the instant the rest of the round is handed on (nested, below, or by the
+		// fallback at the end) — distinguishes "the rest of the round already happened" from "nothing to
+		// nest into yet", for the fallback here AND for `_containFailedApply` if this apply throws.
 		// The synthetic `pvpAttack` / `pvpBind` primitive is GONE. It computed its own
 		// attack and wrote the result onto the target's bundle, bypassing the game entirely — a
 		// second, parallel combat model kept alive "for tests". There is now exactly one path:
@@ -2169,7 +2233,6 @@ class SwapSession {
 					// call is correct even though the global is never explicitly cleared on the
 					// "never fired" path below (disarmed unconditionally right after dispatch instead).
 					this.world.setNestedDispatchCallback(() => {
-						nestedFired = true;
 						// Leaving this slot MID-DISPATCH: commit exactly like a normal end-of-apply
 						// swap-out (log delta, floaters, bundle, avatar reseat + arrival tracking) so
 						// whoever applies next — and the round's eventual per-enemy slot switch — sees
@@ -2189,7 +2252,9 @@ class SwapSession {
 
 						// The rest of the round — every remaining player's own apply, down to and
 						// including the round's one real tick — happens HERE, fully, before this call
-						// returns.
+						// returns. `_applyOne` contains its own failures, so this never throws back
+						// into the engine — the hand-back below always runs.
+						st.handedOn = true;
 						this._applyOne(order, idx + 1, ctx);
 
 						// Hand the slot back to ME: my own remaining execution (below, once this
@@ -2335,7 +2400,8 @@ class SwapSession {
 		// Fallback: the nested-dispatch hook never fired this apply (nothing to dispatch, or the
 		// dispatch never reached KinkyDungeonAdvanceTime) — move on to the next player directly, after
 		// this apply's own bookkeeping above, exactly the order the old flat loop always used.
-		if (multi && !last && !nestedFired) {
+		if (multi && !last && !st.handedOn) {
+			st.handedOn = true;
 			this._applyOne(order, idx + 1, ctx);
 		}
 	}

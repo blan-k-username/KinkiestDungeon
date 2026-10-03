@@ -3381,8 +3381,10 @@ class HeadlessHost {
 							var nestedFn = globalThis.__kdNestedDispatch;
 							globalThis.__kdNestedDispatch = null;
 							var mutedForMe = globalThis.__kdWorldMuted;
-							nestedFn();
-							globalThis.__kdWorldMuted = mutedForMe;
+							// finally: the callback contains its own failures (SwapSession._applyOne), but
+							// if anything ever does escape, this apply must still get its own value back.
+							try { nestedFn(); }
+							finally { globalThis.__kdWorldMuted = mutedForMe; }
 						}
 						if (Allied) {
 							KinkyDungeonUpdateDialogue(KinkyDungeonPlayerEntity, maindelta);
