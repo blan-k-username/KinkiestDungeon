@@ -109,12 +109,25 @@ test('offer peace from your own menu; the peer accepts from theirs', async ({ br
 		// input entered lockstep. The client then set `submitted = true` and suppressed every further
 		// input — so the player could not reach the one action that would unblock them. Every key and
 		// click did nothing while the overlay read "your move — others ready".
-		const refused = await B.evaluate(async () => {
+		//
+		// WAITED FOR, NOT SLEPT ON. This used to read the verdict after a fixed 1.5 s. The reply is
+		// dispatched on the page's main thread, and a headless page rendering a dungeon on a loaded
+		// host stalls for seconds at a time — so the timer sometimes won and read `null` (1 red in 5
+		// isolated runs). Forced by holding B's `blocked` frame back 2.5 s: the sleep reds every time.
+		// The wait ends on the FIRST verdict of either kind, so the soft-lock bug (a `waiting` reply
+		// setting `submitted`) still fails here, fast and on the right assertion.
+		await B.evaluate(() => {
 			const w = window as any;
 			w.__coop.submitted = false;
 			w.__coop.blocked = null;
 			w.__coop.sendAction({ kind: 'wait' });
-			await new Promise((r) => setTimeout(r, 1500));
+		});
+		await B.waitForFunction(() => {
+			const c = (window as any).__coop;
+			return c.blocked !== null || c.submitted === true;
+		}, undefined, { timeout: 30_000, polling: 100 });
+		const refused = await B.evaluate(() => {
+			const w = window as any;
 			return { submitted: w.__coop.submitted, blocked: w.__coop.blocked };
 		});
 		expect(refused.blocked, 'the refusal must reach the client as a refusal').toBe('peace-offer');
