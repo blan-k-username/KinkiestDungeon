@@ -743,7 +743,23 @@
 		if (Math.max(Math.abs(dx), Math.abs(dy)) > 1.5) { coop.route = null; return; }  // displaced/blocked
 		coop.route.shift();
 		coop.routeFresh = false;                          // the clicked step is taken; the rest is auto-walk
-		submit({ kdType: 'move', data: { dir: { x: dx, y: dy }, delta: 1, AllowInteract: true } }, true, !!freshClick);
+		submit({ kdType: 'move', data: fastMoveStepData(dx, dy) }, true, !!freshClick);
+	}
+
+	/**
+	 * The `move` input KD's OWN fast-move sends for one step of a clicked path (`KinkyDungeon.ts`, the
+	 * `KDSendInput("move", …)` in the fast-move block), field for field. KD's `move` handler WRITES the
+	 * player's toggles from it (`KinkyDungeonToggleAutoPass = data.AutoPass`, sprint, SuppressSprint —
+	 * `KinkyDungeonInput.ts`), so a field left out is not "default", it is `undefined` on the server:
+	 * without `AutoPass` every bump into a peaceful NPC on the route opened their dialogue instead of
+	 * swapping past them, as single player does (KDM-315, `tests/e2e/mp-click-move-pass-npc.spec.ts`).
+	 */
+	function fastMoveStepData(dx, dy) {
+		return {
+			dir: { x: dx, y: dy }, delta: 1, AllowInteract: true, AutoDoor: false,
+			AutoPass: KinkyDungeonToggleAutoPass, sprint: KinkyDungeonToggleAutoSprint,
+			SuppressSprint: KinkyDungeonSuppressSprint,
+		};
 	}
 
 	/**
