@@ -146,6 +146,20 @@ const OWN_DIALOGUES = new Set([PEACE_DIALOGUE, HOST_LOST_DIALOGUE, PEER_LOST_DIA
 const CLIENT_OWNED_GAMEDATA_KEYS = ['NightVision', 'MaxVisionDist', 'MinVisionDist'];
 
 /**
+ * GLOBALS the browser owns and the wire bundle therefore never carries — same rule as above: the
+ * headless server cannot compute them.
+ *
+ * `KinkyDungeonPlayer` (and `DefaultPlayer`, the same BC Character in KD) is the PAPER DOLL — the drawn
+ * character `KinkyDungeonDressPlayer` builds from the worn set and the dress table. The headless world
+ * has no renderer: its copy never draws a restraint and wears the join-time declared look. Adopting it
+ * REPLACED the browser's own doll, right after the browser's re-dress had drawn the new restraint and
+ * dropped the displaced clothing exactly as single player does — so a bound co-op player saw themselves
+ * unbound and fully dressed (KDM-322, `tests/e2e/mp-own-paper-doll.spec.ts`). The worn set itself
+ * (inventory) still travels; only its drawing stays local.
+ */
+const CLIENT_OWNED_GLOBALS = ['KinkyDungeonPlayer', 'DefaultPlayer'];
+
+/**
  * CONSUME-ONCE presentation members of an otherwise per-player global.
  *
  * The criterion: if only the presentation layer consumes it, the server must not
@@ -3968,7 +3982,12 @@ class SwapSession {
 			if (CLIENT_OWNED_GAMEDATA_KEYS.includes(k)) continue;
 			gameData[k] = bundle.gameData[k];
 		}
-		return { v: bundle.v, gameData, globals: this._stripPresentation(bundle.globals) };
+		let globals = this._stripPresentation(bundle.globals);
+		if (globals && CLIENT_OWNED_GLOBALS.some((n) => n in globals)) {
+			globals = Object.assign({}, globals);         // shallow copy: the bundle is the session's
+			for (const n of CLIENT_OWNED_GLOBALS) delete globals[n];
+		}
+		return { v: bundle.v, gameData, globals };
 	}
 
 	/**
