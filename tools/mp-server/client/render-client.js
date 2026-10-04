@@ -217,16 +217,32 @@
 	 * a random generated item in one of THOSE groups is removed even when the declared look has
 	 * nothing in that exact group (an avatar is identity-complete from the declared array alone; it is
 	 * never a patchwork of "whatever wasn't a worn item").
+	 *
+	 * ── THE LOOK CARRIES ITS OWN RESTRAINTS (KDM-344) ─────────────────────────────────────────────
+	 * The look is now the partner's own DRAWN look, sent whenever it changes — restraint models and
+	 * lost clothing included, exactly as their own screen shows them. So a worn item that CAME FROM a
+	 * look (tagged `__kdFromLook` by `applyDeclaredLook`) is replaced by the next look like everything
+	 * else; only a worn item KD's own dress step laid HERE (a local "Tie Up" this frame — untagged) is
+	 * kept, and it wins its slot over the look's copy. Without the tag, a restraint from an earlier look
+	 * would be "a worn item slot" forever and outlive the partner getting free.
 	 */
 	function mergeDeclaredLook(Character, declaredItems) {
 		var current = Character.Appearance || [];
-		var kept = [];
+		var kept = [], keptGroups = {};
 		for (var j = 0; j < current.length; j++) {
-			var cm = current[j] && current[j].Model;
-			var cg = cm && cm.Group;
-			if (cm && (cm.Restraint || (cg && cg.indexOf('Item') === 0))) kept.push(current[j]);
+			var it = current[j], cm = it && it.Model, cg = cm && cm.Group;
+			if (it && !it.__kdFromLook && cm && (cm.Restraint || (cg && cg.indexOf('Item') === 0))) {
+				kept.push(it);
+				if (cg) keptGroups[cg] = true;
+			}
 		}
-		Character.Appearance = kept.concat(declaredItems);
+		var look = [];
+		for (var k = 0; k < declaredItems.length; k++) {
+			var dm = declaredItems[k] && declaredItems[k].Model;
+			if (dm && dm.Group && keptGroups[dm.Group]) continue;   // a local tie owns this slot
+			look.push(declaredItems[k]);
+		}
+		Character.Appearance = kept.concat(look);
 		if (typeof KDRefreshSelectedModel === 'function') KDRefreshSelectedModel(Character);
 	}
 
@@ -240,7 +256,9 @@
 		if (typeof AppearanceItemParse !== 'function' || typeof DecompressB64 !== 'function') return;
 		var backup = DecompressB64(declaredWire);
 		var declaredItems = AppearanceItemParse(backup);
-		if (Array.isArray(declaredItems)) mergeDeclaredLook(Character, declaredItems);
+		if (!Array.isArray(declaredItems)) return;
+		for (var i = 0; i < declaredItems.length; i++) if (declaredItems[i]) declaredItems[i].__kdFromLook = 1;
+		mergeDeclaredLook(Character, declaredItems);
 	}
 
 	/**
@@ -282,12 +300,25 @@
 		if (typeof KinkyDungeonDressPlayer !== 'function' || KinkyDungeonDressPlayer.__kdPeerDressGuard) return;
 		var _prev = KinkyDungeonDressPlayer;
 		KinkyDungeonDressPlayer = function (Character) {
+			var declared = null, armed = false;
 			try {
-				var declared = (_peerAppearanceByNPC && Character) ? _peerAppearanceByNPC.get(Character) : null;
+				declared = (_peerAppearanceByNPC && Character) ? _peerAppearanceByNPC.get(Character) : null;
+				armed = !!(declared && typeof KDRefreshCharacter !== 'undefined' && KDRefreshCharacter.get(Character));
 				if (declared) applyDeclaredLook(Character, declared);
 			} catch (e) { /* a redress must never break a frame */ }
 			// eslint-disable-next-line prefer-rest-params
-			return _prev.apply(this, arguments);
+			var ret = _prev.apply(this, arguments);
+			/*
+			 * V4 (KDM-344): on an ARMED frame KD's rebuild re-dresses the avatar from its NPC default
+			 * ("Bandit") and drops every restraint model it did not lay itself — the look's restraints
+			 * included — so the look goes on again AFTER it. Safe now where V1 was not: the merge keeps
+			 * what KD just laid (untagged), and replaces only what came from a look. Unarmed frames do
+			 * nothing in `_prev`, so they skip the second pass.
+			 */
+			if (armed) {
+				try { applyDeclaredLook(Character, declared); } catch (e) { /* never break a frame */ }
+			}
+			return ret;
 		};
 		KinkyDungeonDressPlayer.__kdPeerDressGuard = true;
 	}

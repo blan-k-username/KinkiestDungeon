@@ -19,7 +19,7 @@
  * hard-coding `AutoPass: true` (or by the server ignoring the field and defaulting it).
  */
 import { test, expect, Page } from '@playwright/test';
-import { bootCoopPair, MP_TEST_TIMEOUT } from './helpers/coop';
+import { bootCoopPair, MP_TEST_TIMEOUT, coopWaitTurn } from './helpers/coop';
 import { freeNeighbour } from '../helpers/session-tiles';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
@@ -38,14 +38,6 @@ function standMerchantBesideA(bridge: any) {
 	})()`);
 	expect(id, 'setup: the merchant exists').toBeTruthy();
 	return { ...n!, id };
-}
-
-/** One lockstep turn: B waits, A runs `fn`; resolves when A's client has the new turn. */
-async function turn(A: Page, B: Page, fn: () => Promise<unknown>) {
-	const t0 = await A.evaluate(() => (window as any).__coop.lastTick);
-	await fn();
-	await B.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
-	await A.waitForFunction((t) => (window as any).__coop.lastTick !== t, t0, { timeout: 30_000 });
 }
 
 /** A walks a one-tile ROUTE onto (x,y) through the real route driver — what a click becomes. */
@@ -70,7 +62,7 @@ test.describe('co-op click-to-move passes a peaceful NPC', () => {
 				await bootCoopPair(A, B, port);
 				const m = standMerchantBesideA(bridge);
 				// A turn so A's client has the merchant in its world before it plans a route.
-				await turn(A, B, () => A.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' })));
+				await coopWaitTurn(A, B);
 				await expect.poll(() => A.evaluate((t) => {
 					// @ts-ignore bare let-global
 					const e = KinkyDungeonEnemyAt(t.x, t.y);
@@ -81,7 +73,7 @@ test.describe('co-op click-to-move passes a peaceful NPC', () => {
 				// The player's OWN toggle, set the way KD's HUD button sets it.
 				// @ts-ignore bare let-global
 				await A.evaluate((v) => { KinkyDungeonToggleAutoPass = v; }, autoPass);
-				await turn(A, B, () => routeStep(A, m.x, m.y));
+				await coopWaitTurn(A, B, () => routeStep(A, m.x, m.y));
 
 				const to = bridge.session.posOf('A');
 				// @ts-ignore bare let-global

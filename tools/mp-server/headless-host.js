@@ -2316,6 +2316,22 @@ class HeadlessHost {
 		})()`);
 	}
 
+	/**
+	 * Replace an avatar's `appearance` — the owner's current drawn look (KDM-344). The same opaque
+	 * field `spawnAvatar` sets from the join declaration; the partner's client applies it. Args go
+	 * through a context slot so the eval source stays constant (the eval compilation cache).
+	 */
+	setAvatarAppearance(entityId, appearance) {
+		this._context.__kdLookArgs = { id: entityId | 0, appearance: String(appearance || '') };
+		return this.eval(`(function(){
+			var a = globalThis.__kdLookArgs; globalThis.__kdLookArgs = undefined;
+			var e = KDMapData.Entities.find(function(en){ return en.id === a.id; });
+			if (!e || !a.appearance) return false;
+			e.appearance = a.appearance;
+			return true;
+		})()`);
+	}
+
 	/** Move an injected avatar entity (by entity id) and refresh the entity cache. */
 	moveAvatar(entityId, x, y) {
 		return this.eval(`(function(){

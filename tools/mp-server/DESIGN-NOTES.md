@@ -520,6 +520,29 @@ it from `outfit` (`:11211-11237`). Per-player-safe because `spawnAvatar` already
 its own `RemotePlayer_<label>` def clone. `'BlueHair'` remains the fallback, so an undeclared player
 looks exactly as they always did.
 
+**The look stays live (KDM-344).** Your partner sees exactly what your own screen draws of you: your
+restraints, lost clothes, and getting free. The headless server never runs KD's dress pass for a
+player, so its copy of your paper doll is not the truth. Your own client is, and that is the single
+source:
+
+- **Client.** `sendOwnLook` (`coop-bootstrap.js`) serialises `KinkyDungeonPlayer.Appearance` with the
+  lobby's one serialiser (`KDMPLobby.appearanceString`). After a turn or push frame it sends
+  `{type:'look', appearance}`, but only when the look changed. A look update is not a game input, so it
+  costs no turn.
+- **Server.** `SwapSession.setLook` sanitises it with the join's own `sanitizeAppearance` and puts it on
+  the avatar (`HeadlessHost.setAvatarAppearance`). It also keeps it in the character package, so an
+  avatar respawned on a later floor starts from the current look.
+- **Partner's client.** `render-client.js` tags every model that came from a look (`__kdFromLook`).
+  `mergeDeclaredLook` replaces all tagged models and keeps only untagged worn models that KD laid
+  locally, such as a Tie Up. Without the tag, a restraint from an old look would outlive the partner
+  getting free. The dress guard applies the look again after KD's own armed dress pass; otherwise the
+  stock outfit flickers for one frame.
+
+The avatar's bondage stays item-free (`specialBoundLevel`, plus the per-snapshot `KDSetNPCRestraints`
+reset). The restraints you see on a partner are drawn models only, not items, so the tie-submenu crash
+cannot come back through this path. Pinned by `tests/e2e/mp-own-paper-doll.spec.ts` #3 (proven red with
+the send disabled) and `tests/unit/mp-look-update.spec.ts`.
+
 ### Borrowing a KD screen
 
 `borrowButtons(active, names, commit)` in `coop-lobby.js` is the ONE implementation, shared by the

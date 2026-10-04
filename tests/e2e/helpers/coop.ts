@@ -494,6 +494,36 @@ export async function waitForPeerAvatar(
 	return await handle.jsonValue();
 }
 
+/**
+ * A `characters` entry for `bootCoopPair`: the player's own CUSTOMISED look, declared the way the lobby
+ * does on every real join. Every flat-`Color` item (KD's clothing dye slot) is dyed `hex` BEFORE KD's own
+ * new-game start, the order a wardrobe edit has, so KD's own dress table records it
+ * (`KinkyDungeonDressSet`). A stock look leaves the server's copy of the player at its baseline and hides
+ * every bug that depends on the look differing (KDM-322) — so look tests declare one.
+ */
+export function declareDyedCharacter(hex: string) {
+	return (page: Page) => page.evaluate((h: string) => {
+		// @ts-ignore bare let-globals
+		for (const it of (KinkyDungeonPlayer.Appearance || [])) if (it && typeof it.Color === 'string' && it.Color.charAt(0) === '#') it.Color = h;
+		// @ts-ignore
+		KinkyDungeonStartNewGame(false);
+		// @ts-ignore
+		return (window as any).KDMPLobby.playerCharacter();
+	}, hex);
+}
+
+/**
+ * One ordinary lockstep turn: `actA` (default: wait) on A, a wait on B, and resolve when A's client has
+ * the new turn. `actA` lets a spec act on A's side of the turn (a route step, a key) without its own copy
+ * of this loop.
+ */
+export async function coopWaitTurn(A: Page, B: Page, actA?: () => Promise<unknown>, timeout = 30_000): Promise<void> {
+	const t0 = await A.evaluate(() => (window as any).__coop.lastTick);
+	await (actA ? actA() : A.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' })));
+	await B.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
+	await A.waitForFunction((t) => (window as any).__coop.lastTick !== t, t0, { timeout });
+}
+
 /** One input send observed on the client's OUTGOING wire, in order. */
 export interface CoopWireSend {
 	/** The action's `kdType` (or `kind` for the built-in helpers), e.g. `setMoveDirection`. */

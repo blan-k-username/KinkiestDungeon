@@ -747,6 +747,31 @@
 	}
 
 	/**
+	 * Tell the server what THIS player looks like now, whenever it changed (KDM-344).
+	 *
+	 * The game draws a player on their own screen with KD's single-player rules — restraint models on,
+	 * displaced clothing `Lost` (`KinkyDungeonDressPlayer`); since KDM-322 that drawing is this
+	 * client's alone. The partner must see exactly that (owner, 2026-10-04), so the drawn look itself
+	 * is what travels: the same serialised `Appearance` the join already declares
+	 * (`KDMPLobby.appearanceString`), sent only when it differs from the last one sent. The server
+	 * stores it on this player's avatar; the partner's client applies it (`render-client.js`
+	 * `applyPeerAppearances`). Called after turn and push frames only — UI frames arrive ~60×/s and
+	 * cannot change the worn set.
+	 */
+	function sendOwnLook() {
+		try {
+			if (!ws || ws.readyState !== 1 || !coop.started) return;
+			if (typeof KinkyDungeonPlayer === 'undefined' || !KinkyDungeonPlayer) return;
+			var lobby = window.KDMPLobby;
+			if (!lobby || typeof lobby.appearanceString !== 'function') return;
+			var look = lobby.appearanceString(KinkyDungeonPlayer.Appearance);
+			if (!look || look === coop._lookSent) return;
+			coop._lookSent = look;
+			ws.send(JSON.stringify({ type: 'look', appearance: look }));
+		} catch (e) { /* a look update must never break a frame */ }
+	}
+
+	/**
 	 * The `move` input KD's OWN fast-move sends for one step of a clicked path (`KinkyDungeon.ts`, the
 	 * `KDSendInput("move", …)` in the fast-move block), field for field. KD's `move` handler WRITES the
 	 * player's toggles from it (`KinkyDungeonToggleAutoPass = data.AutoPass`, sprint, SuppressSprint —
@@ -1638,6 +1663,7 @@
 				var pushSnap = resolveState(m);   // sets `coop.screen` BEFORE pinGameScreen reads it
 				pinGameScreen();
 				if (pushSnap) window.KDRenderClient.apply(pushSnap);
+				sendOwnLook();
 			}
 			else if (m.type === 'state' && m.kind === 'ui') {
 				// A UI input of OURS was applied — no turn resolved. Adopt the fresh state so
@@ -1694,6 +1720,7 @@
 				// bundle, not after, or the server's own values are the ones discarded.
 				pinGameScreen();
 				window.KDRenderClient.apply(turnSnap);
+				sendOwnLook();   // after apply: the restraint-sync re-dress has drawn this turn's look
 				// Seed the server-configured carryable restraint item once (the Items inventory
 				// is client-local, so it must be added here even though the server bundle already has it).
 				// Read from the RESOLVED snapshot — with delta encoding `m.snapshot` is absent

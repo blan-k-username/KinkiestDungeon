@@ -219,6 +219,9 @@
 			lobby.share = [];
 		},
 	};
+	// The one serialiser of a look — the join declaration uses it, and so does the in-game
+	// "my look changed" message (coop-bootstrap.js `sendOwnLook`, KDM-344).
+	lobby.appearanceString = appearanceString;
 	window.KDMPLobby = lobby;
 
 	/**

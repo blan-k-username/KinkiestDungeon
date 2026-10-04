@@ -34,7 +34,7 @@ const { KD_SHOP_BUY } = require('./kd-shop-buy');
 const { KD_COOP_CAPTURE } = require('./kd-coop-capture');
 const { KD_VARIANT_REGISTRY, decideVariantSweep } = require('./kd-variant-registry');
 const { KD_DISCONNECT_DIALOGUE, HOST_LOST_DIALOGUE, PEER_LOST_DIALOGUE, JOIN_ASK_DIALOGUE, NOW_HOST_DIALOGUE } = require('./kd-disconnect-dialogue');
-const { sanitizeName, sanitizePerks, sanitizeCharacter } = require('./join-gate');
+const { sanitizeName, sanitizePerks, sanitizeCharacter, sanitizeAppearance } = require('./join-gate');
 // Same normaliser the gate uses, so what the session stores and what the gate
 // accepted cannot drift apart.
 const { sanitizeWorld } = require('./game-modes');
@@ -2583,6 +2583,25 @@ class SwapSession {
 		if (c) this.charOf.set(clientId, c);
 		else this.charOf.delete(clientId);
 		return c;
+	}
+
+	/**
+	 * The player's own DRAWN look changed (KDM-344): put it on their avatar, so the partner sees
+	 * exactly what this player sees of themselves (owner, 2026-10-04).
+	 *
+	 * The look is drawn by the player's own client with KD's single-player dress rules (restraint
+	 * models on, displaced clothing lost); the headless world cannot draw, so it is the one source.
+	 * Recorded in the character package too, so an avatar respawned later (a new floor) starts from
+	 * the current look, not the join-time one. Same sanitiser as the join declaration; an empty or
+	 * invalid look changes nothing.
+	 */
+	setLook(clientId, appearance) {
+		const look = sanitizeAppearance(appearance);
+		if (!look || !this._joined.includes(clientId)) return false;
+		this.charOf.set(clientId, Object.assign({}, this.charOf.get(clientId) || {}, { appearance: look }));
+		const eid = this.avatars.get(clientId);
+		if (eid != null) this.world.setAvatarAppearance(eid, look);
+		return true;
 	}
 
 	/**

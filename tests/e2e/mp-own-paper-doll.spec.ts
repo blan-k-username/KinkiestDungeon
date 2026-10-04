@@ -11,13 +11,17 @@
  * co-op player saw themselves unbound and fully dressed.
  *
  * #1 is the single-player ground truth, so #2 asserts "the same as single player", not a guess.
+ * #3 (KDM-344) closes the chain: the PARTNER sees exactly what the player sees of themselves (owner,
+ * 2026-10-04) — each client sends its own drawn look when it changes (coop-bootstrap.js `sendOwnLook`),
+ * the server puts it on the avatar, the partner's client applies it. Checked bound AND freed, so a
+ * restraint cannot outlive the partner getting free.
  * The restraint is put on server-side (the world owns the worn set) — the same mutation an enemy's
  * bind makes — and two ordinary turns follow, so a later bundle is adopted after the re-dress.
  */
 import { test, expect } from '../helpers/playwright-fixtures';
 import { Page } from '@playwright/test';
 import { bootKD } from '../helpers/bundle';
-import { bootCoopPair, MP_TEST_TIMEOUT } from './helpers/coop';
+import { bootCoopPair, MP_TEST_TIMEOUT, coopWaitTurn, declareDyedCharacter, waitForPeerAvatar } from './helpers/coop';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
 
@@ -56,27 +60,12 @@ test('#2 co-op: your own character shows the same — not the server copy of it'
 	const { server, bridge, port } = await start(0);
 	const ctxA = await browser.newContext(); const ctxB = await browser.newContext();
 	const A = await ctxA.newPage(); const B = await ctxB.newPage();
-	const turn = async () => {
-		const t0 = await A.evaluate(() => (window as any).__coop.lastTick);
-		await A.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
-		await B.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
-		await A.waitForFunction((t) => (window as any).__coop.lastTick !== t, t0, { timeout: 30_000 });
-	};
+	const turn = () => coopWaitTurn(A, B);
 	try {
-		// Each player declares their own CUSTOMISED character, as the lobby does on every real join (the
-		// look travels as `appearance`). A look equal to the stock one leaves the server's paper doll at
-		// its baseline, so it is never captured and the bug cannot show — measured: this test is green
-		// with an undeclared or an undyed character. The dye is applied BEFORE KD's own new-game start,
-		// the order a wardrobe edit has (so KD's own dress table records it, KinkyDungeonDressSet).
-		const declare = (page: Page) => page.evaluate(() => {
-			// @ts-ignore
-			for (const it of (KinkyDungeonPlayer.Appearance || [])) if (it && typeof it.Color === 'string' && it.Color.charAt(0) === '#') it.Color = '#11CC33';
-			// @ts-ignore
-			KinkyDungeonStartNewGame(false);
-			// @ts-ignore
-			return window.KDMPLobby.playerCharacter();
-		});
-		await bootCoopPair(A, B, port, { characters: { A: declare, B: declare } });
+		// Each player declares their own CUSTOMISED character (`declareDyedCharacter`): with a stock or
+		// undeclared look the server's paper doll never leaves its baseline, is never captured, and the
+		// bug cannot show — measured: this test is green without it.
+		await bootCoopPair(A, B, port, { characters: { A: declareDyedCharacter('#11CC33'), B: declareDyedCharacter('#11CC33') } });
 		await turn();
 		const before = await doll(A);
 		expect(before.shoes.length, 'precondition: A starts wearing shoes').toBeGreaterThan(0);
@@ -94,6 +83,57 @@ test('#2 co-op: your own character shows the same — not the server copy of it'
 		const after = await doll(A);
 		expect(after.models, 'still drawn after a further turn').toContain(RESTRAINT_MODEL);
 		expect(after.shoes, 'the shoes are lost, as in single player').toEqual([]);
+	} finally {
+		await ctxA.close().catch(() => {}); await ctxB.close().catch(() => {});
+		try { bridge.close(); } catch (e) { /* ignore */ }
+		await new Promise((r) => server.close(r));
+	}
+});
+
+/** A's look as B's screen draws it: the model names on the avatar's generated NPC character. */
+const peerDoll = (B: Page, id: number) => B.evaluate((eid: number) => {
+	// @ts-ignore bare let-global
+	const C = KDNPCChar.get(eid);
+	return C ? (C.Appearance || []).map((a: any) => a && a.Model && a.Model.Name).filter(Boolean) : null;
+}, id);
+const sameSet = (xs: string[] | null) => Array.from(new Set(xs || [])).sort();
+
+test("#3 co-op: the partner sees exactly what you see of yourself (KDM-344)", async ({ browser }) => {
+	test.setTimeout(MP_TEST_TIMEOUT);
+	const { server, bridge, port } = await start(0);
+	const ctxA = await browser.newContext(); const ctxB = await browser.newContext();
+	const A = await ctxA.newPage(); const B = await ctxB.newPage();
+	const turn = () => coopWaitTurn(A, B);
+	try {
+		await bootCoopPair(A, B, port, { characters: { A: declareDyedCharacter('#11CC33'), B: declareDyedCharacter('#CC1133') } });
+		const peer = await waitForPeerAvatar(B, { label: "B's view of A" });
+		await turn();
+		await B.waitForFunction((id: number) => { /* @ts-ignore */ return !!KDNPCChar.get(id); }, peer.id, { timeout: 30_000 });
+		// Control: before any restraint, B already sees A's own look (KDM-318).
+		await expect.poll(async () => sameSet(await peerDoll(B, peer.id)), { timeout: 15_000, message: 'B sees A as A sees A' })
+			.toEqual(sameSet((await doll(A)).models));
+
+		// The world binds A (the same mutation an enemy's bind makes).
+		const s = bridge.session; const aId = s._joined[0];
+		s._restorePlayer(aId);
+		expect(s.world.eval(`!!KinkyDungeonAddRestraintIfWeaker(${JSON.stringify(RESTRAINT)}, 0, true)`), 'setup: A bound').toBe(true);
+		s.bundles.set(aId, s.world.capturePlayer());
+		await turn(); await turn();
+		const own = await doll(A);
+		expect(own.models, "precondition: A's own doll draws the restraint (#2)").toContain(RESTRAINT_MODEL);
+		expect(own.shoes, "precondition: A's shoes are lost (#2)").toEqual([]);
+		await expect.poll(async () => sameSet(await peerDoll(B, peer.id)), { timeout: 15_000, message: "B's view of bound A" })
+			.toEqual(sameSet(own.models));
+
+		// Freed: the restraint must not outlive it on B's screen, and the shoes come back on both.
+		s._restorePlayer(aId);
+		s.world.eval(`KinkyDungeonRemoveRestraint("ItemBoots")`);
+		s.bundles.set(aId, s.world.capturePlayer());
+		await turn(); await turn();
+		const freed = await doll(A);
+		expect(freed.models, 'A is free').not.toContain(RESTRAINT_MODEL);
+		await expect.poll(async () => sameSet(await peerDoll(B, peer.id)), { timeout: 15_000, message: "B's view of freed A" })
+			.toEqual(sameSet(freed.models));
 	} finally {
 		await ctxA.close().catch(() => {}); await ctxB.close().catch(() => {});
 		try { bridge.close(); } catch (e) { /* ignore */ }

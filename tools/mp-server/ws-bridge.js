@@ -771,6 +771,13 @@ class WSBridge {
 			this._sendExport(clientId, 'requested');
 			return clientId;
 		}
+		// The player's own drawn look changed (KDM-344, coop-bootstrap.js `sendOwnLook`). Stored on
+		// their avatar; the partner sees it on the next state frame. Not an input: it consumes no
+		// turn and the game never sees it — the look is presentation the headless world cannot draw.
+		if (msg.type === 'look' && clientId && this.session.started) {
+			this.session.setLook(clientId, msg.appearance);
+			return clientId;
+		}
 		if (msg.type === 'input' && clientId && this.session.started) {
 			try {
 				// The client routes EVERY input and classifies nothing. `apply`
