@@ -40,6 +40,7 @@
  * resetKDState() cannot undo.
  */
 import { test, expect } from '../helpers/playwright-fixtures';
+import { addRenderClientScripts } from '../helpers/client-sandbox';
 import { bootKD } from '../helpers/bundle';
 import { recordDrawnText, readDrawnText, restoreDrawnText } from './helpers/coop';
 
@@ -129,7 +130,7 @@ async function drawAllyDialogueBody(page: any, id: number, def: string) {
 
 test('a co-op partner is named in the ally dialogue, and no other name answer changes', async ({ isolatedPage }) => {
 	await bootKD(isolatedPage);
-	await isolatedPage.addScriptTag({ path: 'tools/mp-server/client/render-client.js' });
+	await addRenderClientScripts(isolatedPage);
 
 	const id = await plantPeerAvatar(isolatedPage, LABEL, DEF);
 

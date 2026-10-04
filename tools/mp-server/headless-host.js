@@ -589,6 +589,7 @@ const WORLD_GLOBALS_CLIENT = Object.freeze([
 // The codec moved to its own module — the BROWSER thin client needs the same decoder to
 // adopt a state bundle, and two hand-kept copies in two runtimes is the drift this epic deletes.
 const { KD_CODEC } = require('./kd-codec');
+const { KD_PEER_SHARED } = require('./kd-peer-shared');
 // The world/player classification of KD's game-mode keys. Own module so the
 // lightweight join-gate can validate a declaration without loading this engine host.
 const { MODE_WORLD_KEYS, MODE_PLAYER_KEYS, MODE_SOURCE, isModeKey } = require('./game-modes');
@@ -1198,6 +1199,9 @@ class HeadlessHost {
 		 * will tell you about this comment rather than about a mistake.
 		 */
 		this.setServerMode(this.serverMode);
+		// The co-op code both runtimes install (avatar def, ally-dialogue guard, entity snapshot, …):
+		// one source, `kd-peer-shared.js`, served to the browser as the identical text (KDM-335).
+		this.eval(KD_PEER_SHARED);
 		// Record the post-init fingerprint. Anything that diverges from it later is mutable,
 		// hence a per-player state candidate — this is what lets an unknown feature or mod be captured
 		// without anyone adding it to a list. Must happen AFTER the data tables are loaded and BEFORE
@@ -1504,7 +1508,7 @@ class HeadlessHost {
 			if (typeof globalThis.KDMPFloorAvatar === 'function') return { ok: true, already: true };
 			globalThis.KDMPIsAvatar = function (E) {
 				return !!(E && E.id != null && E.Enemy && typeof E.Enemy.name === 'string'
-					&& E.Enemy.name.indexOf('RemotePlayer') === 0);
+					&& KDPeerShared.isPeerAvatarName(E.Enemy.name));
 			};
 			globalThis.KDMPFloorAvatar = function (E) {
 				if (!globalThis.KDMPIsAvatar(E) || E.hp > 0) return false;
@@ -1566,7 +1570,7 @@ class HeadlessHost {
 			var _dmg = KinkyDungeonDamageEnemy;
 			KinkyDungeonDamageEnemy = function (E, D) {
 				var nm = (E && E.Enemy && E.Enemy.name) || '';
-				var isAvatar = !!(E && E.id != null && nm.indexOf('RemotePlayer') === 0);
+				var isAvatar = !!(E && E.id != null && KDPeerShared.isPeerAvatarName(nm));
 				if (D && isAvatar) {
 					var w = KinkyDungeonDamageEnemy;
 					if (!w.__hits) w.__hits = {};
@@ -1743,7 +1747,7 @@ class HeadlessHost {
 				var before = (enemy && enemy.boundLevel) || 0;
 				var res = _untie.apply(this, arguments);
 				var nm = (enemy && enemy.Enemy && enemy.Enemy.name) || '';
-				if (enemy && enemy.id != null && nm.indexOf('RemotePlayer') === 0) {
+				if (enemy && enemy.id != null && KDPeerShared.isPeerAvatarName(nm)) {
 					var removed = before - ((enemy.boundLevel) || 0);
 					if (removed > 0) {
 						var w = KDUntieEnemy;
@@ -1778,39 +1782,11 @@ class HeadlessHost {
 	 * (`KDCheckDialoguePrereq`, `KinkyDungeonDialogue.ts:80-90,169`) — so it reports false whenever
 	 * the dialogue's current entity is a peer avatar; the button simply never appears. `Untie` and
 	 * `Leave` are untouched.
+	 *
+	 * The guard itself lives in `kd-peer-shared.js` (one source for server and browser, KDM-335).
 	 */
 	installPeerAllyDialogueGuard() {
-		return this.eval(`(function(){
-			if (typeof KDDialogue === 'undefined' || !KDDialogue.GenericAlly || !KDDialogue.GenericAlly.options) {
-				return { ok: false, error: 'no GenericAlly dialogue' };
-			}
-			var opts = KDDialogue.GenericAlly.options;
-			var hide = ['Leash', 'ReleaseLeash', 'Shop', 'ShopBuy', 'Attack', 'AttackPlay',
-				'AttackUnaware', 'Food', 'JoinParty', 'Flirt', 'LetMePass', 'StopFollowingMe',
-				'FollowMe', 'DontStayHere', 'StayHere', 'Aggressive', 'Defensive', 'HelpMe',
-				'HelpMeCommandWord', 'HelpMeKey', 'DontHelpMe', 'RemoveParty'];
-			function isPeerAvatarTarget() {
-				var enemy = (typeof KinkyDungeonFindID === 'function') ? KinkyDungeonFindID(KDGameData.CurrentDialogMsgID) : null;
-				var nm = (enemy && enemy.Enemy && enemy.Enemy.name) || '';
-				return nm.indexOf('RemotePlayer') === 0;
-			}
-			function wrapEntry(entry) {
-				var _prereq = entry.prerequisiteFunction;
-				entry.prerequisiteFunction = function (gagged, player) {
-					if (isPeerAvatarTarget()) return false;
-					return _prereq ? _prereq(gagged, player) : true;
-				};
-				entry.__kdPeerAllyGuard = 1;
-			}
-			var hidden = [];
-			for (var i = 0; i < hide.length; i++) {
-				var entry = opts[hide[i]];
-				if (!entry || entry.__kdPeerAllyGuard) continue;
-				wrapEntry(entry);
-				hidden.push(hide[i]);
-			}
-			return { ok: true, hidden: hidden };
-		})()`);
+		return this.eval('KDPeerShared.installAllyDialogueGuard()');
 	}
 
 	/** Take (and clear) the bind level untied off one peer avatar this turn. Take-once, like the hits. */
@@ -1958,36 +1934,11 @@ class HeadlessHost {
 	 * ally-faction, inert avatar definition used to represent another player as a
 	 * real KD entity. faction 'Player' = ally; noAttack falsy so a hostile enemy
 	 * still treats it as a valid target; immobile + visionRadius 0 so it never
-	 * acts on its own (the reconciler drives its position).
+	 * acts on its own (the reconciler drives its position). The def itself lives in
+	 * `kd-peer-shared.js` — one source for server and browser (KDM-335).
 	 */
 	_ensureAvatarDef() {
-		this.eval(`(function(){
-			if (!KinkyDungeonGetEnemyByName('RemotePlayer')) {
-				KinkyDungeonEnemies.push({
-					name: 'RemotePlayer', faction: 'Player', tags: KDMapInit(['peaceful']),
-					bound: 'Apprentice', // sprite name; presence makes KDCanBind true so the Truss/bind option appears
-					AI: 'guard', immobile: true, visionRadius: 0, maxhp: 100, minLevel: 0, weight: -1000,
-					movePoints: 1000, attackPoints: 0, attack: '', attackRange: 0,
-					// Evasion 0 = NEUTRAL, and it must stay neutral. It used to be -100, and
-					// KinkyDungeonMultiplicativeStat(-100) is 101 — a x101 hit chance that made every PvP
-					// attack land unconditionally and swamped anything the peer brought (measured: a peer
-					// with an Evasion buff of 3.0 still came out at 25.25, i.e. still an unconditional
-					// hit). The peer's real evasion now arrives on the entity's buff list instead, via
-					// setAvatarDefenses; a non-zero value here would silently cancel it again.
-					evasion: 0, armor: 0, followRange: 100, lowpriority: true,
-					// style → the client renders the avatar as a full character (NPC path,
-					// KDQuickGenNPC + DrawCharacter) so the other player is VISIBLE, not just
-					// an HP bar. Server never draws (rendering neutered) so this is client-only.
-					style: 'BlueHair',
-					terrainTags: {}, floors: KDMapInit([]),
-				});
-				if (typeof KinkyDungeonRefreshEnemiesCache === 'function') KinkyDungeonRefreshEnemiesCache();
-			}
-			// Register the def's display-name key so real combat text reads a real name
-			// ("Your attack hits the Rival …") instead of "[NotFound] NameRemotePlayer".
-			if (typeof addTextKey === 'function') addTextKey('NameRemotePlayer', 'Rival');
-			return true;
-		})()`);
+		this.eval('KDPeerShared.ensureRemotePlayerDef()');
 	}
 
 	/**
@@ -3911,22 +3862,10 @@ class HeadlessHost {
 	 */
 	serializeRenderState() {
 		return this.eval(`(function(){
-			function clone(o){ try { return (o === undefined) ? undefined : JSON.parse(JSON.stringify(o)); } catch(e){ return null; } }
-			// These are the fields KD OWN predicates read to decide whether a target is
-			// subdued — KinkyDungeonIsStunned reads stun/freeze, KDCanApplyBondage reads vulnerable and
-			// hp, KDBoundEffects reads boundLevel (and KDResyncBondage rebuilds it from
-			// specialBoundLevel). Omitting them meant the CLIENT — where the tie submenu actually
-			// evaluates the gate — never saw the state the server had computed, so no server-side fix
-			// could ever take effect. The old code hid this by stamping ent.stun onto the snapshot AFTER
-			// serialisation, bypassing this list; with the stamping gone the omission became visible.
-			var ENT_FIELDS = ['id','x','y','visual_x','visual_y','offX','offY','scaleX','scaleY','flip','hp','visual_hp','boundLevel','specialBoundLevel','stun','freeze','vulnerable','distraction','revealed','player','CustomSprite','CustomName','CustomNameColor','style','outfit','outfitBound','appearance'];
-			function entSnap(e){
-				var o = {};
-				for (var i=0;i<ENT_FIELDS.length;i++){ var k=ENT_FIELDS[i]; if (e[k] !== undefined) o[k] = e[k]; }
-				o.enemyName = (e.Enemy && e.Enemy.name) || undefined;
-				var b = clone(e.buffs); if (b) o.buffs = b;
-				return o;
-			}
+			// The entity field list (KD's own subdued-state fields included — KinkyDungeonIsStunned reads
+			// stun/freeze, KDCanApplyBondage reads vulnerable and hp, KDBoundEffects reads boundLevel) and
+			// the snapshot of one entity live in kd-peer-shared.js, one source with the browser (KDM-335).
+			var clone = KDPeerShared.clone, entSnap = KDPeerShared.entSnap;
 			var P = (typeof KinkyDungeonPlayerEntity !== 'undefined') ? KinkyDungeonPlayerEntity : null;
 			return {
 				version: 1,
@@ -4841,7 +4780,7 @@ class HeadlessHost {
 				(globalThis.__KD_SAVE_EXCLUDE || []).forEach(function (id) { drop[id] = true; });
 				var save = JSON.parse(JSON.stringify(KinkyDungeonGenerateSaveData()));
 				var isAvatar = function (e) {
-					return drop[e.id] || String((e.Enemy && e.Enemy.name) || '').indexOf('RemotePlayer') === 0;
+					return drop[e.id] || KDPeerShared.isPeerAvatarName(e.Enemy && e.Enemy.name);
 				};
 				var gone = {};
 				if (save.KDMapData && save.KDMapData.Entities) {

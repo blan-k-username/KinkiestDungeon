@@ -24,18 +24,7 @@
  * does and does not carry across a reply.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
-/* eslint-disable @typescript-eslint/no-var-requires */
-const fs = require('fs');
-const path = require('path');
-const vm = require('vm');
-const { KD_CODEC } = require('../../tools/mp-server/kd-codec');
-const { KD_ABSENT_RESET_BROWSER } = require('../../tools/mp-server/kd-absent-reset');
-
-const RENDER_CLIENT_SRC = fs.readFileSync(
-	path.join(__dirname, '../../tools/mp-server/client/render-client.js'), 'utf8');
-
-const CODEC_BODY = `${KD_CODEC}\n;(typeof window !== 'undefined' ? window : globalThis).KDCodec = ` +
-	'{ kdEnc: kdEnc, kdDec: kdDec, kdSer: kdSer };\n';
+import { loadRenderClient } from '../helpers/client-sandbox';
 
 interface Ctx {
 	KDGameData: { BulletWarnings: any[] };
@@ -45,7 +34,7 @@ interface Ctx {
 	[k: string]: any;
 }
 
-/** A browser-shaped context: the codec, the absent-reset rule, then render-client.js, in the real load order. */
+/** A browser-shaped context: the served precursors, then render-client.js, in the real load order. */
 function makeClient(): Ctx {
 	const sandbox: any = {
 		// Pristine post-init values — a real browser has run the same bundle init and starts here.
@@ -54,12 +43,7 @@ function makeClient(): Ctx {
 		KinkyDungeonMessageLog: [],
 		console,
 	};
-	sandbox.window = sandbox;
-	const ctx = vm.createContext(sandbox);
-	vm.runInContext(CODEC_BODY, ctx);
-	vm.runInContext(KD_ABSENT_RESET_BROWSER, ctx);
-	vm.runInContext(RENDER_CLIENT_SRC, ctx);
-	return sandbox as Ctx;
+	return loadRenderClient(sandbox) as Ctx;
 }
 
 /** A state frame carrying this turn's `KDGameData` bundle, same shape as `capturePlayer()`. */

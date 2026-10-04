@@ -33,6 +33,7 @@ const { KD_DELTA_BROWSER } = require('./kd-delta');
 const { KD_PEACE_DIALOGUE_BROWSER } = require('./kd-peace-dialogue');
 const { KD_DISCONNECT_DIALOGUE_BROWSER } = require('./kd-disconnect-dialogue');
 const { KD_ABSENT_RESET_BROWSER } = require('./kd-absent-reset');
+const { KD_PEER_SHARED_BROWSER } = require('./kd-peer-shared');
 // The routed journey choice: the wrap that stops the client committing a route locally,
 // and the KDInputTypes entry the routed choice is dispatched through. Same two-runtime rule again.
 const { KD_JOURNEY_CHOICE_BROWSER } = require('./kd-journey-choice');
@@ -81,6 +82,8 @@ const PEACE_DLG_ROUTE = '/mp/kd-peace-dialogue.js';
 // The disconnect dialogues, on the same two-runtime terms as the peace one.
 const DISCONNECT_DLG_ROUTE = '/mp/kd-disconnect-dialogue.js';
 const ABSENT_RESET_ROUTE = '/mp/kd-absent-reset.js';
+// Code both runtimes install (avatar def, ally-dialogue guard, entity snapshot, …) — one source (KDM-335).
+const PEER_SHARED_ROUTE = '/mp/kd-peer-shared.js';
 // The game-mode key -> source-global table, on the same two-runtime terms.
 const GAME_MODES_ROUTE = '/mp/game-modes.js';
 // The journey-choice wrap + its routed input type, on the same two-runtime terms.
@@ -107,6 +110,7 @@ SYNTHETIC_ROUTES[DELTA_ROUTE] = KD_DELTA_BROWSER;
 SYNTHETIC_ROUTES[PEACE_DLG_ROUTE] = KD_PEACE_DIALOGUE_BROWSER;
 SYNTHETIC_ROUTES[DISCONNECT_DLG_ROUTE] = KD_DISCONNECT_DIALOGUE_BROWSER;
 SYNTHETIC_ROUTES[ABSENT_RESET_ROUTE] = KD_ABSENT_RESET_BROWSER;
+SYNTHETIC_ROUTES[PEER_SHARED_ROUTE] = KD_PEER_SHARED_BROWSER;
 SYNTHETIC_ROUTES[GAME_MODES_ROUTE] = GAME_MODES_BROWSER;
 SYNTHETIC_ROUTES[JOURNEY_ROUTE] = KD_JOURNEY_CHOICE_BROWSER;
 SYNTHETIC_ROUTES[SHOP_BUY_ROUTE] = KD_SHOP_BUY_BROWSER;
@@ -125,6 +129,7 @@ const INJECT = [
 	// a local fallback in either would be the second copy this task exists to remove. It touches no
 	// bundle global, so it has no ordering constraint of its own beyond that.
 	'/tools/mp-server/client/coop-text.js',
+	PEER_SHARED_ROUTE,              // must precede render-client.js AND coop-bootstrap.js — both consume window.KDPeerShared
 	CODEC_ROUTE,                    // must precede render-client.js — it consumes window.KDCodec
 	ABSENT_RESET_ROUTE,             // must precede render-client.js — it consumes window.KDAbsentReset
 	WORLD_KEYS_ROUTE,               // must precede render-client.js — it consumes window.KDWorldGameDataKeys
@@ -462,7 +467,7 @@ function start(port = PORT, overrides = null) {
 }
 
 module.exports = {
-	start, patchServedBundle, INJECT,
+	start, patchServedBundle, INJECT, SYNTHETIC_ROUTES,
 	BUNDLE_PATCHES, PATCH_POLICY_FIELDS, validateBundlePatchPolicy, auditBundlePatches,
 };
 

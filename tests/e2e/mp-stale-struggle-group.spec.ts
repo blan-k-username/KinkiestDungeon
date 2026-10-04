@@ -17,22 +17,14 @@
  * `isolatedPage`: this spec injects render-client.js, whose wrappers resetKDState() cannot undo.
  */
 import { test, expect } from '../helpers/playwright-fixtures';
+import { addRenderClientScripts } from '../helpers/client-sandbox';
 import { bootKD } from '../helpers/bundle';
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const { KD_ABSENT_RESET_BROWSER } = require('../../tools/mp-server/kd-absent-reset');
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const { KD_CODEC } = require('../../tools/mp-server/kd-codec');
-
-const CODEC_BROWSER = `${KD_CODEC}\n;(typeof window !== 'undefined' ? window : globalThis).KDCodec = `
-	+ `{ kdEnc: kdEnc, kdDec: kdDec, kdSer: kdSer };\n`;
 
 test('a struggle group whose restraint is not worn is dropped and reported, a worn one is kept', async ({ isolatedPage }) => {
 	const warnings: string[] = [];
 	isolatedPage.on('console', (m: any) => { if (m.type() === 'warning') warnings.push(m.text()); });
 	await bootKD(isolatedPage);
-	await isolatedPage.addScriptTag({ content: CODEC_BROWSER });
-	await isolatedPage.addScriptTag({ content: KD_ABSENT_RESET_BROWSER });
-	await isolatedPage.addScriptTag({ path: 'tools/mp-server/client/render-client.js' });
+	await addRenderClientScripts(isolatedPage);   // the served precursors (codec, absent-reset, …) + render-client
 
 	const result = await isolatedPage.evaluate(() => {
 		/* eslint-disable */

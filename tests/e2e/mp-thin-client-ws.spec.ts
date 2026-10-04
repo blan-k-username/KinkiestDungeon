@@ -18,6 +18,7 @@
  * inherited a game that could not advance a turn. Its own context, its own mess.
  */
 import { test, expect } from '../helpers/playwright-fixtures';
+import { addRenderClientScripts } from '../helpers/client-sandbox';
 import { bootKD } from '../helpers/bundle';
 import { installRenderSurfaceReader, readRenderSurface, PAINTED_MIN_COLORS } from './helpers/render-surface';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -33,7 +34,7 @@ test('a browser thin-client renders server snapshots and rounds input over a Web
 
 	try {
 		// Inject the production thin-client core and bootstrap render structures.
-		await isolatedPage.addScriptTag({ path: 'tools/mp-server/client/render-client.js' });
+		await addRenderClientScripts(isolatedPage);
 		// This spec builds its own thin client on the STOCK game page, not the demo-server,
 		// so nothing has injected the delta merge for it. Same source text the server diffs with.
 		await isolatedPage.addScriptTag({ content: KD_DELTA_BROWSER });

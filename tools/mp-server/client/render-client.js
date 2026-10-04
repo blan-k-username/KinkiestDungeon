@@ -23,17 +23,11 @@
 (function () {
 	'use strict';
 
-	function clone(o) { try { return (o === undefined) ? undefined : JSON.parse(JSON.stringify(o)); } catch (e) { return null; } }
-
-	var ENT_FIELDS = ['id', 'x', 'y', 'visual_x', 'visual_y', 'offX', 'offY', 'scaleX', 'scaleY', 'flip', 'hp', 'visual_hp', 'boundLevel', 'distraction', 'revealed', 'player', 'CustomSprite', 'CustomName', 'CustomNameColor', 'style', 'outfit', 'outfitBound', 'appearance'];
-
-	function entSnap(e) {
-		var o = {};
-		for (var i = 0; i < ENT_FIELDS.length; i++) { var k = ENT_FIELDS[i]; if (e[k] !== undefined) o[k] = e[k]; }
-		o.enemyName = (e.Enemy && e.Enemy.name) || undefined;
-		var b = clone(e.buffs); if (b) o.buffs = b;
-		return o;
-	}
+	// Code this browser shares with the headless world comes from ONE source, `kd-peer-shared.js`
+	// (served as /mp/kd-peer-shared.js before this file — KDM-335): the same JSON copy, entity
+	// snapshot, avatar def, avatar-name test and ally-dialogue guard the server installs.
+	var PS = window.KDPeerShared;
+	var clone = PS.clone, entSnap = PS.entSnap;
 
 	var inputCb = null;
 	var clientMode = false;   // closure flag — NOT the game-source KDServerRole (reverted)
@@ -108,8 +102,7 @@
 	 * danger check (coop-bootstrap.js) all ask this, and used to spell it out inline.
 	 */
 	function isPeerAvatar(en) {
-		var nm = en && en.Enemy && en.Enemy.name;
-		return typeof nm === 'string' && nm.indexOf('RemotePlayer') === 0;
+		return PS.isPeerAvatarName(en && en.Enemy && en.Enemy.name);
 	}
 
 	/**
@@ -147,65 +140,18 @@
 	}
 
 	/**
-	 * A co-op partner's avatar is a talk target client-side too — the sibling of
-	 * `HeadlessHost.installPeerAllyDialogueGuard` (see its doc comment for the full "why": the
-	 * dialogue itself stays reachable, since it is how a partner gets untied, but most of its OTHER
-	 * options are NPC-only and hidden the same way, by wrapping each one's `prerequisiteFunction`).
-	 * This browser draws its own dialogue buttons from its own bundle's `KDDialogue`, so it needs the
-	 * identical wrap to offer the same options the server would act on.
-	 *
-	 * DRY note: this duplicates `HeadlessHost.installPeerAllyDialogueGuard` verbatim, same as
-	 * `RemotePlayer`'s def and `KDParseStartRestraints` already do between these two files — a
-	 * second instance of the same tracked debt, not fixed here.
-	 */
-	function installPeerAllyDialogueGuard() {
-		if (typeof KDDialogue === 'undefined' || !KDDialogue.GenericAlly || !KDDialogue.GenericAlly.options) return;
-		var opts = KDDialogue.GenericAlly.options;
-		var hide = ['Leash', 'ReleaseLeash', 'Shop', 'ShopBuy', 'Attack', 'AttackPlay',
-			'AttackUnaware', 'Food', 'JoinParty', 'Flirt', 'LetMePass', 'StopFollowingMe',
-			'FollowMe', 'DontStayHere', 'StayHere', 'Aggressive', 'Defensive', 'HelpMe',
-			'HelpMeCommandWord', 'HelpMeKey', 'DontHelpMe', 'RemoveParty'];
-		function isPeerAvatarTarget() {
-			var enemy = (typeof KinkyDungeonFindID === 'function') ? KinkyDungeonFindID(KDGameData.CurrentDialogMsgID) : null;
-			var nm = (enemy && enemy.Enemy && enemy.Enemy.name) || '';
-			return nm.indexOf('RemotePlayer') === 0;
-		}
-		function wrapEntry(entry) {
-			var _prereq = entry.prerequisiteFunction;
-			entry.prerequisiteFunction = function (gagged, player) {
-				if (isPeerAvatarTarget()) return false;
-				return _prereq ? _prereq(gagged, player) : true;
-			};
-			entry.__kdPeerAllyGuard = 1;
-		}
-		for (var i = 0; i < hide.length; i++) {
-			var entry = opts[hide[i]];
-			if (!entry || entry.__kdPeerAllyGuard) continue;
-			wrapEntry(entry);
-		}
-	}
-
-	/**
-	 * Ensure the `RemotePlayer` avatar enemy-def exists in THIS browser. The server
-	 * represents each other player as a `RemotePlayer` ally entity; the snapshot only
-	 * carries `enemyName`, and apply() re-links the def by name. The stock browser
-	 * bundle has no such def → the draw path (KDEnemyRank reads `.tags`) crashes. Push
-	 * the same minimal def the headless host uses (mod-style, once).
+	 * Ensure the `RemotePlayer` avatar enemy-def exists in THIS browser, and the ally-dialogue guard is
+	 * on. The server represents each other player as a `RemotePlayer` ally entity; the snapshot only
+	 * carries `enemyName`, and apply() re-links the def by name. The stock browser bundle has no such
+	 * def → the draw path (KDEnemyRank reads `.tags`) crashes. This browser also draws its own dialogue
+	 * buttons from its own bundle's `KDDialogue`, so it needs the same guard the server acts under.
+	 * Both come from `kd-peer-shared.js` — the server installs the identical code (KDM-335). The
+	 * guard re-runs on every call because an adopted bundle can bring a fresh `KDDialogue`; it is
+	 * idempotent per entry.
 	 */
 	function ensureAvatarDef() {
-		if (typeof KinkyDungeonEnemies === 'undefined' || typeof KinkyDungeonGetEnemyByName !== 'function') return;
-		installPeerAllyDialogueGuard();
-		if (KinkyDungeonGetEnemyByName('RemotePlayer')) return;
-		KinkyDungeonEnemies.push({
-			name: 'RemotePlayer', faction: 'Player', tags: KDMapInit(['peaceful']),
-			bound: 'Apprentice', // presence makes KDCanBind true so the Truss/bind context option appears
-			AI: 'guard', immobile: true, visionRadius: 0, maxhp: 100, minLevel: 0, weight: -1000,
-			movePoints: 1000, attackPoints: 0, attack: '', attackRange: 0,
-			evasion: -100, armor: 0, followRange: 100, lowpriority: true,
-			style: 'BlueHair', // render the peer as a full character (NPC sprite path)
-			terrainTags: {}, floors: KDMapInit([]),
-		});
-		if (typeof KinkyDungeonRefreshEnemiesCache === 'function') KinkyDungeonRefreshEnemiesCache();
+		PS.installAllyDialogueGuard();
+		PS.ensureRemotePlayerDef();
 	}
 
 	/**

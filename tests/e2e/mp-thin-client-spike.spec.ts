@@ -23,6 +23,7 @@
  * inherited a game that could not advance a turn. Its own context, its own mess.
  */
 import { test, expect } from '../helpers/playwright-fixtures';
+import { addRenderClientScripts } from '../helpers/client-sandbox';
 import { bootKD } from '../helpers/bundle';
 import { installRenderSurfaceReader, readRenderSurface, frameDiffRatio, PAINTED_MIN_COLORS } from './helpers/render-surface';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -88,7 +89,7 @@ test('stock renderer is driven purely from an applied render-state snapshot (no 
 		content: `window.KDWorldGameDataKeys = ${JSON.stringify(KDGAMEDATA_WORLD_KEYS)};`,
 	});
 	// Inject the production thin-client core (classic script → shares bundle scope).
-	await isolatedPage.addScriptTag({ path: 'tools/mp-server/client/render-client.js' });
+	await addRenderClientScripts(isolatedPage);
 	expect(await isolatedPage.evaluate(() => typeof (window as any).KDRenderClient)).toBe('object');
 
 	/*

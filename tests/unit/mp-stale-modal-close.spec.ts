@@ -35,18 +35,7 @@
  * this bug is specifically in what `KDRenderClient.apply()`/`adoptBundle()` does and does not carry.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
-/* eslint-disable @typescript-eslint/no-var-requires */
-const fs = require('fs');
-const path = require('path');
-const vm = require('vm');
-const { KD_CODEC } = require('../../tools/mp-server/kd-codec');
-const { KD_ABSENT_RESET_BROWSER } = require('../../tools/mp-server/kd-absent-reset');
-
-const RENDER_CLIENT_SRC = fs.readFileSync(
-	path.join(__dirname, '../../tools/mp-server/client/render-client.js'), 'utf8');
-
-const CODEC_BODY = `${KD_CODEC}\n;(typeof window !== 'undefined' ? window : globalThis).KDCodec = ` +
-	'{ kdEnc: kdEnc, kdDec: kdDec, kdSer: kdSer };\n';
+import { loadRenderClient } from '../helpers/client-sandbox';
 
 interface Ctx {
 	KinkyDungeonTargetTile: any;
@@ -57,7 +46,7 @@ interface Ctx {
 	[k: string]: any;
 }
 
-/** A browser-shaped context: the codec, the absent-reset rule, then render-client.js, in the real load order. */
+/** A browser-shaped context: the served precursors, then render-client.js, in the real load order. */
 function makeClient(): Ctx {
 	const sandbox: any = {
 		// Pristine post-init values — a real browser has run the same bundle init and starts here.
@@ -67,17 +56,9 @@ function makeClient(): Ctx {
 		KinkyDungeonMessageLog: [],
 		console,
 	};
-	// Real render-client.js code reaches its browser-published helpers (KDCodec, KDAbsentReset) via
-	// `window`, falling back to `globalThis` only when `window` is itself undefined. A vm context has
-	// no `window` of its own, so without this self-reference every such lookup silently sees
-	// "undefined" and the rule those helpers implement never runs — self-reference, same as a real
-	// browser's `window === globalThis`.
-	sandbox.window = sandbox;
-	const ctx = vm.createContext(sandbox);
-	vm.runInContext(CODEC_BODY, ctx);
-	vm.runInContext(KD_ABSENT_RESET_BROWSER, ctx);
-	vm.runInContext(RENDER_CLIENT_SRC, ctx);
-	return sandbox as Ctx;
+	// The served precursors (KDPeerShared, KDCodec, KDAbsentReset, …) then render-client.js, with
+	// `window === globalThis` as in a real browser — tests/helpers/client-sandbox.ts.
+	return loadRenderClient(sandbox) as Ctx;
 }
 
 /** Minimal state frame `KDRenderClient.apply()` accepts — just enough of the shape to not throw. */

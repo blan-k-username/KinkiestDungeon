@@ -557,10 +557,10 @@
 	 * Stock function, no game-source edit. Idempotent (won't double-add).
 	 */
 	function addStartItem(spec) {
-		// Accepts one name or a comma/space-separated list, matching the server's
-		// KDParseStartRestraints (swap-session.js) — e.g. "MasterworkHeels,HighsecShackles".
+		// Accepts one name or a comma/space-separated list — the server's own parser, from the one
+		// shared source (kd-peer-shared.js, KDM-335) — e.g. "MasterworkHeels,HighsecShackles".
 		if (!spec) return;
-		var names = String(spec).split(/[,\s]+/).filter(Boolean);
+		var names = window.KDPeerShared.parseStartRestraints(spec);
 		if (names.length > 1) { names.forEach(addStartItem); return; }
 		var name = names[0];
 		try {

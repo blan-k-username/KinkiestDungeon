@@ -35,6 +35,7 @@
  * the probe itself can see one when nothing is suppressing it.
  */
 import { test, expect } from '../helpers/playwright-fixtures';
+import { addRenderClientScripts } from '../helpers/client-sandbox';
 import { bootKD } from '../helpers/bundle';
 
 const TAPE = 'DuctTapeHands';
@@ -153,7 +154,7 @@ async function appearanceHasModel(page: any, id: number, modelName: string): Pro
 test.describe('a peer avatar keeps KD\'s own bondage rendering while a declared look is enforced', () => {
 	test('a restraint tied onto the avatar survives the declared-appearance guard', async ({ isolatedPage }) => {
 		await bootKD(isolatedPage);
-		await isolatedPage.addScriptTag({ path: 'tools/mp-server/client/render-client.js' });
+		await addRenderClientScripts(isolatedPage);
 		await isolatedPage.evaluate(() => {
 			// @ts-ignore
 			KinkyDungeonStartNewGame(false);

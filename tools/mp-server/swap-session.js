@@ -27,6 +27,7 @@ const { HeadlessHost, KDGAMEDATA_WORLD_KEYS } = require('./headless-host');
 const { PartyChoice } = require('./party-choice');
 const { PeaceRegistry } = require('./peace');
 const { KD_PEACE_DIALOGUE } = require('./kd-peace-dialogue');
+const { kdParseStartRestraints } = require('./kd-peer-shared');
 const { KD_PERK_CHOICE } = require('./kd-perk-choice');
 const { KD_JOURNEY_CHOICE } = require('./kd-journey-choice');
 const { KD_SHOP_BUY } = require('./kd-shop-buy');
@@ -163,12 +164,10 @@ const PRESENTATION_SUBKEYS = Object.freeze({
 
 /**
  * KD_START_RESTRAINT accepts ONE name or a comma/space-separated list
- * (e.g. "MasterworkHeels,HighsecShackles"). Single source of truth for the
- * server seeding and the client's copy in coop-bootstrap.js.
+ * (e.g. "MasterworkHeels,HighsecShackles"). The parser lives in kd-peer-shared.js — one source for
+ * the server seeding here and the browser's #startitem in coop-bootstrap.js (KDM-335).
  */
-function KDParseStartRestraints(spec) {
-	return String(spec || '').split(/[,\s]+/).map((s) => s.trim()).filter(Boolean);
-}
+const KDParseStartRestraints = kdParseStartRestraints;
 
 /*
  * The invented `DEFEAT_WILL = 0.52` / `REVIVE_WILL_FRACTION = 0.25` hysteresis is GONE.

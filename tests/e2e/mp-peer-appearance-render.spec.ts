@@ -35,6 +35,7 @@
  *     `KDQuickGenNPC` generated it: the fix must not touch a peer who declared nothing.
  */
 import { test, expect } from '../helpers/playwright-fixtures';
+import { addRenderClientScripts } from '../helpers/client-sandbox';
 import { bootKD } from '../helpers/bundle';
 
 const LABEL = 'Player B';
@@ -114,7 +115,7 @@ async function npcAppearance(page: any, id: number): Promise<string | null> {
 test.describe('a co-op partner\'s avatar wears the partner\'s own look', () => {
 	test('the avatar\'s generated NPC adopts the owner\'s OWN appearance, not the random default', async ({ isolatedPage }) => {
 		await bootKD(isolatedPage);
-		await isolatedPage.addScriptTag({ path: 'tools/mp-server/client/render-client.js' });
+		await addRenderClientScripts(isolatedPage);
 
 		// A real game, so `KinkyDungeonPlayer.Appearance` and `KDAddNewEntity` have something real to
 		// work with — the same precondition `mp-peer-name-dialogue.spec.ts` sets up per-avatar.
@@ -204,7 +205,7 @@ test.describe('a co-op partner\'s avatar wears the partner\'s own look', () => {
 	 */
 	test('the restored appearance survives further real draw frames, not just the instant of the write', async ({ isolatedPage }) => {
 		await bootKD(isolatedPage);
-		await isolatedPage.addScriptTag({ path: 'tools/mp-server/client/render-client.js' });
+		await addRenderClientScripts(isolatedPage);
 		await isolatedPage.evaluate(() => {
 			// @ts-ignore
 			KinkyDungeonStartNewGame(false);
