@@ -512,16 +512,73 @@ export function declareDyedCharacter(hex: string) {
 	}, hex);
 }
 
+/** P spends its turn waiting (the `{kind:'wait'}` action, what KD's own Wait sends through the client). */
+export const coopSendWait = (P: Page) => P.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
+
+export interface CoopAwaitTickOpts {
+	/**
+	 * REQUIRED, no default: `'one'` = the counter moved by EXACTLY one (`=== t+1`, a spec asserting one
+	 * resolved turn); `'any'` = it moved on at all (`> t`; the counter is monotonic, so this is also the
+	 * old `!== t`). A default would let a conversion silently loosen an exact oracle (KDM-345).
+	 */
+	turns: 'one' | 'any';
+	timeout?: number;
+	/** On timeout: rethrow (default), `'ignore'` (a settle — the caller's later assertion reports), or a message to throw. */
+	onTimeout?: 'ignore' | string;
+}
+
+/**
+ * The ONE "read the turn counter, act, wait until it moves" bracket (KDM-345). Reads each observer's
+ * `__coop.lastTick` BEFORE `act`, runs `act` (the sends that make the lockstep turn resolve), then waits on
+ * each observer in order. The read is null-safe: after a reconnect `__coop` may be briefly absent.
+ */
+export async function coopAwaitTick(observers: Page | Page[], act: () => Promise<unknown>, opts: CoopAwaitTickOpts): Promise<void> {
+	const pages = Array.isArray(observers) ? observers : [observers];
+	const timeout = opts.timeout ?? 30_000;
+	const t0s: number[] = [];
+	for (const P of pages) t0s.push(await P.evaluate(() => (window as any).__coop.lastTick));
+	await act();
+	for (let i = 0; i < pages.length; i++) {
+		const wait = pages[i].waitForFunction(({ t, one }) => {
+			const c = (window as any).__coop;
+			if (!c || c.lastTick == null) return false;
+			if (typeof t !== 'number') return !one;   // no counter yet at the read: any tick is a later one
+			return one ? c.lastTick === t + 1 : c.lastTick > t;
+		}, { t: t0s[i], one: opts.turns === 'one' }, { timeout });
+		if (opts.onTimeout === 'ignore') await wait.catch(() => { /* settle only */ });
+		else if (opts.onTimeout) await wait.catch(() => { throw new Error(opts.onTimeout); });
+		else await wait;
+	}
+}
+
 /**
  * One ordinary lockstep turn: `actA` (default: wait) on A, a wait on B, and resolve when A's client has
  * the new turn. `actA` lets a spec act on A's side of the turn (a route step, a key) without its own copy
  * of this loop.
  */
 export async function coopWaitTurn(A: Page, B: Page, actA?: () => Promise<unknown>, timeout = 30_000): Promise<void> {
-	const t0 = await A.evaluate(() => (window as any).__coop.lastTick);
-	await (actA ? actA() : A.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' })));
-	await B.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
-	await A.waitForFunction((t) => (window as any).__coop.lastTick !== t, t0, { timeout });
+	await coopAwaitTick(A, async () => {
+		await (actA ? actA() : coopSendWait(A));
+		await coopSendWait(B);
+	}, { turns: 'any', timeout });
+}
+
+/**
+ * The attacker bump-attacks the victim's avatar once a turn (the victim waits) until `isDefeated()` — at
+ * most `maxTurns` (25: the measured worst case with headroom). Each turn is observed EXACT on the
+ * attacker. Returns `isDefeated()`; the caller asserts it, so the failure message stays the spec's own.
+ */
+export async function coopDefeatPeer(
+	attacker: Page, victim: Page, isDefeated: () => boolean,
+	opts: { maxTurns?: number; paceMs?: number } = {},
+): Promise<boolean> {
+	for (let i = 0; i < (opts.maxTurns ?? 25) && !isDefeated(); i++) {
+		const peer = await waitForPeerAvatar(attacker);
+		await attacker.evaluate((p) => (window as any).__coop.sendAction({ kdType: 'doattack', data: { tx: p.x, ty: p.y, id: p.id, attackCost: 1 } }), peer);
+		await coopAwaitTick(attacker, () => coopSendWait(victim), { turns: 'one' });
+		if (opts.paceMs) await attacker.waitForTimeout(opts.paceMs);
+	}
+	return isDefeated();
 }
 
 /** One input send observed on the client's OUTGOING wire, in order. */

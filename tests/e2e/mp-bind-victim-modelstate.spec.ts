@@ -13,7 +13,7 @@
  *   - Appearance length
  */
 import { test, expect } from '@playwright/test';
-import { bootCoopPair, MP_TEST_TIMEOUT, waitForPeerAvatar } from './helpers/coop';
+import { bootCoopPair, MP_TEST_TIMEOUT, waitForPeerAvatar, coopDefeatPeer, coopAwaitTick, coopSendWait } from './helpers/coop';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
 
@@ -65,13 +65,7 @@ test('PROBE: victim MP client model-container state after a tie', async ({ brows
 
 		const before = await probeA();
 
-		for (let i = 0; i < 25 && !session.isDefeated('A'); i++) {
-			const peer = await waitForPeerAvatar(B);
-			await B.evaluate((p) => (window as any).__coop.sendAction({ kdType: 'doattack', data: { tx: p.x, ty: p.y, id: p.id, attackCost: 1 } }), peer);
-			const t0 = await B.evaluate(() => (window as any).__coop.lastTick);
-			await A.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
-			await B.waitForFunction((p) => (window as any).__coop.lastTick === p + 1, t0, { timeout: 30_000 });
-		}
+		await coopDefeatPeer(B, A, () => session.isDefeated('A'));
 
 		const peer = await waitForPeerAvatar(B);
 		await B.evaluate((p) => {
@@ -88,9 +82,7 @@ test('PROBE: victim MP client model-container state after a tie', async ({ brows
 				draw();
 			}
 		}, peer);
-		const tB = await B.evaluate(() => (window as any).__coop.lastTick);
-		await A.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
-		await B.waitForFunction((p) => (window as any).__coop.lastTick === p + 1, tB, { timeout: 30_000 });
+		await coopAwaitTick(B, () => coopSendWait(A), { turns: 'one' });
 		await A.waitForTimeout(2500);
 
 		const after = await probeA();

@@ -8,7 +8,7 @@
  * B submits a wait, THEN B applies the tie — and the tie still lands on A.
  */
 import { test, expect } from '@playwright/test';
-import { bootCoopPair, MP_TEST_TIMEOUT, waitForPeerAvatar } from './helpers/coop';
+import { bootCoopPair, MP_TEST_TIMEOUT, waitForPeerAvatar, coopDefeatPeer, coopAwaitTick, coopSendWait } from './helpers/coop';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
 
@@ -30,13 +30,7 @@ test('a tie applied after already acting this turn still lands (manual re-submit
 		await bootCoopPair(A, B, port);
 		const session = bridge.session;
 
-		for (let i = 0; i < 25 && !session.isDefeated('A'); i++) {
-			const peer = await waitForPeerAvatar(B);
-			await B.evaluate((p) => (window as any).__coop.sendAction({ kdType: 'doattack', data: { tx: p.x, ty: p.y, id: p.id, attackCost: 1 } }), peer);
-			const t0 = await B.evaluate(() => (window as any).__coop.lastTick);
-			await A.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
-			await B.waitForFunction((p) => (window as any).__coop.lastTick === p + 1, t0, { timeout: 30_000 });
-		}
+		await coopDefeatPeer(B, A, () => session.isDefeated('A'));
 		expect(session.isDefeated('A')).toBe(true);
 
 		const before = session.snapshotFor('A').restraints.length;
@@ -67,9 +61,7 @@ test('a tie applied after already acting this turn still lands (manual re-submit
 		}, peer);
 
 		// A acts → the turn resolves with B's REPLACED action (the tie), not the earlier wait
-		const tB = await B.evaluate(() => (window as any).__coop.lastTick);
-		await A.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
-		await B.waitForFunction((p) => (window as any).__coop.lastTick === p + 1, tB, { timeout: 30_000 });
+		await coopAwaitTick(B, () => coopSendWait(A), { turns: 'one' });
 
 		// the tie's addNPCRestraint must NOT have been dropped by the turn gate (the live symptom)
 		const tieBlocked = blocked.filter((t) => /addNPCRestraint/.test(t));

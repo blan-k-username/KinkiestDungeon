@@ -8,7 +8,7 @@
  * restraints, AND A's CLIENT reflects them (KinkyDungeonAllRestraint on A's page).
  */
 import { test, expect } from '@playwright/test';
-import { bootCoopPair, MP_TEST_TIMEOUT, waitForPeerAvatar } from './helpers/coop';
+import { bootCoopPair, MP_TEST_TIMEOUT, waitForPeerAvatar, coopDefeatPeer, coopAwaitTick, coopSendWait } from './helpers/coop';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
 
@@ -27,13 +27,7 @@ test('a tied peer sees the restraint on their own client', async ({ browser }) =
 		await bootCoopPair(A, B, port);
 		const session = bridge.session;
 
-		for (let i = 0; i < 25 && !session.isDefeated('A'); i++) {
-			const peer = await waitForPeerAvatar(B);
-			await B.evaluate((p) => (window as any).__coop.sendAction({ kdType: 'doattack', data: { tx: p.x, ty: p.y, id: p.id, attackCost: 1 } }), peer);
-			const t0 = await B.evaluate(() => (window as any).__coop.lastTick);
-			await A.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
-			await B.waitForFunction((p) => (window as any).__coop.lastTick === p + 1, t0, { timeout: 30_000 });
-		}
+		await coopDefeatPeer(B, A, () => session.isDefeated('A'));
 		expect(session.isDefeated('A')).toBe(true);
 		expect((await aRestraints()).length, 'A starts unbound').toBe(0);
 
@@ -57,11 +51,7 @@ test('a tied peer sees the restraint on their own client', async ({ browser }) =
 			}
 		}, peer);
 
-		const tB = await B.evaluate(() => (window as any).__coop.lastTick);
-		const tA = await A.evaluate(() => (window as any).__coop.lastTick);
-		await A.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
-		await B.waitForFunction((p) => (window as any).__coop.lastTick === p + 1, tB, { timeout: 30_000 });
-		await A.waitForFunction((p) => (window as any).__coop.lastTick === p + 1, tA, { timeout: 30_000 });
+		await coopAwaitTick([B, A], () => coopSendWait(A), { turns: 'one' });
 		await A.waitForTimeout(300); // let A apply the snapshot
 
 		// SERVER side: A's bundle is bound

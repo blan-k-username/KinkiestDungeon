@@ -17,7 +17,7 @@
  * before that reads an empty report and says nothing.
  */
 import { test, expect } from '@playwright/test';
-import { bootCoopPair, MP_TEST_TIMEOUT } from './helpers/coop';
+import { bootCoopPair, MP_TEST_TIMEOUT, coopAwaitTick, coopSendWait } from './helpers/coop';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
 
@@ -59,9 +59,7 @@ test('AC3: an input the world cannot dispatch is reported, not silently swallowe
 			.toContain('__kdm163_not_a_real_type');
 
 		// Resolve the turn it entered — only then has the world tried to dispatch it.
-		const t0 = await A.evaluate(() => (window as any).__coop.lastTick);
-		await B.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
-		await A.waitForFunction((p) => (window as any).__coop.lastTick === p + 1, t0, { timeout: 30_000 });
+		await coopAwaitTick(A, () => coopSendWait(B), { turns: 'one' });
 
 		// AC3: the server reports it, and the browser can see the report.
 		await A.waitForFunction(

@@ -19,7 +19,7 @@
  * Written first, per the project's Rule 1 (#1 and #3 were red before the fix).
  */
 import { test, expect } from '@playwright/test';
-import { bootCoopPair, MP_TEST_TIMEOUT } from './helpers/coop';
+import { bootCoopPair, MP_TEST_TIMEOUT, coopAwaitTick, coopSendWait } from './helpers/coop';
 import { freeNeighbour } from '../helpers/session-tiles';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
@@ -92,9 +92,7 @@ async function click(P: any, t: any) {
 
 /** The partner spends a turn waiting; returns once A has seen the turn resolve (or a timeout). */
 async function partnerWaits(A: any, B: any) {
-	const t0 = await A.evaluate(() => (window as any).__coop.lastTick);
-	await B.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
-	await A.waitForFunction((t) => (window as any).__coop.lastTick > (t as number), t0, { timeout: 30_000 }).catch(() => {});
+	await coopAwaitTick(A, () => coopSendWait(B), { turns: 'any', onTimeout: 'ignore' });
 	await A.waitForTimeout(1000);
 }
 

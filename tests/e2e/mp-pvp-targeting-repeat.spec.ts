@@ -14,7 +14,7 @@
  * Will keeps dropping every turn. With the bug, turn 2+ fails the gate → no damage.
  */
 import { test, expect } from '@playwright/test';
-import { bootCoopPair, MP_TEST_TIMEOUT, waitForPeerAvatar } from './helpers/coop';
+import { bootCoopPair, MP_TEST_TIMEOUT, waitForPeerAvatar, coopAwaitTick, coopSendWait } from './helpers/coop';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
 
@@ -66,9 +66,7 @@ test('PvP: A can attack the peer every turn (context-menu visibility holds)', as
 			} else {
 				await A.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
 			}
-			const t0 = await A.evaluate(() => (window as any).__coop.lastTick);
-			await B.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
-			await A.waitForFunction((p) => (window as any).__coop.lastTick === p + 1, t0, { timeout: 30_000 });
+			await coopAwaitTick(A, () => coopSendWait(B), { turns: 'one' });
 
 			const will = await willOfB();
 			trace.push({ t, ...peer, willBefore: prevWill, willAfter: will });

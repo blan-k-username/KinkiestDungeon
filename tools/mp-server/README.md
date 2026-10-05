@@ -469,7 +469,7 @@ it labels those as contention.
 
 | Helper | Use |
 |---|---|
-| `tests/e2e/helpers/coop.ts` | `bootCoopPair` (two pages through the real lobby), real-key moves, wire capture, recorders for what was actually *painted* (`recordDrawnText`, `recordDrawnSprites`) |
+| `tests/e2e/helpers/coop.ts` | `bootCoopPair` (two pages through the real lobby), turn brackets (`coopAwaitTick` with a required `turns: 'one' \| 'any'`, `coopWaitTurn`, `coopDefeatPeer`), real-key moves, wire capture, recorders for what was actually *painted* (`recordDrawnText`, `recordDrawnSprites`) |
 | `tests/helpers/mp-lobby.ts` | drives the lobby as a player would, pressing KD's own canvas buttons |
 | `tests/helpers/mp-ws-client.ts` | the one test WebSocket client; merges deltas with the real `kdMerge` |
 | `tests/helpers/session-tiles.ts` | free / contested tiles in a running session |
@@ -488,6 +488,7 @@ mistake cannot recur:
 | `mp-i6-no-gameplay-constants` | a gameplay table (class names, outfits…) is hard-coded in the co-op code instead of read from KD |
 | `mp-parity-oracle` | a one-player co-op session diverges from a plain single-player run |
 | `mp-client-strings` | a player-facing string bypasses the `coop-text.js` table |
+| `e2e-no-inline-turn-wait` | an e2e spec waits on `__coop.lastTick` inline, or has its own attack-until-defeated loop, instead of the `coop.ts` helpers |
 
 ---
 

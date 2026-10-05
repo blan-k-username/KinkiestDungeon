@@ -19,7 +19,7 @@
  * after. If it ever passes without the implementation, the test is vacuous.
  */
 import { test, expect } from '@playwright/test';
-import { bootCoopPair, MP_TEST_TIMEOUT } from './helpers/coop';
+import { bootCoopPair, MP_TEST_TIMEOUT, coopWaitTurn } from './helpers/coop';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -35,12 +35,7 @@ test('I4: browser client state matches the server bundle for that player', async
 	const A = await ctxA.newPage();
 	const B = await ctxB.newPage();
 
-	const advance = async () => {
-		const t0 = await A.evaluate(() => (window as any).__coop.lastTick);
-		await A.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
-		await B.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
-		await A.waitForFunction((p) => (window as any).__coop.lastTick > p, t0, { timeout: 60_000 });
-	};
+	const advance = () => coopWaitTurn(A, B, undefined, 60_000);
 
 	try {
 		await bootCoopPair(A, B, port);

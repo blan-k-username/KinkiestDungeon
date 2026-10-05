@@ -16,7 +16,7 @@
  * every assertion after it share the one session.
  */
 import { test, expect } from '@playwright/test';
-import { bootCoopPair, killCoopSocket, MP_TEST_TIMEOUT } from './helpers/coop';
+import { bootCoopPair, killCoopSocket, MP_TEST_TIMEOUT, coopAwaitTick } from './helpers/coop';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -108,16 +108,10 @@ test('a dropped client reconnects by itself and the survivor\'s disconnect modal
 			expect(back.status, 'the player is told, rather than left to notice').toMatch(/back|resumed|reconnect/i);
 
 			// ---- E4: and the game accepts turns again ---------------------------------------------
-			const tickBefore = await B.evaluate(() => (window as any).__coop.lastTick);
-			await B.evaluate(() => (window as any).__coop.sendMove(1, 0));
-			await A.evaluate(() => (window as any).__coop.sendMove(-1, 0));
-			await B.waitForFunction(
-				(t) => {
-					const c = (window as any).__coop;
-					return !!c && c.lastTick != null && c.lastTick > (t as number);
-				},
-				tickBefore, { timeout: 120_000 },
-			);
+			await coopAwaitTick(B, async () => {
+				await B.evaluate(() => (window as any).__coop.sendMove(1, 0));
+				await A.evaluate(() => (window as any).__coop.sendMove(-1, 0));
+			}, { turns: 'any', timeout: 120_000 });
 			expect((await view(B)).blocked, 'nothing is being refused any more').not.toBe('peer-missing');
 
 			// ---- the identity a reconnect is recognised BY is stable across a fresh page ------------

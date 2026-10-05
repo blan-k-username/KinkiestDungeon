@@ -7,7 +7,7 @@
  * ends up wearing the restraint. If it doesn't, this reproduces the live bug deterministically.
  */
 import { test, expect } from '@playwright/test';
-import { bootCoopPair, MP_TEST_TIMEOUT, waitForPeerAvatar } from './helpers/coop';
+import { bootCoopPair, MP_TEST_TIMEOUT, waitForPeerAvatar, coopDefeatPeer, coopAwaitTick, coopSendWait } from './helpers/coop';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
 
@@ -25,23 +25,12 @@ test('PvP tie: binding a defeated peer applies a real restraint to them', async 
 	const A = await ctxA.newPage();
 	const B = await ctxB.newPage();
 
-	const advance = async (t0: number) => {
-		await A.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
-		await B.waitForFunction((p) => (window as any).__coop.lastTick === p + 1, t0, { timeout: 30_000 });
-	};
-
 	try {
 		await bootCoopPair(A, B, port);
 		const session = bridge.session;
 
 		// --- B wears Player A down to defeated (real doattack on A's avatar) ---
-		for (let i = 0; i < 25 && !session.isDefeated('A'); i++) {
-			const peer = await waitForPeerAvatar(B);
-			// Retired — waitForPeerAvatar throws a named error before this could fail.
-			await B.evaluate((p) => (window as any).__coop.sendAction({ kdType: 'doattack', data: { tx: p.x, ty: p.y, id: p.id, attackCost: 1 } }), peer);
-			const t0 = await B.evaluate(() => (window as any).__coop.lastTick);
-			await advance(t0);
-		}
+		await coopDefeatPeer(B, A, () => session.isDefeated('A'));
 		expect(session.isDefeated('A'), 'A should be defeated before tying').toBe(true);
 
 		// --- B ties Player A: drive the REAL addNPCRestraint the tie submenu emits ---
@@ -75,8 +64,7 @@ test('PvP tie: binding a defeated peer applies a real restraint to them', async 
 		expect(sent.drawState, 'tie submenu should be open').toBe('Bondage');
 
 		// the addNPCRestraint is routed → submitted as B's action; A waits → turn resolves → reconcile
-		const t1 = await B.evaluate(() => (window as any).__coop.lastTick);
-		await advance(t1);
+		await coopAwaitTick(B, () => coopSendWait(A), { turns: 'one' });
 
 		const after = session.snapshotFor('A').restraints;
 		expect(after.length, `A should gain a restraint (was ${restraintsBefore}, slot=${sent.slot})`).toBeGreaterThan(restraintsBefore);

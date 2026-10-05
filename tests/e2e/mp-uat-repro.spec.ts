@@ -6,7 +6,7 @@
  * Both tests below are expected to be RED when written; each says what red means.
  */
 import { test, expect } from '@playwright/test';
-import { bootCoopPair, coopFloaters, MP_TEST_TIMEOUT, waitForFloaterCreated, waitForPeerAvatar } from './helpers/coop';
+import { bootCoopPair, coopFloaters, MP_TEST_TIMEOUT, waitForFloaterCreated, waitForPeerAvatar, coopAwaitTick, coopSendWait } from './helpers/coop';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
 
@@ -98,11 +98,10 @@ test('a single attack logs its damage message exactly once', async ({ browser })
 
 		// Put the shared enemy next to A, then bump it exactly once (one action, one turn).
 		await A.evaluate(() => { /* @ts-ignore */ KinkyDungeonMessageLog = []; });
-		const t0 = await A.evaluate(() => (window as any).__coop.lastTick);
-		await A.evaluate(() => (window as any).__coop.sendMove(0, 1));
-		await B.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
-		await A.waitForFunction((t) => (window as any).__coop.lastTick !== t, t0, { timeout: 30_000 })
-			.catch(() => { /* assertion reports */ });
+		await coopAwaitTick(A, async () => {
+			await A.evaluate(() => (window as any).__coop.sendMove(0, 1));
+			await coopSendWait(B);
+		}, { turns: 'any', onTimeout: 'ignore' });   // the assertion reports
 		await A.waitForTimeout(1500);
 
 		const log: string[] = await A.evaluate(() => {
@@ -188,10 +187,7 @@ test('floating combat text does not accumulate across PvP attacks', async ({ bro
 			if (!peer) break;
 			await B.evaluate((p) => (window as any).__coop.sendAction(
 				{ kdType: 'doattack', data: { tx: p.x, ty: p.y, id: p.id, attackCost: 1 } }), peer);
-			const t0 = await B.evaluate(() => (window as any).__coop.lastTick);
-			await A.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
-			await B.waitForFunction((p) => (window as any).__coop.lastTick !== p, t0, { timeout: 20_000 })
-				.catch(() => { /* count is what matters */ });
+			await coopAwaitTick(B, () => coopSendWait(A), { turns: 'any', timeout: 20_000, onTimeout: 'ignore' });   // count is what matters
 			peak = Math.max(peak, (await coopFloaters(B)).queue);
 		}
 
@@ -249,12 +245,11 @@ test('re-applying an identical snapshot is idempotent (no effect is replayed)', 
 		// Waits for the avatar instead of reading-then-asserting. The null check that used
 		// to follow is retired — it can no longer fail, because the helper throws a named error first.
 		const peer = await waitForPeerAvatar(B, { label: 'B sees no peer avatar — cannot exercise the combat-effect path' });
-		const t0 = await B.evaluate(() => (window as any).__coop.lastTick);
-		await B.evaluate((p) => (window as any).__coop.sendAction(
-			{ kdType: 'doattack', data: { tx: p.x, ty: p.y, id: p.id, attackCost: 1 } }), peer);
-		await A.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
-		await B.waitForFunction((p) => (window as any).__coop.lastTick !== p, t0, { timeout: 20_000 })
-			.catch(() => { /* the applies below are the measurement */ });
+		await coopAwaitTick(B, async () => {
+			await B.evaluate((p) => (window as any).__coop.sendAction(
+				{ kdType: 'doattack', data: { tx: p.x, ty: p.y, id: p.id, attackCost: 1 } }), peer);
+			await coopSendWait(A);
+		}, { turns: 'any', timeout: 20_000, onTimeout: 'ignore' });   // the applies below are the measurement
 
 		// Re-apply the LAST snapshot the client received, 20 times, with no new server traffic.
 		// Nothing about the world changed, so nothing new may appear on screen.

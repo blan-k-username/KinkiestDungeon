@@ -17,7 +17,7 @@
  * complaint was about the mouse, and every layer between the pointer and the route is in scope.
  */
 import { test, expect } from '@playwright/test';
-import { bootCoopPair, captureCoopWire, readCoopWire, MP_TEST_TIMEOUT } from './helpers/coop';
+import { bootCoopPair, captureCoopWire, readCoopWire, MP_TEST_TIMEOUT, coopAwaitTick, coopSendWait } from './helpers/coop';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
 
@@ -78,9 +78,7 @@ test('a mouse click moves the player one tile while an enemy is in view', async 
 			{ timeout: 10_000, message: 'the click must send a move' }).toBeGreaterThan(0);
 
 		// …and the turn resolves into real movement once the partner acts (lockstep).
-		const t0 = await A.evaluate(() => (window as any).__coop.lastTick);
-		await B.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
-		await A.waitForFunction((t) => (window as any).__coop.lastTick > (t as number), t0, { timeout: 60_000 });
+		await coopAwaitTick(A, () => coopSendWait(B), { turns: 'any', timeout: 60_000 });
 		await expect.poll(() => pos(A), { timeout: 30_000, message: 'the player stands on the clicked tile' })
 			.toEqual({ x: target!.tx, y: target!.ty });
 		expect(before, 'control: the player really moved').not.toEqual({ x: target!.tx, y: target!.ty });

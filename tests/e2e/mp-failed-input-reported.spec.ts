@@ -17,7 +17,7 @@
  * which needs the peer to act. Asserting before that reads an empty report and says nothing.
  */
 import { test, expect } from '@playwright/test';
-import { bootCoopPair, MP_TEST_TIMEOUT } from './helpers/coop';
+import { bootCoopPair, MP_TEST_TIMEOUT, coopAwaitTick, coopSendWait } from './helpers/coop';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
 
@@ -56,10 +56,7 @@ test('a dispatch that throws is reported to the browser, not swallowed', async (
 		})()`);
 
 		// Resolve a turn — only then has the world tried to dispatch anything.
-		const t0 = await A.evaluate(() => (window as any).__coop.lastTick);
-		await A.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
-		await B.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
-		await A.waitForFunction((p) => (window as any).__coop.lastTick === p + 1, t0, { timeout: 30_000 });
+		await coopAwaitTick(A, async () => { await coopSendWait(A); await coopSendWait(B); }, { turns: 'one' });
 
 		// The server recorded it…
 		const serverSide = bridge.session.failedInputReport();
@@ -75,11 +72,8 @@ test('a dispatch that throws is reported to the browser, not swallowed', async (
 
 		// R6 — reporting only. The session kept going; a failure that is merely VISIBLE must not also
 		// have become fatal.
-		const t1 = await A.evaluate(() => (window as any).__coop.lastTick);
-		await A.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
-		await B.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
-		await A.waitForFunction((p) => (window as any).__coop.lastTick === p + 1, t1, { timeout: 30_000 })
-			.catch(() => { throw new Error('the session stopped taking turns after a reported failure'); });
+		await coopAwaitTick(A, async () => { await coopSendWait(A); await coopSendWait(B); },
+			{ turns: 'one', onTimeout: 'the session stopped taking turns after a reported failure' });
 	} finally {
 		await ctxA.close().catch(() => {});
 		await ctxB.close().catch(() => {});

@@ -13,7 +13,7 @@
  * lid or a dropped Wi-Fi does. The grace is shortened (`hostGraceMs`); the owner's default is 2 min.
  */
 import { test, expect } from '@playwright/test';
-import { answerCoopDialogue, bootCoopPair, killCoopSocket, MP_TEST_TIMEOUT, reportedPageErrors } from './helpers/coop';
+import { answerCoopDialogue, bootCoopPair, killCoopSocket, MP_TEST_TIMEOUT, reportedPageErrors, coopAwaitTick, coopSendWait } from './helpers/coop';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -73,9 +73,7 @@ test('the host is gone past the grace: the guest hosts and plays on; the old hos
 
 			// …and the run goes on: one player, turns resolve.
 			await answerCoopDialogue(B, NOW_HOST_DIALOGUE, 'Ok');
-			const t0 = await B.evaluate(() => (window as any).__coop.lastTick);
-			await B.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
-			await B.waitForFunction((t) => (window as any).__coop.lastTick > (t as number), t0, { timeout: 60_000 });
+			await coopAwaitTick(B, () => coopSendWait(B), { turns: 'any', timeout: 60_000 });
 
 			// ---- R5: the old host's machine comes back ------------------------------------------------
 			await ctxA.setOffline(false);

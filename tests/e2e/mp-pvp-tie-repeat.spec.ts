@@ -10,7 +10,7 @@
  * accumulates the restraints (real bind, server-authoritative + rendered on the victim's client).
  */
 import { test, expect } from '@playwright/test';
-import { bootCoopPair, MP_TEST_TIMEOUT, waitForPeerAvatar } from './helpers/coop';
+import { bootCoopPair, MP_TEST_TIMEOUT, waitForPeerAvatar, coopDefeatPeer, coopAwaitTick, coopSendWait } from './helpers/coop';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
 
@@ -34,13 +34,7 @@ test('repeated ties do not crash the attacker and the victim accumulates restrai
 		await bootCoopPair(A, B, port);
 		const session = bridge.session;
 
-		for (let i = 0; i < 25 && !session.isDefeated('A'); i++) {
-			const peer = await waitForPeerAvatar(B);
-			await B.evaluate((p) => (window as any).__coop.sendAction({ kdType: 'doattack', data: { tx: p.x, ty: p.y, id: p.id, attackCost: 1 } }), peer);
-			const t0 = await B.evaluate(() => (window as any).__coop.lastTick);
-			await A.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
-			await B.waitForFunction((p) => (window as any).__coop.lastTick === p + 1, t0, { timeout: 30_000 });
-		}
+		await coopDefeatPeer(B, A, () => session.isDefeated('A'));
 		expect(session.isDefeated('A')).toBe(true);
 
 		// tie a DIFFERENT rope restraint each turn (fills different slots — the live crash scenario)
@@ -62,11 +56,7 @@ test('repeated ties do not crash the attacker and the victim accumulates restrai
 					draw();
 				}
 			}, { p: peer, it: item });
-			const tB = await B.evaluate(() => (window as any).__coop.lastTick);
-			const tA = await A.evaluate(() => (window as any).__coop.lastTick);
-			await A.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
-			await B.waitForFunction((p) => (window as any).__coop.lastTick === p + 1, tB, { timeout: 30_000 });
-			await A.waitForFunction((p) => (window as any).__coop.lastTick === p + 1, tA, { timeout: 30_000 });
+			await coopAwaitTick([B, A], () => coopSendWait(A), { turns: 'one' });
 			await A.waitForTimeout(150);
 		}
 

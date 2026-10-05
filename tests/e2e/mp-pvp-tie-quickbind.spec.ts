@@ -9,7 +9,7 @@
  * applies the restraint to Player A.
  */
 import { test, expect } from '@playwright/test';
-import { bootCoopPair, MP_TEST_TIMEOUT, waitForPeerAvatar } from './helpers/coop';
+import { bootCoopPair, MP_TEST_TIMEOUT, waitForPeerAvatar, coopDefeatPeer, coopAwaitTick, coopSendWait } from './helpers/coop';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
 
@@ -38,13 +38,7 @@ test('Tie Up works out-of-the-box: quick-bind pre-selects owned material, bind r
 		expect(quickBind, 'bootstrap should pre-select an owned binding material as quick-bind').toBe(RAW);
 
 		// wear A down to defeated
-		for (let i = 0; i < 25 && !session.isDefeated('A'); i++) {
-			const peer = await waitForPeerAvatar(B);
-			await B.evaluate((p) => (window as any).__coop.sendAction({ kdType: 'doattack', data: { tx: p.x, ty: p.y, id: p.id, attackCost: 1 } }), peer);
-			const t0 = await B.evaluate(() => (window as any).__coop.lastTick);
-			await A.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
-			await B.waitForFunction((p) => (window as any).__coop.lastTick === p + 1, t0, { timeout: 30_000 });
-		}
+		await coopDefeatPeer(B, A, () => session.isDefeated('A'));
 		expect(session.isDefeated('A')).toBe(true);
 
 		const before = session.snapshotFor('A').restraints.length;
@@ -88,9 +82,7 @@ test('Tie Up works out-of-the-box: quick-bind pre-selects owned material, bind r
 		}, peer);
 
 		// routed → submitted as B's action; A waits → reconcile
-		const t1 = await B.evaluate(() => (window as any).__coop.lastTick);
-		await A.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
-		await B.waitForFunction((p) => (window as any).__coop.lastTick === p + 1, t1, { timeout: 30_000 });
+		await coopAwaitTick(B, () => coopSendWait(A), { turns: 'one' });
 
 		const after = session.snapshotFor('A').restraints;
 		expect(after.length, `A should be bound via default Tie Up flow (was ${before})`).toBeGreaterThan(before);

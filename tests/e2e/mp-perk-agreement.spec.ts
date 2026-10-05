@@ -23,7 +23,7 @@
  * pages did not receive `PerkShrines` from the world, step one fails here rather than somewhere later.
  */
 import { test, expect } from '@playwright/test';
-import { bootCoopPair, MP_TEST_TIMEOUT, reportedPageErrors } from './helpers/coop';
+import { bootCoopPair, MP_TEST_TIMEOUT, reportedPageErrors, coopAwaitTick } from './helpers/coop';
 import type { Page } from '@playwright/test';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
@@ -113,13 +113,11 @@ async function pagePerks(P: Page, perk: string) {
  * iteration and pushed the whole spec from 1.6 min to 6.0 min of pure timeout.
  */
 async function pumpBoth(A: Page, B: Page) {
-	const t0 = await A.evaluate(() => (window as any).__coop.lastTick);
-	await A.evaluate(() => (window as any).__coop.sendAction({ kdType: 'wait' }));
-	await B.evaluate(() => (window as any).__coop.sendAction({ kdType: 'wait' }));
-	await A.waitForFunction((t) => (window as any).__coop.lastTick !== t, t0, { timeout: 4_000 })
-		.catch(() => { /* settle only — the caller's poll is the assertion */ });
-	await B.waitForFunction((t) => (window as any).__coop.lastTick !== t, t0, { timeout: 4_000 })
-		.catch(() => { /* ditto */ });
+	// Settle only — the caller's poll is the assertion. `kdType: 'wait'` (not `kind`) is this spec's own send.
+	await coopAwaitTick([A, B], async () => {
+		await A.evaluate(() => (window as any).__coop.sendAction({ kdType: 'wait' }));
+		await B.evaluate(() => (window as any).__coop.sendAction({ kdType: 'wait' }));
+	}, { turns: 'any', timeout: 4_000, onTimeout: 'ignore' });
 }
 
 test('two players propose and agree a perk, and neither browser can grant one alone', async ({ browser }) => {

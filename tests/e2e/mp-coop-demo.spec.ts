@@ -8,7 +8,7 @@
  * submit) advances the shared turn — proving the two-browser UAT path works.
  */
 import { test, expect } from '@playwright/test';
-import { bootCoopPair, coopMoveAnyDirection, MP_TEST_TIMEOUT, waitForPeerAvatar } from './helpers/coop';
+import { bootCoopPair, coopMoveAnyDirection, MP_TEST_TIMEOUT, waitForPeerAvatar, coopAwaitTick, coopSendWait } from './helpers/coop';
 import { installRenderSurfaceReader, readRenderSurface, PAINTED_MIN_COLORS } from './helpers/render-surface';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
@@ -123,10 +123,10 @@ test('two browser windows play one shared co-op dungeon via the demo server', as
 		session.world.moveAvatar(session.enemyId, aAv.x, aAv.y + 1);
 		const enemyHp0 = session.enemyView()?.hp;
 		expect(enemyHp0).toBeGreaterThan(0);
-		const tAtk = await A.evaluate(() => (window as any).__coop.lastTick);
-		await A.evaluate(() => (window as any).__coop.sendMove(0, 1));   // A bumps the enemy
-		await B.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
-		await A.waitForFunction((prev) => (window as any).__coop.lastTick === prev + 1, tAtk, { timeout: 30_000 });
+		await coopAwaitTick(A, async () => {
+			await A.evaluate(() => (window as any).__coop.sendMove(0, 1));   // A bumps the enemy
+			await coopSendWait(B);
+		}, { turns: 'one' });
 		// the world's authoritative enemy took damage (HP dropped or it was killed)
 		const enemyAfter = session.enemyView();
 		// This assertion is INTERMITTENT (measured ~1 run in 3 on a quiet host, with the
@@ -206,9 +206,7 @@ test('two browser windows play one shared co-op dungeon via the demo server', as
 		expect(afterKick).toBe(setup!.len - 1);
 
 		// one lockstep turn (B waits) → A walks one tile via the route
-		const tr0 = await A.evaluate(() => (window as any).__coop.lastTick);
-		await B.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
-		await A.waitForFunction((p) => (window as any).__coop.lastTick === p + 1, tr0, { timeout: 30_000 });
+		await coopAwaitTick(A, () => coopSendWait(B), { turns: 'one' });
 		const afterT1 = await A.evaluate(() => ({ /* @ts-ignore */ x: KinkyDungeonPlayerEntity.x, /* @ts-ignore */ y: KinkyDungeonPlayerEntity.y }));
 		expect(afterT1.x !== startPos.x || afterT1.y !== startPos.y).toBe(true);
 
@@ -216,9 +214,7 @@ test('two browser windows play one shared co-op dungeon via the demo server', as
 		// an interrupt can't hang the barrier.
 		const stillRouting = await A.evaluate(() => (window as any).__coop.submitted && (window as any).__coop.route != null);
 		if (stillRouting) {
-			const tr1 = await A.evaluate(() => (window as any).__coop.lastTick);
-			await B.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
-			await A.waitForFunction((p) => (window as any).__coop.lastTick === p + 1, tr1, { timeout: 30_000 });
+			await coopAwaitTick(A, () => coopSendWait(B), { turns: 'one' });
 			const afterT2 = await A.evaluate(() => ({ /* @ts-ignore */ x: KinkyDungeonPlayerEntity.x, /* @ts-ignore */ y: KinkyDungeonPlayerEntity.y }));
 			expect(afterT2.x !== afterT1.x || afterT2.y !== afterT1.y).toBe(true);
 		}

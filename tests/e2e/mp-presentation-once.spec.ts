@@ -23,7 +23,7 @@
  * nothing at all (the trap an earlier reproduction fell into).
  */
 import { test, expect } from '@playwright/test';
-import { bootCoopPair, MP_TEST_TIMEOUT } from './helpers/coop';
+import { bootCoopPair, MP_TEST_TIMEOUT, coopWaitTurn } from './helpers/coop';
 import { tilesAtRange } from '../helpers/session-tiles';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
@@ -39,12 +39,7 @@ test('ripples draw once per event, and the SP bar keeps its animation', async ({
 	// Both players wait: the world still ticks, and the ripples under test come from the ENEMY-noise
 	// path (a sound the player hears but cannot see), not from the player's own movement. A move can
 	// be blocked by a wall and then never advances the turn at all.
-	const advance = async () => {
-		const t0 = await A.evaluate(() => (window as any).__coop.lastTick);
-		await A.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
-		await B.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
-		await A.waitForFunction((p) => (window as any).__coop.lastTick > p, t0, { timeout: 60_000 });
-	};
+	const advance = () => coopWaitTurn(A, B, undefined, 60_000);
 
 	try {
 		await bootCoopPair(A, B, port);

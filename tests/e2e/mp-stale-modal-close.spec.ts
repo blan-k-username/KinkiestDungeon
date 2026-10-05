@@ -23,7 +23,7 @@
  * coordinates for no more fidelity), and the close is observed on the real page's own globals.
  */
 import { test, expect } from '@playwright/test';
-import { bootCoopPair, coopPos, waitForPeerAvatar, MP_TEST_TIMEOUT, reportedPageErrors } from './helpers/coop';
+import { bootCoopPair, coopPos, waitForPeerAvatar, MP_TEST_TIMEOUT, reportedPageErrors, coopAwaitTick, coopSendWait, coopWaitTurn } from './helpers/coop';
 import type { Page } from '@playwright/test';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
@@ -51,10 +51,7 @@ function plantHeartTablet(bridge: any, x: number, y: number) {
  * in this file tries first, so it is not a new assumption. Lockstep still needs B's turn.
  */
 async function moveOnto(A: Page, B: Page, dx: number, dy: number, timeout = 20_000) {
-	const t0 = await A.evaluate(() => (window as any).__coop.lastTick);
-	await A.evaluate((d) => (window as any).__coop.sendMove(d.dx, d.dy), { dx, dy });
-	await B.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
-	await A.waitForFunction((t) => (window as any).__coop.lastTick !== t, t0, { timeout });
+	await coopWaitTurn(A, B, () => A.evaluate((d) => (window as any).__coop.sendMove(d.dx, d.dy), { dx, dy }), timeout);
 }
 
 /**
@@ -168,9 +165,7 @@ test('the Heart Tablet\'s close button does not survive the purchase that closes
 		expect(bought.sawConfirm, 'the confirm button was really offered after picking it').toBe(true);
 
 		// "heart" advances a turn, so it needs the party's lockstep like any other turn-consuming input.
-		const t0 = await A.evaluate(() => (window as any).__coop.lastTick);
-		await B.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
-		await A.waitForFunction((t) => (window as any).__coop.lastTick !== t, t0, { timeout: 20_000 });
+		await coopAwaitTick(A, () => coopSendWait(B), { turns: 'any', timeout: 20_000 });
 
 		// The purchase really happened, server-side: this is the control that the earlier steps did
 		// something real, not merely that buttons existed.

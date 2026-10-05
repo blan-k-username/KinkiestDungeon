@@ -3,7 +3,7 @@
  * re-dress, no manual model calls) so we can LOOK at whether the restraint shows on the sprite.
  */
 import { test } from '@playwright/test';
-import { bootCoopPair, MP_TEST_TIMEOUT, waitForPeerAvatar } from './helpers/coop';
+import { bootCoopPair, MP_TEST_TIMEOUT, waitForPeerAvatar, coopDefeatPeer, coopAwaitTick, coopSendWait } from './helpers/coop';
 import * as path from 'path';
 import * as fs from 'fs';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -28,13 +28,7 @@ test('SHOT: victim character after a tie', async ({ browser }) => {
 
 		await A.screenshot({ path: path.join(OUT, 'A-before.png') });
 
-		for (let i = 0; i < 25 && !session.isDefeated('A'); i++) {
-			const peer = await waitForPeerAvatar(B);
-			await B.evaluate((p) => (window as any).__coop.sendAction({ kdType: 'doattack', data: { tx: p.x, ty: p.y, id: p.id, attackCost: 1 } }), peer);
-			const t0 = await B.evaluate(() => (window as any).__coop.lastTick);
-			await A.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
-			await B.waitForFunction((p) => (window as any).__coop.lastTick === p + 1, t0, { timeout: 30_000 });
-		}
+		await coopDefeatPeer(B, A, () => session.isDefeated('A'));
 
 		const peer = await waitForPeerAvatar(B);
 		await B.evaluate((p) => {
@@ -51,9 +45,7 @@ test('SHOT: victim character after a tie', async ({ browser }) => {
 				draw();
 			}
 		}, peer);
-		const tB = await B.evaluate(() => (window as any).__coop.lastTick);
-		await A.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
-		await B.waitForFunction((p) => (window as any).__coop.lastTick === p + 1, tB, { timeout: 30_000 });
+		await coopAwaitTick(B, () => coopSendWait(A), { turns: 'one' });
 		await A.waitForTimeout(2500); // let the draw loop rebuild the sprite texture
 
 		await A.screenshot({ path: path.join(OUT, 'A-after.png') });

@@ -6,7 +6,7 @@
  * AUTHORITATIVE/victim view, not the attacker's transient avatar display.
  */
 import { test, expect } from '@playwright/test';
-import { bootCoopPair, MP_TEST_TIMEOUT, waitForPeerAvatar } from './helpers/coop';
+import { bootCoopPair, MP_TEST_TIMEOUT, waitForPeerAvatar, coopDefeatPeer, coopAwaitTick, coopSendWait } from './helpers/coop';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
 
@@ -21,26 +21,16 @@ test('a tie persists on the victim across many turns', async ({ browser }) => {
 
 	const aBoundNames = () => A.evaluate(() => /* @ts-ignore */ (typeof KinkyDungeonAllRestraint === 'function' ? KinkyDungeonAllRestraint().map((r: any) => r.name) : []));
 
-	const bothWaitAdvance = async () => {
-		const tB = await B.evaluate(() => (window as any).__coop.lastTick);
-		const tA = await A.evaluate(() => (window as any).__coop.lastTick);
-		await B.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
-		await A.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
-		await B.waitForFunction((p) => (window as any).__coop.lastTick === p + 1, tB, { timeout: 30_000 });
-		await A.waitForFunction((p) => (window as any).__coop.lastTick === p + 1, tA, { timeout: 30_000 });
-	};
+	const bothWaitAdvance = () => coopAwaitTick([B, A], async () => {
+		await coopSendWait(B);
+		await coopSendWait(A);
+	}, { turns: 'one' });
 
 	try {
 		await bootCoopPair(A, B, port);
 		const session = bridge.session;
 
-		for (let i = 0; i < 25 && !session.isDefeated('A'); i++) {
-			const peer = await waitForPeerAvatar(B);
-			await B.evaluate((p) => (window as any).__coop.sendAction({ kdType: 'doattack', data: { tx: p.x, ty: p.y, id: p.id, attackCost: 1 } }), peer);
-			const t0 = await B.evaluate(() => (window as any).__coop.lastTick);
-			await A.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
-			await B.waitForFunction((p) => (window as any).__coop.lastTick === p + 1, t0, { timeout: 30_000 });
-		}
+		await coopDefeatPeer(B, A, () => session.isDefeated('A'));
 		expect(session.isDefeated('A')).toBe(true);
 
 		// B ties A (bootstrap quick-bind pre-selected the owned rope)
@@ -61,11 +51,7 @@ test('a tie persists on the victim across many turns', async ({ browser }) => {
 		}, peer);
 		// resolve the TIE turn with ONLY A waiting — B's action this turn IS the tie; a B wait here
 		// would (correctly) replace the pending tie via the manual re-submit behavior.
-		{
-			const tB = await B.evaluate(() => (window as any).__coop.lastTick);
-			await A.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
-			await B.waitForFunction((p) => (window as any).__coop.lastTick === p + 1, tB, { timeout: 30_000 });
-		}
+		await coopAwaitTick(B, () => coopSendWait(A), { turns: 'one' });
 		await A.waitForTimeout(300);
 
 		const boundAfterTie = (await aBoundNames()).length;

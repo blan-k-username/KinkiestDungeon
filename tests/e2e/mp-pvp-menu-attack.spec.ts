@@ -10,7 +10,7 @@
  * dropping turn over turn.
  */
 import { test, expect } from '@playwright/test';
-import { bootCoopPair, MP_TEST_TIMEOUT, waitForPeerAvatar } from './helpers/coop';
+import { bootCoopPair, MP_TEST_TIMEOUT, waitForPeerAvatar, coopAwaitTick, coopSendWait } from './helpers/coop';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
 
@@ -78,10 +78,6 @@ test('PvP via the real context menu: sneak then repeated attacks keep landing', 
 	const A = await ctxA.newPage();
 	const B = await ctxB.newPage();
 	const willOfB = () => B.evaluate(() => /* @ts-ignore */ KinkyDungeonStatWill as number);
-	const advance = async (t0: number) => {
-		await B.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
-		await A.waitForFunction((p) => (window as any).__coop.lastTick === p + 1, t0, { timeout: 30_000 });
-	};
 
 	try {
 		await bootCoopPair(A, B, port);
@@ -94,12 +90,11 @@ test('PvP via the real context menu: sneak then repeated attacks keep landing', 
 
 		for (let t = 1; t <= TURNS; t++) {
 			const r = await menuAttackPeer(A, (await waitForPeerAvatar(A, { label: "A driving the context menu" })).id);
-			const t0 = await A.evaluate(() => (window as any).__coop.lastTick);
-			if (!r.ok) {
+			await coopAwaitTick(A, async () => {
 				// the UI offered/sent nothing → A must still act so we can observe (wait)
-				await A.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
-			}
-			await advance(t0);
+				if (!r.ok) await coopSendWait(A);
+				await coopSendWait(B);
+			}, { turns: 'one' });
 			const will = await willOfB();
 			trace.push({ t, ...r, willBefore: prevWill, willAfter: will });
 

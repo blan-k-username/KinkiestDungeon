@@ -5,7 +5,7 @@
  * visual capture. Run it, then open the printed .webm paths.
  */
 import { test } from '@playwright/test';
-import { bootCoopPair, MP_TEST_TIMEOUT, waitForPeerAvatar } from './helpers/coop';
+import { bootCoopPair, MP_TEST_TIMEOUT, waitForPeerAvatar, coopDefeatPeer, coopAwaitTick, coopSendWait } from './helpers/coop';
 import * as path from 'path';
 import * as fs from 'fs';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -33,15 +33,7 @@ test('DEMO VIDEO: PvP wear-down → defeat → tie → bound (both views)', asyn
 		const session = bridge.session;
 
 		// --- wear A down (B attacks A's avatar), slow enough to watch ---
-		for (let i = 0; i < 25 && !session.isDefeated('A'); i++) {
-			const peer = await waitForPeerAvatar(B);
-			if (!peer) break;
-			await B.evaluate((p) => (window as any).__coop.sendAction({ kdType: 'doattack', data: { tx: p.x, ty: p.y, id: p.id, attackCost: 1 } }), peer);
-			const t0 = await B.evaluate(() => (window as any).__coop.lastTick);
-			await A.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
-			await B.waitForFunction((p) => (window as any).__coop.lastTick === p + 1, t0, { timeout: 30_000 });
-			await A.waitForTimeout(450); // pacing for the video
-		}
+		await coopDefeatPeer(B, A, () => session.isDefeated('A'), { paceMs: 450 });
 		await A.waitForTimeout(1500); // lingers on "Player A defeated"
 
 		// --- B ties A (bootstrap quick-bind pre-selected the rope) ---
@@ -61,9 +53,7 @@ test('DEMO VIDEO: PvP wear-down → defeat → tie → bound (both views)', asyn
 			}
 		}, peer);
 		// resolve the tie turn (only A waits — B's action this turn is the tie)
-		const tB = await B.evaluate(() => (window as any).__coop.lastTick);
-		await A.evaluate(() => (window as any).__coop.sendAction({ kind: 'wait' }));
-		await B.waitForFunction((p) => (window as any).__coop.lastTick === p + 1, tB, { timeout: 30_000 });
+		await coopAwaitTick(B, () => coopSendWait(A), { turns: 'one' });
 		await A.waitForTimeout(3000); // lingers on A wearing the restraint
 
 		const aBound = await A.evaluate(() => /* @ts-ignore */ KinkyDungeonAllRestraint().map((r: any) => r.name));

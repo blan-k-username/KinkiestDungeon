@@ -14,7 +14,7 @@
  * second one.
  */
 import { test, expect } from '@playwright/test';
-import { MP_TEST_TIMEOUT, COOP_BOOT_TIMEOUT, PAGE_ERROR_NOISE, coopJoinPage, coopAcceptPending } from './helpers/coop';
+import { MP_TEST_TIMEOUT, COOP_BOOT_TIMEOUT, PAGE_ERROR_NOISE, coopJoinPage, coopAcceptPending, coopAwaitTick } from './helpers/coop';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
 
@@ -92,11 +92,7 @@ test('a friend can join a run already in progress, and the two then play togethe
 			expect(bridge.session.players, 'one player, mid-run').toEqual(['A']);
 
 			// A turn resolves with nobody else there — the control for "it really was in progress".
-			await A.evaluate(() => (window as any).__coop.sendMove(1, 0));
-			await A.waitForFunction(
-				(t) => { const c = (window as any).__coop; return !!c && c.lastTick != null && c.lastTick > (t as number); },
-				solo.lastTick ?? 0, { timeout: 120_000 },
-			);
+			await coopAwaitTick(A, () => A.evaluate(() => (window as any).__coop.sendMove(1, 0)), { turns: 'any', timeout: 120_000 });
 			const beforeJoin = await view(A);
 			const turnAtJoin = bridge.session.turn;
 			expect(turnAtJoin, 'the run is past its first turn').toBeGreaterThan(0);
