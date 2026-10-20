@@ -670,7 +670,7 @@ let KinkyDungeonLootTable = {
 		...KDEnchantedRestraints,
 	],
 	"lessergold": [
-		{name: "DollMirror", weaponlist: "DollMirror", maxRarity: 8, enchantlist: "CommonTrinket", enchantchance: 1.0, minLevel: 0, weight:0.25, message:"LootChestWeapon", messageColor:KDBaseLightBlue, messageTime: 3, allFloors: true},
+		{name: "DollMirror", weaponlist: "DollMirror", maxRarity: 8, enchantlist: "CommonTrinket", enchantchance: 1.0, minLevel: 0, weight:0.5, message:"LootChestWeapon", messageColor:KDBaseLightBlue, messageTime: 3, allFloors: true},
 		
 		...KDGoldArmor, ...KDGoldArmor2,
 		{name: "RobeOfChastity", arousalMode: true, minLevel: 0, weight:4, message:"LootChestArmor",
@@ -1506,7 +1506,18 @@ let KinkyDungeonLootTable = {
 };
 
 
-type lootEventFunc = (Loot: any, Floor: number, Replacemsg: string, Lock: string, container?: KDContainer, x?: number, y?: number) => { value: number; Replacemsg: string };
+interface KDLootEventCustomData {
+	x: number,
+	y: number,
+	loot: string,
+	replacemsg: string,
+	lock: string,
+	itemAdded?: item,
+	spellAdded?: spell,
+
+}
+
+type lootEventFunc = (Loot: any, Floor: number, Replacemsg: string, Lock: string, container?: KDContainer, x?: number, y?: number, data?: KDLootEventCustomData) => { value: number; Replacemsg: string };
 
 let KDLootEvents: Record<string, lootEventFunc> = {
 	"Armor": (_Loot, _Floor, Replacemsg, _Lock, container) => {
@@ -1528,17 +1539,38 @@ let KDLootEvents: Record<string, lootEventFunc> = {
 		if (enemy && KinkyDungeonSummonEnemy(x, y, enemy.name, 1, 2.5)) {
 			return {
 				value: 0,
-				Replacemsg: "LootBookshelfTome",
+				Replacemsg: TextGet("LootBookshelfTome"),
 			};
 		}
 		
 		return {
 			value: 0,
-			Replacemsg: "LootBookshelfTomeFail",
+			Replacemsg: TextGet("LootBookshelfTomeFail"),
+		};
+	},
+	"DollMirror": (_Loot, _Floor, Replacemsg, _Lock, container, x, y, data) => {
+		let player = KDPlayer();
+
+		let chance = KinkyDungeonFlags.get("DollMirrorFirst") ? KDDollMirrorChanceFirst : KDDollMirrorChance;
+
+		if (KDRandom() < chance) {
+			// Basic major curse application code
+			let curse = KDGetMajorCurse(player, ["doll"]);
+			if (curse && KDMajorCurses[curse]) KDMajorCurses[curse].onApply(player, {weapon: data?.itemAdded});
+		}
+
+		KinkyDungeonSetFlag("DollMirrorFirst", -1);
+
+		return {
+			value: 0,
+			Replacemsg: "",
 		};
 	},
 	
 };
+
+let KDDollMirrorChanceFirst = 0.8;
+let KDDollMirrorChance = 0.25;
 
 interface KDMinorLootEntry {
 	rarity: number,

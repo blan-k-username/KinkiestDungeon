@@ -154,7 +154,7 @@ let KDInputTypes: Record<string, (data: any) => string> = {
 	},
 	"curseUnlock": (data) => {
 		KDDelayedActionPrune(["Action", "Struggle"]);
-		KinkyDungeonCurseUnlock(data.group, data.index, data.curse);
+		KinkyDungeonCurseUnlock(data.group, data.index, data.curse, data.alt);
 		return "";
 	},
 	"toggleSpell": (data) => {
@@ -616,6 +616,18 @@ let KDInputTypes: Record<string, (data: any) => string> = {
 		}
 		return "";
 	},
+	"pickup": (data) => {
+		KDDelayedActionPrune(["Action", "World"]);
+		let tick = KinkyDungeonCurrentTick;
+		let fail = !KDPickup(data.x, data.y);
+		if (KinkyDungeonCurrentTick > tick || fail) {
+			if (KDTurnToFace(data.x, data.y)
+				&& (KinkyDungeonStatsChoice.get("DirectionSlow") || KinkyDungeonStatsChoice.get("DirectionSlow2"))) {
+				KinkyDungeonAdvanceTime(1);
+			}
+		}
+		return "";
+	},
 	"shrineBuy": (data) => {
 		KDDelayedActionPrune(["Action", "World"]);
 		KinkyDungeonShopIndex = data.shopIndex;
@@ -709,12 +721,13 @@ let KDInputTypes: Record<string, (data: any) => string> = {
 		KDDelayedActionPrune(["Action", "World"]);
 		let tiles = KinkyDungeonRescueTiles();
 		if (tiles.length > 0) {
-			KDSendStatus('goddess', data.type, 'helpRescue');
-			KinkyDungeonChangeRep(data.type, -10);
+			
 			tile = tiles[Math.floor(tiles.length * KDRandom())];
 			if (tile) {
+				KDGameData.AngelCurrentRep = data.type;
 				KinkyDungeonMapSet(tile.x, tile.y, "$");
 				KinkyDungeonTilesSet(tile.x + "," + tile.y, {Type: "Angel", Light: 5, lightColor: 0xfffafa});
+				KDAddGagXP("Angel", KDPlayer());
 				KDStartDialog("AngelHelp","Angel", true, "");
 			}
 			KDGameData.RescueFlag = true;
@@ -750,7 +763,7 @@ let KDInputTypes: Record<string, (data: any) => string> = {
 
 		KDChangeMana(x + ',' + y,"map", "interact", KinkyDungeonStatManaMax * 0.5, false, 0, false, true);
 		KDSendStatus('goddess', data.type, 'shrineDrink');
-		KinkyDungeonAggroAction('shrine', {});
+		//KinkyDungeonAggroAction('shrine', {});
 		if (KDSoundEnabled()) AudioPlayInstantSoundKD(KinkyDungeonRootDirectory + "Audio/Magic.ogg");
 
 		KinkyDungeonAdvanceTime(1, true);
@@ -758,10 +771,10 @@ let KDInputTypes: Record<string, (data: any) => string> = {
 
 		if (KinkyDungeonGoddessRep[data.type] <= -45) {
 			//Cursed
-			KDSummonRevengeMobs(parseInt(x), parseInt(y), tile.type, 5);
-		} else
-			KDSummonRevengeMobs(parseInt(x), parseInt(y), tile.type, slimed ? 1.5 : 1);
-
+			KDSummonRevengeMobs(parseInt(x), parseInt(y), tile.type, 2);
+		} else if (KinkyDungeonGoddessRep[data.type] <= KDANGER) {
+			KDSummonRevengeMobs(parseInt(x), parseInt(y), tile.type, 1);
+		}
 		KDMapData.PoolUses += 1;
 
 		KinkyDungeonSendEvent("afterShrineDrink", {x: data.x, y: data.y, tile: data.tile});
@@ -780,13 +793,19 @@ let KDInputTypes: Record<string, (data: any) => string> = {
 
 		let x =  data.targetTile.split(',')[0];
 		let y =  data.targetTile.split(',')[1];
-		KDSummonRevengeMobs(parseInt(x), parseInt(y), tile.type, 1.0);
+		if (KinkyDungeonGoddessRep[data.type] <= -45) {
+			//Cursed
+			KDSummonRevengeMobs(parseInt(x), parseInt(y), tile.type, 2);
+		} else if (KinkyDungeonGoddessRep[data.type] <= KDANGER) {
+			KDSummonRevengeMobs(parseInt(x), parseInt(y), tile.type, 1.0);
+		}
+		
 
 		// KinkyDungeonStatsChoice.get("Blessed")
 		KinkyDungeonSendActionMessage(9, TextGet("KinkyDungeonPoolBottle"), "#AAFFFF", 2);
 		KinkyDungeonChangeConsumable(KinkyDungeonFindConsumable("PotionMana"), 1);
 		KDSendStatus('goddess', data.type, 'shrineBottle');
-		KinkyDungeonAggroAction('shrine', {});
+		//KinkyDungeonAggroAction('shrine', {});
 		if (KDSoundEnabled()) AudioPlayInstantSoundKD(KinkyDungeonRootDirectory + "Audio/PotionDrink.ogg");
 
 		KDMapData.PoolUses += 1;
@@ -1114,11 +1133,12 @@ let KDInputTypes: Record<string, (data: any) => string> = {
 			let tiles = KinkyDungeonRescueTiles();
 			if (tiles.length > 0) {
 				KDSendStatus('goddess', data.rep, 'helpRescue');
-				KinkyDungeonChangeRep(data.rep, -10);
 				let tile = tiles[Math.floor(tiles.length * KDRandom())];
 				if (tile) {
+					KDGameData.AngelCurrentRep = data.rep;
 					KinkyDungeonMapSet(tile.x, tile.y, "$");
 					KinkyDungeonTilesSet(tile.x + "," + tile.y, {Type: "Angel", Light: 5, lightColor: 0xfffafa});
+					KDAddGagXP("Angel", KDPlayer());
 					KDStartDialog("AngelHelp","Angel", true, "");
 				}
 				KDGameData.RescueFlag = true;
@@ -1129,21 +1149,6 @@ let KDInputTypes: Record<string, (data: any) => string> = {
 			KDSendStatus('goddess', data.rep, 'helpNoRescue');
 			return "FailRescue";
 		}
-	},
-	"penance": (data) => {
-		KDGameData.KinkyDungeonPenance = true;
-		KDGameData.KDPenanceMode = "";
-		KDGameData.KDPenanceStage = 0;
-		KDGameData.KDPenanceStageEnd = 0;
-		KDGameData.AngelCurrentRep = data.rep;
-		KinkyDungeonSendTextMessage(10, TextGet("KinkyDungeonPenanceHappen"), KDBasePurple, 4);
-		KDGameData.KinkyDungeonPenanceCostCurrent = KinkyDungeonPenanceCosts[data.rep] ? KinkyDungeonPenanceCosts[data.rep] : KinkyDungeonPenanceCostDefault;
-		if (KinkyDungeonGold >= KDGameData.KinkyDungeonPenanceCostCurrent) {
-			if (KinkyDungeonPenanceCosts[data.rep]) KinkyDungeonPenanceCosts[data.rep] += KinkyDungeonPenanceCostGrowth;
-			else KinkyDungeonPenanceCosts[data.rep] = KinkyDungeonPenanceCostDefault + KinkyDungeonPenanceCostGrowth;
-		}
-		KDSendStatus('goddess', data.rep, 'helpPenance');
-		return "";
 	},
 	"spellChoice": (data) => {
 		KDDelayedActionPrune(["Action", "SwitchSpell"]);
@@ -1234,7 +1239,7 @@ let KDInputTypes: Record<string, (data: any) => string> = {
 	"select": (data) => {
 		if (data.enemy && KDAllied(data.enemy)) {
 			if (data.enemy.buffs?.AllySelect?.duration > 0) KinkyDungeonExpireBuff(data.enemy, "AllySelect")
-			else KinkyDungeonApplyBuffToEntity(data.enemy, {
+			else KDApplyBuffToEntity(data.enemy, {
 				id: "AllySelect",
 				aura: KDBaseWhite,
 				auraSprite: "Select",
@@ -1248,7 +1253,7 @@ let KDInputTypes: Record<string, (data: any) => string> = {
 	"selectOnly": (data) => {
 		for (let e of KDMapData.Entities) {
 			if (e.id != data.enemy?.id && e.buffs?.AllySelect) KinkyDungeonExpireBuff(e, "AllySelect")
-			else if (e.id == data.enemy?.id) KinkyDungeonApplyBuffToEntity(e, {
+			else if (e.id == data.enemy?.id) KDApplyBuffToEntity(e, {
 				id: "AllySelect",
 				aura: KDBaseWhite,
 				auraSprite: "Select",
@@ -1383,19 +1388,19 @@ let KDInputTypes: Record<string, (data: any) => string> = {
 					let Willmulti = 1.0;
 					Willmulti = Math.max(KinkyDungeonStatWillMax / KDMaxStatStart);
 
-					KinkyDungeonApplyBuffToEntity(KinkyDungeonPlayerEntity, {id: "TabletWill", type: "restore_mp", power: Manamulti*0.5, duration: 20});
-					KinkyDungeonApplyBuffToEntity(KinkyDungeonPlayerEntity, {id: "TabletWill2", type: "restore_sp", power: multi*0.5, duration: 20});
-					KinkyDungeonApplyBuffToEntity(KinkyDungeonPlayerEntity, {id: "TabletWill3", type: "restore_wp", power: Willmulti*0.15, duration: 10});
+					KDApplyBuffToEntity(KinkyDungeonPlayerEntity, {id: "TabletWill", type: "restore_mp", power: Manamulti*0.5, duration: 20});
+					KDApplyBuffToEntity(KinkyDungeonPlayerEntity, {id: "TabletWill2", type: "restore_sp", power: multi*0.5, duration: 20});
+					KDApplyBuffToEntity(KinkyDungeonPlayerEntity, {id: "TabletWill3", type: "restore_wp", power: Willmulti*0.15, duration: 10});
 				} else if (tile.Name == "Determination") {
 					if (KinkyDungeonStatWill >= KinkyDungeonStatWillMax) {
 						full = true;
 					} else {
 						let Willmulti = 1.0;
 						Willmulti = Math.max(KinkyDungeonStatWillMax / KDMaxStatStart);
-						KinkyDungeonApplyBuffToEntity(KinkyDungeonPlayerEntity, {id: "TabletDetermination", type: "restore_wp", power: Willmulti*0.30, duration: 10});
+						KDApplyBuffToEntity(KinkyDungeonPlayerEntity, {id: "TabletDetermination", type: "restore_wp", power: Willmulti*0.30, duration: 10});
 					}
 				} else {
-					KinkyDungeonApplyBuffToEntity(KinkyDungeonPlayerEntity,
+					KDApplyBuffToEntity(KinkyDungeonPlayerEntity,
 						{id: "Tablet" + tile.Name, aura: KDGoddessColor(tile.Name), type: "event", duration: 9999, infinite: true, power: 2, player: true, enemies: false, maxCount: 3, tags: ["cast_" + tile.Name.toLowerCase(), "trigger_" + tile.Name.toLowerCase()], events: [
 							{trigger: "calcMana", type: "Tablet", requiredTag: tile.Name.toLowerCase(), power: 0.5},
 						]}
@@ -1713,8 +1718,6 @@ function KDProcessInputs(ReturnResult?: boolean): string {
 function KDInteract(x: number, y: number, dist?: number): boolean {
 	if (dist == undefined) dist = KDistChebyshev(x - KDPlayer().x, y - KDPlayer().y);
 	KinkyDungeonSendEvent("beforeInteract", {x:x, y: y});
-	if (dist < 1.5 && !KinkyDungeonEntityAt(x, y, false, undefined, undefined, false))
-		KinkyDungeonItemCheck(x, y, MiniGameKinkyDungeonLevel, true);
 	KDInteracting = false;
 	let tile = KinkyDungeonTilesGet(x + ',' + y);
 	if (tile?.Type) {
@@ -1762,5 +1765,15 @@ function KDInteract(x: number, y: number, dist?: number): boolean {
 		}
 	}
 	KinkyDungeonSendEvent("afterInteractFail", {x:x, y: y});
+	return false;
+}
+
+
+
+function KDPickup(x: number, y: number): boolean {
+	if ((!KinkyDungeonEntityAt(x, y, false, undefined, undefined, false)
+		|| !KDHostile(KinkyDungeonEntityAt(x, y, false, undefined, undefined, false))))
+		KinkyDungeonItemCheck(x, y, MiniGameKinkyDungeonLevel, true);
+	
 	return false;
 }

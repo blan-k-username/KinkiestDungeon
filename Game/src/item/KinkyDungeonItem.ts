@@ -203,7 +203,9 @@ function KinkyDungeonItemEvent(Item: any, nomsg?: boolean) {
 		}
 	} else if (KDWeapon(Item)) {
 		if (KinkyDungeonWeaponVariants[Item.name]) {
-			KDGiveWeaponVariant(KinkyDungeonWeaponVariants[Item.name], undefined, Item.name);
+			KDGiveWeaponVariant(KinkyDungeonWeaponVariants[Item.name], undefined, Item.name, undefined, undefined, 
+				Item.data
+			);
 			color = "#aaaaff";
 			name = "Generic";
 			replace = TextGet("KinkyDungeonInventoryItem" + KinkyDungeonWeaponVariants[Item.name].template);
@@ -216,7 +218,9 @@ function KinkyDungeonItemEvent(Item: any, nomsg?: boolean) {
 
 	} else if (KDRestraint(Item)) {
 		if (KinkyDungeonRestraintVariants[Item.name]) {
-			KDGiveInventoryVariant(KinkyDungeonRestraintVariants[Item.name], undefined, KinkyDungeonRestraintVariants[Item.name].curse, "", Item.name, undefined, undefined, undefined, Item.amount || 1);
+			KDGiveInventoryVariant(KinkyDungeonRestraintVariants[Item.name], undefined, 
+				KinkyDungeonRestraintVariants[Item.name].curse, "", Item.name, undefined, 
+				undefined, undefined, Item.amount || 1, undefined, Item.data);
 			color = "#aaaaff";
 			name = "Generic";
 			replace = TextGet("Restraint" + KinkyDungeonRestraintVariants[Item.name].template);

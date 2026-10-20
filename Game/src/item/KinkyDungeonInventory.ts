@@ -37,6 +37,9 @@ let KDInventoryActionsDefault: Record<string, (item: item) => string[]> = {
 			}
 		} else {
 			ret.push("CurseUnlock", "CurseInfo", "CurseStruggle");
+			if (KDCurses[KDGetCurse(item)]?.condition2) {
+				ret.splice(1, 0, "CurseUnlock2");
+			}
 			//if (!KinkyDungeonCurseAvailable(item, KDGetCurse(item))) ret.push("CurseUnlock");
 		}
 		ret.push("Recolor");
@@ -142,6 +145,14 @@ function KDGetWeaponVariant(item: item): KDWeaponVariant {
 	return KinkyDungeonWeaponVariants[item.inventoryVariant || item.inventoryAs || item.name];
 }
 
+
+/**
+ * @param item
+ */
+function KDGetVariant(item: item): KDWeaponVariant {
+	return KDGetRestraintVariant(item) || KDGetWeaponVariant(item) || KDGetConsumableVariant(item);
+}
+
 let KDInventoryUseIconConfig: Record<string, boolean> = {};
 KDInventoryUseIconConfig[Weapon] = true;
 KDInventoryUseIconConfig[Consumable] = true;
@@ -173,19 +184,20 @@ KDFilterFilters[LooseRestraint] = {
 	Cuffs: false,
 	Collars: false,
 	Gags: false,
-	Boots: false,
-
-	Chains: false,
-	Mittens: false,
-	Harnesses: false,
-	Corsets: false,
-	ChastityBelts: false,
-	ChastityBras: false,
+	Blindfolds: false,
 	Armbinders: false,
 	Boxbinders: false,
 	Straitjackets: false,
+	Mittens: false,
+	Boots: false,
+	Harnesses: false,
+	Corsets: false,
+	Chastity: false,
 	Legbinders: false,
 	Cyber: false,
+	Sensedep: false,
+	Leashes: false,
+	Chains: false,
 	Devices: false,
 	Disassemble: false,
 	Raw: false,
@@ -267,6 +279,9 @@ let KDSpecialFilters: Record<string, Record<string, (item: item, handle: boolean
 		QuickBind: (item, _handle) => {
 			return KDRestraint(item)?.quickBindCondition != undefined;
 		},
+		Chastity: (item, _handle) => {
+			return !!KDRestraint(item)?.chastity || !!KDRestraint(item)?.chastitybra;
+		},
 		Harness: (item, _handle) => {
 			return KDRestraint(item)?.shrine?.includes("Harness") != undefined;
 		},
@@ -277,6 +292,10 @@ let KDSpecialFilters: Record<string, Record<string, (item: item, handle: boolean
 		Devices: (item, _handle) => {
 			return KDRestraint(item)?.shrine?.includes("Devices") != undefined
 				|| KDRestraint(item)?.shrine?.includes("Modules") != undefined;
+		},
+		Sensedep: (item, _handle) => {
+			return !!KDRestraint(item)?.blindfold
+				|| !!KDRestraint(item)?.deaf;
 		},
 	},
 	armor: {
@@ -508,9 +527,11 @@ function KDInvAddWeapon(container: KDContainer | null, Name: string) {
 	if (container) {
 		container.items[Name] = {name:Name, type:Weapon, events: Object.assign([],
 			KinkyDungeonWeapons[Name].events), id: KinkyDungeonGetItemID()};
+		return container.items[Name];
 	} else {
 		if (!KinkyDungeonInventoryGetWeapon(Name) && KinkyDungeonWeapons[Name])
 			KinkyDungeonInventoryAdd({name:Name, type:Weapon, events: Object.assign([], KinkyDungeonWeapons[Name].events), id: KinkyDungeonGetItemID()});
+		return KinkyDungeonInventoryGetWeapon(Name);
 	}
 }
 
@@ -522,6 +543,7 @@ function KDInvAddLoose(container: KDContainer | null, Name: string, UnlockCurse?
 		} else {
 			container.items[Name].quantity = (container.items[Name].quantity || 1) + quantity;
 		}
+		return container.items[Name];
 	} else {
 		if (!KinkyDungeonInventoryGetLoose(Name) || UnlockCurse)
 			KinkyDungeonInventoryAdd({faction: faction, name: Name, type: LooseRestraint, curse: UnlockCurse,
@@ -529,6 +551,7 @@ function KDInvAddLoose(container: KDContainer | null, Name: string, UnlockCurse?
 		else {
 			KinkyDungeonInventoryGetLoose(Name).quantity += quantity;
 		}
+		return KinkyDungeonInventoryGetLoose(Name);
 	}
 }
 
@@ -819,7 +842,6 @@ function KDGetItemPreview(item: item): itemPreviewEntry {
 	let Group = "";
 	if (item.type == Restraint && KDRestraint(item)?.Group) Group = KDRestraint(item).Group;
 	else if (item.type == LooseRestraint && KDRestraint(item)?.Group) Group = KDRestraint(item).Group;
-	if ((item.type == Restraint || item.type == LooseRestraint) && KDRestraint(item)?.AssetGroup) Group = KDRestraint(item).AssetGroup;
 	if (Group == "ItemMouth2" || Group == "ItemMouth3") Group = "ItemMouth";
 
 	if (item.type == Restraint && KDRestraint(item)) {
@@ -1205,13 +1227,16 @@ function KDInventoryItemHover(item: item): InventoryHoverObject {
  * @param [xOffset]
  */
 function KinkyDungeonDrawInventorySelected (
-	 item:           {name: any, item: item, preview: string, preview2?: string, key?: string},
+	 item:           itemPreviewEntry,
 	noscroll?:       boolean,
 	_treatAsHover?:  boolean,
 	xOffset:         number = 0,
 	yOffset:         number = 0
 )
 {
+
+	let player = KDPlayer();
+
 	if (!noscroll) {
 		if (KDToggles.SpellBook) {
 			KDTextTan = KDTextTanSB;
@@ -1334,13 +1359,16 @@ function KinkyDungeonDrawInventorySelected (
 			DrawTextKD(TextGet("KinkyDungeonRestraintLevel").replace("RestraintLevel", "" + Math.max(1, restraint.displayPower != undefined ? restraint.displayPower : restraint.power)).replace("Rarity", TextGet("KinkyDungeonRarity" + Math.max(0, Math.min(Math.floor(pp),10)))),
 				xOffset + canvasOffsetX_ui + 640*KinkyDungeonBookScale/3.35, 
 				yOffset + canvasOffsetY_ui + 483*KinkyDungeonBookScale/5 + 408, KDBookText, KDTextTan, 22, undefined, 130);
-			DrawTextKD(
-			restraint.escapeChance ? (item.item.lock ? (TextGet("KinkyLocked") + " " + TextGet("Kinky" + item.item.lock + "LockType")) :
+			DrawTextKD(((item.item.type == Restraint && KDGetCurse(item.item)) ? TextGet("KinkyCursed") :
+			restraint.escapeChance ? ((item.item.lock) ? (TextGet(
+				"KinkyLocked") + " " + TextGet("Kinky" + item.item.lock + "LockType")) :
 				(restraint.DefaultLock && !restraint.HideDefaultLock ? (TextGet("KinkyLocked") + " " + TextGet("Kinky" + restraint.DefaultLock + "LockType")) :
-				((item.item.type == Restraint && KDGetCurse(item.item)) ? TextGet("KinkyCursed") : TextGet("KinkyUnlocked"))))
-			: (restraint.escapeChance.Pick != null ? TextGet("KinkyLockable") : TextGet("KinkyNonLockable")),
+				(TextGet("KinkyUnlocked"))))
+			: (restraint.escapeChance.Pick != null ? TextGet("KinkyLockable") : TextGet("KinkyNonLockable"))),
 			xOffset + canvasOffsetX_ui + 640*KinkyDungeonBookScale/3.35, 
 			yOffset + canvasOffsetY_ui + 483*KinkyDungeonBookScale/5 + 375, KDBookText, KDTextTan, 30, undefined, 130);
+
+			KDDrawExtraItemInfo(item, xOffset, yOffset, player);
 
 			let goddesses = "";
 			if (restraint.shrine)
@@ -2098,7 +2126,7 @@ function KDDrawInventoryFilters(xOffset, yOffset = 0, skipfilters = [], addFilte
 				})
 			}
 
-			DrawButtonKDEx("categoryfilter" + I, (_bdata) => {
+			DrawButtonKDEx("categoryfilter" + I + "." + dim, (_bdata) => {
 				KinkyDungeonCurrentFilter = KDFilters[I];
 
 				KinkyDungeonCurrentPageInventory = 0;
@@ -3502,6 +3530,8 @@ function KDMorphToInventoryVariant(item: item, variant: KDRestraintVariant, pref
 			item.inventoryVariant = newname;
 		}
 		KDUpdateItemEventCache = true;
+
+		return item;
 	} else {
 		// here we remove the current item and then add the new one
 
@@ -3541,6 +3571,8 @@ function KDMorphToInventoryVariant(item: item, variant: KDRestraintVariant, pref
 		);
 
 		KDUpdateItemEventCache = true;
+		
+		return KinkyDungeonInventoryGet(newname);
 	}
 	
 }
@@ -3552,7 +3584,7 @@ function KDMorphToInventoryVariant(item: item, variant: KDRestraintVariant, pref
  * @param [forceName]
  * @param [suffix]
  */
-function KDGiveWeaponVariant(variant: KDWeaponVariant, prefix: string = "", forceName?: string, suffix: string = "", container?: KDContainer) {
+function KDGiveWeaponVariant(variant: KDWeaponVariant, prefix: string = "", forceName?: string, suffix: string = "", container?: KDContainer, data?: any) {
 	let origWeapon = KinkyDungeonFindWeapon(variant.template);
 	let events = origWeapon.events ? JSON.parse(JSON.stringify(origWeapon.events)) : [];
 	let newname = forceName ? forceName : (prefix + variant.template + KinkyDungeonGetItemID());
@@ -3567,11 +3599,13 @@ function KDGiveWeaponVariant(variant: KDWeaponVariant, prefix: string = "", forc
 		if (container.items[newname]) {
 			container.items[newname].quantity = (container.items[newname].quantity || 1) + 1;
 		} else {
-			container.items[newname] = {name: newname, id: KinkyDungeonGetItemID(), type: Weapon, events:events, quantity: q, showInQuickInv: true,};
+			container.items[newname] = {name: newname, id: KinkyDungeonGetItemID(), type: Weapon, events:events, data: data, quantity: q, showInQuickInv: true,};
 		}
+		return container.items[newname];
 	} else {
 		if (KinkyDungeonInventoryGet(newname)) q = KinkyDungeonInventoryGet(newname).quantity + 1;
-		KinkyDungeonInventoryAdd({name: newname, id: KinkyDungeonGetItemID(), type: Weapon, events:events, quantity: q, showInQuickInv: true,});
+		KinkyDungeonInventoryAdd({name: newname, id: KinkyDungeonGetItemID(), type: Weapon, data: data, events:events, quantity: q, showInQuickInv: true,});
+		return KinkyDungeonInventoryGet(newname);
 	}
 }
 
@@ -3600,9 +3634,11 @@ function KDGiveConsumableVariant(variant: KDConsumableVariant, prefix: string = 
 		} else {
 			container.items[newname] = {name: newname, id: KinkyDungeonGetItemID(), type: Consumable, events:events, quantity: q, showInQuickInv: true,};
 		}
+		return container.items[newname];
 	} else {
 		if (KinkyDungeonInventoryGet(newname)) q = KinkyDungeonInventoryGet(newname).quantity + Quantity;
 		KinkyDungeonInventoryAdd({name: newname, id: KinkyDungeonGetItemID(), type: Consumable, events:events, quantity: q, showInQuickInv: true,});
+		return KinkyDungeonInventoryGet(newname);
 	}
 }
 /**
@@ -3617,7 +3653,8 @@ function KDGiveConsumableVariant(variant: KDConsumableVariant, prefix: string = 
  * @param [powerBonus]
  * @param [quantity]
  */
-function KDReturnInventoryVariant(variant: KDRestraintVariant, prefix: string = "", curse: string = undefined, ID: string = "", forceName?: string, suffix: string = "", faction: string = "", powerBonus?: number, quantity: number = 1): item {
+function KDReturnInventoryVariant(variant: KDRestraintVariant, prefix: string = "", curse: string = undefined, ID: string = "", forceName?: string,
+	suffix: string = "", faction: string = "", powerBonus?: number, quantity: number = 1, data?: any): item {
 	let origRestraint = KinkyDungeonGetRestraintByName(variant.template);
 	let events = origRestraint.events ? JSON.parse(JSON.stringify(origRestraint.events)) : [];
 	let newname = forceName ? forceName : (prefix + variant.template + (ID || (KinkyDungeonGetItemID() + "")) + (curse ? curse : ""));
@@ -3633,7 +3670,7 @@ function KDReturnInventoryVariant(variant: KDRestraintVariant, prefix: string = 
 	if (variant.events)
 		events = [...variant.events];
 	let q = quantity;
-	return {faction: faction, name: newname, curse: curse, id: KinkyDungeonGetItemID(), type: LooseRestraint, events:events, quantity: q, showInQuickInv: true,};
+	return {faction: faction, name: newname, curse: curse, id: KinkyDungeonGetItemID(), data: data, type: LooseRestraint, events:events, quantity: q, showInQuickInv: true,};
 }
 
 
@@ -3649,7 +3686,9 @@ function KDReturnInventoryVariant(variant: KDRestraintVariant, prefix: string = 
  * @param [powerBonus]
  * @param [quantity]
  */
-function KDGiveInventoryVariant(variant: KDRestraintVariant, prefix: string = "", curse: string = undefined, ID: string = "", forceName?: string, suffix: string = "", faction: string = "", powerBonus?: number, quantity: number = 1, container?: KDContainer) {
+function KDGiveInventoryVariant(variant: KDRestraintVariant, prefix: string = "", curse: string = undefined, ID: string = "",
+	forceName?: string, suffix: string = "", faction: string = "", powerBonus?: number, quantity: number = 1, container?: KDContainer,
+	data?: any) {
 	let origRestraint = KinkyDungeonGetRestraintByName(variant.template);
 	let events = origRestraint.events ? JSON.parse(JSON.stringify(origRestraint.events)) : [];
 	let newname = forceName ? forceName : (prefix + variant.template + (ID || (KinkyDungeonGetItemID() + "")) + (curse ? curse : ""));
@@ -3669,11 +3708,17 @@ function KDGiveInventoryVariant(variant: KDRestraintVariant, prefix: string = ""
 		if (container.items[newname]) {
 			container.items[newname].quantity = (container.items[newname].quantity || 1) + 1;
 		} else {
-			container.items[newname] = {faction: faction, name: newname, curse: curse, id: KinkyDungeonGetItemID(), type: LooseRestraint, events:events, quantity: q, showInQuickInv: true,};
+			container.items[newname] = {faction: faction, name: newname, curse: curse, id: KinkyDungeonGetItemID(),
+				data: data,
+				type: LooseRestraint, events:events, quantity: q, showInQuickInv: true,};
 		}
+		return container.items[newname];
 	} else {
 		if (KinkyDungeonInventoryGet(newname)) q = KinkyDungeonInventoryGet(newname).quantity + quantity;
-		KinkyDungeonInventoryAdd({faction: faction, name: newname, curse: curse, id: KinkyDungeonGetItemID(), type: LooseRestraint, events:events, quantity: q, showInQuickInv: true,});
+		KinkyDungeonInventoryAdd({faction: faction, name: newname, curse: curse, id: KinkyDungeonGetItemID(),
+			data: data,
+			type: LooseRestraint, events:events, quantity: q, showInQuickInv: true,});
+		return KinkyDungeonInventoryGet(newname);
 	}
 }
 
@@ -3873,7 +3918,8 @@ function KDGiveItem(name: string, quantity: number = 1): boolean {
 		return true;
 	} else if (KinkyDungeonRestraintVariants[name]) {
 		let variant = KinkyDungeonRestraintVariants[name];
-		KDGiveInventoryVariant(variant, undefined, variant.curse, undefined, name, KinkyDungeonRestraintVariants[name].suffix, undefined, undefined, quantity);
+		KDGiveInventoryVariant(variant, undefined, variant.curse, undefined, 
+			name, KinkyDungeonRestraintVariants[name].suffix, undefined, undefined, quantity);
 		return true;
 	} else if (KDRest(name)) {
 		let restraint = KDRest(name);
@@ -4424,3 +4470,48 @@ function KDFindHotkeyInGrid(index: number, currentPage: number, gridList: any[],
 function KDGetDescOffset(item: itemPreviewEntry) {
 	return ((item.item?.type == Weapon) ? 10 : 0);
 }
+
+function KDDrawExtraItemInfo(item: itemPreviewEntry, xOffset: number, yOffset: number, player: entity) {
+	let yy = 0;
+	if (KDRestraint(item.item)?.corset)
+		DrawTextKD(TextGet("KDCorsetDesc", {
+			FRACTION: Math.round(KDRestraint(item.item)?.corset * 100 * KDCorsetSPReductionMult(player)),
+			}) + (KDCorsetSPReductionMult(player) < 1 ? TextGet("KDRestraintDescBaseTag", {
+				FRACTIONORIG: Math.round(KDRestraint(item.item)?.corset * 100),
+			}): ""),
+			xOffset + canvasOffsetX_ui + 640*KinkyDungeonBookScale*(1-1.0/3.35), 
+			yOffset + canvasOffsetY_ui + 483*KinkyDungeonBookScale/5 + 435 + (20 * yy--),
+			KDBookText, KDTextTan, 22,
+			 undefined, 130);
+	if (KDRestraint(item.item)?.gag)
+		DrawTextKD(TextGet("KDGagDesc", {
+			FRACTION: Math.round(KDRestraint(item.item)?.gag * 100 * KDGagReductionMult(player)),
+			}) + (KDGagReductionMult(player) < 1 ? TextGet("KDRestraintDescBaseTag", {
+				FRACTIONORIG: Math.round(KDRestraint(item.item)?.gag * 100),
+			}): ""),
+			xOffset + canvasOffsetX_ui + 640*KinkyDungeonBookScale*(1-1.0/3.35), 
+			yOffset + canvasOffsetY_ui + 483*KinkyDungeonBookScale/5 + 435 + (20 * yy--),
+			KDBookText, KDTextTan, 22,
+			 undefined, 130);
+	if (KDRestraint(item.item)?.deaf)
+		DrawTextKD(TextGet("KDDeafDesc", {
+			FRACTION: Math.round(KDRestraint(item.item)?.deaf * 10),
+			}),
+			xOffset + canvasOffsetX_ui + 640*KinkyDungeonBookScale*(1-1.0/3.35), 
+			yOffset + canvasOffsetY_ui + 483*KinkyDungeonBookScale/5 + 435 + (20 * yy--),
+			KDBookText, KDTextTan, 22,
+			 undefined, 130);
+	if (KDRestraint(item.item)?.blindfold)
+		DrawTextKD(TextGet("KDBlindDesc", {
+			FRACTION: Math.round(KDRestraint(item.item)?.blindfold * 10 / (KDSensesTrainingBoost(player, false))),
+			}) + (KDSensesTrainingBoost(player) > 1 ? TextGet("KDRestraintDescBaseTag", {
+				FRACTIONORIG: Math.round(KDRestraint(item.item)?.blindfold * 10),
+			}): ""),
+			xOffset + canvasOffsetX_ui + 640*KinkyDungeonBookScale*(1-1.0/3.35), 
+			yOffset + canvasOffsetY_ui + 483*KinkyDungeonBookScale/5 + 435 + (20 * yy--),
+			KDBookText, KDTextTan, 22,
+			 undefined, 130);
+			
+	
+}
+

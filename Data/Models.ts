@@ -418,6 +418,9 @@ function DisposeCharacter(C: Character, resort: boolean = true, deleteSpecial: b
 }
 function DisposeEntity(id: number, resort: boolean = true, deleteSpecial = false, deletePersistent = true): void {
 	let C = KDNPCChar.get(id);
+	if (KDGameData.SeenEntities) {
+		delete KDGameData.SeenEntities[id];
+	}
 	if (C && KDCurrentModels.get(C)) {
 		for (let Container of KDCurrentModels.get(C).Containers.values()) {
 			if (Container.Container.parent)
@@ -524,6 +527,8 @@ function DrawCharacter(C: Character, X: number, Y: number, Zoom: number,
 		OldSubmeshes = data.ContainerInfo.Submeshes;
 		for (let submesh of OldSubmeshes.values()) {
 			KDMeshToDestroy.push(submesh.mesh);
+			//submesh.mesh.texture.destroy();
+			//KDRenderTexToDestroy.push(submesh.mesh.texture);
 		}
 		MC.Update.delete(containerID);
 		MC.Refresh.delete(containerID);
@@ -533,6 +538,7 @@ function DrawCharacter(C: Character, X: number, Y: number, Zoom: number,
 		MC.Containers.get(containerID).Container.destroy();
 		//MC.Containers.get(containerID).Mesh.destroy();
 		KDMeshToDestroy.push(MC.Containers.get(containerID).Mesh);
+		//MC.Containers.get(containerID).Mesh.texture.destroy();
 		KDRenderTexToDestroy.push(MC.Containers.get(containerID).RenderTexture);
 		/*for (let submesh of MC.Containers.get(containerID).Submeshes.values()) {
 			KDMeshToDestroy.push(submesh.mesh);

@@ -540,11 +540,11 @@ function KinkyDungeonAggro(Enemy: entity, Spell: spell, Attacker: entity, Factio
 				}
 			}
 		} else {
-			KinkyDungeonApplyBuffToEntity(Enemy, KDAdrenaline, {
+			KDApplyBuffToEntity(Enemy, KDAdrenaline, {
 				duration: 4,
 				power: 0.8,
 			});
-			KinkyDungeonApplyBuffToEntity(Enemy, KDAdrenaline2, {
+			KDApplyBuffToEntity(Enemy, KDAdrenaline2, {
 				duration: 2,
 				power: 0.5,
 			});
@@ -2443,7 +2443,7 @@ function KinkyDungeonBulletHit(b: KDBullet, born: number, outOfTime?: boolean, o
 							&& (!buff.noAlly || !b.bullet.faction || KDFactionRelation(b.bullet.faction, KDGetFaction(enemy)) < 0.5)
 							&& (!buff.onlyAlly || !b.bullet.faction || KDFactionRelation(b.bullet.faction, KDGetFaction(enemy)) >= 0.5)) {
 							if (!enemy.buffs) enemy.buffs = {};
-							KinkyDungeonApplyBuffToEntity(enemy, buff);
+							KDApplyBuffToEntity(enemy, buff);
 						}
 					}
 				}
@@ -3192,7 +3192,7 @@ function KDBulletAoECanHitEntity(bullet: KDBullet, enemy: entity): boolean {
 		return (bullet.reflected
 			|| KDEntityHasFlag(enemy, "takeFF")
 			|| (!bullet.bullet.spell || !bullet.bullet.faction
-				|| bullet.bullet.spell.friendlyfire
+				|| (bullet.bullet.spell.friendlyfire && !enemy.Enemy?.alwaysNoFF && enemy.id != bullet.source)
 				|| (!KDFactionFavorable(bullet.bullet.faction, enemy)
 					&& (!bullet.bullet.damage || bullet.bullet.damage.type != "heal"))
 				|| (!KDFactionHostile(bullet.bullet.faction, enemy) && (bullet.bullet.damage && bullet.bullet.damage.type == "heal"))
@@ -3223,7 +3223,7 @@ function KDBulletCanHitEntity(bullet: KDBullet, enemy: entity, inWarningOnly?: b
 		return (enemy.x == bullet.x && enemy.y == bullet.y) && (bullet.reflected || overrideCollide
 			|| KDEntityHasFlag(enemy, "takeFF")
 			|| (!bullet.bullet.spell || !bullet.bullet.faction
-				|| bullet.bullet.spell.friendlyfire
+				|| (bullet.bullet.spell.friendlyfire && !enemy.Enemy?.alwaysNoFF && enemy.id != bullet.source)
 				|| (!KDFactionFavorable(bullet.bullet.faction, enemy)
 					&& (!bullet.bullet.damage || bullet.bullet.damage.type != "heal"))
 				|| (!KDFactionHostile(bullet.bullet.faction, enemy) && (bullet.bullet.damage && bullet.bullet.damage.type == "heal"))
@@ -3690,7 +3690,7 @@ function KDHealRepChange(enemy: entity, amount: number) {
 	// De-aggro an enemy if you heal them to full
 	if (enemy.hostile && amount > 0) {
 		if (enemy.hp >= enemy.Enemy.maxhp - 0.5) {
-			enemy.hostile = 0;
+			KDResetAggro(enemy);
 		}
 	} else if ((!enemy.allied || enemy.allied <= 400) && amount > 0) {
 		// Befriend enemies if you save them
@@ -3716,7 +3716,7 @@ function KDApplyGenBuffs(entity: entity, buff: string, time: number) {
 		for (let b of buffs) {
 			let newBuff = Object.assign({}, b);
 			if (newBuff && time) newBuff.duration = time;
-			KinkyDungeonApplyBuffToEntity(entity, newBuff);
+			KDApplyBuffToEntity(entity, newBuff);
 		}
 	}
 }

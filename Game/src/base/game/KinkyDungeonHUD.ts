@@ -1239,7 +1239,7 @@ function KinkyDungeonDrawActionBar(_x: number, _y: number) {
 			24, "left", 110, 0.9);
 		KinkyDungeonBarTo(kdstatusboard, 1000, BalanceOffset + 8 - BalanceSpacing*(II), 500, 12, 100*KDGameData.Balance,
 			"#4fd658", "#283540", KDGameData.Balance * 100, "#ffee83",
-			KDSteps(KDGameData.Balance, -KDGetBalanceCost("move")*1.5), "#283540", "#4fd658");
+			KDSteps(KDGameData.Balance, -KDGetBalanceCost("move", KDPlayer())*1.5), "#283540", "#4fd658");
 
 		if (!KDGameData.Training) KDGameData.Training = {};
 		DrawTextFitKDTo(kdstatusboard, TextGet("KDBalanceTraining")
@@ -1756,6 +1756,12 @@ function KinkyDungeonActivateWeaponSpell(instant = false) {
 		let energyCost = KinkyDungeonPlayerDamage.special.energyCost;
 		if (KDGameData.AncientEnergyLevel < energyCost) {
 			KinkyDungeonSendActionMessage(8, TextGet("KinkyDungeonInsufficientEnergy"), KDBaseRed, 1);
+			KinkyDungeonCrystalWarningTime = CommonTime();
+			return true;
+		}
+		let staminaCost =  KinkyDungeonPlayerDamage.special.minStamina || KinkyDungeonPlayerDamage.special.staminaCost;
+		if (staminaCost && !KinkyDungeonHasStamina(staminaCost)) {
+			KinkyDungeonSendActionMessage(8, TextGet("KinkyDungeonInsufficientStamina"), KDBaseRed, 1);
 			KinkyDungeonCrystalWarningTime = CommonTime();
 			return true;
 		}
@@ -2914,7 +2920,9 @@ function KDProcessBuffIcons(minXX: number, minYY: number, side: boolean = false)
 	if (gag >= 0.99) {
 		statsDraw.b_gag = {text: TextGet("KDStatGagFull"), category: "status", icon: "boundGagFull", color: KDBaseRed, bgcolor: "#333333", priority: 7};
 	} else if (gag > 0) {
-		statsDraw.b_gag = {text: TextGet("KDStatGag"), category: "status", icon: "boundGag", color: KDBaseRed, bgcolor: "#333333", priority: 7};
+		statsDraw.b_gag = {text: TextGet("KDStatGag", {
+			AMOUNT: Math.round(gag * 100) + "%"
+		}), category: "status", icon: "boundGag", color: KDBaseRed, bgcolor: "#333333", priority: 7};
 	} else if (KDToggleShowAllBuffs) {
 		statsDraw.b_gag = {text: TextGet("KDStatFreeMouth"), category: "status", icon: "status/freeMouth", color: KDBaseNeon, bgcolor: "#333333", priority: 7};
 	}
@@ -3200,7 +3208,9 @@ function KDProcessBuffIcons(minXX: number, minYY: number, side: boolean = false)
 		//DrawTextFitKD(TextGet("KinkyDungeonPlayerStatisfied"), X3, 900 - i * 35, 260, KDBasePink, "#333333"); i++;
 	} else if (KDGameData.OrgasmTurns > KinkyDungeonOrgasmTurnsCrave) {
 		statsDraw.sex = {
-			text: TextGet("KinkyDungeonPlayerEdged"),
+			text: TextGet("KinkyDungeonPlayerEdged", {
+				Denial: Math.round(KDEntityBuffedStat(KDPlayer(), "DenialBonus"))
+			}),
 			icon: "Edged",
 			category: "kinky", color: KDBaseRed, bgcolor: "#333333", priority: 7,
 		};
@@ -3208,7 +3218,9 @@ function KDProcessBuffIcons(minXX: number, minYY: number, side: boolean = false)
 	}
 	if (KDGameData.CurrentVibration  && KDGameData.CurrentVibration.denyTimeLeft > 0) {
 		statsDraw.deny = {
-			text: TextGet("KinkyDungeonPlayerDenied"),
+			text: TextGet("KinkyDungeonPlayerDenied", {
+				Denial: Math.round(KDEntityBuffedStat(KDPlayer(), "DenialBonus"))
+			}),
 			icon: "Denied",
 			category: "kinky", color: KDBaseRed, bgcolor: "#333333", priority: 12,
 		};
@@ -3227,7 +3239,8 @@ function KDProcessBuffIcons(minXX: number, minYY: number, side: boolean = false)
 			KinkyDungeonSelectedBuff = b.id;
 			KinkyDungeonSelectedBuffEntity = KDPlayer();
 			
-			let t = TextGet("KinkyDungeonBuff" + (b.desc || b.id), {
+			// Compat with old formatting
+			let t = TextGet(HasText("KDBuffDesc_" + (b.desc || b.id)) ? "KDBuffDesc_" + (b.desc || b.id) : ("KinkyDungeonBuff" + (b.desc || b.id)), {
 				PowerInt: Math.round(b.power),
 				Power: Math.round(b.power * 100) / 100
 			}) + (count ? ` ${count}/${b.maxCount}` : "")
@@ -3236,6 +3249,10 @@ function KDProcessBuffIcons(minXX: number, minYY: number, side: boolean = false)
 				for (let replace of Object.entries(b.buffTextReplace)) {
 					t = t.replace(replace[0], (replace as [string , string])[1]);
 				}
+			}
+
+			if (HasText("KDBuffName_" + (b.desc || b.id)) && TextGet("KDBuffName_" + (b.desc || b.id))) {
+				t = TextGet("KDBuffName_" + (b.desc || b.id)) + ": " + t;
 			}
 			statsDraw[b.id] = {
 				text: t,
@@ -3251,7 +3268,6 @@ function KDProcessBuffIcons(minXX: number, minYY: number, side: boolean = false)
 				flashing: b.flashing,
 				click: b.click,
 			};
-			//DrawTextFitKD(TextGet("KinkyDungeonBuff" + b.id) + (count ? ` ${count}/${b.maxCount}` : "") + ((b.duration > 1 && b.duration < 1000) ? ` (${b.duration})` : ""), 790, 900 - i * 35, 275, b.aura ? b.aura : b.labelcolor, "#333333"); i++;
 		}
 
 	}
@@ -3566,7 +3582,7 @@ function KDDrawStruggleGroups() {
 					}
 					);
 				}
-				if (KDStruggleGroupHighlightedItem && KDRestraint(KDStruggleGroupHighlightedItem)?.Group
+				if (KDStruggleGroupHighlightedItem && (!currentHighlightedItem || !KDContextMenu) && KDRestraint(KDStruggleGroupHighlightedItem)?.Group
 					== sg.group) currentHighlightedItem = KDStruggleGroupHighlightedItem;
 			}
 			
@@ -3599,6 +3615,10 @@ function KDDrawStruggleGroups() {
 					KinkyDungeonDrawInventorySelected(
 						KDGetItemPreview(currentHighlightedItem || item), false, true, 700);
 				//}
+
+				if (!KDStruggleGroupHighlightedItem) {
+
+				}
 				if (!currentHighlightedItem)
 					currentHighlightedItem = item;
 				let data = {
@@ -3670,7 +3690,7 @@ function KDDrawStruggleGroups() {
 
 
 					for (let d of dynamicList) {
-						if (dynamicList.length <= 1) break;
+						if (dynamicList.length == 0) break;
 						//if (d != item)//KDRestraint(item) && (!KDRestraint(item).UnLink || d.name != KDRestraint(item).UnLink))
 						//{
 						let dotdotdot = false;
@@ -3793,7 +3813,7 @@ function KDDrawStruggleGroups() {
 					if (struggleData.lockType && (StruggleType == "Unlock" && !struggleData.lockType.canUnlock(struggleData))
 						|| (StruggleType == "Pick" && struggleData.lockType && !struggleData.lockType.canPick(struggleData))) {
 						// Nope
-					} else if (StruggleType != "ContextMenu") {
+					} else if (StruggleType != "ContextMenu" && KDStruggleTypeShowDifficulty.includes(StruggleType)) {
 						let O = lastO;
 						let pentext = RetDrawTextKD(TextGet("KDItemDifficulty").replace("AMNT",
 							Math.max(0,
@@ -4192,6 +4212,7 @@ let KDScrollMovedStruggleItem = false;
 function KDDrawScrollableItemList(x: number, y: number, size: number, width: number, sg: StruggleGroup, item: item, dynamicList: item[],
 	surfaceItems: item[], zIndex: number = 50, highlightSG?: boolean) {
 
+	
 	let listID = x + y + KDRestraint(item).Group;
 	let doFix = false;
 	if (KinkyDungeonCheckClothesLoss || KDScrollMovedStruggleItem || ShouldUpdateList(listID)) {
@@ -4207,6 +4228,7 @@ function KDDrawScrollableItemList(x: number, y: number, size: number, width: num
 			doFix = true;
 		}
 	}
+	let hoverCallback = null;
 	//@ts-ignore
 	let drawn: item = KDDrawScrollableList(listID, true, (
 		container: PIXIContainer,
@@ -4217,7 +4239,7 @@ function KDDrawScrollableItemList(x: number, y: number, size: number, width: num
 		isSelected: boolean,
 		selectedIndex: number,
 		list: KDScrollableListData)  => {
-		let selected = dynamicList[KDStruggleGroupLinkIndex[sg.group]] == listItem;
+		let selected = dynamicList[KDStruggleGroupLinkIndex[sg.group] || 0] == listItem;
 
 		if (listItem) {
 
@@ -4241,7 +4263,7 @@ function KDDrawScrollableItemList(x: number, y: number, size: number, width: num
 
 			let GroupText = (sg.name && item) ? (KDGetItemName(item)) : ( TextGet("KinkyDungeonGroup"+ sg.group)); // The name of the group to draw.
 
-
+			let hover = false;
 
 			if (DrawButtonKDExTo(container, listID + "_item_" + listItem.id, (bdata) => {
 
@@ -4266,22 +4288,36 @@ function KDDrawScrollableItemList(x: number, y: number, size: number, width: num
 				zIndex: zIndex,
 				alpha: KDStruggleGroupBGAlpha,
 			})) {
-				if (MouseIn(x, y, width, size)) {
-					// draw the hover thing
-					KDStruggleGroupHighlightedItem = listItem;
-					DrawTextFitKD(KDGetItemName(listItem), 
-					list.x + visualIndex * size, list.y - size * 0.13, 300, KDBaseWhite, 
-					KDBaseBlack, 18, "left", 120)
-				}
+				hover = true;
 			}
+			if ((hover && MouseIn(x, y, width, size))
+					|| (KDStruggleDrawMode == KDDrawStruggleEnum.STRUGGLE && (
+					!KDStruggleGroupHighlightedItem && selected))) {
+					// draw the hover tooltip
+
+					if (MouseIn(x, y, width, size))
+						KDStruggleGroupHighlightedItem = listItem;
+
+					let item = listItem;
+
+					hoverCallback = () => {
+						DrawTextFitKD(KDGetItemName(item), 
+						list.x + visualIndex * size, list.y + ((list.y < 20 || KDStruggleDrawMode == KDDrawStruggleEnum.STRUGGLE) ? 1 : -1) * size * 0.13, 300, KDBaseWhite, 
+						KDBaseBlack, 18, "left", 120)
+					}
+
+					
+				}
 		}
+
 		
 
 		
 		return selected;
-	}, false, true, 4, undefined, 
+	}, false, true, 0, undefined, 
 	"", "", undefined, undefined, undefined, undefined, false);
 
+	if (hoverCallback) hoverCallback();
 	if (doFix) {
 		KDFixScrollableList(listID, 2);
 	}
@@ -4293,3 +4329,11 @@ function KDDrawScrollableItemList(x: number, y: number, size: number, width: num
 let KDScrollableStruggleSectionNum = 6.4;
 let KDStruggleGroupBGAlpha = 0.6;
 let KDStruggleGroupHighlightedItem = null;
+
+let KDStruggleTypeShowDifficulty = [
+	"Struggle",
+	"Cut",
+	"Unlock",
+	"Pick",
+	"Remove"
+]

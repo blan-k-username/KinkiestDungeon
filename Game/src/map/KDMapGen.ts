@@ -494,8 +494,14 @@ function KinkyDungeonCreateMap (
 			}
 			let traps2 = [];
 			if (!altType || altType.placeDoors)
-				traps2 = KinkyDungeonPlaceDoors(doorchance, doortrapchance, nodoorchance, doorlockchance, trapChance, grateChance, Floor, width, height,
+				traps2 = KinkyDungeonPlaceDoors(doorchance, doortrapchance, nodoorchance, 
+			doorlockchance, trapChance, grateChance, Floor, width, height,
 				!altType ? KDPlaceMode.MODE_MODIFYPOTENTIALANDEXISTING : (altType.doorPlaceMode || KDPlaceMode.MODE_PLACENEW));
+			
+			if (!altType || !altType.placeDoors) {
+				KDFixDoors(width, height);
+			}
+			
 			if (KDDebug) {
 				console.log(`${performance.now() - startTime} ms for door creation`);
 				startTime = performance.now();
@@ -746,6 +752,13 @@ function KinkyDungeonCreateMap (
 			KinkyDungeonAdvanceTime(0);
 		}
 	}
+
+	// purely for debugging
+	let fails2 = KDCreateBoringness(false, false);
+	if (fails2 > 0) {
+		console.log("Warning: some tiles are inaccessible (this can be normal)")
+	}
+	KDCreateBoringness(false, true);
 
 	location.data[KDGameData.RoomType] = KDMapData;
 

@@ -3,27 +3,61 @@ let KDBaseTrainingMinRatioPercent = 0.5;
 
 let KDTrainingTypes = [
 	"Heels",
+	"Corset",
+	"Gag",
+	"Senses",
 ];
+
+let KDTrainingTypeProperties: Record<string, KDTrainingProps> = {
+	Heels: {
+		color: KDBaseTeal,
+		prereq: (player) => {return true;},
+		effectVal: (player) => {
+			let mult = 100 * KDHeelTrainingMult(player, KDHeelTrainingEffectMultBase, false);
+			return "-" + Math.round(100 - 100 * mult) + "%";
+		}
+		
+	},
+	Corset: {
+		color: KDBaseGreen,
+		prereq: (player) => {return true;},
+		effectVal: (player) => {
+			return "-" + Math.round(-100 * (1 - KDCorsetSPReductionMult(player, false))) + "%";
+		},
+	},
+	Gag: {
+		color: KDBaseReddishPink,
+		prereq: (player) => {return true;},
+		effectVal: (player) => {
+			return "-" + Math.round(100 * (1 - KDGagReductionMult(player, false))) + "%";
+		},
+	},
+	Senses: {
+		color: KDBaseLightGrey,
+		prereq: (player) => {return true;},
+		effectVal: (player) => {
+			return "+" + Math.round(100 * (KDSensesTrainingBoost(player, false))) + "%";
+		},
+	},
+}
+
+
 interface KDTrainingProps {
 	color: string,
 	showBuff?: boolean,
 	dontShowProgress?: boolean,
 	prereq: (player: entity) => boolean,
+	effectVal: (player: entity) => string,
+	
 	calc_xpnext?: (player: entity) => number,
 	calc_xpmax?: (player: entity) => number,
 	
 	
 }
-let KDTrainingTypeProperties: Record<string, KDTrainingProps> = {
-	Heels: {
-		color: KDBaseGreal,
-		prereq: (player) => {return true;}
-	},
-}
 
-function KDGetHeelTraining(): number {
+function KDGetHeelTraining(buffs: boolean = true): number {
 	if (!KDGameData.Training) KDGameData.Training = {};
-	return (KDGameData.Training?.Heels?.training_stage || 0) + KinkyDungeonGetBuffedStat(KinkyDungeonPlayerBuffs, "HeelTraining");
+	return (KDGameData.Training?.Heels?.training_stage || 0) + (buffs ? KinkyDungeonGetBuffedStat(KinkyDungeonPlayerBuffs, "HeelTraining") : 0);
 }
 
 function KDTrip(delta: number) {
@@ -49,8 +83,10 @@ function KDTripDuration(): number {
 	return Math.max(2, Math.round(5 * mult));
 }
 
-function KDGetBalanceCost(trig: string): number {
-	let mult = 1;//KinkyDungeonStatsChoice.has("HeelWalker") ? 0.5 : 1;
+let KDHeelTrainingEffectMultBase = 1;
+
+function KDGetBalanceCost(trig: string, player: entity): number {
+	let mult = KDHeelTrainingEffectMultBase;//KinkyDungeonStatsChoice.has("HeelWalker") ? 0.5 : 1;
 	if (KinkyDungeonStatsChoice.get("PoorBalance")) mult *= 1.7;
 	if (!KinkyDungeonIsArmsBound()) mult *= 0.6;
 
@@ -60,8 +96,12 @@ function KDGetBalanceCost(trig: string): number {
 		}
 	}
 
-	let training = KDGetHeelTraining();
-	return KDGameData.HeelPowerEffective * (0.01*mult*5/(5+training) - (0.001));
+	return KDGameData.HeelPowerEffective * (KDHeelTrainingMult(player, mult) - (0.001));
+}
+
+function KDHeelTrainingMult(player: entity, mult: number, buffs: boolean = true) {
+	let training = KDGetHeelTraining(buffs);
+	return 0.01*mult*10/(10+training);
 }
 
 /** 50 bondage resist halves the balance cost of resisting, per power */
@@ -110,21 +150,48 @@ function KDGetTrainingMinRatioPercentTick(name: string, data: KDTrainingRecord, 
  */
 function KDAdvanceTraining(player: entity): void {
 	if (!KDGameData.Training) KDGameData.Training = {};
-	for (let entry of Object.entries(KDGameData.Training)) {
-		//let training = entry[0];
-		let data = entry[1];
-		if (data.turns_total == 0) continue; // No advance
-		let trainingPercentage = KDGetTrainingPercentage(entry[0], data, player, true);
-		data.training_points += 1 * trainingPercentage;
-		data.turns_total = 0;
-		data.turns_skipped = 0;
-		data.turns_trained = 0;
-		data.best_ratio = 0;
+	for (let entry of Object.keys(KDGameData.Training)) {
+		KDAdvanceSingleTraining(entry, player);
+		
 
-		while (data.training_points > data.training_stage + 1) {
-			data.training_stage += 1;
-			data.training_points -= data.training_stage;
-		}
+	}
+	TickProgressRecord();
+}
+
+function KDAdvanceSingleTraining(training: string, player: entity) {
+	let data = KDGameData.Training[training];
+	//let training = entry[0];
+	if (data.turns_total == 0) return; // No advance
+	let trainingPercentage = KDGetTrainingPercentage(
+		training, data, player, true);
+	data.training_points += 1 * trainingPercentage;
+	data.turns_total = 0;
+	data.turns_skipped = 0;
+	data.turns_trained = 0;
+	data.best_ratio = 0;
+
+	KDCheckLevelUp(training, player);
+	
+}
+
+function KDCheckLevelUp(training: string, player: entity) {
+	let data = KDGameData.Training[training];
+	let costmult = 1;
+	if (player?.player && KinkyDungeonStatsChoice.get("Mastery" + training)) {
+		costmult *= 2;
+	}
+	while (data.training_points > (data.training_stage + 1) * costmult) {
+
+		KinkyDungeonSendFloater({x: 1100, y: 600 - KDRecentRepIndex * KDFloaterSpacingOverride}, 
+			TextGet("KDLevelUpStat", {
+				STAT: TextGet("KDProgressItem_Training" + training)
+			}), KDBaseWhite, 5, true);
+		KDRecentRepIndex += 1;
+
+		data.training_stage += 1;
+		data.training_points -= data.training_stage;
+
+		LevelUpProgressRecord("Training", training);
 	}
 }
 
@@ -136,8 +203,9 @@ function KDAdvanceTraining(player: entity): void {
  * @param total
  * @param bonus - Multiplier for turns trained or skipped
  */
-function KDTickTraining(Name: string, trained: boolean, skipped: boolean, total: number, bonus: number = 1): void {
-	let player = KDPlayer();
+function KDTickTraining(Name: string, trained: boolean,
+	skipped: boolean, total: number, bonus: number = 1, player?: entity): void {
+	if (!player) player = KDPlayer();
 	if (!KDGameData.Training) KDGameData.Training = {};
 	if (!KDGameData.Training[Name]) {
 		KDGameData.Training[Name] = {
@@ -167,5 +235,171 @@ function KDTickTraining(Name: string, trained: boolean, skipped: boolean, total:
 	}
 }
 
+/**
+ * for player ONLY
+ * @param Name
+ * @param trained
+ * @param skipped
+ * @param total
+ * @param bonus - Multiplier for turns trained or skipped
+ */
+function KDAddFlatTraining(Name: string, amount: number, player?: entity): void {
+	if (!player) player = KDPlayer();
+	if (!KDGameData.Training) KDGameData.Training = {};
+	if (!KDGameData.Training[Name]) {
+		KDGameData.Training[Name] = {
+			best_ratio: 0,
+			training_points: 0,
+			training_stage: 0,
+			turns_skipped: 0,
+			turns_total: 0,
+			turns_trained: 0,
+		};
+	}
+	if (amount > 0)
+		KDGameData.Training[Name].training_points += amount;
+	else 
+		KDGameData.Training[Name].training_points = Math.max((KDGameData.Training[Name].training_points || 0) + amount);
+	
+	KDCheckLevelUp(Name, player);
+}
+
+
 /** This many training turns are requred, any less is scaled down by this amount */
 let KDTrainingSoftScale = 10;
+
+
+function KDAddLeashWalkXP(player: entity) {
+	let xp = 1 + .25 * (KDGameData.Training["Heels"]?.training_stage || 0);
+	if (AddProgressFloor("Training", "Heels", 
+		{
+			key: "Heels_LeashWalk",
+			tag: "LeashWalk",
+			data: {
+				level: KDGameData.Training["Heels"]?.training_stage,
+				floor: KDGameData.HighestLevelCurrent,
+			},
+			desc: "Heels_LeashWalk",
+			value: Math.round(xp * 100)}, false)) {
+			KDAddFlatTraining("Heels", xp);
+		}
+}
+
+function KDAddGagXP(type: string, player: entity, xp?: number) {
+	xp = xp == undefined ? 0 + .25 * (KDGameData.Training["Gag"]?.training_stage || 1) : xp;
+	let gagTotal = KinkyDungeonGagTotal(false, 1, true);
+	for (let dat of [
+		{thresh: 0, tag: "None", xp: -xp},
+		{thresh: 0.25, tag: "Light", xp: xp},
+		{thresh: 0.5, tag: "Medium", xp: xp},
+		{thresh: 0.75, tag: "Heavy", xp: xp},
+	]) {
+		if (dat.thresh == 0) {
+			KDTickTraining("Gag", gagTotal > 0, gagTotal == 0, KDGagTrainingMult * 10, 1 + gagTotal);
+		}
+		if (((dat.thresh > 0 && gagTotal >= dat.thresh) || (
+			(dat.thresh == 0 && gagTotal == 0)
+		)) && AddProgressFloor("Training", "Gag", 
+			{
+				key: "Gag_" + type + dat.tag,
+				tag: type + dat.tag,
+				data: {
+					level: KDGameData.Training["Gag"]?.training_stage,
+					floor: KDGameData.HighestLevelCurrent,
+				},
+				desc: "OncePerFloor",
+				value: Math.round(dat.xp * 100)}, false)) {
+				KDAddFlatTraining("Gag", dat.xp);
+			}
+	}
+}
+
+
+interface KDCorsetSPRedEventData {
+    level: number;
+    buff: number;
+	buffmult: number;
+    mult: number;
+    exponent: number;
+    priority: number;
+}
+function KDCorsetSPReductionMult(player: entity, buffs: boolean = true) : number {
+
+	let data: KDCorsetSPRedEventData = {
+		level: (KDGameData.Training?.Corset?.training_stage || 0),
+		buff: KDEntityBuffedStat(player, "CorsetTraining"),
+		buffmult: 1,
+		mult: 1,
+		exponent: .9,
+		priority: 0,
+	}
+
+	if (KinkyDungeonFlags.get("Artificial")) {
+		data.mult *= 0.1;
+	}
+
+	KinkyDungeonSendEvent("calcCorsetSPRed", data);
+
+	if (data.exponent != 1)
+		data.mult *= data.exponent**((data.level + data.buff) * data.buffmult);
+
+
+	return data.mult;
+}
+
+
+interface KDGagRedEventData {
+    level: number;
+    buff: number;
+	buffmult: number;
+    mult: number;
+    exponent: number;
+    priority: number;
+}
+
+function KDGagReductionMult(player: entity, buffs: boolean = true) : number {
+	let data: KDGagRedEventData = {
+		level: (KDGameData.Training?.Gag?.training_stage || 0),
+		buff: KDEntityBuffedStat(player, "GagTraining"),
+		buffmult: 1,
+		mult: 1,
+		exponent: .91,
+		priority: 0,
+	}
+
+	KinkyDungeonSendEvent("calcGagRed", data);
+
+	if (data.exponent != 1)
+		data.mult *= data.exponent**((data.level + data.buff) * data.buffmult);
+
+
+	return data.mult;
+}
+
+
+interface KDSensesEventData {
+    level: number;
+    buff: number;
+	buffmult: number;
+    mult: number;
+    boost: number;
+    priority: number;
+}
+
+function KDSensesTrainingBoost(player: entity, buffs: boolean = true) : number {
+	let data: KDSensesEventData = {
+		level: (KDGameData.Training?.Senses?.training_stage || 0),
+		buff: KDEntityBuffedStat(player, "SensesTraining"),
+		buffmult: 1,
+		mult: 1,
+		boost: 0.05,
+		priority: 0,
+	}
+
+	KinkyDungeonSendEvent("calcGagRed", data);
+
+	if (data.boost) data.mult += data.boost * ((data.level + data.buff) * data.buffmult)
+	
+
+	return data.mult;
+}

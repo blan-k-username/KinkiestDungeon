@@ -13,6 +13,7 @@ interface ProgressListData {
     name: string,
     data?: Record<string, string>,
     progress: number,
+    progressghost: number,
     color: string,
     failcolor?: string,
     bordercolor: string,
@@ -36,6 +37,7 @@ interface ProgressListDrawData {
     type: string,
     name: string,
     progressString: string,
+    effectString: string,
     bonusprogress?: string,
     failpercentage?: string,
 }
@@ -55,15 +57,17 @@ function KDEnumerateTrainingProgress(data: ProgressListEventData) {
             let drawData: ProgressListDrawTrainingData = {
                 type: "Training",
                 name: type,
-                progressString: Math.round(points*100) + "/" + Math.round(lvl * 100),
+                progressString: KDGetTrainingXPString(points, lvl),
+                effectString: KDTrainingTypeProperties[type].effectVal ? KDTrainingTypeProperties[type].effectVal(data.player) : "",
                 bonusprogress: "+" + Math.round(next * 100),
                 failpercentage: Math.round(10000*(skipped / Math.max(total, points + skipped, 0.000001)))/100 + "%",
             };
             data.trainings.push({
                 name: "Training" + type,
                 progress: points/lvl,
+                progressghost: (points + next)/lvl,
                 color: KDTrainingTypeProperties[type].color,
-                bordercolor: KDBaseTeal,
+                bordercolor: KDTrainingTypeProperties[type].color,
                 textColor: KDBaseWhite,
                 failcolor: skipped == 0 ? KDBaseGreal : KDBaseRed,
                 level: Math.floor(KDGameData.Training ? (KDGameData.Training[type]?.training_stage || 0) : 0),
@@ -161,7 +165,7 @@ function KDDrawProgressList(xOffset) {
 		let w = list.w - 40;
         DrawTextFitKDTo(container, TextGet("KDProgressItem_" + item.name,
             item.data), 
-            list.x + 20 + w*0.5 + (horizontal ? visualIndex * 80 : 0), list.y + 20 + (horizontal ? 0 : visualIndex * 80), 
+            list.x + 20 + w*0.5 + (horizontal ? visualIndex * 80 : 0), list.y + 25 + (horizontal ? 0 : visualIndex * 80), 
             w - 80, item.textColor, undefined, undefined, undefined,
             undefined, undefined, undefined, undefined, undefined, undefined, 
             "tx|" + item.name + "_label_scrollist")
@@ -193,6 +197,17 @@ function KDDrawProgressList(xOffset) {
             alpha: 0.9,
             LineWidth: 1
         });
+        if (item.progressghost)
+            FillRectKD(container, kdpixisprites, "MainProgressSelectGhost" + item.name + "pbfill", {
+                Color: item.color,
+                Left: list.x + 60 + (horizontal ? visualIndex * 80 : 0),
+                Height: 11,
+                Top: list.y + 50 + (horizontal ? 0 : visualIndex * 80),
+                Width: (w - 70) * Math.min(1, item.progressghost),
+                zIndex: 100.5,
+                alpha: 0.15,
+                LineWidth: 1
+            });
         DrawButtonKDExTo(container, "MainProgressSelect" + item.name, 
             (bdata) => {
                 KDCurrentProgressMainSelection = it.name;
@@ -259,20 +274,31 @@ let KDProgressDrawTypes: Record<string, (container: PIXIContainer, z: number, id
         });
 
         if (drawData) {
-            let mult = KDGetFontMult();
-            let textSplit = KinkyDungeonWordWrap(TextGet("KDProgress_" + drawData.type + "_" + drawData.name), 28*mult, 80*mult).split('\n');
+            // let mult = KDGetFontMult();
+            // let textSplit = KinkyDungeonWordWrap(TextGet("KDProgress_" + drawData.type + "_" + drawData.name), 28*mult, 80*mult).split('\n');
             let fsize = 18;
 
-            for (let i = 0; i < textSplit.length; i++) {
-                DrawTextFitKD(textSplit[i], 
-                    x + 50, y + 25 + i * (fsize+1), width - 100, KDTextWhite, KDTextGray0, fsize, "left")
+            DrawTextFitKDgetHeight(TextGet("KDProgress_" + drawData.type + "_" + drawData.name), x + 50, y + 10, width - 100, KDTextWhite, KDTextGray0, fsize, "left",110, 1.0, undefined, undefined, undefined, true, "top", 22);
+
+            // for (let i = 0; i < textSplit.length; i++) {
+            //     DrawTextFitKD(textSplit[i], 
+            //         x + 50, y + 25 + i * (fsize+1), width - 100, KDTextWhite, KDTextGray0, fsize, "left")
+            // }
+
+            if (drawData.effectString) {
+                DrawTextFitKD(TextGet("KDEff" + drawData.type + "_" + drawData.name), 
+                        x + width/2 + 20, y + 105, 400, KDTextWhite, 
+                        KDTextGray0, 24, "right");
+                DrawTextFitKD(drawData.effectString, 
+                        x + width/2 + 40, y + 105, 400, item.color, 
+                        KDTextGray0, 24, "left");
             }
             
             DrawRectKD(container, kdpixisprites, id + "pb1border", {
                 Color: item.bordercolor,
                 Left: x + 40,
                 Height: 24,
-                Top: y + 120,
+                Top: y + 130,
                 Width: width - 80,
                 zIndex: z + 102,
                 alpha: 0.9,
@@ -282,7 +308,7 @@ let KDProgressDrawTypes: Record<string, (container: PIXIContainer, z: number, id
                 Color: item.color,
                 Left: x + 40,
                 Height: 24,
-                Top: y + 120,
+                Top: y + 130,
                 Width: (width - 80) * item.progress,
                 zIndex: z + 101,
                 alpha: 0.9,
@@ -354,14 +380,18 @@ let KDProgressDrawTypes: Record<string, (container: PIXIContainer, z: number, id
                     listt.push(...KDGameData.RecentProgress[drawData.type + "_" + drawData.name].currentLevelList);
                     listt.push(...KDGameData.RecentProgress[drawData.type + "_" + drawData.name].currentFloorList);
                     listt.push(...KDGameData.RecentProgress[drawData.type + "_" + drawData.name].lastFloorList);
+                    if (KDGameData.RecentProgress[drawData.type + "_" + drawData.name].lastLevelList)
+                        listt.push(...KDGameData.RecentProgress[drawData.type + "_" + drawData.name].lastLevelList);
                     for (let tag of listt) {
                         if (yy + 18 < height - 50) {
                             yy += 8;
                             let xx = RetDrawTextFitKD(TextGet("KDProgressTag_" + tag.key, tag.keyparams), 
-                                x + 50, yy, width * 0.5, KDTextWhite, 
+                                x + 50, yy, width * 0.5, tag.last ? KDTextGraymid : KDTextWhite, 
                                 KDTextGray0, 18, "left").x;
                             DrawTextFitKD((tag.value > 0 ? "+" : "") + tag.value, 
-                                x + 50 + xx + 10, yy, width * 0.1, item.color, 
+                                x + 50 + xx + 10, yy, width * 0.1, tag.last ? KDTextGraymidlow : (
+                                    tag.value > 0 ? item.color : KDBaseRed
+                                ), 
                                 KDTextGray0, 18, "left");
                             if (tag.desc) {
                                 DrawTextFitKD(TextGet("KDProgressTagDesc_" + tag.desc, tag.descparams), 
@@ -397,44 +427,69 @@ interface ProgressTag {
     tag: string,
     desc: string,
     value: number,
+    data?: any,
+    last?: boolean,
 }
 
 interface ProgressRecord {
     currentFloorList: ProgressTag[],
     lastFloorList: ProgressTag[],
     currentLevelList: ProgressTag[],
+    lastLevelList: ProgressTag[],
 }
 
-function AddProgressFloor(type: string, name: string, item: ProgressTag, force: boolean): boolean {
+function AddProgressFloor(type: string, name: string, item: ProgressTag, force: boolean, replace?: boolean): boolean {
     if (!KDGameData.RecentProgress) KDGameData.RecentProgress = {};
     let id = type + "_" + name;
     if (!KDGameData.RecentProgress[id]) KDGameData.RecentProgress[id] = {
         currentFloorList: [],
         lastFloorList: [],
         currentLevelList: [],
+        lastLevelList: [],
     };
 
     if (force || !KDGameData.RecentProgress[id].currentFloorList.some((litem) => {
         return litem.tag == item.tag;
     })) {
-        KDGameData.RecentProgress[id].currentFloorList.push(item);
+        if (replace && KDGameData.RecentProgress[id].currentFloorList.findIndex((litem) => {
+            return litem.tag == item.tag;
+        }) >= 0) {
+            let index = KDGameData.RecentProgress[id].currentFloorList.findIndex((litem) => {
+                return litem.tag == item.tag;
+            });
+            KDGameData.RecentProgress[id].currentFloorList[index] = item;
+
+        } else {
+            KDGameData.RecentProgress[id].currentFloorList.push(item);
+        }
         return true;
     }
     return false;
 }
-function AddProgressLevel(type: string, name: string, item: ProgressTag, force: boolean): boolean {
+function AddProgressLevel(type: string, name: string, item: ProgressTag, force: boolean, replace?: boolean): boolean {
     if (!KDGameData.RecentProgress) KDGameData.RecentProgress = {};
     let id = type + "_" + name;
     if (!KDGameData.RecentProgress[id]) KDGameData.RecentProgress[id] = {
         currentFloorList: [],
         lastFloorList: [],
         currentLevelList: [],
+        lastLevelList: [],
     };
 
     if (force || !KDGameData.RecentProgress[id].currentLevelList.some((litem) => {
         return litem.tag != item.tag;
     })) {
-        KDGameData.RecentProgress[id].currentLevelList.push(item);
+        if (replace && KDGameData.RecentProgress[id].currentLevelList.findIndex((litem) => {
+            return litem.tag == item.tag;
+        }) >= 0) {
+            let index = KDGameData.RecentProgress[id].currentLevelList.findIndex((litem) => {
+                return litem.tag == item.tag;
+            });
+            KDGameData.RecentProgress[id].currentLevelList[index] = item;
+
+        } else {
+            KDGameData.RecentProgress[id].currentLevelList.push(item);
+        }
         return true;
     }
     return false;
@@ -446,13 +501,28 @@ function TickProgressRecord() {
         for (let record in KDGameData.RecentProgress) {
             let current = KDGameData.RecentProgress[record];
             current.lastFloorList = current.currentFloorList;
+            for (let itm of current.lastFloorList) {
+                itm.last = true;
+            }
+            current.currentFloorList = [];
         }
     }
 }
-/** Ticks the progress record one floor */
+/** Ticks the progress record one level */
 function LevelUpProgressRecord(type: string, name: string) {
     if (KDGameData.RecentProgress) {
         let id = type + "_" + name;
-        if (KDGameData.RecentProgress[id]) KDGameData.RecentProgress[id].currentLevelList = [];
+        
+        if (KDGameData.RecentProgress[id]) {
+            KDGameData.RecentProgress[id].lastLevelList = KDGameData.RecentProgress[id].currentLevelList;
+            for (let itm of KDGameData.RecentProgress[id].lastLevelList) {
+                itm.last = true;
+            }
+            KDGameData.RecentProgress[id].currentLevelList = [];
+        }
     }
+}
+
+function KDGetTrainingXPString(points: number, lvl: number) {
+    return Math.round(points*100) + "/" + Math.round(lvl * 100);
 }

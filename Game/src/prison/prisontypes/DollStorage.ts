@@ -609,13 +609,13 @@ KDPrisonTypes.DollStorage = {
 							KinkyDungeonPlaySoundLocation(KinkyDungeonRootDirectory + "HydraulicUnlock.ogg", KDPlayer(), {
 								x: xx, y: label.y
 							}, 1.0, true);
-							e.faction = "Ambush";
+							e.faction = "Training";
 							e.vp = 2;
 							e.aware = true;
 							e.hostile = KinkyDungeonFlags.get("latexTraining");
 							e.summoned = false; // They can drop loot
 							KinkyDungeonSetEnemyFlag(e, "noignore", KinkyDungeonFlags.get("latexTraining"));
-							KinkyDungeonApplyBuffToEntity(e, KDTrainingUnit); // Training unit
+							KDApplyBuffToEntity(e, KDTrainingUnit); // Training unit
 						}
 
 						//Create training doors
@@ -636,7 +636,7 @@ KDPrisonTypes.DollStorage = {
 					// TODO progress training
 					let enemiesNear = KDNearbyEnemies(label.x, label.y, rad+2);
 					for (let en of enemiesNear) {
-						if (en.faction != "Ambush" && KDGetFaction(en) != "Player") {
+						if (en.faction != "Training" && KDGetFaction(en) != "Player") {
 							if (!KDEnemyHasFlag(en, "trainingLeave")) {
 								KDWanderEnemy(en);
 								KinkyDungeonSetEnemyFlag(en, "trainingLeave", 10);

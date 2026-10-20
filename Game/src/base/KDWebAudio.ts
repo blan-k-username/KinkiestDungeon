@@ -144,11 +144,11 @@ class WebAudioWrapper {
 	set vibe(height: number) {        
         
         if (this.lpf) {
-            this.lpf.frequency.setValueAtTime(150 - height * 90, 0);
+            this.lpf.frequency.setValueAtTime(1050 - height * 990, 0);
         } else {
             // creates and adds a panner node
             let filter = new BiquadFilterNode(KDWebAudio, {
-                frequency: 150 - height * 90,
+                frequency: 1050 - height * 990,
                 type: "lowpass",
                 gain: 0,
                 Q: 5,
@@ -504,7 +504,7 @@ let KDReverbDist = 10;
 let KDReverbFloor = 0.05;
 let KDReverbDampeningObject = 0.95;
 let KDReverbWallObject = 0.85;
-let KDImpulseReverbDefault = "Large Wide Echo Hall";
+let KDImpulseReverbDefault = "Scala Milan Opera Hall";
 let KDReverbSoundLow = "Small Drum Room";
 let KDReverbWeightingDistance = 0.3;
 let KDReverbClampThresh = 0.22;

@@ -435,6 +435,11 @@ function KDDrawEditorUI() {
 		return true;
 	}, true, 150 , 210, 140, 45, 'OpenBorder', KDBaseWhite, KDEditorTileFlexSuper ? (KinkyDungeonRootDirectory + "UI/CheckSmall.png") : undefined);
 
+	DrawButtonKDEx("accessibilitytoggle", () => {
+		KDTE_TestAccessibility = !KDTE_TestAccessibility;
+		return true;
+	}, true, 150, 260, 140, 45, "Test Access", KDBaseWhite, KDTE_TestAccessibility ? (KinkyDungeonRootDirectory + "UI/CheckSmall.png") : undefined);
+
 	// For later
 	let tileKeys = Object.keys(KDMapTilesListEditor);
 
@@ -634,7 +639,7 @@ function KDDrawEditorUI() {
 
 	if (!KDClipboardDisabled) {
 		DrawButtonKDEx("CopyClip", () => {
-			var text = JSON.stringify(KDMapTilesListEditor);
+			var text = JSON.stringify(KDMapTilesListEditor, null, 4);
 			navigator.clipboard.writeText(text).then(function() {
 				console.log('Async: Copying to clipboard was successful!');
 				console.log(KDMapTilesListEditor);
@@ -642,7 +647,7 @@ function KDDrawEditorUI() {
 				console.error('Async: Could not copy text: ', err);
 			});
 			return true;
-		}, true, 1450, 900, 275, 45, "Copy array to clipboard", KDBaseWhite, "");
+		}, true, 1450, 900, 275, 45, "Copy database to clipboard", KDBaseWhite, "");
 
 		DrawButtonKDEx("MergeClip", () => {
 			let success = false;
@@ -1046,7 +1051,7 @@ let KDTE_Brush: Record<string, (brush: any, curr: string, noSwap: boolean) => vo
 					delete KDMapData.EffectTiles[KinkyDungeonTargetX + "," + KinkyDungeonTargetY];
 			} else {
 				// Has to have unlimited duration
-				KDCreateEffectTile(KinkyDungeonTargetX, KinkyDungeonTargetY, {name: brush.effectTile, duration: 9999}, 0);
+				KDCreateEffectTile(KinkyDungeonTargetX, KinkyDungeonTargetY, {name: brush.effectTile, duration: 9999, infinite: true}, 0);
 			}
 		}
 	},
@@ -1090,6 +1095,7 @@ let KDTE_Brush: Record<string, (brush: any, curr: string, noSwap: boolean) => vo
 };
 
 let KDTE_Inaccessible = false;
+let KDTE_TestAccessibility = true;
 
 let KDTE_confirmreset = false;
 let KDTE_confirmcommit = false;
@@ -1138,7 +1144,7 @@ function KDHandleTileEditor(noSwap?: boolean): void {
 	}
 
 	if (!noSwap) {
-		let inaccess = KDTEGetInaccessible();
+		let inaccess = KDTE_TestAccessibility ? KDTEGetInaccessible() : [];
 		if (inaccess.length > 0) KDTE_Inaccessible = true;
 		else KDTE_Inaccessible = false;
 	}

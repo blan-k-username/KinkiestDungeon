@@ -275,6 +275,8 @@ interface AltType {
 	brightness?: number,
 	/** Automatically place extra doors according to door placement algorithm */
 	placeDoors?: boolean,
+	/** Automatically fixes doors that are embedded into walls with no route through them */
+	dontFixDoors?: boolean,
 	/** places no setpieces */
 	noSetpiece?: boolean,
 	/** This is considered a "main" room, e.g. quests will generate, elemental hunters will follow, etc. **/
@@ -593,6 +595,7 @@ let alts: Record<string, AltType> = {
 			dollshoppe: true,
 		},
 		skin: "shoppe",
+		faction: "Dressmaker",
 		soundParams: "DollShoppe",
 		musicParams: "DollShoppe",
 		lightParams: "DollShoppe",
@@ -603,7 +606,7 @@ let alts: Record<string, AltType> = {
 		shrines: false,
 		orbs: 0,
 		chargers: false,
-		notorches: true,
+		notorches: false,
 		heart: false,
 		specialtiles: false,
 		shortcut: false,
@@ -613,8 +616,8 @@ let alts: Record<string, AltType> = {
 		nostairs: true,
 		nostartstairs: true,
 		notraps: true,
-		noClutter: true,
-		nobrick: true,
+		noClutter: false,
+		nobrick: false,
 		nolore: true,
 		noboring: true, // Skip generating boringness
 	},
@@ -646,8 +649,27 @@ let alts: Record<string, AltType> = {
 
 		loadscript: (_firstTime) => {
 			// Summit loadscript triggers escape for up to 10 NPCs
-
 			KDTriggerNPCEscape(10);
+
+			// latex tiles that despawned in unfixed saves need to be respawned
+			const tile = KDMapTilesList.Summit;
+			for (let pos of Object.entries(tile.effectTiles)) {
+				// KinkyDungeonCreateSummit pastes at 1,1 so offset by 1,1
+				const xx = parseInt(pos[0].split(',')[0]) + 1;
+				const yy = parseInt(pos[0].split(',')[1]) + 1;
+				for (let effect of Object.values(pos[1])) {
+					if (!effect.infinite || KDEffectTiles[effect.name]?.infinite) {
+						continue;
+					}
+					const existing = KDGetEffectTiles(xx, yy)[effect.name];
+					if (existing) {
+						existing.infinite = true;
+						existing.duration = 9999;
+					} else {
+						KDCreateEffectTile(xx, yy, {name: effect.name, duration: 9999, infinite: true}, 0);
+					}
+				}
+			}
 
 			return true; // Returns whether or not to repopulate this map
 		},
@@ -1957,6 +1979,8 @@ function KinkyDungeonCreateTileMaze(_POI: any[], VisitedRooms: any[], width: num
 
 	// Now we convert the maze into an array of indices
 	let indices: Record<string, string> = {};
+	let indexW = 1;
+	let indexH = 1;
 	for (let x = 1; x < KDMapData.GridWidth; x += 2) {
 		for (let y = 1; y < KDMapData.GridHeight; y += 2) {
 			let index = "";
@@ -1968,6 +1992,8 @@ function KinkyDungeonCreateTileMaze(_POI: any[], VisitedRooms: any[], width: num
 
 
 			indices[(1 + (x - 1)/2) + "," + (1 + (y - 1)/2)] = index;
+			if ((1 + (x - 1)/2) > indexW) indexW = (1 + (x - 1)/2);
+			if ((1 + (y - 1)/2) > indexW) indexH = (1 + (y - 1)/2);
 		}
 	}
 
@@ -2011,7 +2037,7 @@ function KinkyDungeonCreateTileMaze(_POI: any[], VisitedRooms: any[], width: num
 		shrine: data.params.shrinecount || 0,
 		charger: data.params.chargercount || 0,
 	}, KDDefaultMaxFlags);
-	KDMapTilesPopulate(w, h, indices, data, requiredAccess, maxTagFlags, tagModifiers);
+	KDMapTilesPopulate(indexW, indexH, indices, data, requiredAccess, maxTagFlags, tagModifiers);
 
 	let floodChance = data.params.floodchance || 0;
 
@@ -2215,6 +2241,16 @@ function KinkyDungeonCreateSummit(_POI: any, VisitedRooms: any[], _width: number
 	}
 
 	KD_PasteTile(KDMapTilesList.Summit, 1, 1, data);
+
+	if (KDGameData.SummitFurniture) {
+		for (let key in KDGameData.SummitFurniture) {
+			const tile = KinkyDungeonTilesGet(key);
+			if (tile?.Furniture) {
+				tile.Furniture = KDGameData.SummitFurniture[key];
+			}
+		}
+	}
+
 	KDGenerateBaseTraffic(KDMapData.GridWidth, KDMapData.GridHeight);
 
 
@@ -3007,8 +3043,6 @@ function KinkyDungeonCreateElevatorRoom(_POI: any, VisitedRooms: any[], _width: 
 
 	KDMapData.StartPosition = {x: 15, y: 2 + 7 * 4};
 	KDMapData.EndPosition = {x: KDMapData.StartPosition.x, y: KDMapData.StartPosition.y};
-	VisitedRooms[0].x = 1;
-	VisitedRooms[0].y = Math.floor(height/2);
 
 	// Now we STRETCH the map
 	let KinkyDungeonOldGrid = KDMapData.Grid;
@@ -3021,7 +3055,7 @@ function KinkyDungeonCreateElevatorRoom(_POI: any, VisitedRooms: any[], _width: 
 	// Generate the grid
 	for (let Y = 0; Y < KDMapData.GridHeight; Y++) {
 		for (let X = 0; X < KDMapData.GridWidth; X++)
-			KDMapData.Grid = KDMapData.Grid + KinkyDungeonOldGrid[Math.floor(X * w / KDMapData.GridWidth) + Math.floor(Y * h / KDMapData.GridHeight)*(w+1)];
+			KDMapData.Grid = KDMapData.Grid + '1';
 		KDMapData.Grid = KDMapData.Grid + '\n';
 	}
 
@@ -3119,6 +3153,10 @@ function KinkyDungeonCreateElevatorRoom(_POI: any, VisitedRooms: any[], _width: 
 			lightColor: 0x99ff99,
 		});
 	}
+
+	
+	VisitedRooms[0].x = KDMapData.StartPosition.x;
+	VisitedRooms[0].y = KDMapData.StartPosition.y;
 
 	KinkyDungeonMapSet(KDMapData.StartPosition.x, KDMapData.StartPosition.y - 3, '6');
 	KinkyDungeonTilesSet((KDMapData.StartPosition.x) + ',' + (KDMapData.StartPosition.y - 3), {

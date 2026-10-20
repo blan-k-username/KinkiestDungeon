@@ -983,9 +983,11 @@ function KDAllyDialogue(name: string, requireTags: string[], requireSingleTag: s
 					}
 					return false;
 				},
-				clickFunction: (_gagged, _player) => {
+				clickFunction: (_gagged, player) => {
 					let enemy = KinkyDungeonFindID(KDGameData.CurrentDialogMsgID);
 					if (enemy && enemy.Enemy.name == KDGameData.CurrentDialogMsgSpeaker) {
+						KDAddGagXP("Flirt", player);
+
 						let r = KinkyDungeonGetRestraint({tags: ["armLink"]}, MiniGameKinkyDungeonLevel * 2 + KDGetOfferLevelMod(),
 							(KinkyDungeonMapIndex[MiniGameKinkyDungeonCheckpoint] || MiniGameKinkyDungeonCheckpoint));
 						if (r && KDCanAddRestraint(r, true, undefined, false, undefined, true, true)) {
@@ -1006,7 +1008,7 @@ function KDAllyDialogue(name: string, requireTags: string[], requireSingleTag: s
 			},
 			LinkRequestLegs: {
 				playertext: "Default", response: "Default", gag: true,
-				prerequisiteFunction: (_gagged, _player) => {
+				prerequisiteFunction: (_gagged, player) => {
 					let enemy = KinkyDungeonFindID(KDGameData.CurrentDialogMsgID);
 					if (enemy && enemy.Enemy.name == KDGameData.CurrentDialogMsgSpeaker) {
 						let r = KinkyDungeonGetRestraint({tags: ["legLink", "feetLink"]}, MiniGameKinkyDungeonLevel * 2 + KDGetOfferLevelMod(),
@@ -1024,9 +1026,10 @@ function KDAllyDialogue(name: string, requireTags: string[], requireSingleTag: s
 					}
 					return false;
 				},
-				clickFunction: (_gagged, _player) => {
+				clickFunction: (_gagged, player) => {
 					let enemy = KinkyDungeonFindID(KDGameData.CurrentDialogMsgID);
 					if (enemy && enemy.Enemy.name == KDGameData.CurrentDialogMsgSpeaker) {
+						KDAddGagXP("Flirt", player);
 						let r = KinkyDungeonGetRestraint({tags: ["legLink", "feetLink"]}, MiniGameKinkyDungeonLevel * 2 + KDGetOfferLevelMod(),
 							(KinkyDungeonMapIndex[MiniGameKinkyDungeonCheckpoint] || MiniGameKinkyDungeonCheckpoint));
 						if (r && KDCanAddRestraint(r, true, undefined, false, undefined, true, true)) {
@@ -1050,13 +1053,14 @@ function KDAllyDialogue(name: string, requireTags: string[], requireSingleTag: s
 				prerequisiteFunction: (_gagged, _player) => {
 					let enemy = KinkyDungeonFindID(KDGameData.CurrentDialogMsgID);
 					if (enemy && enemy.Enemy.name == KDGameData.CurrentDialogMsgSpeaker) {
-						return (KinkyDungeonCanPlay(enemy)) && !enemy.playWithPlayer;
+						return (KinkyDungeonCanPlay(enemy, true)) && !enemy.playWithPlayer;
 					}
 					return false;
 				},
-				clickFunction: (_gagged, _player) => {
+				clickFunction: (_gagged, player) => {
 					let enemy = KinkyDungeonFindID(KDGameData.CurrentDialogMsgID);
 					if (enemy && enemy.Enemy.name == KDGameData.CurrentDialogMsgSpeaker) {
+						KDAddGagXP("Flirt", player);
 						KinkyDungeonSetEnemyFlag(enemy, "forcePlay", 20);
 						KinkyDungeonSetEnemyFlag(enemy, "noHarshPlay", 20);
 						KinkyDungeonSetEnemyFlag(enemy, "allyPlay", 80);
@@ -1093,9 +1097,10 @@ function KDAllyDialogue(name: string, requireTags: string[], requireSingleTag: s
 						prerequisiteFunction: (_gagged, _player) => {
 							return KinkyDungeonInventoryGet("VibeWand") != undefined && !KinkyDungeonIsHandsBound(true, true, 0.99);
 						},
-						clickFunction: (_gagged, _player) => {
+						clickFunction: (_gagged, player) => {
 							let enemy = KinkyDungeonFindID(KDGameData.CurrentDialogMsgID);
 							if (enemy && enemy.Enemy.name == KDGameData.CurrentDialogMsgSpeaker) {
+								KDAddGagXP("Flirt", player);
 								KDEnemyRelease(enemy);
 								if (KDGetSpeaker()) KDAddOpinionPersistent(KDGetSpeaker().id, 3);
 							}
@@ -1109,9 +1114,10 @@ function KDAllyDialogue(name: string, requireTags: string[], requireSingleTag: s
 						prerequisiteFunction: (_gagged, _player) => {
 							return true;
 						},
-						clickFunction: (_gagged, _player) => {
+						clickFunction: (_gagged, player) => {
 							let enemy = KinkyDungeonFindID(KDGameData.CurrentDialogMsgID);
 							if (enemy && enemy.Enemy.name == KDGameData.CurrentDialogMsgSpeaker) {
+								KDAddGagXP("Flirt", player);
 								KDEnemyRelease(enemy);
 								KDStunTurns(2, true);
 								if (KDGetSpeaker()) KDAddOpinionPersistent(KDGetSpeaker().id, 3);
@@ -1127,9 +1133,10 @@ function KDAllyDialogue(name: string, requireTags: string[], requireSingleTag: s
 							let enemy = KinkyDungeonFindID(KDGameData.CurrentDialogMsgID);
 							return KDEntityBuffedStat(enemy, "Plug") && KinkyDungeonInventoryGet("VibeRemote") != undefined && !KinkyDungeonIsHandsBound(true, true, 0.99);
 						},
-						clickFunction: (_gagged, _player) => {
+						clickFunction: (_gagged, player) => {
 							let enemy = KinkyDungeonFindID(KDGameData.CurrentDialogMsgID);
 							if (enemy && enemy.Enemy.name == KDGameData.CurrentDialogMsgSpeaker) {
+								KDAddGagXP("Flirt", player);
 								KDEnemyRelease(enemy);
 								KDStunTurns(2, true);
 								if (KDGetSpeaker()) KDAddOpinionPersistent(KDGetSpeaker().id, 3);
@@ -1163,9 +1170,10 @@ function KDAllyDialogue(name: string, requireTags: string[], requireSingleTag: s
 				},
 				options: {
 					"Yes": {playertext: "Default", response: "Default",
-						clickFunction: (_gagged, _player) => {
+						clickFunction: (_gagged, player) => {
 							let enemy = KinkyDungeonFindID(KDGameData.CurrentDialogMsgID);
 							if (enemy && enemy.Enemy.name == KDGameData.CurrentDialogMsgSpeaker) {
+								KDAddGagXP("Flirt", player);
 								KinkyDungeonSetEnemyFlag(enemy, "allyOffer", 1);
 								let dialogue = KDGetDialogueTrigger(enemy, {
 									aggressive: false,
@@ -1196,13 +1204,14 @@ function KDAllyDialogue(name: string, requireTags: string[], requireSingleTag: s
 					let enemy = KinkyDungeonFindID(KDGameData.CurrentDialogMsgID);
 					if (enemy && enemy.Enemy.name == KDGameData.CurrentDialogMsgSpeaker) {
 						if (enemy == KinkyDungeonJailGuard() || enemy == KinkyDungeonLeashingEnemy()) return false;
-						return (KinkyDungeonCanPlay(enemy) && KinkyDungeonPlayerTags.get("Collars") && KinkyDungeonGetRestraintItem("ItemNeckRestraints") && !enemy.playWithPlayer) == true;
+						return (KinkyDungeonCanPlay(enemy, true) && KinkyDungeonPlayerTags.get("Collars") && KinkyDungeonGetRestraintItem("ItemNeckRestraints") && !enemy.playWithPlayer) == true;
 					}
 					return false;
 				},
-				clickFunction: (_gagged, _player) => {
+				clickFunction: (_gagged, player) => {
 					let enemy = KinkyDungeonFindID(KDGameData.CurrentDialogMsgID);
 					if (enemy && enemy.Enemy.name == KDGameData.CurrentDialogMsgSpeaker) {
+						KDAddGagXP("Flirt", player);
 						KinkyDungeonSetEnemyFlag(enemy, "allowLeashWalk", -1);
 
 						enemy.aware = true;
@@ -1219,9 +1228,6 @@ function KDAllyDialogue(name: string, requireTags: string[], requireSingleTag: s
 						enemy.playWithPlayer = 12;
 						enemy.playWithPlayerCD = 40;
 						enemy.IntentAction = 'TempLeash';
-						if (KDGameData.HeelPower > 0)
-							KDTickTraining("Heels", KDGameData.HeelPower > 0,
-								KDGameData.HeelPower <= 0, 4, 25);
 						KinkyDungeonSendDialogue(enemy,
 							TextGet("KinkyDungeonJailer" + (KDEnemyCanTalk(enemy) ? KDJailPersonality(enemy) : "Gagged") + "LeashTime", KDGetGenericDialogueParams(KDPlayer(), enemy)).replace("EnemyName", TextGet("Name" + enemy.Enemy.name)),
 							KDGetColor(enemy), 14, 10);
@@ -1903,7 +1909,7 @@ function KDShopDialogue(name: string, items: string[], requireTags: string[], re
 				return false;
 			},
 			greyoutTooltip: "KDNotEnoughMoneyVendor",
-			clickFunction: (_gagged, _player) => {
+			clickFunction: (_gagged, player) => {
 				let itemInv = KinkyDungeonInventoryGetSafe(item);
 				if (!itemInv) return false;
 				if (itemInv.type == Consumable)
@@ -1925,6 +1931,7 @@ function KDShopDialogue(name: string, items: string[], requireTags: string[], re
 						KinkyDungeonInventoryGetSafe(item) ?
 						(KinkyDungeonInventoryGetSafe(item).quantity || 1) : 0);
 				}
+				KDAddGagXP("Shop", player);
 				KinkyDungeonAddGold(KDGameData.CurrentDialogMsgValue["ItemCost"+i]);
 				KDPleaseSpeaker(0.05 * (KDGameData.CurrentDialogMsgValue["ItemCost"+i]/100));
 				enemy.gold = enemy.gold ? Math.max(0, enemy.gold - KDGameData.CurrentDialogMsgValue["ItemCost"+i]) : 0;
@@ -2055,7 +2062,7 @@ function KDShopBuyDialogue(name: string): KinkyDialogue {
 				}
 				return false;
 			},
-			clickFunction: (_gagged, _player) => {
+			clickFunction: (_gagged, player) => {
 				let enemy = KinkyDungeonFindID(KDGameData.CurrentDialogMsgID);
 				let items: string[] = [];
 				if (enemy && enemy.Enemy.name == KDGameData.CurrentDialogMsgSpeaker) {
@@ -2073,6 +2080,8 @@ function KDShopBuyDialogue(name: string): KinkyDialogue {
 						}
 						enemy.items.splice(i, 1);
 					}
+					
+					KDAddGagXP("Shop", player);
 					KinkyDungeonAddGold(-KDGameData.CurrentDialogMsgValue["IC_"+i + "_"]);
 					KDPleaseSpeaker(0.025 * (KDGameData.CurrentDialogMsgValue["ItemCost"+i]/100));
 
@@ -2619,7 +2628,7 @@ function KDSaleShop(name: string, items: string[], requireTags: string[], requir
 			prerequisiteFunction: (_gagged, _player) => {
 				return true;//KinkyDungeonInventoryGet(item) != undefined;
 			},
-			clickFunction: (_gagged, _player) => {
+			clickFunction: (_gagged, player) => {
 				let buy = false;
 				if (KinkyDungeonGold >= KDGameData.CurrentDialogMsgValue["ItemCost"+i]) {
 					buy = true;
@@ -2655,6 +2664,7 @@ function KDSaleShop(name: string, items: string[], requireTags: string[], requir
 				}
 
 				if (buy) {
+					KDAddGagXP("Shop", player);
 					KinkyDungeonAddGold(-KDGameData.CurrentDialogMsgValue["ItemCost"+i]);
 					let enemy = KinkyDungeonFindID(KDGameData.CurrentDialogMsgID);
 					if (enemy && enemy.Enemy.name == KDGameData.CurrentDialogMsgSpeaker) {
@@ -2858,6 +2868,7 @@ function DialogueAddCursedEnchantedHexed(
 	Lock?: string,
 ): item {
 
+	let seed = (Math.random() * 4274967296).toString();
 	let unlockcurse = null;
 	let hexVariant = "";
 	let enchantVariant = "";
@@ -2903,31 +2914,37 @@ function DialogueAddCursedEnchantedHexed(
 		};
 		if (!!(unlockcurse ? undefined : Lock)) variant.lock = Lock;
 		if (hexVariant) {
-			events.push(...KDEventHexModular[hexVariant].events({variant: variant}));
+			events.push(...KDEventHexModular[hexVariant].events({variant: variant, seed: seed}));
 		}
 		for (let c of hex_extra) {
-			events.push(...KDEventHexModular[c].events({variant: variant}));
+			events.push(...KDEventHexModular[c].events({variant: variant, seed: seed}));
 		}
 		if (enchantVariant) {
-			events.push(...KDEventEnchantmentModular[enchantVariant].types[KDModifierEnum.restraint].events(restraint.name, undefined, hexVariant, enchantVariant, enchant_extra, {variant: variant}));
+			events.push(...KDEventEnchantmentModular[enchantVariant].types[KDModifierEnum.restraint].events(
+				restraint.name, undefined, hexVariant, enchantVariant, enchant_extra, {variant: variant, seed: seed}));
 		}
 		for (let e of enchant_extra) {
-			events.push(...KDEventEnchantmentModular[e].types[KDModifierEnum.restraint].events(restraint.name, undefined, hexVariant, enchantVariant, enchant_extra, {variant: variant}));
+			events.push(...KDEventEnchantmentModular[e].types[KDModifierEnum.restraint].events(
+				restraint.name, undefined, hexVariant, enchantVariant, enchant_extra, {variant: variant, seed: seed}));
 		}
 
 		if (returnOnly) {
 			return KDReturnInventoryVariant(variant, KDEventEnchantmentModular[enchantVariant]?.prefix, unlockcurse, undefined, undefined, KDEventEnchantmentModular[enchantVariant]?.suffix,
 				(enemy ? KDGetFaction(enemy) : undefined) || (unlockcurse ? "Curse" : undefined),
-				undefined, 1);
+				undefined, 1, {seed: seed});
 		} else {
 			if (inventory) {
 				KDGiveInventoryVariant(variant, KDEventEnchantmentModular[enchantVariant]?.prefix, unlockcurse, undefined, undefined, KDEventEnchantmentModular[enchantVariant]?.suffix,
 					(enemy ? KDGetFaction(enemy) : undefined) || (unlockcurse ? "Curse" : undefined),
-					undefined, 1);
+					undefined, 1, undefined, {seed: seed});
 
 			} else {
 				KDEquipInventoryVariant(variant, KDEventEnchantmentModular[enchantVariant]?.prefix, 0, true, unlockcurse ? undefined : Lock, true, false,
-					(enemy ? KDGetFaction(enemy) : undefined) || (unlockcurse ? "Curse" : undefined), true, unlockcurse, enemy, false, undefined, undefined, KDEventEnchantmentModular[enchantVariant]?.suffix);
+					(enemy ? KDGetFaction(enemy) : undefined) || (unlockcurse ? "Curse" : undefined), 
+					true, unlockcurse, enemy, false, 
+					undefined, undefined, KDEventEnchantmentModular[enchantVariant]?.suffix, 
+					undefined, undefined,
+					{seed: seed});
 
 			}
 		}

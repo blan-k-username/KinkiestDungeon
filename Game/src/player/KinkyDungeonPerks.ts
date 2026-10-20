@@ -78,19 +78,19 @@ let KDPerkIcons = {
 
 let KDPerkUpdateStats = {
 	"Rigger": () => {
-		/*KinkyDungeonApplyBuffToEntity(KinkyDungeonPlayerEntity, {
+		/*KDApplyBuffToEntity(KinkyDungeonPlayerEntity, {
 			id: "Rigger1",
 			type: "glueDamageBuff",
 			power: KDRiggerDmgBoost,
 			duration: 2
 		});
-		KinkyDungeonApplyBuffToEntity(KinkyDungeonPlayerEntity, {
+		KDApplyBuffToEntity(KinkyDungeonPlayerEntity, {
 			id: "Rigger2",
 			type: "chainDamageBuff",
 			power: KDRiggerDmgBoost,
 			duration: 2
 		});*/
-		KinkyDungeonApplyBuffToEntity(KinkyDungeonPlayerEntity, {
+		KDApplyBuffToEntity(KinkyDungeonPlayerEntity, {
 			id: "Rigger3",
 			type: "BindAmp",
 			power: KDRiggerBindBoost,
@@ -98,52 +98,52 @@ let KDPerkUpdateStats = {
 		});
 	},
 	"Ticklish": () => {
-		KinkyDungeonApplyBuffToEntity(KinkyDungeonPlayerEntity, {
+		KDApplyBuffToEntity(KinkyDungeonPlayerEntity, {
 			id: "Ticklish", type: "tickleDamageResist", power: -0.5, duration: 2
 		});
 	},
 	"Stoic": () => {
-		KinkyDungeonApplyBuffToEntity(KinkyDungeonPlayerEntity, {
+		KDApplyBuffToEntity(KinkyDungeonPlayerEntity, {
 			id: "Stoic", type: "tickleDamageResist", power: 0.82, duration: 2
 		});
 	},
 	"Lascivious": () => {
-		KinkyDungeonApplyBuffToEntity(KinkyDungeonPlayerEntity, {
+		KDApplyBuffToEntity(KinkyDungeonPlayerEntity, {
 			id: "Lascivious", type: "gropeDamageResist", power: -0.5, duration: 2
 		});
 	},
 	"Unperturbed": () => {
-		KinkyDungeonApplyBuffToEntity(KinkyDungeonPlayerEntity, {
+		KDApplyBuffToEntity(KinkyDungeonPlayerEntity, {
 			id: "Unperturbed", type: "gropeDamageResist", power: 0.82, duration: 2
 		});
 	},
 	"PainTolerance": () => {
-		KinkyDungeonApplyBuffToEntity(KinkyDungeonPlayerEntity, {
+		KDApplyBuffToEntity(KinkyDungeonPlayerEntity, {
 			id: "PainTolerance", type: "painDamageResist", power: 2.0, duration: 2
 		});
 	},
 	"Sticky": () => {
-		KinkyDungeonApplyBuffToEntity(KinkyDungeonPlayerEntity, {
+		KDApplyBuffToEntity(KinkyDungeonPlayerEntity, {
 			id: "StickySituation", type: "glueDamageResist", power: -0.4, duration: 2
 		});
 	},
 	"EnemyResist": () => {
-		KinkyDungeonApplyBuffToEntity(KinkyDungeonPlayerEntity, {
+		KDApplyBuffToEntity(KinkyDungeonPlayerEntity, {
 			id: "EnemyResist", type: "TeaseBuff", power: KDPerkParams.KDEnemyResistBuff, duration: 2
 		});
-		/*KinkyDungeonApplyBuffToEntity(KinkyDungeonPlayerEntity, {
+		/*KDApplyBuffToEntity(KinkyDungeonPlayerEntity, {
 			id: "EnemyResist1", type: "soulDamageBuff", power: KDEnemyResistBuff, duration: 2
 		});
-		KinkyDungeonApplyBuffToEntity(KinkyDungeonPlayerEntity, {
+		KDApplyBuffToEntity(KinkyDungeonPlayerEntity, {
 			id: "EnemyResist2", type: "tickleDamageBuff", power: KDEnemyResistBuff, duration: 2
 		});
-		KinkyDungeonApplyBuffToEntity(KinkyDungeonPlayerEntity, {
+		KDApplyBuffToEntity(KinkyDungeonPlayerEntity, {
 			id: "EnemyResist3", type: "painDamageBuff", power: KDEnemyResistBuff, duration: 2
 		});
-		KinkyDungeonApplyBuffToEntity(KinkyDungeonPlayerEntity, {
+		KDApplyBuffToEntity(KinkyDungeonPlayerEntity, {
 			id: "EnemyResist4", type: "gropeDamageBuff", power: KDEnemyResistBuff, duration: 2
 		});
-		KinkyDungeonApplyBuffToEntity(KinkyDungeonPlayerEntity, {
+		KDApplyBuffToEntity(KinkyDungeonPlayerEntity, {
 			id: "EnemyResist5", type: "charmDamageBuff", power: KDEnemyResistBuff, duration: 2
 		});*/
 	},
@@ -155,13 +155,13 @@ let KDPerkUpdateStats = {
 	},
 	"Dodge": () => {
 		if (KinkyDungeonMiscastChance < 0.001) {
-			KinkyDungeonApplyBuffToEntity(KinkyDungeonPlayerEntity, {
+			KDApplyBuffToEntity(KinkyDungeonPlayerEntity, {
 				id: "FocusedDodge", type: "Evasion", power: 0.4, duration: 1, sfxApply: "Fwoosh"
 			});
 		}
 	},
 	"StartShadow": () =>{
-		KinkyDungeonApplyBuffToEntity(KinkyDungeonPlayerEntity, {
+		KDApplyBuffToEntity(KinkyDungeonPlayerEntity, {
 				id: "Cursed",
 				type: "Cursed",
 				power: 10,
@@ -376,11 +376,20 @@ let KinkyDungeonStatsPresets: Record<string, KDPerk> = {
 
 	"SelfBondage": {category: "Start", id: "SelfBondage", cost: 0, tags: ["start"]},
 	"HeelTraining": {category: "Start", id: "HeelTraining", cost: 0, tags: ["start"]},
+	"CorsetTraining": {category: "Start", id: "CorsetTraining", cost: 0, tags: ["start"]},
+	"SensesTraining": {category: "Start", id: "SensesTraining", cost: 0, tags: ["start"]},
+	"GagTraining": {category: "Start", id: "GagTraining", cost: 0, tags: ["gag"]},
 	"ClassicHeels": {category: "Toggles", id: "ClassicHeels", cost: 0, tags: ["start"], blocktags: ["heels"]},
 
-	"MasteryHeels": {category: "Training", id: "MasteryHeels", cost: -1, tags: ["heels"], block: ["ClassicHeels"]},
+	"MasteryHeels": {category: "Training", id: "MasteryHeels", cost: -1, tags: ["heels"], block: ["ClassicHeels"], costGroup: "mastery", costMin: -0.5},
+	"MasteryCorset": {category: "Training", id: "MasteryCorset", cost: -1, tags: ["corset"], costGroup: "mastery", costMin: -0.5},
+	"MasteryGag": {category: "Training", id: "MasteryGag", cost: -1, tags: ["gag"], costGroup: "mastery", costMin: -0.5},
+	"MasterySenses": {category: "Training", id: "MasterySenses", cost: -1, tags: ["senses"], costGroup: "mastery", costMin: -0.5},
 	"PoorBalance": {category: "Combat", id: "PoorBalance", cost: -1, tags: ["heels"], block: ["ClassicHeels"]},
 	"HeadStartHeels": {category: "Training", id: "HeadStartHeels", cost: 1, tags: ["start", "heels"], block: ["ClassicHeels"]},
+	"HeadStartCorset": {category: "Training", id: "HeadStartHeels", cost: 1, tags: ["start", "corset"]},
+	"HeadStartGag": {category: "Training", id: "HeadStartGag", cost: 1, tags: ["start", "gag"]},
+	"HeadStartSenses": {category: "Training", id: "HeadStartSenses", cost: 1, tags: ["start", "senses"]},
 
 	"Hogtied": {startPriority: 50, category: "Start", id: "Hogtied", cost: -0.5, tags: ["start"]},
 	"StartObsidian": {startPriority: 5, category: "Start", id: "StartObsidian", cost: -2.0, outfit: "Obsidian", tags: ["start"]},
@@ -548,7 +557,7 @@ function KDGetPerkCost(perk: KDPerk): number {
 			costGroups[KinkyDungeonStatsPresets[p].costGroup] = KinkyDungeonStatsPresets[p].cost;
 		}
 	}
-	if (costGroups[perk.costGroup] != undefined && perk.cost >= costGroups[perk.costGroup]) return 0;
+	if (costGroups[perk.costGroup] != undefined && perk.cost >= costGroups[perk.costGroup]) return perk.costMin || 0;
 	else return perk.cost;
 }
 
@@ -810,6 +819,7 @@ let KDPerkStart = {
 		KinkyDungeonInventoryAddLoose("TrapCuffs");
 		KinkyDungeonInventoryAddLoose("TrapGag");
 		KinkyDungeonInventoryAddLoose("TrapBlindfold");
+		KinkyDungeonInventoryAddLoose("TrapEarplugs");
 		KinkyDungeonInventoryAddLoose("TrapArmbinder");
 		KinkyDungeonInventoryAddLoose("RopeSnakeArmsBoxtie");
 		KinkyDungeonInventoryAddLoose("RopeSnakeArmsWrist");
@@ -842,6 +852,23 @@ let KDPerkStart = {
 		KinkyDungeonInventoryAddLoose("TrainingHeels");
 
 	},
+	HeadStartSenses: () =>{
+		KDGameData.Training.Senses = {
+			best_ratio: 0,
+			training_points: 0,
+			training_stage: 5,
+			turns_skipped: 0,
+			turns_total: 0,
+			turns_trained: 0,
+		};
+		
+		// Add to inventory bc its not forced
+		KinkyDungeonInventoryAddLoose("LeatherHood");
+		KinkyDungeonInventoryAddLoose("LeatherMask");
+		KinkyDungeonInventoryAddLoose("TrapEarplugs");
+		KinkyDungeonInventoryAddLoose("TrapBlindfold");
+
+	},
 	CorsetTraining: () =>{
 		KDGameData.Training.Corset = {
 			best_ratio: 0,
@@ -851,9 +878,57 @@ let KDPerkStart = {
 			turns_total: 0,
 			turns_trained: 0,
 		};
+		KinkyDungeonAddRestraintIfWeaker("TrainingCorset", 20, true, "HiSec", false, undefined, undefined, undefined, true);
+
 	},
 	HeadStartCorset: () =>{
 		KDGameData.Training.Corset = {
+			best_ratio: 0,
+			training_points: 0,
+			training_stage: 5,
+			turns_skipped: 0,
+			turns_total: 0,
+			turns_trained: 0,
+		};
+
+	},
+	GagTraining: () =>{
+		KDGameData.Training.Gag = {
+			best_ratio: 0,
+			training_points: 0,
+			training_stage: 0,
+			turns_skipped: 0,
+			turns_total: 0,
+			turns_trained: 0,
+		};
+		KinkyDungeonAddRestraintIfWeaker("TrapGagLarge", 20, true, "HiSec", false, undefined, undefined, undefined, true);
+
+	},
+	SensesTraining: () =>{
+		KDGameData.Training.Senses = {
+			best_ratio: 0,
+			training_points: 0,
+			training_stage: 0,
+			turns_skipped: 0,
+			turns_total: 0,
+			turns_trained: 0,
+		};
+		if (!KinkyDungeonStatsChoice.get("NoSenseDep")) {
+			if (!KinkyDungeonStatsChoice.get("NoHood")) {
+				KinkyDungeonAddRestraintIfWeaker("LeatherHood", 20, true, "HiSec", false, undefined, undefined, undefined, true);
+			} else if (!KinkyDungeonStatsChoice.get("Unmasked")) {
+				KinkyDungeonAddRestraintIfWeaker("LeatherMask", 20, true, "HiSec", false, undefined, undefined, undefined, true);
+			}
+		} else {
+			if (!KinkyDungeonStatsChoice.get("NoHood")) {
+				KinkyDungeonInventoryAddLoose("LeatherHood");
+			} else if (!KinkyDungeonStatsChoice.get("Unmasked")) {
+				KinkyDungeonInventoryAddLoose("LeatherMask");
+			}
+		}
+	},
+	HeadStartGag: () =>{
+		KDGameData.Training.Gag = {
 			best_ratio: 0,
 			training_points: 0,
 			training_stage: 5,
@@ -900,6 +975,18 @@ let KDPerkStart = {
 		if (!KDHasSpell("ZeroResistance")) KDPushSpell(KinkyDungeonFindSpell("ZeroResistance"));
 		KDAddConsumable("RedKey", -1000);
 		KDAddConsumable("Pick", -1000);
+	},
+	DollShoppeStart: () => {
+		if (KinkyDungeonStatsChoice.get("NoPlayerOwner")) {
+			return;
+		}
+		KDChangeFactionRelation("Player", "Dressmaker", KDREPHOSTILE - KDFactionRelation("Player", "Dressmaker"), false);
+		KDCustomDefeatUniforms.DollShoppe();
+		KDFixPlayerClothes("Dressmaker");
+		KDBecomeShoppeMerchandise();
+		if (!KDHasSpell("ZeroResistance")) {
+			KDPushSpell(KinkyDungeonFindSpell("ZeroResistance"));
+		}
 	},
 	StartMaid: () =>{
 		KDAddQuest("MaidSweeper");
@@ -1366,7 +1453,7 @@ function KDGetPerkShrineBondage(perks: string[]): string[] {
 					if (i > 0)
 						randTheme();
 					restraints = KDGetRestraintsEligible({tags: [theme, theme+"Heavy", theme+"Chastity"]}, KDGetEffLevel(), KDCurrIndex(),
-						true, "Gold");
+						true, "GoldPlus");
 					restraints = restraints.filter((r) => {
 						return !ret.includes(r.restraint.name);
 					});

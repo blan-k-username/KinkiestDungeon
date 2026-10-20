@@ -293,25 +293,6 @@ kdparticles.sortableChildren = false;
 kdcanvas.addChild(kdparticles);
 //kdgameboard.addChild(kdparticles);
 
-let KDTextWhite = KDBaseWhite;
-let KDTextGray3 = "#aaaaaa";
-let KDTextGraymid = "#888888";
-let KDBookTextNew = "#efefef";
-let KDTextTanNew = "#222222";
-let KDBookTextSB = KDBaseBlack;
-let KDTextTanSB = "#d6cbc5";
-let KDBookText = KDBookTextNew;
-let KDTextTan = KDTextTanNew;
-let KDTextGray2 = "#333333";
-let KDTextGray1 = "#111111";
-let KDTextGray05 = "#030303";
-let KDTextGray0 = KDBaseBlack;
-let KDTextGreen1 = "#001100";
-let KDTextBlue1 = "#000011";
-let KDTextRed1 = "#110000";
-let KDTextRedBG = "#551616";
-let KDCurseColor = "#ff55aa";
-let KDGoodColor = "#77ff99";
 
 let KDTutorialColor = KDBaseCyan;
 
@@ -1165,6 +1146,8 @@ function KinkyDungeonDrawGame() {
 
 	if (KinkyDungeonDrawState == "Game") {
 		let tooltip = "";
+		let tooltipX = 0;
+		let tooltipY = 0;
 		if ((KinkyDungeonIsPlayer() || (KinkyDungeonGameData && CommonTime() < KinkyDungeonNextDataLastTimeReceived + KinkyDungeonNextDataLastTimeReceivedTimeout))) {
 
 
@@ -1262,6 +1245,8 @@ function KinkyDungeonDrawGame() {
 				KDDrawFog(CamX, CamY, CamX_offset, CamY_offset, CamX_offsetVis, CamY_offsetVis);
 
 				tooltip = spriteRes.tooltip;
+				tooltipX = spriteRes.tooltipX;
+				tooltipY = spriteRes.tooltipY;
 				KinkyDungeonForceRender = spriteRes.KinkyDungeonForceRender;
 
 
@@ -1595,11 +1580,12 @@ function KinkyDungeonDrawGame() {
 						let allowFog = KDAllowFog();
 						if (KinkyDungeonVisionGet(KinkyDungeonTargetX, KinkyDungeonTargetY) > 0 || (allowFog && KinkyDungeonFogGet(KinkyDungeonTargetX, KinkyDungeonTargetY) > 0)
 							|| KDistChebyshev(KinkyDungeonTargetX - KinkyDungeonPlayerEntity.x, KinkyDungeonTargetY - KinkyDungeonPlayerEntity.y) < 1.5) {
+							let retType = KDGetTargetRetType(KinkyDungeonTargetX, KinkyDungeonTargetY);
 							KDDraw(kdstatusboard, kdpixisprites, "ui_movereticule" + KinkyDungeonTargetX + "," + KinkyDungeonTargetY, 
-								KinkyDungeonRootDirectory + "Target" + KDGetTargetRetType(KinkyDungeonTargetX, KinkyDungeonTargetY) + ".png",
+								KinkyDungeonRootDirectory + "Target" + retType + ".png",
 								(KinkyDungeonTargetX - CamX)*KinkyDungeonGridSizeDisplay, (KinkyDungeonTargetY - CamY)*KinkyDungeonGridSizeDisplay, KinkyDungeonGridSizeDisplay, KinkyDungeonGridSizeDisplay, undefined, {
 									zIndex: 100,
-								tint: KinkyDungeonFastMoveSuppress ? 0xff7777 : 0xffffff
+								tint: retType && KinkyDungeonFastMoveSuppress ? 0xff7777 : 0xffffff
 								});
 							if (KinkyDungeonSlowLevel < 10) {
 								//if (!KinkyDungeonEnemyAt(KinkyDungeonTargetX, KinkyDungeonTargetY)
@@ -1987,7 +1973,10 @@ function KinkyDungeonDrawGame() {
 				KinkyDungeonDrawTethers(CamX+CamX_offset, CamY+CamY_offset);
 
 				if (tooltip && KDMouseInPlayableArea()) {
-					DrawTextFitKD(tooltip, MouseX, MouseY - KinkyDungeonGridSizeDisplay/2, 200, KDBaseWhite, KDTextGray2);
+					DrawTextFitKD(tooltip, 
+						canvasOffsetX + (tooltipX - CamX + 0.5)*KinkyDungeonGridSizeDisplay, 
+						canvasOffsetY + (tooltipY - CamY)*KinkyDungeonGridSizeDisplay, 
+						200, KDBaseWhite, KDTextGray2);
 				}
 			}
 
@@ -2511,9 +2500,7 @@ function KinkyDungeonDrawGame() {
 				KDGoToScreen("MagicSpells");
 				KinkyDungeonGameKey.keyPressed[9] = false;
 				KinkyDungeonKeybindingCurrentKey = '';
-				KinkyDungeonInspect = false;
-				KDInteracting = false;
-				KDContextMenu = false;
+				KDCancelConfirmBasic();
 			} else if ((KinkyDungeonDrawState == "Collection" || KinkyDungeonDrawState == "Bondage")
 					&& (KDCollectionTab || KDCurrentRestrainingTarget || KDCurrentFacilityTarget)) {
 				if (KDCurrentFacilityTarget) {
@@ -2525,40 +2512,16 @@ function KinkyDungeonDrawGame() {
 				KDCurrentRestrainingTarget = 0;
 				KinkyDungeonGameKey.keyPressed[9] = false;
 				KinkyDungeonKeybindingCurrentKey = '';
-				KinkyDungeonInspect = false;
-				KDInteracting = false;
-				KDContextMenu = false;
+				KDCancelConfirmBasic();
 			} else if (KDAlternateInventoryRender()) {
 				KDResetAlternateInventoryRender();
 				KinkyDungeonGameKey.keyPressed[9] = false;
 				KinkyDungeonKeybindingCurrentKey = '';
-				KinkyDungeonInspect = false;
-				KDInteracting = false;
-				KDContextMenu = false;
+				KDCancelConfirmBasic();
 			} else {
-				KDLastForceRefresh = CommonTime() - KDLastForceRefreshInterval - 10;
-				KDPlayerSetPose = false;
-				KinkyDungeonInspect = false;
-				KDInteracting = false;
-				KinkyDungeonUpdateLightGrid = true;
-				KDGoToScreen("Game");
-				KDResetAlternateInventoryRender();
-				KinkyDungeonMessageToggle = false;
-				KinkyDungeonTargetingSpell = null;
-				KinkyDungeonTargetingSpellItem = null;
-				KinkyDungeonTargetingSpellWeapon = null;
-				KinkyDungeonTargetTile = null;
-				KinkyDungeonTargetTileLocation = "";
-				KinkyDungeonInspect = false;
-				KinkyDungeonSpellPress = "";
-				KDModalArea = false;
-				KDSetFocusControl("");
-				KDCloseQuickInv();
-				KDRepSelectionMode = "";
+				KDCancelConfirmAllGame();
+				
 				KinkyDungeonGameKey.keyPressed[9] = false;
-				KinkyDungeonKeybindingCurrentKey = '';
-				KDRefreshCharacter.set(KinkyDungeonPlayer, true);
-				KinkyDungeonDressPlayer();
 			}
 		}
 	}
@@ -2637,7 +2600,7 @@ function KDCanAttack() {
 	return KinkyDungeonHasStamina(Math.abs(attackCost), true);
 }
 
-let KinkyDungeonFloaters = [];
+let KinkyDungeonFloaters: KDFloater[] = [];
 let KinkyDungeonLastFloaterTime = 0;
 
 let KDTimescale = 0.004;
@@ -2647,6 +2610,8 @@ let KDBulletSpeed = 40;
 let KDEntitiesFloaterRegisty = new Map();
 /// @ts-ignore   Weird tsserver error about `KinkyDungeonGridSizeDisplay` being used before being defined.  `tsc` doesn't seem to care.
 let KDFloaterSpacing = 18 / KinkyDungeonGridSizeDisplay;
+let KDFloaterSpacingOverride = 18;
+let KDFloaterRefreshTime = 1000;
 
 function KinkyDungeonSendFloater(Entity: entity, Amount: number | string, Color: string, Time?: number, LocationOverride?: boolean, suff: string = "", size?: number, prefix?: string) {
 	if (Entity.x && Entity.y) {
@@ -2655,24 +2620,40 @@ function KinkyDungeonSendFloater(Entity: entity, Amount: number | string, Color:
 		KDEntitiesFloaterRegisty.set(Entity, II);
 		let floaterMult = KDToggles.FastFloaters ? 0.33 : 1;
 		let stringFloaterMult = KDToggles.FastFloaters ? 0.7 : 1;
-		let floater = {
-			x: Entity.x + 0.5,// + Math.random(),
-			y: Entity.y - (II - 1) * KDFloaterSpacing,// + Math.random(),
+		let floater: KDFloater = {
+			x: Entity.x + (LocationOverride ? 0 : 0.5) + (II - 1) * (LocationOverride ? KDFloaterSpacingOverride : KDFloaterSpacing),// + Math.random(),
+			y: Entity.y + (II - 1) * (LocationOverride ? KDFloaterSpacingOverride : KDFloaterSpacing),// + Math.random(),
 			override: LocationOverride,
 			speed: 30,// + (Time ? Time : 0) + Math.random()*10,
 			t: 0,
 			color: Color,
 			size: size,
+			id: KDFloaterID++,
 			text: "" + ((typeof Amount === "string") ? Amount : (prefix || "") + Math.round(Amount * 10)/10) + suff,
 			lifetime: Time ? stringFloaterMult*Time : ((typeof Amount === "string") ? stringFloaterMult*4 : floaterMult*((Amount < 3) ? 2 : (Amount > 5 ? 3 : 2))),
 		};
 		KinkyDungeonFloaters.push(floater);
+		if (KDFloaterID > 1000000000) KDFloaterID = 0;
 	}
+}
+
+interface KDFloater {
+	x: number,
+	y: number,
+	speed: number,
+	override: boolean,
+	t: number,
+	color: string,
+	size: number,
+	text: string,
+	lifetime: number,
+	id: number,
 }
 
 let KDFloaterGridRes = 10; // How many sections the screen is split into
 let KDFloaterGridCache: Record<string, number> = {};
 let KDFloaterGridWipedOutAlpha = 0.25;
+let KDFloaterID = 0;
 
 function KinkyDungeonDrawFloaters(CamX: number, CamY: number, onlyAbs: boolean = false) {
 	let delta = CommonTime() - KinkyDungeonLastFloaterTime;
@@ -2696,7 +2677,7 @@ function KinkyDungeonDrawFloaters(CamX: number, CamY: number, onlyAbs: boolean =
 		if (i <= max && (floater.override || !onlyAbs)) {
 			let x = floater.override ? floater.x : canvasOffsetX + (floater.x - CamX)*KinkyDungeonGridSizeDisplay;
 			let y = (floater.override ? floater.y : canvasOffsetY + (floater.y - CamY)*KinkyDungeonGridSizeDisplay);
-			let overlap = false;
+			/*let overlap = false;
 			let overlapAmount = 9;
 			for (let iii = -overlapAmount; iii < overlapAmount; iii += 2) {
 				if (KDFloaterYCache[Math.round(XCacheRes * x / PIXIWidth)]
@@ -2725,7 +2706,7 @@ function KinkyDungeonDrawFloaters(CamX: number, CamY: number, onlyAbs: boolean =
 				if (!KDFloaterYCache[Math.round(XCacheRes * x / PIXIWidth)])
 					KDFloaterYCache[Math.round(XCacheRes * x / PIXIWidth)] = {};
 				KDFloaterYCache[Math.round(XCacheRes * x / PIXIWidth)][Math.round(y + iii)] = true;
-			}
+			}*/
 			let alpha = KDEase(floater.t / floater.lifetime);
 
 			KDFloaterGridCache[Math.round(KDFloaterGridRes * x / PIXIWidth)
@@ -2756,7 +2737,8 @@ function KinkyDungeonDrawFloaters(CamX: number, CamY: number, onlyAbs: boolean =
 			DrawTextFitKDTo(kdfloatercanvas, floater.text,
 				x, y - floater.speed*floater.t/floatermult,
 				1000, floater.color, KDTextGray1, floater.size || 20, undefined,
-				undefined, alpha);
+				undefined, alpha, undefined, undefined, undefined,
+				undefined, "KDFloater_" + floater.id);
 		}
 		if (floater.t < floater.lifetime) {
 			newFloaters.push(floater);
@@ -2791,8 +2773,8 @@ let KDLogTopPad = 25;
 let KDLogIndex = 0;
 let KDLogIndexInc = 3;
 
-let KDMsgWidth = 800;
-let KDMsgWidthMin = 800;
+let KDMsgWidth = 840;
+let KDMsgWidthMin = 840;
 let KDMsgX = 640; // 720
 let KDMsgFadeTime = 10;
 
@@ -2879,7 +2861,7 @@ function KinkyDungeonDrawMessages(NoLog?: boolean, shiftx: number = 0, noBG: boo
 			if (KinkyDungeonActionMessageTime > 0 && KinkyDungeonActionMessageNoPush) {
 				DrawTextFitKD(KinkyDungeonActionMessage, KDMsgX + shiftx + (KDToggles.CenteredLog ? KDMsgWidth/2 : 0), 
 					heightBonus + 15 + spacing * i, 
-					width, KinkyDungeonActionMessageColor, KDTextGray1, KDMSGFontSize, 
+					width - 40, KinkyDungeonActionMessageColor, KDTextGray1, KDMSGFontSize, 
 					KDToggles.CenteredLog ? "center" : "left", zLevel);
 				ignoreMSG.push(KinkyDungeonActionMessage);
 				i++;
@@ -2887,7 +2869,7 @@ function KinkyDungeonDrawMessages(NoLog?: boolean, shiftx: number = 0, noBG: boo
 			if (KinkyDungeonTextMessageTime > 0 && KinkyDungeonTextMessageNoPush) {
 				DrawTextFitKD(KinkyDungeonTextMessage, KDMsgX + shiftx + (KDToggles.CenteredLog ? KDMsgWidth/2 : 0), 
 				heightBonus + 15 + spacing * i, 
-					width, KinkyDungeonTextMessageColor, KDTextGray1, KDMSGFontSize, 
+					width - 40, KinkyDungeonTextMessageColor, KDTextGray1, KDMSGFontSize, 
 					KDToggles.CenteredLog ? "center" : "left", zLevel);
 				ignoreMSG.push(KinkyDungeonTextMessage);
 				i++;
@@ -2930,7 +2912,7 @@ function KinkyDungeonDrawMessages(NoLog?: boolean, shiftx: number = 0, noBG: boo
 						alpha = Math.max(0, Math.min(1, 2.0 - i / (KDMaxConsoleMsg - subLines))) * (1 - Math.max(0, Math.min(1, Math.max(0, KinkyDungeonCurrentTick - msg.time - 1)/KDMsgFadeTime)));
 						DrawTextFitKD(msg.text, KDMsgX + shiftx + (KDToggles.CenteredLog ? KDMsgWidth/2 : 0), 
 						heightBonus + 15 + spacing * i, 
-							width, msg.color, KDTextGray1, KDMSGFontSize, 
+							width - 40, msg.color, KDTextGray1, KDMSGFontSize, 
 							KDToggles.CenteredLog ? "center" : "left", zLevel, alphamin + (1 - alphamin) * alpha);
 						if (msg.time && (msg.time - KinkyDungeonCurrentTick < 0))
 							DrawTextFitKD("(" + (msg.time - KinkyDungeonCurrentTick) + ")", KDMsgX + shiftx + KDMsgWidth, 
@@ -2982,7 +2964,7 @@ function KinkyDungeonDrawMessages(NoLog?: boolean, shiftx: number = 0, noBG: boo
 			let col = log.color;
 			DrawTextFitKD(log.text, KDMsgX + shiftx + (KDToggles.CenteredLog ? KDMsgWidth/2 : 0), 
 				heightBonus + KDLogTopPad + ii * KDLogDist + KDLogDist/2, 
-				KDMsgWidth, col, KDTextGray1, KDMSGFontSize, 
+				KDMsgWidth - 40, col, KDTextGray1, KDMSGFontSize, 
 				KDToggles.CenteredLog ? "center" : "left", 101);
 				
 			if (log.time && (log.time - KinkyDungeonCurrentTick < 0))
@@ -2998,13 +2980,13 @@ function KinkyDungeonDrawMessages(NoLog?: boolean, shiftx: number = 0, noBG: boo
 				if (KDLogIndex > 0)
 					KDLogIndex = Math.max(0, KDLogIndex - KDLogIndexInc);
 				return true;
-			}, true, 1500, heightBonus + 20, 90, 40, "", KDBaseWhite, KinkyDungeonRootDirectory + "Up.png");
+			}, true, 1500, heightBonus + 60, 90, 40, "", KDBaseWhite, KinkyDungeonRootDirectory + "Up.png");
 			//KDMsgX + shiftx + KDMsgWidth/2 - 45, KDLogTopPad + KDLogHeight + 10
 			DrawButtonKDEx("logscrolldown", (_bdata) => {
 				if (KDLogIndex < KinkyDungeonMessageLog.length - KDMaxLog)
 					KDLogIndex = Math.min(Math.max(0, KinkyDungeonMessageLog.length - KDMaxLog), KDLogIndex + KDLogIndexInc);
 				return true;
-			}, true,1500, heightBonus + 60, 90, 40, "", KDBaseWhite, KinkyDungeonRootDirectory + "Down.png");
+			}, true,1500, heightBonus + 100, 90, 40, "", KDBaseWhite, KinkyDungeonRootDirectory + "Down.png");
 
 			if (KinkyDungeonMessageLog.length > KDMaxLog * 100) {
 				KinkyDungeonMessageLog.splice(0, KDMaxLog * 100 - KinkyDungeonMessageLog.length);
@@ -3256,7 +3238,6 @@ function DrawBoxKDTo(Container: PIXIContainer, Left: number, Top: number, Width:
 		Width: Width,
 		Height: Height,
 		Color: Color,
-		LineWidth: 1,
 		zIndex: zIndex,
 		alpha: Alpha != undefined ? Alpha : 1,
 	});
@@ -3269,8 +3250,8 @@ function DrawBoxKDTo(Container: PIXIContainer, Left: number, Top: number, Width:
 			Width: Width,
 			Height: Height,
 			Color: bordercolor || KDBorderColor,
-			LineWidth: 1,
-			zIndex: zIndex + 0.003,
+			LineWidth: 1.1,
+			zIndex: zIndex + 0.005,
 		});
 	}
 }
@@ -4613,6 +4594,8 @@ function DrawBackNextButtonVis (
  */
 function KDDrawMap(CamX: number, CamY: number, CamX_offset: number, CamY_offset: number, _CamX_offsetVis: number, _CamY_offsetVis: number, Debug?: boolean): any {
 	let tooltip = "";
+	let tooltipX = 0;
+	let tooltipY = 0;
 	let KinkyDungeonForceRender = "";
 	let KinkyDungeonForceRenderFloor = "";
 
@@ -4767,8 +4750,11 @@ function KDDrawMap(CamX: number, CamY: number, CamX_offset: number, CamY_offset:
 				}
 				if (KinkyDungeonVisionGet(RX, RY) > 0
 					&& (KinkyDungeonTilesGet(RX + "," + RY) && rows[RY][RX] == "A" || KinkyDungeonTilesGet(RX + "," + RY) && rows[RY][RX] == "M")
-					&& MouseIn(canvasOffsetX + (-CamX_offset + X)*KinkyDungeonGridSizeDisplay, canvasOffsetY + (-CamY_offset+R)*KinkyDungeonGridSizeDisplay, KinkyDungeonGridSizeDisplay, KinkyDungeonGridSizeDisplay)) {
+					&& MouseIn(canvasOffsetX + (-CamX_offset + X)*KinkyDungeonGridSizeDisplay, 
+					canvasOffsetY + (-CamY_offset+R)*KinkyDungeonGridSizeDisplay, KinkyDungeonGridSizeDisplay, KinkyDungeonGridSizeDisplay)) {
 					tooltip = TextGet("KinkyDungeon" + KinkyDungeonTilesGet(RX + "," + RY).Type + "Tooltip").replace("SHRINETYPE", TextGet("KinkyDungeonShrine" + KinkyDungeonTilesGet(RX + "," + RY).Name));
+					tooltipX = RX;
+					tooltipY = RY;
 				}
 			}
 		}
@@ -4777,6 +4763,8 @@ function KDDrawMap(CamX: number, CamY: number, CamX_offset: number, CamY_offset:
 
 	return {
 		tooltip: tooltip,
+		tooltipX: tooltipX,
+		tooltipY: tooltipY,
 		KinkyDungeonForceRender: KinkyDungeonForceRender,
 	};
 }
@@ -6670,4 +6658,37 @@ function KDTileSlows(entity: entity, x: number, y: number) {
 		return true;
 	}
 	return "gW".includes(KinkyDungeonMapGet(x, y));
+}
+
+function KDCancelConfirmAllGame() {
+	KinkyDungeonChestConfirm = false;
+	KDLastForceRefresh = CommonTime() - KDLastForceRefreshInterval - 10;
+	KDPlayerSetPose = false;
+	KinkyDungeonInspect = false;
+	KDInteracting = false;
+	KinkyDungeonUpdateLightGrid = true;
+	KDGoToScreen("Game");
+	KDResetAlternateInventoryRender();
+	KinkyDungeonMessageToggle = false;
+	KinkyDungeonTargetingSpell = null;
+	KinkyDungeonTargetingSpellItem = null;
+	KinkyDungeonTargetingSpellWeapon = null;
+	KinkyDungeonTargetTile = null;
+	KinkyDungeonTargetTileLocation = "";
+	KinkyDungeonInspect = false;
+	KinkyDungeonSpellPress = "";
+	KDModalArea = false;
+	KDSetFocusControl("");
+	KDCloseQuickInv();
+	KDRepSelectionMode = "";
+	KinkyDungeonKeybindingCurrentKey = '';
+	KDRefreshCharacter.set(KinkyDungeonPlayer, true);
+	KinkyDungeonDressPlayer();
+}
+
+function KDCancelConfirmBasic() {
+	KinkyDungeonChestConfirm = false;
+	KinkyDungeonInspect = false;
+	KDInteracting = false;
+	KDContextMenu = false;
 }

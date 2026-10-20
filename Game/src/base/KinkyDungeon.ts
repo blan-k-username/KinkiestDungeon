@@ -513,6 +513,9 @@ interface KDGameDataBase {
 	HeelPowerEffective:			number,
 	/** actual, based on worn */
 	HeelPower:			number,
+	CorsetPowerEffective:			number,
+	/** actual, based on worn */
+	CorsetPower:			number,
 	visionAdjust:			number,
 	visionAdjustBlind:		number,
 	visionBlind:			number,
@@ -536,6 +539,7 @@ interface KDGameDataBase {
 	NoForceGreet:			boolean,
 	InteractTargetX:		number,
 	InteractTargetY:		number,
+	SummitFurniture:		Record<string, string>, // {"x,y": KDFurniture key}
 	RegimentID:			number,
 	Containers: Record<string, KDContainer>,
 	FacilitiesData:			FacilitiesData,
@@ -584,10 +588,15 @@ interface KDGameDataBase {
 	MistressID: number,
 	AutoSprintTriggered: boolean,
 	BulletWarnings: Record<string, any>[],
+	ShopkeeperFavors: number,
+	SeenEntities?: Record<string, boolean>,
 };
 
 
 let KDGameDataBase: KDGameDataBase = {
+	CorsetPower: 0,
+	CorsetPowerEffective: 0,
+	ShopkeeperFavors: 0,
 	AutoSprintTriggered: false,
 	BulletWarnings: [],
 	originalBody: "",
@@ -617,6 +626,7 @@ let KDGameDataBase: KDGameDataBase = {
 	FacilitiesData: null,
 	InteractTargetX: 0,
 	InteractTargetY: 0,
+	SummitFurniture: {},
 	NoForceGreet: false,
 	LogFilters: {
 		Combat: true,
@@ -877,6 +887,7 @@ let KDGameDataBase: KDGameDataBase = {
 	} ,
 	selectedLabel: {},
 	MistressID: 0,
+	SeenEntities: {},
 };
 
 // endregion
@@ -1260,6 +1271,8 @@ function KinkyDungeonLoad(): void {
 
 
 	KDLoadToysIntegration();
+
+	currentSavePage = parseInt(localStorage.getItem("KDCurrentSavePage")) || 0;
 	
 
 	KDStartTime = CommonTime();
@@ -1987,9 +2000,21 @@ function KinkyDungeonRun() {
 						loadedsaveslots[num - 1] = code;
 
 						let decoded = LZString.decompressFromBase64(code);
+						let parse = JSON.parse(decoded);
 						if (decoded && JSON.parse(decoded)?.KDGameData?.PlayerName)
 							loadedsaveNames[num - 1] =
 								JSON.parse(decoded)?.KDGameData?.PlayerName;
+
+						if (decoded && parse?.KDGameData?.HighestLevelCurrent)
+							loadedsaveFloors[num - 1] =
+								parse.KDGameData.HighestLevelCurrent;
+								
+						if (decoded && parse?.KDGameData?.Class)
+							loadedsaveClasses[num - 1] =
+								parse.KDGameData.Class;
+						if (decoded && (parse?.npp ||  parse?.stats?.npp))
+							loadedsaveNG[num - 1] =
+								(parse?.npp ||  parse?.stats?.npp);
 					});
 				}
 
@@ -3314,6 +3339,13 @@ function KinkyDungeonRun() {
 	KDCullSprites();
 	KDCullRTList(kdRTcache);
 	KDCullTexList(kdTexcache);
+	
+	if (CommonTime() > lastFloaterRefresh + KDFloaterRefreshTime) {
+		KDEntitiesFloaterRegisty = new Map();
+		lastFloaterRefresh = CommonTime();
+
+	}
+
 
 
 
@@ -5082,6 +5114,7 @@ function KDDrawLoadMenu() {
 		DrawButtonKDEx(`PreviousPage`, (_bdata) => {
 			// when on page 0 and going left, wrap over to last page
 			currentSavePage = (currentSavePage - 1) < 0 ? maxSaveSlotPages - 1 : currentSavePage - 1;
+			localStorage.setItem("KDCurrentSavePage", "" + currentSavePage);
 			return true;
 		}, true, CombarXX + saveSlotXOffset + (saveSlotWidth/2) - slotPageBtnWidth - 35, YYstart - 20, slotPageBtnWidth, slotPageBtnWidth, '<', "#ffffff");
 		// page number / max pages displayed as text
@@ -5092,6 +5125,7 @@ function KDDrawLoadMenu() {
 		DrawButtonKDEx(`NextPage`, (_bdata) => {
 			// when on last page and going right, wrap to 0th page
 			currentSavePage = (currentSavePage + 1) % maxSaveSlotPages;
+			localStorage.setItem("KDCurrentSavePage", "" + currentSavePage);
 			return true;
 		}, true, CombarXX + saveSlotXOffset + (saveSlotWidth/2) + 35, YYstart - 20, slotPageBtnWidth, slotPageBtnWidth, '>', "#ffffff");
 
@@ -5100,6 +5134,13 @@ function KDDrawLoadMenu() {
 		for (let i = startSaveSlot; i < endSaveSlot; i++) {
 			let num = (i);
 			// Slot button
+			let slot = i;
+			let slotText = slot + ". " + (((loadedsaveNames[slot-1] ? loadedsaveNames[slot - 1] : "")
+					+ (loadedsaveClasses[slot-1] ? TextGet("KDClassSaveLabel") + TextGet("KinkyDungeonStatMC_" + loadedsaveClasses[slot-1]) : "")
+					+ (loadedsaveFloors[slot-1] ? TextGet("KDFloorSaveLabel") + loadedsaveFloors[slot-1] : "")
+					+ (loadedsaveNG[slot-1] ? TextGet("KDNGSaveLabel") + loadedsaveNG[slot-1] : "")
+				) || (TextGet("KDSaveSlotButton") + i));
+			
 			DrawButtonKDEx(TextGet("KDSaveSlotButton") + num, () => {
 				console.log("Pressed button for save slot " + num);
 				loadedSaveforPreview = null;
@@ -5120,7 +5161,8 @@ function KDDrawLoadMenu() {
 
 
 				return true;
-			}, true, CombarXX + saveSlotXOffset, YY, saveSlotWidth, 64, TextGet("KDSaveSlotButton") + i, KDBaseWhite, "");
+			}, true, CombarXX + saveSlotXOffset, YY, saveSlotWidth, 64,
+			 slotText, KDBaseWhite, "");
 			// Selected arrow if the currently selected slot matches
 			if (num == LoadMenuCurrentSlot) {
 				DrawTextFitKD(`<--`, CombarXX + 430, YY + 35, 50, KDBaseWhite, undefined, 40);
@@ -5187,9 +5229,18 @@ function KDDrawLoadMenu() {
 			YY += YYd;
 		}
 	}
+
+	// CLOUD GAMES
 	else {
         for (let i = 1; i < 3; i++) {
             let num = (i);
+			// make it show name
+			let slot = i;
+			let slotText = slot + ". " + (((loadedsaveNames[slot-1] ? loadedsaveNames[slot - 1] : "")
+					+ (loadedsaveClasses[slot-1] ? TextGet("KDClassSaveLabel") + TextGet("KinkyDungeonStatMC_" + loadedsaveClasses[slot-1]) : "")
+					+ (loadedsaveFloors[slot-1] ? TextGet("KDFloorSaveLabel") + loadedsaveFloors[slot-1] : "")
+					+ (loadedsaveNG[slot-1] ? TextGet("KDNGSaveLabel") + loadedsaveNG[slot-1] : "")
+				) || (TextGet("KDSaveSlotButton") + i));
             DrawButtonKDEx(TextGet("KDSaveSlotButton") + num, () => {
 				// Slot button
                 console.log("Pressed button for save slot " + num);
@@ -5208,7 +5259,8 @@ function KDDrawLoadMenu() {
                 KDConfirmDeleteSave = false; KinkyDungeonReplaceColorConfirm = -999; 
                 KDConfirmUpload = false;
                 return true;
-            }, true, CombarXX + 160, YY, 240, 64, TextGet("KDSaveSlotButton") + i, KDBaseWhite, "");
+            }, true, CombarXX + 160, YY, 240, 64, 
+			slotText, KDBaseWhite, "");
 			// Selected arrow if the currently selected slot matches
             if (num == LoadMenuCurrentSlot) {
                 DrawTextFitKD(`<--`, CombarXX + 430, YY + 35, 50, KDBaseWhite, undefined, 40);
@@ -6614,6 +6666,8 @@ function KDMenuTogglesClick() {
 				KDResolutionConfirm = true;
                 if (KDSoundEnabled()) AudioPlayInstantSoundKD(KinkyDungeonRootDirectory + "Audio/ClickError.ogg");
 				localStorage.setItem("KDResolution", "" + KDResolutionListIndex);
+
+				KDUpdateScreen();
 			}
 			YY += YYd;
 			if (MouseIn(CombarXX, YY, 350, 64)) {
@@ -7394,7 +7448,7 @@ function KinkyDungeonLoadGame(String: string = "", kdloadconsent = false) {
 			if (!KDGameData.Containers) KDGameData.Containers = {};
 			if (!KDGameData.NPCRestraints) KDGameData.NPCRestraints = {};
 			if (!KDGameData.BulletWarnings) KDGameData.BulletWarnings = [];
-			
+			if (!KDGameData.SummitFurniture) KDGameData.SummitFurniture = {};
 
 			InitFacilities();
 
@@ -7684,8 +7738,13 @@ function KinkyDungeonLoadGame(String: string = "", kdloadconsent = false) {
 	return false;
 }
 
+function KDRandomGen(seed: string) {
+	return sfc32(xmur3(KinkyDungeonSeed)(), xmur3(KinkyDungeonSeed)(), xmur3(KinkyDungeonSeed)(), xmur3(KinkyDungeonSeed)());
+}
+
 let KinkyDungeonSeed = (Math.random() * 4294967296).toString();
-let KDRandom = sfc32(xmur3(KinkyDungeonSeed)(), xmur3(KinkyDungeonSeed)(), xmur3(KinkyDungeonSeed)(), xmur3(KinkyDungeonSeed)());
+let KDRandom = KDRandomGen(KinkyDungeonSeed);
+
 
 /**
  * @param {boolean} Native Decides whether or not to use native KDRandom to randomize
@@ -8245,13 +8304,19 @@ let KDCustomToggleTab: Record<string, () => void > = {
 			} else KinkyDungeonState = "Menu";
 			//ServerAccountUpdate.QueueData({ KinkyDungeonKeybindings: KinkyDungeonKeybindings });
 			return true;
-		}, true, 1450, 700, 350, 64, TextGet("GameReturnToMenu2"), KDBaseWhite, "");
+		}, true, 1450, 700, 350, 64, TextGet("GameReturnToMenu2"), 
+		KDBaseWhite, "", undefined, undefined, undefined, undefined,
+		undefined, undefined, {
+			hotkey: KDHotkeyToText(KinkyDungeonKeySkip[0]),
+			hotkeyPress: KinkyDungeonKeySkip[0],
+		});
 
 		// Draw temp start screen
 		DrawButtonKDEx("KDReset", () => {
 			KinkyDungeonKeybindingsTemp = Object.assign({}, KDDefaultKB);
 			return true;
 		}, true, 1450, 500, 350, 64, TextGet("KDResetKeys"), KDBaseWhite, "");
+
 
 
 		// Draw key buttons
@@ -8286,7 +8351,7 @@ let KDCustomToggleTab: Record<string, () => void > = {
 		if (KDCurrentKeyBindSet)
 			DrawTextKD(TextGet("KinkyDungeonCurrentPress") + ": '" + (TextGet("KinkyDungeonKey" + KDCurrentKeyBindSet)) + "'", 1250, 900, KDBaseWhite, KDTextGray2);
 
-		DrawTextKD(TextGet("KinkyDungeonCurrentPressInfo"), 1250, 950, KDBaseWhite, KDTextGray2);
+		DrawTextKD(TextGet("KinkyDungeonCurrentPressInfo"), 1450, 950, KDBaseWhite, KDTextGray2);
 	
 	}
 };
@@ -8478,7 +8543,8 @@ function KDTogglesDraw() {
 
 		if (KDToggleTab == "Main") {
 			if (StandalonePatched) {
-				DrawBackNextButtonVis(CombarXX, YY, 350, 64, TextGet("KDResolution" + (KDResolutionConfirm ? "Confirm" : "")) + " " + Math.round(KDResolution * 50) + "%", KDBaseWhite, "",
+				DrawBackNextButtonVis(CombarXX, YY, 350, 64, 
+					TextGet("KDResolution" + (KDResolutionConfirm ? "Confirm" : "")) + " " + Math.round(KDResolution * 50) + "%", KDBaseWhite, "",
 					() => KDResolutionList[(KDResolutionListIndex + KDResolutionList.length - 1) % KDResolutionList.length] * 50 + "%",
 					() => KDResolutionList[(KDResolutionListIndex + 1) % KDResolutionList.length] * 50 + "%");
 				YY += YYd;
@@ -8816,4 +8882,13 @@ function KDGoToScreen(screen: string, noReset?: boolean) {
 		KDResetCollectionScreen();
 	}
 	KinkyDungeonDrawState = screen;
+}
+
+function KDUpdateScreen() {
+	resolution = KDResolution
+	PIXIapp.renderer.resolution = resolution;
+				
+	PIXIapp.renderer.resize(PIXIWidth * resolution, PIXIHeight * resolution);
+	PIXIapp.view.width = PIXIWidth * resolution;
+	PIXIapp.view.height = PIXIHeight * resolution;
 }

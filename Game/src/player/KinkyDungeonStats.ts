@@ -5,6 +5,7 @@ let KinkyDungeonPlayerEntity: any = {id: -1, Enemy: undefined, hp: 10, x: 0, y:0
 
 let KDBaseBalanceDmgLevel = 5; // Decides how much heels affect balance loss from attacks. higher = less loss
 let KDShadowThreshold = 1.5;
+let KDGlobalMaxGagReduction = 0.5; // Maximum flat gag strength reduction
 
 /** Sleep */
 let KDSleepWillFraction = 0.5;     // Will restored to this percentage when sleeping
@@ -353,30 +354,36 @@ function KinkyDungeonDefaultStats(_Load?: any) {
 }
 
 
-function KinkyDungeonGetVisionRadius() {
-	let data = {
-		brightness: KDMapData.MapBrightness,
-		blindlevel: KinkyDungeonBlindLevel,
-		blindlevelBonus: 0,
-		noperipheral: KinkyDungeonDeaf || KinkyDungeonStatBlind > 0,
-		blindMult: (KinkyDungeonStatsChoice.get("Blackout") || KinkyDungeonStatsChoice.get("TotalBlackout")) ? 2 : 1,
-		visionMult: 1.0,
-		max: 8,
-		min: KinkyDungeonStatsChoice.get("TotalBlackout") ? 0.5 : (KinkyDungeonStatsChoice.get("Blackout") ? 1.5 : 2.9),
-		nightVision: 1.0,
-		blindRadius: KDGameData.visionBlind || 0,
-	};
-	if (KinkyDungeonStatsChoice.get("NightBlindness") && KinkyDungeonBrightnessGet(KinkyDungeonPlayerEntity.x, KinkyDungeonPlayerEntity.y) < KDShadowThreshold) {
-		data.min = Math.min(data.min, KDGameData.visionAdjust < -0.1 ? 1.5 : 0.5);
+function KinkyDungeonGetVisionRadius(entity?: entity) {
+	if (!entity) entity = KDPlayer();
+	if (entity.player) {
+		let data = {
+			brightness: KDMapData.MapBrightness,
+			blindlevel: KinkyDungeonBlindLevel,
+			blindlevelBonus: 0,
+			noperipheral: KinkyDungeonDeaf || KinkyDungeonStatBlind > 0,
+			blindMult: (KinkyDungeonStatsChoice.get("Blackout") || KinkyDungeonStatsChoice.get("TotalBlackout")) ? 2 : 1,
+			visionMult: 1,
+			max: 8,
+			min: KinkyDungeonStatsChoice.get("TotalBlackout") ? 0.5 : (KinkyDungeonStatsChoice.get("Blackout") ? 1.5 : 2.9),
+			nightVision: 1.0,
+			blindRadius: KDGameData.visionBlind || 0,
+		};
+		data.blindMult *= 1/ (KDSensesTrainingBoost(entity));
+		if (KinkyDungeonStatsChoice.get("NightBlindness") && KinkyDungeonBrightnessGet(KinkyDungeonPlayerEntity.x, KinkyDungeonPlayerEntity.y) < KDShadowThreshold) {
+			data.min = Math.min(data.min, KDGameData.visionAdjust < -0.1 ? 1.5 : 0.5);
+		}
+		KinkyDungeonSendEvent("calcVision", data);
+		if (data.blindRadius > 0) {
+			data.blindlevelBonus += KDGameData.MaxVisionDist * data.blindRadius;
+		}
+		KDGameData.MaxVisionDist = data.max;
+		KDGameData.MinVisionDist = data.min;
+		KDGameData.NightVision = data.nightVision;
+		return (KDGameData.SleepTurns > 2) ? 1 : (Math.max((data.noperipheral) ? 1 : 2, Math.round(data.visionMult*(KDGameData.MaxVisionDist-data.blindlevelBonus-data.blindlevel * data.blindMult))));
+
 	}
-	KinkyDungeonSendEvent("calcVision", data);
-	if (data.blindRadius > 0) {
-		data.blindlevelBonus += KDGameData.MaxVisionDist * data.blindRadius;
-	}
-	KDGameData.MaxVisionDist = data.max;
-	KDGameData.MinVisionDist = data.min;
-	KDGameData.NightVision = data.nightVision;
-	return (KDGameData.SleepTurns > 2) ? 1 : (Math.max((data.noperipheral) ? 1 : 2, Math.round(data.visionMult*(KDGameData.MaxVisionDist-data.blindlevelBonus-data.blindlevel * data.blindMult))));
+	return 8;
 }
 
 
@@ -438,7 +445,7 @@ function KinkyDungeonGetHearingRadius(entity?: entity): {radius: number, mult: n
 			noise: 0,
 			base: 8,
 			deaflevel: KDDeafLevel(),
-			hearingMult: 1.0,
+			hearingMult: KDSensesTrainingBoost(entity),
 		};
 		KinkyDungeonSendEvent("calcHearing", data);
 		return {
@@ -968,7 +975,7 @@ function KinkyDungeonSendDialogue(entity: entity, dialogue: string, color: strin
 				KinkyDungeonSendTextMessage(0, `${TextGet("Name" + entity.Enemy.name)}: ${dialogue}`, 
 				color, 0, false, false, entity, important ? undefined : "Dialogue");
 			}
-			KDEnemyAddSound(entity, 7);
+			KDEnemyAddSound(entity, 7, undefined, (KDToggles.MinorSoundDesc ? TextGet("KDAmbSound_Speech") : undefined));
 			if (KDRandom() < 0.5)
 				KDSendGagParticles(entity);
 		}
@@ -989,7 +996,8 @@ function KinkyDungeonSendDialogue(entity: entity, dialogue: string, color: strin
 				color, 3 + 0.7*duration);
 		}
 		if (!entity.player && dialogue) {
-			KDEnemyAddSound(entity, 12);
+			KDEnemyAddSound(entity, 12, undefined, 
+				(KDToggles.MinorSoundDesc ? TextGet("KDAmbSound_Speech") : undefined));
 			if (dialogue && KDCanHearEnemy(KDPlayer(), entity) || KDCanSeeEnemy(entity)) {
 				KinkyDungeonSendTextMessage(0, `${TextGet("Name" + entity.Enemy.name)}: ${dialogue}`, color, 0, false, false, entity, "Dialogue");
 			}
@@ -1242,6 +1250,13 @@ function KDChangeStamina(src: string, type: string, trig: string, Amount: number
 	if (isNaN(KinkyDungeonStatStamina)) {
 		console.trace();
 		KinkyDungeonStatStamina = 0;
+	}
+	if (KinkyDungeonStatStamina < stamPre && src && (
+		KDIntentionalSPSpendSrc.includes(src)
+	)) {
+		let amt = KDCorsetTrainingMult * (stamPre - KinkyDungeonStatStamina);
+		KDTickTraining("Corset", KDGameData.CorsetPower > 0, !KDGameData.CorsetPower, 
+			amt + (KDGameData.CorsetPower), 0.3 + KDGameData.CorsetPower * 2.7);
 	}
 	return KinkyDungeonStatStamina - stamPre;
 }
@@ -1666,7 +1681,7 @@ function KinkyDungeonUpdateStats(delta: number): void {
 	KDBoundPowerLevel += 0.1 * Math.max(0, Math.min(1, KDGameData.HeelPowerEffective / 4));
 	if (KDBoundPowerLevel > 1) KDBoundPowerLevel = 1;
 	if (KinkyDungeonStatsChoice.get("BoundPower")) {
-		KinkyDungeonApplyBuffToEntity(KinkyDungeonPlayerEntity, {
+		KDApplyBuffToEntity(KinkyDungeonPlayerEntity, {
 			id:"BoundPower",
 			type: "Evasion",
 			constant: true, duration: 1,
@@ -1826,7 +1841,9 @@ function KinkyDungeonUpdateStats(delta: number): void {
 	// Slowness calculation
 	KinkyDungeonCalculateSlowLevel(delta);
 	KDGameData.HeelPowerEffective = KinkyDungeonCalculateHeelLevel(delta);
+	KDGameData.CorsetPowerEffective = KinkyDungeonCalculateCorsetLevel(delta);
 	KDGameData.HeelPower = KinkyDungeonCalculateHeelLevel(delta, true);
+	KDGameData.CorsetPower = KinkyDungeonCalculateCorsetLevel(delta, true);
 	let sleepRate = KinkyDungeonGetBuffedStat(KinkyDungeonPlayerBuffs, "Sleepiness")
 		+ (KDIsImmuneToGas(KDPlayer()) ? 0 : (KinkyDungeonGetBuffedStat(KinkyDungeonPlayerBuffs, "SleepinessGas")
 			* KinkyDungeonMultiplicativeStat(KDEntityBuffedStat(KinkyDungeonPlayerEntity, "happygasDamageResist") * 2)))
@@ -1837,7 +1854,7 @@ function KinkyDungeonUpdateStats(delta: number): void {
 		if (KinkyDungeonSleepiness > 2.99) {
 			KinkyDungeonSlowLevel = Math.max(KinkyDungeonSlowLevel, 2);
 			//KinkyDungeonBlindLevel = Math.max(KinkyDungeonBlindLevel + Math.floor(KinkyDungeonSleepiness/2), 5);
-			KinkyDungeonApplyBuffToEntity(KinkyDungeonPlayerEntity, {
+			KDApplyBuffToEntity(KinkyDungeonPlayerEntity, {
 				id: "Sleepy",
 				aura: "#767676ff",
 				type: "AttackStamina",
@@ -1899,7 +1916,7 @@ function KinkyDungeonUpdateStats(delta: number): void {
 
 	if (!KinkyDungeonHasWill(0.1)) {
 		// Add Surrender debuff
-		KinkyDungeonApplyBuffToEntity(KinkyDungeonPlayerEntity, {
+		KDApplyBuffToEntity(KinkyDungeonPlayerEntity, {
 			id: "NoWP",
 			duration: 1,
 			buffSprite: true,
@@ -1909,13 +1926,13 @@ function KinkyDungeonUpdateStats(delta: number): void {
 			power: 1,
 			flashing: true,
 		});
-		KinkyDungeonApplyBuffToEntity(KinkyDungeonPlayerEntity, {
+		KDApplyBuffToEntity(KinkyDungeonPlayerEntity, {
 			id: "NoWP2",
 			duration: 1,
 			type: "BlockPenalty",
 			power: 1,
 		});
-		KinkyDungeonApplyBuffToEntity(KinkyDungeonPlayerEntity, {
+		KDApplyBuffToEntity(KinkyDungeonPlayerEntity, {
 			id: "NoWP3",
 			duration: 1,
 			type: "RestraintBlockPenalty",
@@ -2119,6 +2136,20 @@ function KinkyDungeonCalculateHeelLevel(_delta: number, overrideKneel?: boolean)
 		+ Math.max(0, KinkyDungeonSleepiness));
 }
 
+
+function KinkyDungeonCalculateCorsetLevel(delta: number, baseAmount?: boolean): number {
+	let corsetpower = 0;
+	for (let inv2 of KinkyDungeonAllRestraintDynamic()) {
+		let inv = inv2.item;
+		if ((KDRestraint(inv)?.corset)) {
+			corsetpower = Math.max(corsetpower, KDRestraint(inv)?.corset);
+		}
+	}
+	return Math.max(0,
+		Math.pow(corsetpower, 0.75)
+		+ KinkyDungeonGetBuffedStat(KinkyDungeonPlayerBuffs, "CorsetPower"));
+}
+
 function KinkyDungeonCalculateSlowLevel(delta?: number) {
 	KinkyDungeonSlowLevel = 0;
 	if (KinkyDungeonAllRestraint().some((r) => {return KDRestraint(r).immobile;})) {KinkyDungeonSlowLevel += 100;}
@@ -2175,15 +2206,22 @@ function KinkyDungeonCalculateSlowLevel(delta?: number) {
  * @param   [AllowFlags] - Whether or not flags such as allowPotions and blockPotions should override the final result
  * @return  - The gag level, sum of all gag properties of worn restraints
  */
-function KinkyDungeonGagTotal(AllowFlags?: boolean, gagMult: number = 1): number {
-	if (KinkyDungeonStatsChoice.get("SmoothTalker")) gagMult = 0.8;
+function KinkyDungeonGagTotal(AllowFlags?: boolean, gagMult: number = 1, noMults?: boolean): number {
+	if (!noMults && KinkyDungeonStatsChoice.get("SmoothTalker")) gagMult = 0.85;
 	let total = 0;
 	let allow = false;
 	let prevent = false;
+	let globalGagReduction = KDGagReductionMult(KDPlayer());
+	if (!noMults) {
+		gagMult *= globalGagReduction;
+	}
 	for (let rest of KinkyDungeonAllRestraintDynamic()) {
 		let inv = rest.item;
 		if (KDRestraint(inv).gag) total += gagMult * KDRestraint(inv).gag;
 		if (KDRestraint(inv).allowPotions) allow = true;
+	}
+	if (!noMults) {
+		if (globalGagReduction < 1) total = Math.max(0, total - KDGlobalMaxGagReduction * (1 - globalGagReduction));
 	}
 	if (AllowFlags) {
 		if (prevent) return 1.00;
@@ -2451,7 +2489,8 @@ function KinkyDungeonDoTryOrgasm(Bonus?: number, Auto?: number) {
 		KDChangeBalanceSrc(data.auto ? "auto" : "player", "orgasm", "tryOrgasm", (KDBaseBalanceDmgLevel + KDGameData.HeelPowerEffective) / KDBaseBalanceDmgLevel * 0.5*-KDBalanceDmgMult() * 4*KDFitnessMult(), true, true);
 		KinkyDungeonSendEvent("orgasm", data);
 
-		KDAddDenial(KDPlayer(), KDDenialFromOrgasm);
+		let amt = KDEntityGetBuff(KDPlayer(), "Denial")?.power || 0;
+		KDAddDenial(KDPlayer(), KDDenialFromOrgasm + KDDenialFromOrgasmMult * (amt));
 
 	} else {
 		KDChangeStamina(data.auto ? "auto" : "player", "edge", "tryOrgasm", data.edgespcost);
@@ -2671,27 +2710,41 @@ interface KDDenialData {
 	base: number,
 	mult: number,
 	bonus: number,
+	willReq: number,
+	effectiveWill: number,
+
 }
 
-function KDGetDenialLevel(entity: entity) {
+let KDBaseDenialWillLevel = 5;
+
+function KDGetDenialLevel(entity: entity, willMult: boolean = true) {
 	let data: KDDenialData = {
 		entity: entity,
 		base: KDDenialFactorBase,
 		mult: KinkyDungeonMultiplicativeStat(-KDEntityBuffedStat(entity, "DenialMult")),
 		bonus: KDEntityBuffedStat(entity, "DenialBonus"),
+		willReq: willMult ? KDBaseDenialWillLevel : KinkyDungeonStatWillMax, // willpower starts decreasing the bonus when it's lower than this
+		effectiveWill: KinkyDungeonStatWill,
 	};
 
 	KinkyDungeonSendEvent("beforeCalcDenialLevel", data);
 	KinkyDungeonSendEvent("calcDenialLevel", data);
 	KinkyDungeonSendEvent("afterCalcDenialLevel", data);
 
-	return (data.base + data.bonus) * data.mult;
+	return (data.base + (
+		// willpower is needed to gain the denial bonus
+		data.bonus * Math.max(0, Math.min(1, 
+			data.effectiveWill / data.willReq
+		))
+	)) * data.mult;
 }
 
 let KDDenialDuration = 10;
 let KDDenialFactorBase = 100;
 let KDDenialFromDeny = 25;
 let KDDenialFromOrgasm = -100;
+/** 25% of current denial */
+let KDDenialFromOrgasmMult = -0.25;
 let KDDenialFromEdge = 5;
 let KDDenialChangeFactor = -0.05;
 
@@ -2700,7 +2753,7 @@ function KDAddDenial(entity: entity, amount: number) {
 	let power = (buff?.power || 0) + amount;
 	if (power > 0) {
 		if (buff) buff.power = power;
-		else KinkyDungeonApplyBuffToEntity(entity, {
+		else KDApplyBuffToEntity(entity, {
 			id: "Denial",
 			type: "DenialBonus",
 			hide: true,

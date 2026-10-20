@@ -86,6 +86,8 @@ let KDLocks: Record<string, KDLockType> = {
 			return 0;
 		},
 
+		sfx: "Rubber4",
+
 		consume_key: false,
 		lockmult: 1.1,
 		// Picking
@@ -163,6 +165,8 @@ let KDLocks: Record<string, KDLockType> = {
 		pickable: true, // rather than calling the function (which could vary) this is for classifying the lock
 		pick_speed: 1.5, // Multiplies the picking rate
 		pick_diff: -0.1, // Added to the item's pick difficulty
+
+		sfx: "LockMagic",
 
 		canPick: (_data) => {
 			return false;
@@ -339,6 +343,7 @@ let KDLocks: Record<string, KDLockType> = {
 		weight: (_Guaranteed, _Floor, _AllowGold, _Type, _Data) => {
 			return 0;
 		},
+		sfx: "FutureLock",
 
 		consume_key: false,
 		lockmult: 2.9,
@@ -435,6 +440,7 @@ let KDLocks: Record<string, KDLockType> = {
 		weight: (_Guaranteed, _Floor, _AllowGold, _Type, _Data) => {
 			return 0;
 		},
+		sfx: "FutureLock",
 
 		consume_key: false,
 		lockmult: 3.15,
@@ -538,6 +544,7 @@ let KDLocks: Record<string, KDLockType> = {
 			"Struggle": 0.35,
 			"Cut": 0.35,
 		},
+		sfx: "FutureLock",
 
 		consume_key: false,
 		lockmult: 3.5,
@@ -1219,6 +1226,7 @@ let KDLocks: Record<string, KDLockType> = {
 			"Struggle": 0.1,
 			"Cut": 0.15,
 		},
+		sfx: "LockMagic",
 
 		// Picking
 		pickable: false, // rather than calling the function (which could vary) this is for classifying the lock
@@ -1372,7 +1380,104 @@ let KDLocks: Record<string, KDLockType> = {
 				KinkyDungeonSendTextMessage(8, TextGet("KinkyDungeonGoldLockRemove"), "yellow", 2);
 			}
 		},
-		shrineImmune: true,
+		shrineImmune: true, shopImmune: true,
+
+		// Command word
+		commandlevel: 0, // rather than calling the function (which could vary) this is for classifying the lock
+		commandable: false,
+		command_lesser: () => {return 0.0 ;},
+		command_greater: () => {return 0.0;},
+		command_supreme: () => {return 0.0;},
+
+		loot_special: true,
+		loot_locked: false,
+	},
+	"GoldPlus": {
+		canNPCPass: (_xx, _yy, _MapTile, Enemy) => {
+			if (Enemy?.player) return false;
+			return KDEnemyRank(Enemy) > 3 || Enemy?.Enemy?.tags.robot || Enemy?.Enemy?.tags.cyborg || (Enemy?.Enemy?.unlockCommandLevel > 2 && KDEnemyCanTalk(Enemy));
+		},
+		filter: (_Guaranteed, Floor, AllowGold, _Type, _Data) => {
+			return AllowGold && Floor > 10;
+		},
+		weight: (_Guaranteed, Floor, _AllowGold, _Type, _Data) => {
+			return 2 * Floor - 15;
+		},
+
+		consume_key: true,
+		lockmult: 3.3,
+		penalty: {
+			"Struggle": 0.2,
+			"Cut": 0.3,
+		},
+
+		// Picking
+		pickable: false, // rather than calling the function (which could vary) this is for classifying the lock
+		pick_speed: 0.0, // Multiplies the picking rate
+		pick_diff: 0.0, // Added to the item's pick difficulty
+
+		canPick: (_data) => {
+			return false;
+		},
+		doPick: (_data) => {
+			return false;
+		},
+		failPick: (_data) => {
+			return "Break";
+		},
+		breakChance: (_data) => {
+			return true;
+		},
+
+		// Key
+		unlockable: true, // rather than calling the function (which could vary) this is for classifying the lock
+		key: "Mistress",
+		canUnlock: (_data) => {
+			return KinkyDungeonItemCount("MistressKey") > 0;
+		},
+		doUnlock: (_data) => {
+			return true;
+		},
+		removeKeys: (data) => {
+			if (!data?.unlock && KinkyDungeonItemCount("MistressKey") > 0) {
+				KinkyDungeonDropItem({name: "MistressKey"}, KinkyDungeonPlayerEntity, true);
+			}
+			KinkyDungeonChangeConsumable(KinkyDungeonFindConsumable("MistressKey"), -1);
+		},
+		failUnlock: (_data) => {
+			return "Fail";
+		},
+		entityCanUnlock(entity, player, data) {
+			return !KDHelpless(entity) && 
+			KDEnemyHasItem(entity, "BlueKey")
+			 && (
+				KDEnemyHasItem(entity, "MistressKey")
+				|| entity.Enemy?.Security?.level_magic >= 4
+				|| entity.Enemy?.Security?.level_tech >= 4
+				|| entity.Enemy?.unlockCommandLevel >= 4
+			);
+		},
+		entityDoUnlock(entity, player, data) {
+			return true;
+		},
+		entityRemoveKeys: (entity, player, _data) => {
+			//KDConsumeItem(entity, "RedKey", true)
+		},
+
+		doLock: (data) => {
+			if (data.item && !data.link) {
+				if (!data.item.data) data.item.data = {};
+				data.item.data.lockTimer = MiniGameKinkyDungeonLevel + 2;
+			}
+		},
+		// Start of level -- for gold locks and others
+		levelStart: (item) => {
+			if ((MiniGameKinkyDungeonLevel >= item.data?.lockTimer || !item.data?.lockTimer || item.data?.lockTimer >= KinkyDungeonMaxLevel)) {
+				KinkyDungeonLock(item, "Blue");
+				KinkyDungeonSendTextMessage(8, TextGet("KinkyDungeonGoldLockRemove"), "yellow", 2);
+			}
+		},
+		shrineImmune: true, shopImmune: true,
 
 		// Command word
 		commandlevel: 0, // rather than calling the function (which could vary) this is for classifying the lock
@@ -1452,7 +1557,7 @@ let KDLocks: Record<string, KDLockType> = {
 		levelStart: (_item) => {
 			KinkyDungeonSendTextMessage(8, TextGet("KDDivineLockReminder"), "#ffff44", 2, false, true);
 		},
-		shrineImmune: true,
+		shrineImmune: true, shopImmune: true,
 
 		// Command word
 		commandlevel: 0, // rather than calling the function (which could vary) this is for classifying the lock
@@ -1530,7 +1635,7 @@ let KDLocks: Record<string, KDLockType> = {
 		// Start of level -- for gold locks and others
 		levelStart: (_item) => {
 		},
-		shrineImmune: true,
+		shrineImmune: true, shopImmune: true,
 
 		// Command word
 		commandlevel: 0, // rather than calling the function (which could vary) this is for classifying the lock
@@ -1556,6 +1661,8 @@ let KDLocks: Record<string, KDLockType> = {
 
 		consume_key: false,
 		lockmult: 2.2,
+		
+		sfx: "LockMagic",
 
 		// Picking
 		pickable: false, // rather than calling the function (which could vary) this is for classifying the lock

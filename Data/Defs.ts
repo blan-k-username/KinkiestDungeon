@@ -54,7 +54,10 @@ let LAYERS_BASE = [
 	"Mouth",
 	"Blush",
 	"Fear",
+	"HeadphoneFront",
 	"Head",
+	"HeadphoneBack",
+	"Mic",
 
 
 	"InflatableArms",
@@ -635,6 +638,13 @@ let LayerGroups = {
 	]),
 	"ChestBinding": ToMap([
 		"Chest",
+		"Chestplate",
+		"BraChest",
+		"BustierChest",
+		"ShirtChest",
+		"WrapChest",
+		"BindChestLower",
+		"Option_BindChestLower",
 		//"Shirt",
 		//"ShirtOver",
 	]),
@@ -1595,6 +1605,7 @@ let LayerGroups = {
 		"BraChestDeco",
 		"BraChest",
 		"BindChestLower",
+		"Option_BindChestLower",
 	]),
 	"ShirtCutoffBra": ToMap([
 		"Chest",

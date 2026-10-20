@@ -203,7 +203,7 @@ let KDGuardActions: Record<string, guardActionEntry> = {
 	"release": {
 		weight: (_guard, _xx, _yy) => {
 			let missingJailUniform = KinkyDungeonMissingJailUniform();
-			return (KinkyDungeonCheckRelease() >= 0 && KinkyDungeonLockableItems().length == 0 && missingJailUniform.length < 1) ? 1000 : 0;
+			return (KinkyDungeonCheckRelease() >= 0 && KDLockableRestraints(true, true).length == 0 && missingJailUniform.length < 1) ? 1000 : 0;
 		},
 		assign: (guard, _xx, _yy) => {
 			KinkyDungeonInterruptSleep();
@@ -280,7 +280,7 @@ let KDGuardActions: Record<string, guardActionEntry> = {
 			if (!KinkyDungeonPlayerInCell()) return 0;
 			let missingJailUniform = KinkyDungeonMissingJailUniform();
 			let tooMuchRestraint = KinkyDungeonTooMuchRestraint();
-			let lockableRestraint = KinkyDungeonLockableItems();
+			let lockableRestraint = KDLockableRestraints(true, true);
 
 			return (
 					lockableRestraint.length > 0
@@ -290,7 +290,7 @@ let KDGuardActions: Record<string, guardActionEntry> = {
 		assign: (guard, _xx, _yy) => {
 			let missingJailUniform = KinkyDungeonMissingJailUniform();
 			let tooMuchRestraint = KinkyDungeonTooMuchRestraint();
-			let lockableRestraint = KinkyDungeonLockableItems();
+			let lockableRestraint = KDLockableRestraints(true, true);
 
 			if (missingJailUniform.length > 0 || KDRandom() < 0.2) {
 				if (tooMuchRestraint.length > 0 && (KDRandom() < 0.5 || missingJailUniform.length < 1) && KDGameData.JailRemoveRestraintsTimer > KinkyDungeonJailRemoveRestraintsTimerMin) {
@@ -594,6 +594,7 @@ let KDJailOutfits: Record<string, {overridelowerpriority: boolean, priority: num
 			{Name: "LegShackles", Level: 35},
 			{Name: "HighsecLegbinder", Level: 35},
 			{Name: "TrapBlindfold", Level: 35, Condition: "NoBlindfolds"},
+			{Name: "TrapEarplugs", Level: 99, Condition: "NoEarplugs"},
 			{Name: "HighsecBallGag", Level: 40},
 			{Name: "HighsecShackles", Level: 40},
 			{Name: "TrapArmbinder", Level: 40, Condition: "LessArmbinders", Priority: "MoreArmbinders"},
@@ -1035,6 +1036,9 @@ let KDJailConditions: Record<string, (r: KDJailRestraint) => boolean> = {
 	},
 	NoBlindfolds: (_r) => {
 		return !KinkyDungeonStatsChoice.get("NoBlindfolds");
+	},
+	NoEarplugs: (_r) => {
+		return !KinkyDungeonStatsChoice.get("NoEarplugs");
 	},
 	LessArmbinders: (_r) => {
 		return !KinkyDungeonStatsChoice.get("Less_Armbinders")

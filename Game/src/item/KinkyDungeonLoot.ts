@@ -268,7 +268,7 @@ function KinkyDungeonLootEvent(Loot: any, Floor: number, Replacemsg: string, Loc
 		x = KDPlayer().x;
 		y = KDPlayer().y;
 	}
-	let data = {
+	let data: KDLootEventCustomData = {
 		x: x,
 		y: y,
 		loot: Loot,
@@ -289,7 +289,9 @@ function KinkyDungeonLootEvent(Loot: any, Floor: number, Replacemsg: string, Loc
 
 	let value = 0;
 
+
 	if (Loot.weapon || Loot.weaponlist) {
+		let seed = KDGetRandomSeed(null);
 		let weapon = Loot.weapon;
 
 		if (Loot.weaponlist) weapon = KDGetByWeight(KinkyDungeonGetWeaponsByListWeighted(Loot.weaponlist, false, (Loot.minRarity || 0), (Loot.maxRarity || 4))) || weapon;
@@ -315,21 +317,25 @@ function KinkyDungeonLootEvent(Loot: any, Floor: number, Replacemsg: string, Loc
 		if (enchantVariant) {
 			let events: KinkyDungeonEvent[] = JSON.parse(JSON.stringify(KDWeapon({name: weapon}).events || []));
 			if (enchantVariant) {
-				events.push(...KDEventEnchantmentModular[enchantVariant].types[KDModifierEnum.weapon].events(weapon, Loot, "", undefined, enchant_extra));
+				events.push(...KDEventEnchantmentModular[enchantVariant].types[KDModifierEnum.weapon].events(weapon, Loot, "", undefined,
+					enchant_extra, {seed: seed}));
 			}
 			for (let e of enchant_extra) {
-				events.push(...KDEventEnchantmentModular[e].types[KDModifierEnum.weapon].events(weapon, Loot, "", enchantVariant, enchant_extra));
+				events.push(...KDEventEnchantmentModular[e].types[KDModifierEnum.weapon].events(weapon, Loot, "",
+					enchantVariant, enchant_extra, {seed: seed}));
 			}
 			let variant: KDWeaponVariant = {
 				template: weapon,
 				events: events,
 			};
-			KDGiveWeaponVariant(variant, KDEventEnchantmentModular[enchantVariant]?.prefix, undefined, KDEventEnchantmentModular[enchantVariant]?.suffix, container);
+			data.itemAdded = KDGiveWeaponVariant(variant, KDEventEnchantmentModular[enchantVariant]?.prefix, undefined, 
+				KDEventEnchantmentModular[enchantVariant]?.suffix, container, {seed: seed});
 
 			if (Replacemsg)
 				Replacemsg = Replacemsg.replace("WeaponAcquired", (enchantVariant ? TextGet("KDVarPrefEnchanted") : "") + ' ' + TextGet("KinkyDungeonInventoryItem" + weapon));
 		} else {
-			KDInvAddWeapon(container, weapon);
+			
+			data.itemAdded = KDInvAddWeapon(container, weapon);
 			if (Replacemsg)
 				Replacemsg = Replacemsg.replace("WeaponAcquired", TextGet("KinkyDungeonInventoryItem" + weapon));
 		}
@@ -338,6 +344,7 @@ function KinkyDungeonLootEvent(Loot: any, Floor: number, Replacemsg: string, Loc
 	if (Loot.spell) {
 		let spell = KinkyDungeonFindSpell(Loot.spell, true);
 		KDPushSpell(spell);
+		data.spellAdded = spell;
 		if (spell.autoLearn) {
 			for (let sp of spell.autoLearn) {
 				if (KinkyDungeonSpellIndex(sp) < 0) {
@@ -360,7 +367,8 @@ function KinkyDungeonLootEvent(Loot: any, Floor: number, Replacemsg: string, Loc
 		if (Replacemsg)
 			Replacemsg = Replacemsg.replace("SpellLearned", TextGet("KinkyDungeonSpell" + Loot.spell));
 	}
-	else if (Loot.armor || Loot.armortags) {
+	if (Loot.armor || Loot.armortags) {
+		let seed = KDGetRandomSeed(null);
 		let armor = Loot.armor;
 		let hexed = Loot.hexlist && (Loot.hexchance == undefined || KDRandom() < Loot.hexchance + (Loot.hexscale|| 0) * levelPercent || (Loot.nouncursed && !Loot.enchantlist && KinkyDungeonInventoryGet(Loot.nouncursed)));
 		let forceequip = Loot.forceEquip || (hexed && (Loot.forceEquipCursed || KinkyDungeonStatsChoice.get("CurseSeeker"))) || (!hexed && (Loot.forceEquipUncursed));
@@ -421,25 +429,33 @@ function KinkyDungeonLootEvent(Loot: any, Floor: number, Replacemsg: string, Loc
 				events: events,
 			};
 			if (hexVariant) {
-				events.push(...KDEventHexModular[hexVariant].events({variant: variant}));
+				events.push(...KDEventHexModular[hexVariant].events({variant: variant, seed: seed }));
 			}
 			for (let c of hex_extra) {
-				events.push(...KDEventHexModular[c].events({variant: variant}));
+				events.push(...KDEventHexModular[c].events({variant: variant, seed: seed}));
 			}
 			if (enchantVariant) {
-				events.push(...KDEventEnchantmentModular[enchantVariant].types[KDModifierEnum.restraint].events(armor, Loot, hexVariant, enchantVariant, enchant_extra, {variant: variant}));
+				events.push(...KDEventEnchantmentModular[enchantVariant].types[KDModifierEnum.restraint].events(
+					armor, Loot, hexVariant, enchantVariant, enchant_extra, {variant: variant, seed: seed}));
 			}
 			for (let e of enchant_extra) {
-				events.push(...KDEventEnchantmentModular[e].types[KDModifierEnum.restraint].events(armor, Loot, hexVariant, enchantVariant, enchant_extra, {variant: variant}));
+				events.push(...KDEventEnchantmentModular[e].types[KDModifierEnum.restraint].events(
+					armor, Loot, hexVariant, enchantVariant, enchant_extra, {variant: variant, seed: seed}));
 			}
 
-			let equipped = 0;
+			let equipped = null;
 			if (forceequip) {
-				equipped = KDEquipInventoryVariant(variant, KDEventEnchantmentModular[enchantVariant]?.prefix, 0, true, undefined, true, false, Loot.faction || (unlockcurse ? "Curse" : undefined), true, unlockcurse, undefined, false, undefined, undefined, KDEventEnchantmentModular[enchantVariant]?.suffix);
+				equipped = KDEquipRestraintVariant(variant, KDEventEnchantmentModular[enchantVariant]?.prefix, 0, true, undefined, true, false, 
+					Loot.faction || (unlockcurse ? "Curse" : undefined), true, unlockcurse, undefined,
+					 false, undefined, undefined, KDEventEnchantmentModular[enchantVariant]?.suffix,
+					undefined, undefined, {seed: seed});
 			}
 			if (!equipped) {
-				KDGiveInventoryVariant(variant, KDEventEnchantmentModular[enchantVariant]?.prefix, unlockcurse, undefined, undefined, KDEventEnchantmentModular[enchantVariant]?.suffix, Loot.faction || (unlockcurse ? "Curse" : undefined), undefined, undefined, container);
+				data.itemAdded = KDGiveInventoryVariant(variant, KDEventEnchantmentModular[enchantVariant]?.prefix, unlockcurse, undefined,
+					undefined, KDEventEnchantmentModular[enchantVariant]?.suffix, Loot.faction || (unlockcurse ? "Curse" : undefined),
+					 undefined, undefined, container, {seed: seed});
 			} else {
+				data.itemAdded = equipped;
 				KinkyDungeonSendTextMessage(10, TextGet("KDCursedChestEquip" + (unlockcurse ? "Cursed" : ""))
 					.replace("NEWITM", TextGet("Restraint" + variant.template)),
 				"#aa88ff", 10);
@@ -448,7 +464,7 @@ function KinkyDungeonLootEvent(Loot: any, Floor: number, Replacemsg: string, Loc
 			if (Replacemsg)
 				Replacemsg = Replacemsg.replace("ArmorAcquired", (enchantVariant ? TextGet("KDVarPrefEnchanted") : "") + ' ' + TextGet("Restraint" + armor));
 		} else {
-			KDInvAddLoose(container, armor, unlockcurse, Loot.faction || (unlockcurse ? "Curse" : undefined));
+			data.itemAdded = KDInvAddLoose(container, armor, unlockcurse, Loot.faction || (unlockcurse ? "Curse" : undefined));
 			if (Replacemsg)
 				Replacemsg = Replacemsg.replace("ArmorAcquired", TextGet("Restraint" + armor));
 		}
@@ -457,7 +473,7 @@ function KinkyDungeonLootEvent(Loot: any, Floor: number, Replacemsg: string, Loc
 	else if (Loot.name == "spell_points") {
 		let amount = 1;
 		KinkyDungeonSpellPoints += amount;
-		KinkyDungeonSendFloater({x: 1100, y: 800 - KDRecentRepIndex * 40}, `+${amount} Spell Points!!!`, KDBaseLightBlue, 5, true);
+		KinkyDungeonSendFloater({x: 1100, y: 800 - KDRecentRepIndex * KDFloaterSpacingOverride}, `+${amount} Spell Points!!!`, KDBaseLightBlue, 5, true);
 		KDRecentRepIndex += 1;
 		if (Replacemsg)
 			Replacemsg = Replacemsg.replace("AMOUNT", "" + amount);
@@ -470,6 +486,7 @@ function KinkyDungeonLootEvent(Loot: any, Floor: number, Replacemsg: string, Loc
 		if (Replacemsg)
 			Replacemsg = Replacemsg.replace("SpellLearned", TextGet("KinkyDungeonSpell" + spell.name));
 		KDPushSpell(spell);
+		data.spellAdded = spell;
 	}
 	else if (Loot.name == "spell_conjuration_low") {
 		let SpellsUnlearned = KinkyDungeonGetUnlearnedSpells(0, 2, KinkyDungeonSpellList.Conjure);
@@ -479,6 +496,7 @@ function KinkyDungeonLootEvent(Loot: any, Floor: number, Replacemsg: string, Loc
 		if (Replacemsg)
 			Replacemsg = Replacemsg.replace("SpellLearned", TextGet("KinkyDungeonSpell" + spell.name));
 		KDPushSpell(spell);
+		data.spellAdded = spell;
 	}
 	else if (Loot.name == "spell_elemental_low") {
 		let SpellsUnlearned = KinkyDungeonGetUnlearnedSpells(0, 2, KinkyDungeonSpellList.Elements);
@@ -488,6 +506,7 @@ function KinkyDungeonLootEvent(Loot: any, Floor: number, Replacemsg: string, Loc
 		if (Replacemsg)
 			Replacemsg = Replacemsg.replace("SpellLearned", TextGet("KinkyDungeonSpell" + spell.name));
 		KDPushSpell(spell);
+		data.spellAdded = spell;
 	}
 	else if (Loot.name == "pearlReward") {
 		let rewardAvailable = [];
@@ -503,17 +522,20 @@ function KinkyDungeonLootEvent(Loot: any, Floor: number, Replacemsg: string, Loc
 		}
 		let reward = rewardAvailable[Math.floor(KDRandom() * rewardAvailable.length)];
 		if (KinkyDungeonWeapons[reward]) {
-			KDInvAddWeapon(container, reward);
+			data.itemAdded = KDInvAddWeapon(container, reward);
 			if (Replacemsg)
 				Replacemsg = Replacemsg.replace("ITEMGET", TextGet("KinkyDungeonInventoryItem" + reward));
 		}
 		else if (KinkyDungeonFindSpell(reward, true)) {
-			KDPushSpell(KinkyDungeonFindSpell(reward, true));
+			let spell = KinkyDungeonFindSpell(reward, true);
+			KDPushSpell(spell);
+			data.spellAdded = spell;
 			if (Replacemsg)
 				Replacemsg = Replacemsg.replace("ITEMGET", TextGet("KinkyDungeonSpell" + reward));
 		}
 		else if (KinkyDungeonConsumables[reward]) {
 			KinkyDungeonChangeConsumable(KinkyDungeonConsumables[reward], 1);
+			data.itemAdded = KinkyDungeonInventoryGet(KinkyDungeonConsumables[reward].name);
 			if (Replacemsg)
 				Replacemsg = Replacemsg.replace("ITEMGET", TextGet("KinkyDungeonInventoryItem" + reward));
 		}
@@ -521,6 +543,8 @@ function KinkyDungeonLootEvent(Loot: any, Floor: number, Replacemsg: string, Loc
 			KinkyDungeonChangeConsumable(KinkyDungeonConsumables.AncientPowerSource, 1);
 			if (Replacemsg)
 				Replacemsg = Replacemsg.replace("ITEMGET", TextGet("KinkyDungeonInventoryItemAncientPowerSource"));
+			
+			data.itemAdded = KinkyDungeonInventoryGet("AncientPowerSource");
 		}
 
 	}
@@ -911,8 +935,9 @@ function KinkyDungeonLootEvent(Loot: any, Floor: number, Replacemsg: string, Loc
 		}
 		KinkyDungeonLostItems = newLostItems;
 	}
+
 	if (KDLootEvents[Loot.name]) {
-		let ret = KDLootEvents[Loot.name](Loot, Floor, Replacemsg, Lock, container, x, y);
+		let ret = KDLootEvents[Loot.name](Loot, Floor, Replacemsg, Lock, container, x, y, data);
 		if (ret.value) value = ret.value;
 		if (ret.Replacemsg) Replacemsg = ret.Replacemsg;
 	}

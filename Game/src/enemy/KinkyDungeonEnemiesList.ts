@@ -296,7 +296,9 @@ let KinkyDungeonEnemies: enemy[] = [
 
 	// End Quest NPC
 
-	{name: "DirtPile", tags: KDMapInit(["poisonmmune", "soulimmune", "dirt", "immobile", "noknockback", "melee", "nofidget", "notalk", "nonvulnerable", "nobrain", "nosignal", "acidweakness", "soapsevereweakness"]),
+	{name: "DirtPile", tags: KDMapInit(["poisonmmune", "soulimmune", "dirt", "immobile", "noknockback", "melee",
+		"peaceful",
+		"nofidget", "notalk", "nonvulnerable", "nobrain", "nosignal", "acidweakness", "soapsevereweakness"]),
 		faction: "Door", spellResist: -3, lowpriority: true, evasion: -100, armor: -1, followRange: 100, AI: "wander",
 		visionRadius: 0, maxhp: 4, minLevel:0, weight:-1000, movePoints: 1000, attackPoints: 0, attack: "", attackRange: 0,
 		ondeath: [
@@ -362,6 +364,7 @@ let KinkyDungeonEnemies: enemy[] = [
 		immobile: true, spellResist: 0, lowpriority: true, evasion: -100, armor: 3, followRange: 100, AI: "wander",
 		visionRadius: 0, maxhp: 4, minLevel:0, weight:-1000, movePoints: 1000, attackPoints: 0, attack: "", attackRange: 0,
 		faction: "Warden",
+		alwaysNoFF: true,
 		cueSfx: {
 			Block: "Clang",
 			Resist: "Clang",
@@ -2518,7 +2521,9 @@ let KinkyDungeonEnemies: enemy[] = [
 	},
 	{name: "WolfTapeDrones", faction: "Nevermere", clusterWith: "nevermere", color: "#00eeee", playLine: "Robot",
 		SFX: {death: "SciFiExplode"},
-		tags: KDMapInit(["ignoreharmless", "quadcopter", "disarmimmune", "robot", "wolfdrone", "leashing", "nevermere", "flying", "acidweakness", "soapweakness", "soulresist", "minor", "ranged", "fireweakness", "electricsevereweakness", "wolfPet", "coldresist", "iceresist", "slashresist", "crushsevereweakness", "pierceweakness", "autoTape", "search"]),
+		tags: KDMapInit(["ignoreharmless", "quadcopter", "disarmimmune", "robot", "wolfdrone", "leashing", "leashing", "nevermere",
+			"flying", "acidweakness", "soapweakness", "soulresist", "minor", "ranged", "fireweakness", "electricsevereweakness",
+			"wolfPet", "coldresist", "iceresist", "slashresist", "crushsevereweakness", "pierceweakness", "autoTape", "search"]),
 		followRange: 1, difficulty: 0.5,
 		maxblock: 0,
 		maxdodge: 0,
@@ -4343,8 +4348,12 @@ let KinkyDungeonEnemies: enemy[] = [
 		dropTable: [{name: "Gold", amountMin: 5, amountMax: 10, weight: 10}, {name: "IceRune", weight: 1}, {name: "IceBreaker", weight: 1, ignoreInInventory: true}]},
 	{name: "ElementalWater", nameList: "elemental", outfit: "ElementalWater", style: "WaterElemental", faction: "Elemental", playLine: "Elemental", clusterWith: "ice", bound: "ElementalWater", color: "#57ff88", tags: KDMapInit(["opendoors", "flying", "antiMagic", "water", "elemental", "ranged", "fireresist", "soapimmune", "acidresist", "electricsevereweakness", "latexRestraints", "ropeRestraints", "elite", "leashing", "jail", "jailer", "hunter"]),
 		armor: 0, kite: 1.5, followRange: 3, AI: "hunt", guardChance: 0.6, evasion: 0.25, summon: [{enemy: "ElementalIce", range: 2.5, count: 1, chance: 0.6, strict: true}],
-		specialCD: 5, specialAttack: "PullWill", specialCDonAttack: true, specialAttackPoints: 4, specialRange: 4, specialWidth: 3, specialMinRange: 1.5, specialsfx: "Song", hitsfx: "Song", tilesMinRangeSpecial: 2,
+		specialCD: 5, specialAttack: "Effect", specialCDonAttack: true, specialAttackPoints: 4, specialRange: 4, specialWidth: 3, specialMinRange: 1.5, specialsfx: "Song", hitsfx: "Song", tilesMinRangeSpecial: 2,
 		visionRadius: 7, maxhp: 12, minLevel:3, weight:-2, movePoints: 1.5, followLeashedOnly: true, projectileTargeting: true,
+		effect: {
+			effect: {name: "PullToward", damage: "charm", dist: 2, power: 5, msg: "KDElementalSong"},
+			
+		},
 		attackPoints: 3, attack: "MeleeBindLockAll", attackWidth: 3, attackRange: 1, power: 5, dmgType: "charm", pullTowardSelf: true, pullDist: 2, pullMsg: true,
 		attackLock: "Purple",
 		stamina: 5,
@@ -7007,7 +7016,7 @@ let KDSpecialBuffs: Record<string, KDSpecialEnemyBuff> = {
 			return 40;
 		},
 		apply: (enemy, _types) => {
-			KinkyDungeonApplyBuffToEntity(enemy, {
+			KDApplyBuffToEntity(enemy, {
 				id: "Armored",
 				aura: KDBaseWhite, auraSprite: "Armored",
 				noAuraColor: true,
@@ -7026,7 +7035,7 @@ let KDSpecialBuffs: Record<string, KDSpecialEnemyBuff> = {
 			return 40;
 		},
 		apply: (enemy, _types) => {
-			KinkyDungeonApplyBuffToEntity(enemy, {
+			KDApplyBuffToEntity(enemy, {
 				id: "Fast",
 				aura: KDBaseWhite, auraSprite: "Fast",
 				noAuraColor: true,
@@ -7045,7 +7054,7 @@ let KDSpecialBuffs: Record<string, KDSpecialEnemyBuff> = {
 			return 40;
 		},
 		apply: (enemy, _types) => {
-			KinkyDungeonApplyBuffToEntity(enemy, {
+			KDApplyBuffToEntity(enemy, {
 				id: "Muscle",
 				aura: KDBaseWhite, auraSprite: "Muscle",
 				noAuraColor: true,
@@ -7053,7 +7062,7 @@ let KDSpecialBuffs: Record<string, KDSpecialEnemyBuff> = {
 				power: Math.min(5, enemy.Enemy.power*2),
 				type: "AttackPower",
 			});
-			KinkyDungeonApplyBuffToEntity(enemy, {
+			KDApplyBuffToEntity(enemy, {
 				id: "Muscle2",
 				duration: 9999, infinite: true,
 				power: 1,
@@ -7069,7 +7078,7 @@ let KDSpecialBuffs: Record<string, KDSpecialEnemyBuff> = {
 			return 40;
 		},
 		apply: (enemy, _types) => {
-			KinkyDungeonApplyBuffToEntity(enemy, {
+			KDApplyBuffToEntity(enemy, {
 				id: "EnergyShield",
 				aura: KDBaseWhite, auraSprite: "EnergyShield",
 				duration: 9999, infinite: true,
@@ -7077,7 +7086,7 @@ let KDSpecialBuffs: Record<string, KDSpecialEnemyBuff> = {
 				power: enemy.Enemy.maxhp * 0.25,
 				type: "MaxShield",
 			});
-			KinkyDungeonApplyBuffToEntity(enemy, {
+			KDApplyBuffToEntity(enemy, {
 				id: "EnergyShield2",
 				duration: 9999, infinite: true,
 				power: 0.1,
@@ -7094,7 +7103,7 @@ let KDSpecialBuffs: Record<string, KDSpecialEnemyBuff> = {
 			return 10 + (enemy.Enemy.shrines?.includes("Will") ? 20 : 0);
 		},
 		apply: (enemy, _types) => {
-			KinkyDungeonApplyBuffToEntity(enemy, {
+			KDApplyBuffToEntity(enemy, {
 				id: "HealingAuraSBuff",
 				aura: KDBaseWhite, auraSprite: "HealingAura",
 				duration: 9999, infinite: true,
@@ -7118,7 +7127,7 @@ let KDSpecialBuffs: Record<string, KDSpecialEnemyBuff> = {
 			if ((enemy.Enemy.tags?.boss)) count = 4;
 			else if (enemy.Enemy.tags?.miniboss) count = Math.max(count, 3);
 			else if (enemy.Enemy.tags?.elite) count = Math.max(count, 2);
-			KinkyDungeonApplyBuffToEntity(enemy, {
+			KDApplyBuffToEntity(enemy, {
 				id: "Missiles",
 				duration: 9999, infinite: true,
 				power: count,
@@ -7140,7 +7149,7 @@ let KDSpecialBuffs: Record<string, KDSpecialEnemyBuff> = {
 		},
 		apply: (enemy, _types) => {
 			let count = 2;
-			KinkyDungeonApplyBuffToEntity(enemy, {
+			KDApplyBuffToEntity(enemy, {
 				id: "Airbender",
 				duration: 9999, infinite: true,
 				power: count,
@@ -7160,7 +7169,7 @@ let KDSpecialBuffs: Record<string, KDSpecialEnemyBuff> = {
 			return 10 + (enemy.Enemy.shrines?.includes("Metal") ? 20 : 0) + ((enemy.Enemy.tags?.water) ? 20 : 0);
 		},
 		apply: (enemy, _types) => {
-			KinkyDungeonApplyBuffToEntity(enemy, {
+			KDApplyBuffToEntity(enemy, {
 				id: "ElectrifyX",
 				duration: 9999, infinite: true,
 				power: 1,
@@ -7179,7 +7188,7 @@ let KDSpecialBuffs: Record<string, KDSpecialEnemyBuff> = {
 			return 10 + (enemy.Enemy.tags?.fire ? 20 : 0);
 		},
 		apply: (enemy, _types) => {
-			KinkyDungeonApplyBuffToEntity(enemy, {
+			KDApplyBuffToEntity(enemy, {
 				id: "FireexpX",
 				duration: 9999, infinite: true,
 				power: 1,
@@ -7197,7 +7206,7 @@ let KDSpecialBuffs: Record<string, KDSpecialEnemyBuff> = {
 			return 10 + (enemy.Enemy.tags?.plant || enemy.Enemy.tags?.nature || enemy.Enemy.tags?.elf ? 20 : 0);
 		},
 		apply: (enemy, _types) => {
-			KinkyDungeonApplyBuffToEntity(enemy, {
+			KDApplyBuffToEntity(enemy, {
 				id: "VineexpX",
 				duration: 9999, infinite: true,
 				power: 1,
@@ -7216,7 +7225,7 @@ let KDSpecialBuffs: Record<string, KDSpecialEnemyBuff> = {
 			return 10 + ((enemy.Enemy.tags?.water) ? 20 : 0);
 		},
 		apply: (enemy, _types) => {
-			KinkyDungeonApplyBuffToEntity(enemy, {
+			KDApplyBuffToEntity(enemy, {
 				id: "BubbleexpX",
 				duration: 9999, infinite: true,
 				power: 1,
@@ -7234,7 +7243,7 @@ let KDSpecialBuffs: Record<string, KDSpecialEnemyBuff> = {
 			return 10 + ((enemy.Enemy.tags?.ice) ? 20 : 0);
 		},
 		apply: (enemy, _types) => {
-			KinkyDungeonApplyBuffToEntity(enemy, {
+			KDApplyBuffToEntity(enemy, {
 				id: "IceexpX",
 				duration: 9999, infinite: true,
 				power: 1,
@@ -7253,7 +7262,7 @@ let KDSpecialBuffs: Record<string, KDSpecialEnemyBuff> = {
 			return 10 + (enemy.Enemy.attack?.includes("Bind") ? 20 : 0);
 		},
 		apply: (enemy, _types) => {
-			KinkyDungeonApplyBuffToEntity(enemy, {
+			KDApplyBuffToEntity(enemy, {
 				id: "BearTrapper",
 				duration: 9999, infinite: true,
 				power: 1,

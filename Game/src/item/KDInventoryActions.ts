@@ -203,6 +203,7 @@ let KDInventoryAction: Record<string, KDInventoryActionDef> = {
 		},
 	},
 	"GenericBondage": {
+		doubleSize: true,
 		hotkey: () => {return KDHotkeyToText(KinkyDungeonKeySpell[0]);},
 		hotkeyPress: () => {return KinkyDungeonKeySpell[0];},
 		icon: (_player, _item) => {
@@ -364,8 +365,9 @@ let KDInventoryAction: Record<string, KDInventoryActionDef> = {
 	"CurseUnlock": {
 		hotkey: () => {return KDHotkeyToText(KinkyDungeonKeySpell[4]);},
 		hotkeyPress: () => {return KinkyDungeonKeySpell[4];},
-		icon: (_player, _item) => {
-			return "InventoryAction/CurseUnlock";
+		icon: (_player, item) => {
+			return "InventoryAction/" + ((KDGetCurse(item) && KDCurses[KDGetCurse(item)].customIcon_RemoveSuccess)
+				? KDCurses[KDGetCurse(item)].customIcon_RemoveSuccess : "CurseUnlock");
 		},
 		show: (_player, item) => {
 			return !!KDGetCurse(item);
@@ -382,6 +384,35 @@ let KDInventoryAction: Record<string, KDInventoryActionDef> = {
 				let r = KDRestraint(item);
 				let sg = KinkyDungeonStruggleGroups.find((group) => {return r.Group == group.group;});
 				KDSendInput("curseUnlock", {group: sg.group, index: KDStruggleGroupLinkIndex[sg.group], curse: (KDGetCurse(item))});
+			}
+		},
+		cancel: (_player, _delta) => {
+			return false; // NA for default actions
+		},
+	},
+	"CurseUnlock2": {
+		hotkey: () => {return KDHotkeyToText(KinkyDungeonKeySpell[4]);},
+		hotkeyPress: () => {return KinkyDungeonKeySpell[4];},
+		icon: (_player, item) => {
+			return "InventoryAction/" + ((KDGetCurse(item) && KDCurses[KDGetCurse(item)].altIcon)
+			? KDCurses[KDGetCurse(item)].altIcon : "CurseUnlock");
+		},
+		show: (_player, item) => {
+			return !!KDGetCurse(item);
+		},
+		valid: (_player, item) => {
+			return !KinkyDungeonCurseAvailable_Alt(item, (KDGetCurse(item)));
+		},
+		invalidtooltip: (player, item) => {
+			return KinkyDungeonCurseAvailable_Alt(item, (KDGetCurse(item)));
+		},
+		click: (_player, item) => {
+			let itemIndex = KDGetItemLinkIndex(item, false);
+			if (itemIndex >= 0 && !KinkyDungeonCurseAvailable_Alt(item, (KDGetCurse(item)))) {
+				let r = KDRestraint(item);
+				let sg = KinkyDungeonStruggleGroups.find((group) => {return r.Group == group.group;});
+				KDSendInput("curseUnlock", {group: sg.group, index: KDStruggleGroupLinkIndex[sg.group],
+					curse: (KDGetCurse(item)), alt: 1});
 			}
 		},
 		cancel: (_player, _delta) => {
@@ -1314,13 +1345,13 @@ let KDInventoryAction: Record<string, KDInventoryActionDef> = {
 							.replace("AMNT", "" + Math.round(100 * enemy.boundLevel / enemy.Enemy.maxhp)),
 						KDBaseWhite, 1);
 					if (status.belt) {
-						KinkyDungeonApplyBuffToEntity(enemy, KDChastity);
+						KDApplyBuffToEntity(enemy, KDChastity);
 					}
 					if (status.toy) {
-						KinkyDungeonApplyBuffToEntity(enemy, KDToy);
+						KDApplyBuffToEntity(enemy, KDToy);
 					}
 					if (status.plug) {
-						KinkyDungeonApplyBuffToEntity(enemy, KDEntityBuffedStat(enemy, "Plug") > 0 ? KDDoublePlugged : KDPlugged);
+						KDApplyBuffToEntity(enemy, KDEntityBuffedStat(enemy, "Plug") > 0 ? KDDoublePlugged : KDPlugged);
 					}
 					if (status.blind) {
 						enemy.blind = Math.max(enemy.blind || 0, status.blind);
@@ -1341,7 +1372,7 @@ let KDInventoryAction: Record<string, KDInventoryActionDef> = {
 						enemy.disarm = Math.max(enemy.disarm || 0, status.disarm);
 					}
 					if (status.reduceaccuracy) {
-						KinkyDungeonApplyBuffToEntity(enemy,
+						KDApplyBuffToEntity(enemy,
 							KDRestraintReduceAccuracy,
 							{
 								power: status.reduceaccuracy,

@@ -11,6 +11,9 @@ let KDDialogueParams = {
 	ChefChance: 0.1,
 	KDTableFlipWP: 1,
 	MasterworkCount: 5,
+	ShopkeeperFavorsToRemoveNormal: 1,
+	ShopkeeperFavorsToRemoveDivine: 4,
+	ShopkeeperFavorsToRemoveCurse: 5,
 };
 
 /**
@@ -492,7 +495,7 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 				},
 				options: {
 					"Accept": {playertext: "Default", response: "Default",
-						clickFunction: (_gagged, _player) => {
+						clickFunction: (_gagged, player) => {
 							let GoldAmount = Math.round(KDGetEffLevel() * 100 * (1 + 0.02 * Math.max(0, KDGetEffSecurityLevel() + 50)));
 							if (KDGetEffSecurityLevel() >= 49.5) {
 								KDGameData.CurrentDialogMsg = "PrisonRepeatBribeFail";
@@ -504,6 +507,7 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 							}
 							KinkyDungeonChangeRep("Prisoner", -Math.max(10, Math.min(100, GoldAmount*0.25)));
 							KinkyDungeonAddGold(-GoldAmount);
+							KDAddGagXP("Bribe", player, 50 + 50 * KDGameData.Training?.Gag?.training_stage);
 							KinkyDungeonSetFlag("LeashToPrison", 0);
 							return false;
 						},
@@ -584,6 +588,9 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 				},
 				clickFunction: (_gagged, _player) => {
 					KinkyDungeonInventoryAddWeapon("Knife");
+					if (KDGameData.AngelCurrentRep) {
+						KinkyDungeonChangeRep(KDGameData.AngelCurrentRep, -1);
+					}
 					KinkyDungeonSetFlag("AngelHelped", 5);
 					return false;
 				},
@@ -596,6 +603,10 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 				},
 				clickFunction: (_gagged, _player) => {
 					KDAddConsumable("Pick", 3);
+					
+					if (KDGameData.AngelCurrentRep) {
+						KinkyDungeonChangeRep(KDGameData.AngelCurrentRep, -1);
+					}
 					KinkyDungeonSetFlag("AngelHelped", 5);
 					return false;
 				},
@@ -608,6 +619,10 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 				},
 				clickFunction: (_gagged, _player) => {
 					KDAddConsumable("BlueKey", 1);
+					
+					if (KDGameData.AngelCurrentRep) {
+						KinkyDungeonChangeRep(KDGameData.AngelCurrentRep, -3);
+					}
 					KinkyDungeonSetFlag("AngelHelped", 5);
 					return false;
 				},
@@ -621,6 +636,10 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 				clickFunction: (_gagged, _player) => {
 					let lockedRestraints = KinkyDungeonPlayerGetRestraintsWithLocks(["Divine2"]);
 					if (KDGetBlessings().length > 0 && lockedRestraints.length > 0) {
+						
+						if (KDGameData.AngelCurrentRep) {
+							KinkyDungeonChangeRep(KDGameData.AngelCurrentRep, -4);
+						}
 						let luckyItem = lockedRestraints[Math.floor(KDRandom() * lockedRestraints.length)];
 						KinkyDungeonLock(luckyItem, "", false, false, false, false);
 						KinkyDungeonSetFlag("AngelHelped", 5);
@@ -632,9 +651,37 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 					}
 					return false;
 				},
+				
 				leadsToStage: "", dontTouchText: true,
 			},
-			"Leave": {playertext: "Leave", exitDialogue: true},
+			"Curse": {
+				playertext: "Default", response: "AngelHelpCurse",
+				gag: true,
+				prerequisiteFunction: (_gagged, player) => {
+					return !KinkyDungeonFlags.get("AngelHelped")
+						&& Object.values(KDGetBuffsWithTag(player, "majorcurse_angel")).length > 0;
+				},
+				clickFunction: (_gagged, player) => {
+					KinkyDungeonRemoveBuffsWithTag(player, ["majorcurse_angel"]);
+					if (KDSoundEnabled()) KinkyDungeonPlaySound(KinkyDungeonRootDirectory + "Audio/Fwoosh.ogg");
+
+					
+					if (KDGameData.AngelCurrentRep) {
+						KinkyDungeonChangeRep(KDGameData.AngelCurrentRep, -14);
+					}
+					KinkyDungeonSetFlag("AngelHelped", 5);
+					return false;
+				},
+				leadsToStage: "", dontTouchText: true,
+			},
+			"Leave": {
+				clickFunction: (_gagged, _player) => {
+					if (KDGameData.AngelCurrentRep) {
+						KinkyDungeonChangeRep(KDGameData.AngelCurrentRep, -6);
+					}
+					return false;
+				},
+				playertext: "Leave", exitDialogue: true},
 		}
 	},
 
@@ -670,7 +717,7 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 							tile.GhostDecision = 0;
 							KinkyDungeonSetFlag("GhostDeal", 200);
 
-							KinkyDungeonApplyBuffToEntity(player,
+							KDApplyBuffToEntity(player,
 							{
 								id: "GhostDeal",
 								type: "GhostDeal",
@@ -706,7 +753,7 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 							let tile = KinkyDungeonTilesGet(KDGameData.InteractTargetX + ',' + KDGameData.InteractTargetY);
 							tile.GhostDecision = 0;
 
-							KinkyDungeonApplyBuffToEntity(player,
+							KDApplyBuffToEntity(player,
 							{
 								id: "GhostDealPleasure",
 								type: "GhostDealPleasure",
@@ -2024,6 +2071,8 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 											en, false, undefined, {npc: en.id}
 										);
 										if (added && KDAddToParty(en)) {
+											
+											KDUnlockPerk("DollShoppeStart");
 											KDRemoveLeashRemovedRestraints(player)
 											delete en.despawnX;
 											delete en.goToDespawn;
@@ -2490,6 +2539,33 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 					}
 					return KDCanSleepTooltip(KDGameData.InteractTargetX, KDGameData.InteractTargetY);
 				}
+			},
+			"Remodel": {
+				playertext: "Default",
+				response: "Default",
+				prerequisiteFunction: (): boolean => {
+					if (KDGameData.RoomType != "Summit") {
+						return false;
+					}
+					const tile = KinkyDungeonTilesGet(KDGameData.InteractTargetX + ',' + KDGameData.InteractTargetY);
+					return !!tile?.Furniture;
+				},
+				greyoutFunction: (): boolean => {
+					return !KinkyDungeonEntityAt(KDGameData.InteractTargetX, KDGameData.InteractTargetY);
+				},
+				greyoutCustomTooltip: (): string => {
+					return "KDOccupied";
+				},
+				enterFunction: () => {
+					KDSummitFurnitureBuildCache();
+				},
+				options: {
+					"Leave": {
+						playertext: "Leave",
+						response: "Default",
+						exitDialogue: true,
+					},
+				},
 			},
 			"Leave": {
 				playertext: "Leave", response: "Default",
@@ -3463,13 +3539,18 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 				prerequisiteFunction: (_gagged, _player) => {
 					return KinkyDungeonGold >= KDGameData.ShopkeeperFee;
 				},
-				clickFunction: (_gagged, _player) => {
+				clickFunction: (_gagged, player) => {
 					KinkyDungeonGold -= KDGameData.ShopkeeperFee;
 					KDGameData.ShopkeeperFee = 0;
-					KinkyDungeonRemoveRestraintsWithShrine("Rope", undefined, true, false, true, false, true);
-					KinkyDungeonRemoveRestraintsWithShrine("Leather", undefined, true, false, true, false, true);
-					KinkyDungeonRemoveRestraintsWithShrine("Metal", undefined, true, false, true, false, true);
-					KinkyDungeonRemoveRestraintsWithShrine("Latex", undefined, true, false, true, false, true);
+					KDAddGagXP("Shop", player);
+					KDRemoveRestraintsWithShrine("Rope", undefined, true, 
+						false, KDShopkeeperCriteria(player), false, true);
+					KDRemoveRestraintsWithShrine("Leather", undefined, true, 
+						false, KDShopkeeperCriteria(player), false, true);
+					KDRemoveRestraintsWithShrine("Metal", undefined, true, 
+						false, KDShopkeeperCriteria(player), false, true);
+					KDRemoveRestraintsWithShrine("Latex", undefined, true, 
+						false, KDShopkeeperCriteria(player), false, true);
 					return false;
 				},
 				options: {
@@ -3595,7 +3676,7 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 											events: events,
 										};
 										if (curs) {
-											events.push(...KDEventHexModular[curs].events({variant: variant}));
+											events.push(...KDEventHexModular[curs].events({variant: variant, seed: KDGetRandomSeed(null)}));
 										}
 										KDEquipInventoryVariant(variant, "", 0, true, "", true, false, "Shopkeeper", true,
 											KDGetByWeight(KinkyDungeonGetCurseByListWeighted(["Common"], "", false, 0, 20)));
@@ -3645,7 +3726,7 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 										events: events,
 									};
 									if (curs) {
-										events.push(...KDEventHexModular[curs].events({variant: variant}));
+										events.push(...KDEventHexModular[curs].events({variant: variant, seed: KDGetRandomSeed(null)}));
 									}
 									KDEquipInventoryVariant(variant, "", 0, true, "", true, false, "Shopkeeper", true,
 										KDGetByWeight(KinkyDungeonGetCurseByListWeighted(["Common"], "", false, 0, 20)));
@@ -3690,7 +3771,7 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 										events: events,
 									};
 									if (curs) {
-										events.push(...KDEventHexModular[curs].events({variant: variant}));
+										events.push(...KDEventHexModular[curs].events({variant: variant, seed: KDGetRandomSeed(null)}));
 									}
 									KDEquipInventoryVariant(variant, "", 0, true, "", true, false, "Shopkeeper", true,
 										KDGetByWeight(KinkyDungeonGetCurseByListWeighted(["Common"], "", false, 0, 20)));
@@ -3735,7 +3816,7 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 										events: events,
 									};
 									if (curs) {
-										events.push(...KDEventHexModular[curs].events({variant: variant}));
+										events.push(...KDEventHexModular[curs].events({variant: variant, seed: KDGetRandomSeed(null)}));
 									}
 									KDEquipInventoryVariant(variant, "", 0, true, "", true, false, "Shopkeeper", true,
 										KDGetByWeight(KinkyDungeonGetCurseByListWeighted(["Common"], "", false, 0, 20)));
@@ -3763,13 +3844,18 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 						prerequisiteFunction: (_gagged, _player) => {
 							return KinkyDungeonGold >= KDGameData.ShopkeeperFee;
 						},
-						clickFunction: (_gagged, _player) => {
+						clickFunction: (_gagged, player) => {
 							KinkyDungeonGold -= KDGameData.ShopkeeperFee;
 							KDGameData.ShopkeeperFee = 0;
-							KinkyDungeonRemoveRestraintsWithShrine("Rope", undefined, true, false, true, false, true);
-							KinkyDungeonRemoveRestraintsWithShrine("Leather", undefined, true, false, true, false, true);
-							KinkyDungeonRemoveRestraintsWithShrine("Metal", undefined, true, false, true, false, true);
-							KinkyDungeonRemoveRestraintsWithShrine("Latex", undefined, true, false, true, false, true);
+							KDAddGagXP("Shop", player);
+							KDRemoveRestraintsWithShrine("Rope", undefined, true, 
+								false, KDShopkeeperCriteria(player), false, true);
+							KDRemoveRestraintsWithShrine("Leather", undefined, true, 
+								false, KDShopkeeperCriteria(player), false, true);
+							KDRemoveRestraintsWithShrine("Metal", undefined, true, 
+								false, KDShopkeeperCriteria(player), false, true);
+							KDRemoveRestraintsWithShrine("Latex", undefined, true, 
+								false, KDShopkeeperCriteria(player), false, true);
 							return false;
 						},
 						options: {
@@ -3792,9 +3878,12 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 					+ (KDDialogueParams.ShopkeeperHelpFeePerPower * (KDGetTotalRestraintPower(
 						KinkyDungeonPlayerEntity, ["Leather", "Latex", "Rope", "Metal"], [], true, false, false, false)
 						|| 1)))),
+				"${FAVORCOST}": KDDialogueParams.ShopkeeperFavorsToRemoveNormal,
 			};
 			KDGameData.CurrentDialogMsgData = {
 				"RESCUECOST": "" + Math.round(KDGameData.CurrentDialogMsgValue.RESCUECOST),
+				"${FAVORCOST}": "" + KDDialogueParams.ShopkeeperFavorsToRemoveNormal,
+				"${FAVORS}": "" + KDGameData.ShopkeeperFavors,
 			};
 			return false;
 		},
@@ -3804,12 +3893,46 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 				prerequisiteFunction: (_gagged, _player) => {
 					return KinkyDungeonGold >= KDGameData.CurrentDialogMsgValue.RESCUECOST;
 				},
-				clickFunction: (_gagged, _player) => {
+				clickFunction: (_gagged, player) => {
 					KinkyDungeonGold -= KDGameData.CurrentDialogMsgValue.RESCUECOST;
-					KinkyDungeonRemoveRestraintsWithShrine("Rope", undefined, true, false, true, false, true);
-					KinkyDungeonRemoveRestraintsWithShrine("Leather", undefined, true, false, true, false, true);
-					KinkyDungeonRemoveRestraintsWithShrine("Metal", undefined, true, false, true, false, true);
-					KinkyDungeonRemoveRestraintsWithShrine("Latex", undefined, true, false, true, false, true);
+					
+					KDAddGagXP("Shop", player);
+					KDRemoveRestraintsWithShrine("Rope", undefined, true, false, 
+						KDShopkeeperCriteria(player), false, true);
+					KDRemoveRestraintsWithShrine("Leather", undefined, true, false, 
+						KDShopkeeperCriteria(player), false, true);
+					KDRemoveRestraintsWithShrine("Metal", undefined, true, false, 
+						KDShopkeeperCriteria(player), false, true);
+					KDRemoveRestraintsWithShrine("Latex", undefined, true, false, 
+						KDShopkeeperCriteria(player), false, true);
+					return false;
+				},
+				options: {
+					"Leave": {
+						playertext: "Leave", response: "Default",
+						exitDialogue: true,
+					},
+				}
+			},
+			"PayFavor": {
+				playertext: "Default", response: "Default", gag: true,
+				prerequisiteFunction: (_gagged, _player) => {
+					return KDGameData.ShopkeeperFavors > 0;
+				},
+				greyoutFunction: (_gagged, _player) => {
+					return KDGameData.ShopkeeperFavors >= KDGameData.CurrentDialogMsgValue["${FAVORCOST}"];
+				},
+				clickFunction: (_gagged, player) => {
+					KDGameData.ShopkeeperFavors -= KDGameData.CurrentDialogMsgValue["${FAVORCOST}"];
+					KDAddGagXP("Shop", player);
+					KDRemoveRestraintsWithShrine("Rope", undefined, true, false, 
+						KDShopkeeperCriteria(player), false, true);
+					KDRemoveRestraintsWithShrine("Leather", undefined, true, false, 
+						KDShopkeeperCriteria(player), false, true);
+					KDRemoveRestraintsWithShrine("Metal", undefined, true, false, 
+						KDShopkeeperCriteria(player), false, true);
+					KDRemoveRestraintsWithShrine("Latex", undefined, true, false, 
+						KDShopkeeperCriteria(player), false, true);
 					return false;
 				},
 				options: {
@@ -3868,7 +3991,7 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 					return KDGameData.CurrentDialogMsgData.Please != undefined;
 				},
 				playertext: "Default", response: "Default", gag: true,
-				clickFunction: (_gagged, _player) => {
+				clickFunction: (_gagged, player) => {
 					if (!KDGameData.CurrentDialogMsgData) KDGameData.CurrentDialogMsgData = {};
 					KDGameData.CurrentDialogMsgData.RESTRAINTNAME_Armor = KinkyDungeonGetRestraint({tags: ['commonCurse']}, 10, 'grv', true, undefined, undefined, undefined, false)?.name;
 					KDGameData.CurrentDialogMsgData.RESTRAINTNAME_Restraint = KDChooseRestraintFromListGroupPri(
@@ -3888,10 +4011,15 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 						KDGameData.CurrentDialogMsg = "ShopkeeperOfferHelpTabRetryRestrained";
 					} else {
 						KinkyDungeonSetFlag("Collateral", -1, 1);
-						KinkyDungeonRemoveRestraintsWithShrine("Rope", undefined, true, false, true, false, true);
-						KinkyDungeonRemoveRestraintsWithShrine("Leather", undefined, true, false, true, false, true);
-						KinkyDungeonRemoveRestraintsWithShrine("Metal", undefined, true, false, true, false, true);
-						KinkyDungeonRemoveRestraintsWithShrine("Latex", undefined, true, false, true, false, true);
+						KDAddGagXP("Shop", player);
+						KDRemoveRestraintsWithShrine("Rope", undefined, true, false, 
+							KDShopkeeperCriteria(player), false, true);
+						KDRemoveRestraintsWithShrine("Leather", undefined, true, false, 
+							KDShopkeeperCriteria(player), false, true);
+						KDRemoveRestraintsWithShrine("Metal", undefined, true, false, 
+							KDShopkeeperCriteria(player), false, true);
+						KDRemoveRestraintsWithShrine("Latex", undefined, true, false, 
+							KDShopkeeperCriteria(player), false, true);
 						KDGameData.CurrentDialogStage = "Debt";
 						KDGameData.CurrentDialogMsg = "ShopkeeperOfferHelpDebt";
 					}
@@ -3939,7 +4067,7 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 											events: events,
 										};
 										if (curs) {
-											events.push(...KDEventHexModular[curs].events({variant: variant}));
+											events.push(...KDEventHexModular[curs].events({variant: variant, seed: KDGetRandomSeed(null)}));
 										}
 										KDEquipInventoryVariant(variant, "", 0, true, "", true, false, "Shopkeeper", true,
 											KDGetByWeight(KinkyDungeonGetCurseByListWeighted(["Common"], "", false, 0, 20)));
@@ -3988,7 +4116,7 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 										events: events,
 									};
 									if (curs) {
-										events.push(...KDEventHexModular[curs].events({variant: variant}));
+										events.push(...KDEventHexModular[curs].events({variant: variant, seed: KDGetRandomSeed(null)}));
 									}
 									KDEquipInventoryVariant(variant, "", 0, true, "", true, false, "Shopkeeper", true,
 										KDGetByWeight(KinkyDungeonGetCurseByListWeighted(["Common"], "", false, 0, 20)));
@@ -4033,7 +4161,7 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 										events: events,
 									};
 									if (curs) {
-										events.push(...KDEventHexModular[curs].events({variant: variant}));
+										events.push(...KDEventHexModular[curs].events({variant: variant, seed: KDGetRandomSeed(null)}));
 									}
 									KDEquipInventoryVariant(variant, "", 0, true, "", true, false, "Shopkeeper", true,
 										KDGetByWeight(KinkyDungeonGetCurseByListWeighted(["Common"], "", false, 0, 20)));
@@ -4078,7 +4206,7 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 										events: events,
 									};
 									if (curs) {
-										events.push(...KDEventHexModular[curs].events({variant: variant}));
+										events.push(...KDEventHexModular[curs].events({variant: variant, seed: KDGetRandomSeed(null)}));
 									}
 									KDEquipInventoryVariant(variant, "", 0, true, "", true, false, "Shopkeeper", true,
 										KDGetByWeight(KinkyDungeonGetCurseByListWeighted(["Common"], "", false, 0, 20)));
@@ -4106,12 +4234,17 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 						prerequisiteFunction: (_gagged, _player) => {
 							return KinkyDungeonGold >= KDGameData.CurrentDialogMsgValue.RESCUECOST;
 						},
-						clickFunction: (_gagged, _player) => {
+						clickFunction: (_gagged, player) => {
 							KinkyDungeonGold -= KDGameData.CurrentDialogMsgValue.RESCUECOST;
-							KinkyDungeonRemoveRestraintsWithShrine("Rope", undefined, true, false, true, false, true);
-							KinkyDungeonRemoveRestraintsWithShrine("Leather", undefined, true, false, true, false, true);
-							KinkyDungeonRemoveRestraintsWithShrine("Metal", undefined, true, false, true, false, true);
-							KinkyDungeonRemoveRestraintsWithShrine("Latex", undefined, true, false, true, false, true);
+							KDAddGagXP("Shop", player);
+							KDRemoveRestraintsWithShrine("Rope", undefined, true, false, 
+								KDShopkeeperCriteria(player), false, true);
+							KDRemoveRestraintsWithShrine("Leather", undefined, true, false, 
+								KDShopkeeperCriteria(player), false, true);
+							KDRemoveRestraintsWithShrine("Metal", undefined, true, false, 
+								KDShopkeeperCriteria(player), false, true);
+							KDRemoveRestraintsWithShrine("Latex", undefined, true, false, 
+								KDShopkeeperCriteria(player), false, true);
 							return false;
 						},
 						options: {
@@ -4129,17 +4262,146 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 			},
 		}
 	},
+	"ShopkeeperOfferHelpDivine": {
+		response: "Default",
+		clickFunction: (_gagged, _player) => {
+			let speaker = KDGetSpeaker();
+			if (speaker) KinkyDungeonSetEnemyFlag(speaker, "removeddivine");
+			KDGameData.CurrentDialogMsgData = {
+				"${FAVORS}": "" + KDGameData.ShopkeeperFavors,
+				"${FAVORCOST}": "" + KDDialogueParams.ShopkeeperFavorsToRemoveDivine,
+			};
+			KDGameData.CurrentDialogMsgValue = {
+				"${FAVORS}": KDGameData.ShopkeeperFavors,
+				"${FAVORCOST}": KDDialogueParams.ShopkeeperFavorsToRemoveDivine,
+			};
+
+			return false;
+		},
+		options: {
+			"Pay": {
+				playertext: "Default", response: "Default", gag: true,
+				prerequisiteFunction: (_gagged, _player) => {
+					return KDGameData.ShopkeeperFavors >= KDGameData.CurrentDialogMsgValue["${FAVORCOST}"]
+					&& KinkyDungeonAllRestraintDynamic().some((element) => {
+						return !KDRestraint(element.item)?.armor && !KDRestraint(element.item)?.good;
+					});
+				},
+				clickFunction: (_gagged, player) => {
+					KDGameData.ShopkeeperFavors -= KDGameData.CurrentDialogMsgValue["${FAVORCOST}"];
+					let lockedRestraints = KinkyDungeonPlayerGetRestraintsWithLocks(["Divine2", "Divine"]);
+					KDAddGagXP("Shop", player);
+					for (let item of lockedRestraints) {
+						KinkyDungeonLock(item, "", false, false, false, false);
+					}
+					return false;
+				},
+				options: {
+					"Leave": {
+						playertext: "Leave", response: "Default",
+						clickFunction: (_gagged, _player) => {
+							KDStartDialog("ShopkeeperStart", KDGetSpeaker()?.Enemy.name, 
+							true, KDGetSpeaker()?.personality, KDGetSpeaker());
+							return false;
+						}
+					},
+				}
+			},
+			"LeaveSub": {
+				response: "Default",
+				gagDisabled: true,
+				clickFunction: (_gagged, _player) => {
+					KDStartDialog("ShopkeeperStart", KDGetSpeaker()?.Enemy.name, 
+					true, KDGetSpeaker()?.personality, KDGetSpeaker());
+					return false;
+				}
+			},
+			"Leave": {
+				response: "Default",
+				gag: true,
+				clickFunction: (_gagged, _player) => {
+					KDStartDialog("ShopkeeperStart", KDGetSpeaker()?.Enemy.name, 
+					true, KDGetSpeaker()?.personality, KDGetSpeaker());
+					return false;
+				}
+			},
+		}
+	},
+
+	"ShopkeeperOfferHelpCurse": {
+		response: "Default",
+		clickFunction: (_gagged, _player) => {
+			let speaker = KDGetSpeaker();
+			if (speaker) KinkyDungeonSetEnemyFlag(speaker, "removedcurse");
+			KDGameData.CurrentDialogMsgData = {
+				"${FAVORS}": "" + KDGameData.ShopkeeperFavors,
+				"${FAVORCOST}": "" + KDDialogueParams.ShopkeeperFavorsToRemoveCurse,
+			};
+			KDGameData.CurrentDialogMsgValue = {
+				"${FAVORS}": KDGameData.ShopkeeperFavors,
+				"${FAVORCOST}": KDDialogueParams.ShopkeeperFavorsToRemoveCurse,
+			};
+
+			return false;
+		},
+		options: {
+			"Pay": {
+				playertext: "Default", response: "Default", gag: true,
+				prerequisiteFunction: (_gagged, player) => {
+					return KDGameData.ShopkeeperFavors >= KDGameData.CurrentDialogMsgValue["${FAVORCOST}"]
+						&& Object.values(KDGetBuffsWithTag(player, "majorcurse_angel")).length > 0;
+				},
+				clickFunction: (_gagged, player) => {
+					KDGameData.ShopkeeperFavors -= KDGameData.CurrentDialogMsgValue["${FAVORCOST}"];
+					KDAddGagXP("Shop", player);
+					KinkyDungeonRemoveBuffsWithTag(player, ["majorcurse_angel"])
+					return false;
+				},
+				options: {
+					"Leave": {
+						playertext: "Leave", response: "Default",
+						clickFunction: (_gagged, _player) => {
+							KDStartDialog("ShopkeeperStart", KDGetSpeaker()?.Enemy.name, 
+							true, KDGetSpeaker()?.personality, KDGetSpeaker());
+							return false;
+						}
+					},
+				}
+			},
+			"Leave": {
+				response: "Default",
+				gag: true,
+				clickFunction: (_gagged, _player) => {
+					KDStartDialog("ShopkeeperStart", KDGetSpeaker()?.Enemy.name, 
+					true, KDGetSpeaker()?.personality, KDGetSpeaker());
+					return false;
+				}
+			},
+		}
+	},
 	"ShopkeeperStart": {
 		response: "Default",
 		clickFunction: (_gagged, _player) => {
 			if (!KDGameData.ShopkeeperFee) KDGameData.ShopkeeperFee = 0;
 			KDGameData.CurrentDialogMsgValue = {
+				"${FAVORS}": KDGameData.ShopkeeperFavors,
+				"${FAVORCOST}": KDDialogueParams.ShopkeeperFavorsToRemoveDivine,
+				"${FAVORCOSTCURSE}": KDDialogueParams.ShopkeeperFavorsToRemoveCurse,
 				"RESCUECOST": Math.round(Math.sqrt(KDPriceGougingValueMult(_player)) * 
 					(KDGameData.ShopkeeperFee || (KDDialogueParams.ShopkeeperFee + Math.max(0, KDDialogueParams.ShopkeeperFeePerLevel * (KDGameData.HighestLevelCurrent || 1))))),
 			};
 			KDGameData.CurrentDialogMsgData = {
+				"${FAVORS}": "" + KDGameData.ShopkeeperFavors,
+				"${FAVORCOST}": "" + KDDialogueParams.ShopkeeperFavorsToRemoveDivine,
+				"${FAVORCOSTCURSE}": "" + KDDialogueParams.ShopkeeperFavorsToRemoveCurse,
 				"RESCUECOST": "" + Math.round(Math.sqrt(KDPriceGougingValueMult(_player))*(KDGameData.ShopkeeperFee || (KDDialogueParams.ShopkeeperFee + Math.max(0, KDDialogueParams.ShopkeeperFeePerLevel * (KDGameData.HighestLevelCurrent || 1))))),
 			};
+
+			if (KDGameData.ShopkeeperFavors) {
+				KDGameData.CurrentDialogMsg = "ShopkeeperStartFavors";
+				return true;
+			}
+
 			return false;
 		},
 		options: {
@@ -4194,6 +4456,27 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 					},
 				}
 			},
+			"HelpCurse": {
+				playertext: "Default", response: "Default", gag: true,
+				prerequisiteFunction: (_gagged, player) => {
+					return Object.values(KDGetBuffsWithTag(player, "majorcurse_angel")).length > 0;
+				},
+				clickFunction: (_gagged, player) => {
+					if (Object.values(KDGetBuffsWithTag(player, "majorcurse_angel")).length > 0
+						&& KDGameData.ShopkeeperFavors >= KDGameData.CurrentDialogMsgValue["${FAVORCOSTCURSE}"]) {
+						let e = KDGetSpeaker();
+						KDStartDialog("ShopkeeperOfferHelpCurse", e.Enemy.name, true, e.personality, e);
+						return true;
+					}
+					return false;
+				},
+				options: {
+					"Return": {
+						playertext: "Return", response: "Default",
+						leadsToStage: "",
+					},
+				}
+			},
 			"Help": {
 				playertext: "Default", response: "Default", gag: true,
 				prerequisiteFunction: (_gagged, _player) => {
@@ -4202,17 +4485,66 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 					});
 				},
 				clickFunction: (_gagged, _player) => {
-					if (KinkyDungeonGetRestraintsWithShrine("Metal", true, 
+					if (KDGetRestraintsWithShrine("Metal", KDShopkeeperCriteria(_player), 
 						true, false, false, true).length > 0
-						|| KinkyDungeonGetRestraintsWithShrine("Latex", true, 
+						|| KDGetRestraintsWithShrine("Latex", KDShopkeeperCriteria(_player), 
 							true, false, false, true).length > 0
-						|| KinkyDungeonGetRestraintsWithShrine("Leather", true, 
+						|| KDGetRestraintsWithShrine("Leather", KDShopkeeperCriteria(_player), 
 							true, false, false, true).length > 0
-						|| KinkyDungeonGetRestraintsWithShrine("Rope", true, 
+						|| KDGetRestraintsWithShrine("Rope", KDShopkeeperCriteria(_player), 
 							true, false, false, true).length > 0) {
 						let e = KDGetSpeaker();
 						KDStartDialog("ShopkeeperOfferHelp", e.Enemy.name, true, e.personality, e);
 						return true;
+					} else if (KDAllRestraintDynamicList()?.some((item) => {
+						return item.lock == "GoldPlus";
+					})) {
+						KDGameData.CurrentDialogMsg = "ShopkeeperStartHelpGoldPlus"; 
+						return true;
+					}
+					return false;
+				},
+				options: {
+					"Return": {
+						playertext: "Return", response: "Default",
+						leadsToStage: "",
+					},
+				}
+			},
+			"HelpDivine": {
+				playertext: "Default", response: "Default", gag: true,
+				prerequisiteFunction: (_gagged, _player) => {
+					return KinkyDungeonAllRestraintDynamic().some((element) => {
+						return !KDRestraint(element.item)?.armor && !KDRestraint(element.item)?.good;
+					});
+				},
+				clickFunction: (_gagged, _player) => {
+					if (KinkyDungeonPlayerGetRestraintsWithLocks(["Divine2", "Divine"]).length > 0
+						&& KDGameData.ShopkeeperFavors >= KDGameData.CurrentDialogMsgValue["${FAVORCOST}"]) {
+						let e = KDGetSpeaker();
+						KDStartDialog("ShopkeeperOfferHelpDivine", e.Enemy.name, true, e.personality, e);
+						return true;
+					}
+					return false;
+				},
+				options: {
+					"Return": {
+						playertext: "Return", response: "Default",
+						leadsToStage: "",
+					},
+				}
+			},
+			"DivineAsk": {
+				playertext: "Default", response: "Default",
+				gagDisabled: true,
+				prerequisiteFunction: (gagged, _player) => {
+					let speaker = KDGetSpeaker();
+					if (speaker && KDEntityHasFlag(speaker, "removeddivine")) return true;
+					return false;
+				},
+				clickFunction: (gagged, _player) => {
+					if (gagged) {
+						KDGameData.CurrentDialogMsg = "ShopkeeperStartShopGag";
 					}
 					return false;
 				},
@@ -4438,7 +4770,7 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 	"ArmorerShop": KDSaleShop("ArmorerShop", ["Shield", "Breastplate", "Bracers", "Gauntlets", "SteelBoots", "ChainTunic", "ChainBikini", "TrapBelt", "TrapBra"], [], ["blacksmith"], 0.4, 2.0),
 	"BowyerShop": KDSaleShop("BowyerShop", ["AncientPowerSource", "Bow", "BowRecurve", "Crossbow", "CrossbowPistol", "Bustier", "LeatherGloves", "LeatherBoots", "TrapBlindfold"], [], ["blacksmith"], 0.4, 1.5),
 	"ShadyShop": KDSaleShop("ShadyShop",
-		["RopeSnakeRaw", "VinylTapeRaw", "Stuffing", "ClothGag", "ClothGag2", "ClothGag3", "ClothGagOver"], [], ["blacksmith"], 0.4, 5, ["SmokeBomb"], 10),
+		["RopeSnakeRaw", "VinylTapeRaw", "Stuffing", "ClothGag", "ClothGag2", "ClothGag3", "ClothGagOver", "TrapEarplugs"], [], ["blacksmith"], 0.4, 5, ["SmokeBomb"], 10),
 	"PrisonerBandit": {
 		response: "Default",
 		personalities: ["Sub"],
@@ -4453,7 +4785,7 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 			"Help": {
 				playertext: "Default", response: "Default",
 				personalities: ["Sub"],
-				clickFunction: (_gagged, _player) => {
+				clickFunction: (_gagged, player) => {
 					if (KDDialogueEnemy()) {
 						let e = KDDialogueEnemy();
 						KDRemoveEntity(KDDialogueEnemy(), false);
@@ -4464,7 +4796,7 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 							for (let enemy of KDMapData.Entities) {
 								if (enemy.Enemy.tags.bandit) {
 									if (enemy.hostile && enemy.hostile < 9000) {
-										enemy.hostile = 0;
+										KDResetAggro(e, player);
 									}
 									enemy.ceasefire = 300;
 								}
@@ -5455,6 +5787,32 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 				enemy.AI = 'hunt';
 				KinkyDungeonSetFlag("BossDialogueTheWarden", -1, 1);
 			}
+			let restraint = KinkyDungeonGetRestraint({tags: ["wardenRestraint"]}, 
+				KDGetEffLevel(), 'cat', true);
+				
+			KDGameData.CurrentDialogMsgData = {
+				"itemName": restraint?.name || "WardenBelt",
+				"${Restraint}": TextGet("KDWardenRestraint_Belt"),
+				"${Restraints}": TextGet("KDWardenRestraints_Belt"),
+				"${Restrained}": TextGet("KDWardenRestrained_Belt"),
+			};
+			if (restraint?.chastity) {
+				KDGameData.CurrentDialogMsgData = {
+				"itemName": restraint.name,
+					"${Restraint}": TextGet("KDWardenRestraint_ChastityBelt"),
+					"${Restraints}": TextGet("KDWardenRestraints_ChastityBelt"),
+					"${Restrained}": TextGet("KDWardenRestrained_ChastityBelt"),
+				};
+			} else 
+			if (restraint?.shrine?.includes("Collars")) {
+				
+				KDGameData.CurrentDialogMsgData = {
+				"itemName": restraint.name,
+					"${Restraint}": TextGet("KDWardenRestraint_Collar"),
+					"${Restraints}": TextGet("KDWardenRestraints_Collar"),
+					"${Restrained}": TextGet("KDWardenRestrained_Collar"),
+				};
+			}
 			return false;
 		},
 		options: {
@@ -6075,9 +6433,12 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 	},
 	"DollmakerWin": {
 		response: "Default",
-		clickFunction: (_gagged, _player) => {
+		clickFunction: (_gagged, player) => {
 			KinkyDungeonSetFlag("BossUnlocked", -1);
 			KinkyDungeonSetFlag("SpawnMap", -1);
+			
+
+			KDResetAllAggro(player, 4);
 			return false;
 		},
 		options: {
@@ -6158,13 +6519,17 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 	},
 	"DollmakerLose": {
 		response: "Default",
-		clickFunction: (_gagged, _player) => {
+		clickFunction: (_gagged, player) => {
 			let enemy = KinkyDungeonFindID(KDGameData.CurrentDialogMsgID);
 			if (enemy && enemy.Enemy.name == KDGameData.CurrentDialogMsgSpeaker) {
-				enemy.hostile = 0;
-				enemy.ceasefire = 4;
+				KDResetAllAggro(player, 4);
 				KinkyDungeonSetFlag("BossUnlocked", -1);
 				KinkyDungeonSetFlag("NoDollRoomBypass", 0);
+			}
+			
+			let speaker = KDGetSpeaker(true);
+			if (speaker) {
+				KDCustomExp[speaker.id] = {"BlushPose":"BlushLow","EyesPose":"EyesSly","Eyes2Pose":"Eyes2Sly","MouthPose":"MouthSmile","FearPose":"NoFearPose","BrowsPose":"BrowsNeutral","Brows2Pose":"Brows2Neutral"};
 			}
 			return false;
 		},
@@ -6241,13 +6606,16 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 	},
 	"FuukaLose": { // Player loses to Fuuka
 		response: "Default",
-		clickFunction: (_gagged, _player) => {
+		clickFunction: (_gagged, player) => {
 			let enemy = KinkyDungeonFindID(KDGameData.CurrentDialogMsgID);
 			if (enemy && enemy.Enemy.name == KDGameData.CurrentDialogMsgSpeaker) {
-				enemy.hostile = 0;
-				enemy.ceasefire = 4;
+				KDResetAllAggro(player, 4);
 				KinkyDungeonSetFlag("BossUnlocked", -1);
 				KinkyDungeonRemoveBuffsWithTag(KinkyDungeonPlayerEntity, ["removeDefeat"]);
+			}
+			let speaker = KDGetSpeaker(true);
+			if (speaker) {
+				KDCustomExp[speaker.id] = {"BlushPose":"BlushLow","EyesPose":"EyesSly","Eyes2Pose":"Eyes2Sly","MouthPose":"MouthSmile","FearPose":"NoFearPose","BrowsPose":"BrowsNeutral","Brows2Pose":"Brows2Neutral"};
 			}
 			return false;
 		},
@@ -6400,10 +6768,12 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 	},
 	"FuukaWin": { // Player beats Fuuka
 		response: "Default",
-		clickFunction: (_gagged, _player) => {
+		clickFunction: (_gagged, player) => {
 			KinkyDungeonSetFlag("BossUnlocked", -1);
 			KinkyDungeonSetFlag("SpawnMap", -1);
 			if (KinkyDungeonPlayerBuffs?.FuukaOrb) KinkyDungeonPlayerBuffs.FuukaOrb.duration = 0;
+
+			KDResetAllAggro(player, 4);
 			return false;
 		},
 		options: {
@@ -6459,13 +6829,43 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 
 	"TheWardenLose": { // Player loses to TheWarden
 		response: "Default",
-		clickFunction: (_gagged, _player) => {
+		clickFunction: (_gagged, player) => {
 			let enemy = KinkyDungeonFindID(KDGameData.CurrentDialogMsgID);
+			KDResetAllAggro(player, 4);
 			if (enemy && enemy.Enemy.name == KDGameData.CurrentDialogMsgSpeaker) {
-				enemy.hostile = 0;
-				enemy.ceasefire = 4;
 				KinkyDungeonSetFlag("BossUnlocked", -1);
 				KinkyDungeonRemoveBuffsWithTag(KinkyDungeonPlayerEntity, ["removeDefeat"]);
+			}
+			let speaker = KDGetSpeaker(true);
+			if (speaker) {
+				KDCustomExp[speaker.id] = {"BlushPose":"BlushLow","EyesPose":"EyesSly","Eyes2Pose":"Eyes2Sly","MouthPose":"MouthSmile","FearPose":"NoFearPose","BrowsPose":"BrowsNeutral","Brows2Pose":"Brows2Neutral"};
+			}
+
+			let restraint = KinkyDungeonGetRestraint({tags: ["wardenRestraint"]}, 
+				KDGetEffLevel(), 'cat', true);
+
+			KDGameData.CurrentDialogMsgData = {
+				"itemName": restraint?.name || "WardenBelt",
+				"${Restraint}": TextGet("KDWardenRestraint_Belt"),
+				"${Restraints}": TextGet("KDWardenRestraints_Belt"),
+				"${Restrained}": TextGet("KDWardenRestrained_Belt"),
+			};
+			if (restraint?.chastity) {
+				KDGameData.CurrentDialogMsgData = {
+				"itemName": restraint.name,
+					"${Restraint}": TextGet("KDWardenRestraint_ChastityBelt"),
+					"${Restraints}": TextGet("KDWardenRestraints_ChastityBelt"),
+					"${Restrained}": TextGet("KDWardenRestrained_ChastityBelt"),
+				};
+			} else 
+			if (restraint?.shrine?.includes("Collars")) {
+				
+				KDGameData.CurrentDialogMsgData = {
+				"itemName": restraint.name,
+					"${Restraint}": TextGet("KDWardenRestraint_Collar"),
+					"${Restraints}": TextGet("KDWardenRestraints_Collar"),
+					"${Restrained}": TextGet("KDWardenRestrained_Collar"),
+				};
 			}
 			return false;
 		},
@@ -6477,7 +6877,9 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 						playertext: "TheWardenLose_Continue1", response: "Default",
 						leadsToStage: "Finish",
 						clickFunction: (_gagged, _player) => {
-							KinkyDungeonAddRestraintIfWeaker(KinkyDungeonGetRestraintByName("WardenBelt"), 0, true);
+							KinkyDungeonAddRestraintIfWeaker(KinkyDungeonGetRestraintByName(
+								KDGameData.CurrentDialogMsgData.itemName
+							), 0, true);
 							KinkyDungeonChangeRep("Prisoner", -100);
 							return false;
 						},
@@ -6486,7 +6888,7 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 						playertext: "TheWardenLose_Continue2", response: "Default",
 						leadsToStage: "Finish",
 						clickFunction: (_gagged, _player) => {
-							KinkyDungeonAddRestraintIfWeaker(KinkyDungeonGetRestraintByName("WardenBelt"), 0, true);
+							KinkyDungeonAddRestraintIfWeaker(KinkyDungeonGetRestraintByName(KDGameData.CurrentDialogMsgData.itemName), 0, true);
 							KinkyDungeonChangeRep("Prisoner", -100);
 							return false;
 						},
@@ -6495,7 +6897,7 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 						playertext: "TheWardenLose_Continue3", response: "Default",
 						leadsToStage: "Finish",
 						clickFunction: (_gagged, _player) => {
-							KinkyDungeonAddRestraintIfWeaker(KinkyDungeonGetRestraintByName("WardenBelt"), 0, true);
+							KinkyDungeonAddRestraintIfWeaker(KinkyDungeonGetRestraintByName(KDGameData.CurrentDialogMsgData.itemName), 0, true);
 							KinkyDungeonChangeRep("Prisoner", -100);
 							return false;
 						},
@@ -6509,7 +6911,7 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 						playertext: "TheWardenLose_Continue1", response: "Default",
 						leadsToStage: "Finish",
 						clickFunction: (_gagged, _player) => {
-							KinkyDungeonAddRestraintIfWeaker(KinkyDungeonGetRestraintByName("WardenBelt"), 0, true);
+							KinkyDungeonAddRestraintIfWeaker(KinkyDungeonGetRestraintByName(KDGameData.CurrentDialogMsgData.itemName), 0, true);
 							KinkyDungeonChangeRep("Prisoner", -100);
 							return false;
 						},
@@ -6518,7 +6920,7 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 						playertext: "TheWardenLose_Continue2", response: "Default",
 						leadsToStage: "Finish",
 						clickFunction: (_gagged, _player) => {
-							KinkyDungeonAddRestraintIfWeaker(KinkyDungeonGetRestraintByName("WardenBelt"), 0, true);
+							KinkyDungeonAddRestraintIfWeaker(KinkyDungeonGetRestraintByName(KDGameData.CurrentDialogMsgData.itemName), 0, true);
 							KinkyDungeonChangeRep("Prisoner", -100);
 							return false;
 						},
@@ -6527,7 +6929,7 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 						playertext: "TheWardenLose_Continue3", response: "Default",
 						leadsToStage: "Finish",
 						clickFunction: (_gagged, _player) => {
-							KinkyDungeonAddRestraintIfWeaker(KinkyDungeonGetRestraintByName("WardenBelt"), 0, true);
+							KinkyDungeonAddRestraintIfWeaker(KinkyDungeonGetRestraintByName(KDGameData.CurrentDialogMsgData.itemName), 0, true);
 							KinkyDungeonChangeRep("Prisoner", -100);
 							return false;
 						},
@@ -6541,7 +6943,7 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 						playertext: "TheWardenLose_Continue1", response: "Default",
 						leadsToStage: "Finish",
 						clickFunction: (_gagged, _player) => {
-							KinkyDungeonAddRestraintIfWeaker(KinkyDungeonGetRestraintByName("WardenBelt"), 0, true);
+							KinkyDungeonAddRestraintIfWeaker(KinkyDungeonGetRestraintByName(KDGameData.CurrentDialogMsgData.itemName), 0, true);
 							KinkyDungeonChangeRep("Prisoner", -100);
 							return false;
 						},
@@ -6550,8 +6952,9 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 						playertext: "TheWardenLose_Continue2", response: "Default",
 						leadsToStage: "Finish",
 						clickFunction: (_gagged, _player) => {
-							KinkyDungeonAddRestraintIfWeaker(KinkyDungeonGetRestraintByName("WardenBelt"), 0, true);
+							KinkyDungeonAddRestraintIfWeaker(KinkyDungeonGetRestraintByName(KDGameData.CurrentDialogMsgData.itemName), 0, true);
 							KinkyDungeonChangeRep("Prisoner", -100);
+							KinkyDungeonChangeRep("Ghost", 10);
 							return false;
 						},
 					},
@@ -6559,7 +6962,7 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 						playertext: "TheWardenLose_Continue3", response: "Default",
 						leadsToStage: "Finish",
 						clickFunction: (_gagged, _player) => {
-							KinkyDungeonAddRestraintIfWeaker(KinkyDungeonGetRestraintByName("WardenBelt"), 0, true);
+							KinkyDungeonAddRestraintIfWeaker(KinkyDungeonGetRestraintByName(KDGameData.CurrentDialogMsgData.itemName), 0, true);
 							KinkyDungeonChangeRep("Prisoner", -100);
 							return false;
 						},
@@ -6604,9 +7007,43 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 	},
 	"TheWardenWin": { // Player beats TheWarden
 		response: "Default",
-		clickFunction: (_gagged, _player) => {
+		clickFunction: (_gagged, player) => {
 			KinkyDungeonSetFlag("BossUnlocked", -1);
 			KinkyDungeonSetFlag("SpawnMap", -1);
+
+			KDResetAllAggro(player, 4);
+			
+			let speaker = KDGetSpeaker(true);
+			if (speaker) {
+				KDCustomExp[speaker.id] = {"BlushPose":"BlushLow","EyesPose":"EyesSly","Eyes2Pose":"Eyes2Sly","MouthPose":"MouthSmile","FearPose":"NoFearPose","BrowsPose":"BrowsNeutral","Brows2Pose":"Brows2Neutral"};
+			}
+
+			let restraint = KinkyDungeonGetRestraint({tags: ["wardenRestraintPos"]}, 
+				KDGetEffLevel(), 'cat', true);
+				
+			KDGameData.CurrentDialogMsgData = {
+				"itemName": restraint?.name || "WardenBelt",
+				"${Restraint}": TextGet("KDWardenRestraint_Belt"),
+				"${Restraints}": TextGet("KDWardenRestraints_Belt"),
+				"${Restrained}": TextGet("KDWardenRestrained_Belt"),
+			};
+			if (restraint?.chastity) {
+				KDGameData.CurrentDialogMsgData = {
+				"itemName": restraint.name,
+					"${Restraint}": TextGet("KDWardenRestraint_ChastityBelt"),
+					"${Restraints}": TextGet("KDWardenRestraints_ChastityBelt"),
+					"${Restrained}": TextGet("KDWardenRestrained_ChastityBelt"),
+				};
+			} else 
+			if (restraint?.shrine?.includes("Collars")) {
+				
+				KDGameData.CurrentDialogMsgData = {
+				"itemName": restraint.name,
+					"${Restraint}": TextGet("KDWardenRestraint_Collar"),
+					"${Restraints}": TextGet("KDWardenRestraints_Collar"),
+					"${Restrained}": TextGet("KDWardenRestrained_Collar"),
+				};
+			}
 			return false;
 		},
 		options: {
@@ -6621,10 +7058,62 @@ let KDDialogue: Record<string, KinkyDialogue> = {
 				},
 				exitDialogue: true,
 			},
-			"Accept": {
+			"AcceptCollar": {
 				playertext: "Default", response: "Default",
+				prerequisiteFunction: (gagged, player) => {
+					return KDCanAddRestraint(KinkyDungeonGetRestraintByName("WardenCollar2"), 
+					true, undefined, false);
+				},
 				clickFunction: (_gagged, _player) => {
-					KinkyDungeonAddRestraintIfWeaker(KinkyDungeonGetRestraintByName("WardenBelt2"), 0, true);
+					
+					KinkyDungeonAddRestraintIfWeaker(KinkyDungeonGetRestraintByName("WardenCollar2"), 0, true);
+					KinkyDungeonAddGold(1000);
+					if (KinkyDungeonIsPlayer()) {
+						KDUnlockPerk("WardenBelt");
+						KDUnlockPerk("CommonWarden");
+					}
+					return false;
+				},
+				options: {
+					"Leave": {
+						playertext: "Leave", response: "Default",
+						exitDialogue: true,
+					},
+				}
+			},
+			"AcceptBelt": {
+				playertext: "Default", response: "Default",
+				prerequisiteFunction: (gagged, player) => {
+					return KDCanAddRestraint(KinkyDungeonGetRestraintByName("WardenBelt2"), 
+					true, undefined, false);
+				},
+				clickFunction: (_gagged, _player) => {
+					
+					KinkyDungeonAddRestraintIfWeaker(KinkyDungeonGetRestraintByName("WardenBelt2"), 
+					0, true);
+					KinkyDungeonAddGold(1000);
+					if (KinkyDungeonIsPlayer()) {
+						KDUnlockPerk("WardenBelt");
+						KDUnlockPerk("CommonWarden");
+					}
+					return false;
+				},
+				options: {
+					"Leave": {
+						playertext: "Leave", response: "Default",
+						exitDialogue: true,
+					},
+				}
+			},
+			"AcceptCBelt": {
+				playertext: "Default", response: "Default",
+				prerequisiteFunction: (gagged, player) => {
+					return KDCanAddRestraint(KinkyDungeonGetRestraintByName("WardenCBelt2"), 
+					true, undefined, false);
+				},
+				clickFunction: (_gagged, _player) => {
+					
+					KinkyDungeonAddRestraintIfWeaker(KinkyDungeonGetRestraintByName("WardenCBelt2"), 0, true);
 					KinkyDungeonAddGold(1000);
 					if (KinkyDungeonIsPlayer()) {
 						KDUnlockPerk("WardenBelt");
@@ -6701,6 +7190,7 @@ function KDMakeIntoDoll(player: entity) {
 				KinkyDungeonSetFlag("Transformed", -1);
 
 				KinkyDungeonStatsChoice.set("SpeciesDoll", true);
+				KDUnlockPerk("DollShoppeStart");
 				let body = KinkyDungeonPlayer.Appearance.find((item) => {
 					return item.Model?.Group == "Body"
 				});
@@ -6840,5 +7330,87 @@ function KDDoDollShoppeVisitorImpress(en: entity, player: entity, gagged: boolea
 				KinkyDungeonSetEnemyFlag(en, "failedBuyRequest", -1);
 			}
 		}
+	}
+}
+
+function KDShopkeeperCriteria(player?: entity) {
+	return (item: item) => {
+		return !KDRestraint(item)?.noShop
+		&& !(item.lock && KDLocks[item.lock]?.shopImmune)
+		&& !(KDGetCurse(item) && KDCurses[KDGetCurse(item)]?.noShop);
+	};
+}
+
+let KDSummitFurnitureCacheBuilt = false;
+function KDSummitFurnitureBuildCache() {
+	if (KDSummitFurnitureCacheBuilt) {
+		return;
+	}
+	KDSummitFurnitureCacheBuilt = true;
+
+	const dialog = KDDialogue["Furniture"]?.options?.["Remodel"];
+	if (!dialog) {
+		return;
+	}
+
+	// map furniture tags to furniture restraints
+	const furnitures: Record<string, string> = {};
+	const best: Record<string, number> = {};
+	for (let r of KinkyDungeonRestraints) {
+		if (r.Group != "ItemDevices" || !r.immobile) {
+			continue;
+		}
+		if (!r.enemyTags) {
+			continue;
+		}
+		if (r.enemyTags["noSummitRemodel"] != undefined) {
+			// allow mods to exclude their furniture from the dialog
+			continue;
+		}
+		if (r.name == "Resin") {
+			continue;
+		}
+
+		for (let key in KDFurniture) {
+			if (key == "ShadowBase") {
+				// ShadowBallSuit has weight 100 but is not immobile so it picks cage with weight 0.1 instead
+				continue;
+			}
+			if (key == "DisplayEgyptian") {
+				// resolves to display trap which creates a duplicate dialog entry
+				continue;
+			}
+
+			const w = r.enemyTags[KDFurniture[key].restraintTag];
+			if (w != undefined && (best[key] == undefined || w > best[key])) {
+				best[key] = w;
+				furnitures[key] = KDGetRestraintName(r);
+			}
+		}
+	}
+
+	let i = 0;
+	for (let key in furnitures) {
+		const idx = "" + i;
+		addTextKey("dFurnitureRemodel_" + idx, furnitures[key]);
+		dialog.options[idx] = {
+			playertext: "Default",
+			response: "FurnitureRemodeled",
+			leadsToStage: "",
+			dontTouchText: true,
+			clickFunction: (): boolean => {
+				const pos = KDGameData.InteractTargetX + ',' + KDGameData.InteractTargetY;
+				if (!KDGameData.SummitFurniture) {
+					KDGameData.SummitFurniture = {};
+				}
+				KDGameData.SummitFurniture[pos] = key;
+				const tile = KinkyDungeonTilesGet(pos);
+				if (tile?.Furniture) {
+					tile.Furniture = key;
+				}
+				return false;
+			},
+		};
+		i++;
 	}
 }
