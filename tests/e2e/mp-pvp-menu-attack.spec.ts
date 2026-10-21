@@ -10,11 +10,14 @@
  * dropping turn over turn.
  */
 import { test, expect } from '@playwright/test';
-import { bootCoopPair, MP_TEST_TIMEOUT, waitForPeerAvatar, coopAwaitTick, coopSendWait } from './helpers/coop';
+import { bootCoopPair, MP_TEST_TIMEOUT, waitForPeerAvatar, coopAwaitTick, coopSendWait, captureCoopWire, clearCoopWire, readCoopWire } from './helpers/coop';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { start } = require('../../tools/mp-server/demo-server');
 
 const TURNS = 4;
+
+/** The input each attack-ish menu entry sends (KDContextMenu.ts, `KDGetGameContextActionsVanilla`). */
+const MENU_INPUT: Record<string, string> = { Aggro: 'doaggro', Attack: 'doattack', Tease: 'doattack', Capture: 'docapture' };
 
 /** Drive KD's real context menu against the peer avatar; invoke the attack option it offers. */
 // The caller WAITS for the avatar (waitForPeerAvatar) and passes its id in, so the
@@ -48,23 +51,43 @@ async function menuAttackPeer(P: any, peerId: any) {
 			cacheFlag: (typeof KDUpdateEnemyCache !== 'undefined') ? KDUpdateEnemyCache : 'undef',
 		};
 		// build the REAL menu options via KD's own vanilla builder, against the peer tile
-		const options: string[] = [];
-		const optionImages: any = {}, optionActions: any = {}, optionGrey: any = {}, optionText: any = {}, optionColor: any = {}, optionFilter: any[] = [];
 		// @ts-ignore bare global fn
 		if (typeof KDGetGameContextActionsVanilla !== 'function') return { ok: false, why: 'no-vanilla-builder', vis, see, dbg };
-		// @ts-ignore
-		KDGetGameContextActionsVanilla(false, options, optionImages, optionActions, optionGrey, optionText, optionColor, optionFilter);
-		const menu = { options, optionActions, optionGrey };
-		const grey = optionGrey;
+		const build = () => {
+			const options: string[] = [];
+			const optionImages: any = {}, optionActions: any = {}, optionGrey: any = {}, optionText: any = {}, optionColor: any = {}, optionFilter: any[] = [];
+			// @ts-ignore
+			KDGetGameContextActionsVanilla(false, options, optionImages, optionActions, optionGrey, optionText, optionColor, optionFilter);
+			return { options, optionActions, optionGrey, optionText };
+		};
+		let menu = build();
+		const options = menu.options;
+		const grey = menu.optionGrey;
 		// pick the attack-ish option the UI would use
 		const key = ['Attack', 'Aggro', 'Tease', 'Capture'].find((k) => options.includes(k));
 		if (!key) return { ok: false, why: 'no-attack-option', options, vis, see, dbg };
 		if (grey[key]) return { ok: false, why: 'option-greyed', key, options, grey, vis, see };
 		// reset the per-turn submit gate so the routed KDSendInput actually forwards
 		if (w.__coop) w.__coop.submitted = false;
+		const wireLen = () => ((w.__coopWire || []) as any[]).length;   // captureCoopWire's log
+		const wireBefore = wireLen();
 		// invoke the REAL option callback (runs KDSendInput → routed → submit → WS)
 		try { menu.optionActions[key](0, 0); } catch (e) { return { ok: false, why: 'action-threw:' + (e && (e as any).message), key, options }; }
-		return { ok: true, key, options, vis, see, sent: !!(w.__coop && w.__coop.submitted) };
+		// KD's Aggro is two clicks (KDContextMenu.ts, the `KinkyDungeonChestConfirm` branch): the first
+		// only arms the confirm, the menu re-renders the entry as "confirm", and the SECOND click sends
+		// doaggro. Click again exactly as a player must — through a rebuilt menu, since the re-render is
+		// what a player sees — and report both clicks, so a confirm that never sends is visible.
+		let confirmText: any = null;
+		// Only when the first click sent NOTHING: the confirm flag outlives the click it armed, so an
+		// entry with no confirm step (Attack) would otherwise be clicked twice and send twice.
+		// @ts-ignore bare let-global
+		if (wireLen() === wireBefore && KinkyDungeonChestConfirm) {
+			menu = build();
+			confirmText = menu.optionText[key];
+			if (!menu.optionActions[key]) return { ok: false, why: 'confirm-entry-gone', key, options: menu.options };
+			try { menu.optionActions[key](0, 0); } catch (e) { return { ok: false, why: 'confirm-threw:' + (e && (e as any).message), key }; }
+		}
+		return { ok: true, key, options, vis, see, confirmText };
 	}, peerId);
 }
 
@@ -81,6 +104,7 @@ test('PvP via the real context menu: sneak then repeated attacks keep landing', 
 
 	try {
 		await bootCoopPair(A, B, port);
+		await captureCoopWire(A);
 
 		let prevWill = await willOfB();
 		const willAtStart = prevWill;
@@ -89,7 +113,16 @@ test('PvP via the real context menu: sneak then repeated attacks keep landing', 
 		let attackTurns = 0;
 
 		for (let t = 1; t <= TURNS; t++) {
+			await clearCoopWire(A);
 			const r = await menuAttackPeer(A, (await waitForPeerAvatar(A, { label: "A driving the context menu" })).id);
+			// Before the tick wait: a menu that "succeeds" without putting its input on the wire leaves
+			// the turn open forever, and the tick wait would report that as an unexplained 30 s timeout.
+			// The wire is the deciding layer — `__coop.submitted` only turns true when the server's
+			// `waiting` reply arrives, so it cannot be read synchronously after the click.
+			if (r.ok) {
+				const sent = await readCoopWire(A, MENU_INPUT[r.key as string]);
+				expect(sent.length, `turn ${t}: the menu must send exactly one ${MENU_INPUT[r.key as string]} — ${JSON.stringify(r)}`).toBe(1);
+			}
 			await coopAwaitTick(A, async () => {
 				// the UI offered/sent nothing → A must still act so we can observe (wait)
 				if (!r.ok) await coopSendWait(A);
