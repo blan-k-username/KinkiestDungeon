@@ -105,6 +105,7 @@ const ADVANCE_TIME = {
 	KinkyDungeonUpdateFlags:      entry('player', 'ticks KinkyDungeonFlags, the per-player flag map (same bucket as KinkyDungeonSetFlag) (Game/src/enemy/KinkyDungeonEnemies.ts:303)'),
 	KinkyDungeonSetFlag:          entry('player', 'writes KinkyDungeonFlags — a per-player flag map (e.g. "DangerFlag", "Quickness"), visible on that player\'s own HUD (Game/src/enemy/KinkyDungeonEnemies.ts:276)'),
 	KinkyDungeonParseExtraWarningTiles: entry('player', 'populates KDGameData.WarningTiles, reset to {} earlier in the SAME apply, not in KDGAMEDATA_WORLD_KEYS — per-player overlay (Game/src/fight/KinkyDungeonFight.ts near :4113)'),
+	KDTickSensesTraining:         entry('player', 'called with KDPlayer() (Game/src/base/game/KinkyDungeonGame.ts:3853); reads KinkyDungeonPlayerEntity\'s position and KinkyDungeonBlindLevel (both per-player, SLOT_SWAP_GLOBALS) and writes only KDGameData.SeenEntities and, via KDTickTraining (Game/src/player/KDTraining.ts:206), KDGameData.Training — neither in KDGAMEDATA_WORLD_KEYS, so both follow the human. Not a WORLD_MUTE_CANDIDATE, so it runs on every apply: once per player per round, the acting player\'s own senses training (Game/src/base/game/KinkyDungeonGame.ts:3878-3901)'),
 	KinkyDungeonInDanger:         entry('player', 'pure read of the acting player\'s own stats/flags (Game/src/enemy/KinkyDungeonEnemies.ts:683)'),
 	KDAutoSprintCriteria:         entry('player', 'always called with KDPlayer() at this call site; reads the given entity\'s own stats (Game/src/base/game/KinkyDungeonGame.ts:4885)'),
 	KinkyDungeonMultiplayerUpdate: entry('player', 'placeholder — "Do nothing. Placeholder for when/if there is ever any MP functionality" (Game/src/base/KinkyDungeon.ts:7930)'),
@@ -196,7 +197,10 @@ const UPDATE_ENEMIES = {
 	KDistChebyshev:            worldHelper('pure coordinate math, no entity at all', 'Game/src/base/KinkyDungeon.ts', 977),
 	KinkyDungeonAllConsumable: worldHelper('reads the acting player\'s inventory as a decoy-check input only; writes nothing', 'Game/src/item/KinkyDungeonInventory.ts', 792),
 	KinkyDungeonAllWeapon:     worldHelper('same as KinkyDungeonAllConsumable', 'Game/src/item/KinkyDungeonInventory.ts', 804),
-	KinkyDungeonApplyBuffToEntity: worldHelper('applies a buff to the given entity (enemy at this call site)', 'Game/src/effect/KinkyDungeonBuffs.ts', 404),
+	// Upstream (merged 2026-10-20) moved these calls from KinkyDungeonApplyBuffToEntity — now a thin
+	// alias (KinkyDungeonBuffs.ts:405-407) UpdateEnemies no longer names — to KDApplyBuffToEntity itself.
+	KDApplyBuffToEntity:       worldHelper('applies a bondage-status buff to the iterated enemy (call sites :4416-4440 all pass `enemy`); the entity.player branch (KinkyDungeonBuffs.ts:416) is never taken from here', 'Game/src/effect/KinkyDungeonBuffs.ts', 415),
+	KDIsFlying:                worldHelper('pure read of the iterated enemy\'s own tags/flags, choosing its move-sound text (call site Game/src/enemy/KinkyDungeonEnemies.ts:4881)', 'Game/src/enemy/KinkyDungeonEnemies.ts', 9969),
 	KinkyDungeonCheckPath:     worldHelper('pure pathing/LOS math over the shared grid', 'Game/src/base/KinkyDungeonVision.ts', 67),
 	KinkyDungeonDamageEnemy:   worldHelper('damages the given ENEMY (not the player — KinkyDungeonDealDamage is the player path)', 'Game/src/fight/KinkyDungeonFight.ts', 1581),
 	KinkyDungeonFindID:        worldHelper('entity lookup by id over the shared map', 'Game/src/enemy/KinkyDungeonEnemies.ts', 8462),
@@ -443,6 +447,9 @@ const SLOT_SWAP_GLOBALS = {
 	// --- pass-world: a world-entity cache dirty-flag, same shape as KDUpdateEnemyCache above —
 	// PROTECTED: added to GLOBAL_BLACKLIST by this task.
 	KDUpdateEntityFlagCache:    entry('pass-world', 'dirty flag for a cache rebuilt from KDMapData.Entities (KinkyDungeonCollection.ts:394, KinkyDungeonGame.ts:3833), keyed by no player — GLOBAL_BLACKLIST'),
+	// --- pass-world: found after the 2026-10-20 upstream merge — PROTECTED: added to GLOBAL_BLACKLIST.
+	KDDeletedIDs:   entry('pass-world', 'persistent-NPC tombstones keyed by ENEMY id (KDPersistence.ts:450) — criterion (a). Cleared mid-pass when an enemy is re-made persistent (KDGetPersistentNPC, KDPersistence.ts:549) and read by KDAddEntity to refuse re-adding a deleted NPC (KinkyDungeonEnemies.ts:10498/10502): a mid-pass restore of a stale per-player copy would re-tombstone an NPC the pass just undeleted — GLOBAL_BLACKLIST'),
+	KDFloaterID:    entry('pass-world', 'id counter for floater objects (KinkyDungeonDraw.ts:2631/2656), used only as a draw-text cache key (:2741) — the server has no screen and never ships the id (clients re-create each harvested floater locally via KinkyDungeonSendFloater, render-client.js). Same render bucket as KDParticleid; per-player capture would only rewind a counter nobody reads — GLOBAL_BLACKLIST'),
 	// --- per-player: ordinary per-turn player state, correctly captured/restored with the human ----
 	KinkyDungeonStatWill:          entry('per-player', 'the acting human\'s own Will stat'),
 	KinkyDungeonStatMana:          entry('per-player', 'the acting human\'s own current mana, spent by their own spell cast'),
@@ -535,6 +542,7 @@ const SLOT_SWAP_GAMEDATA_KEYS = {
 	SawFlags:       entry('per-player', 'per-faction "has this human witnessed crime c times" tally (KinkyDungeonMagic.ts:1509)'),
 	TempFlagFloorTicks: entry('per-player', 'decay timer for the human\'s OWN KinkyDungeonFlags entries (KinkyDungeonEvents.ts:12826-12829) — KinkyDungeonFlags itself is per-player (not in GLOBAL_BLACKLIST), so this decays WITH it despite the name'),
 	JailTurns:      entry('per-player', 'the acting human\'s own turns-served-in-jail countdown (KinkyDungeonJail.ts:191/665)'),
+	Training:       entry('per-player', 'the human\'s own skill-training progress (Heels/Gag/Corset/Senses), written only by KDTickTraining/KDAddFlatTraining against KDPlayer() (Game/src/player/KDTraining.ts:206-263) — callers include the new per-apply KDTickSensesTraining (KinkyDungeonGame.ts:3853, ADVANCE_TIME) and heels/jail ticks; whoever holds the slot when it is written is the human it belongs to, and the generic KDGameData capture carries it with them'),
 	PrisonerState:  entry('per-player', 'the acting human\'s own prisoner state — already treated as per-player by mp-transition-write-audit.spec.ts, confirmed here independently'),
 };
 

@@ -15,53 +15,14 @@ Upstream source of truth for these line numbers: `upstream/5.5` (`git remote ups
 
 | Patch id | Report | Filed upstream |
 |---|---|---|
-| `npcrestrain-null-slot-sgroup` | [#1](#1-npcrestraints-unguarded-kdgetnpcbindingslotforitem-sgroup) | no — local only |
 | `kdinventoryactions-sg-nocut`, `kdinventoryactions-sg-blocked` | [#2](#2-kdinventoryactionsts-unguarded-struggle-group-lookup-in-the-cut-action) | no — local only |
 
-Both files were verified byte-identical to `upstream/5.5` (KDM-156), i.e. these are genuine upstream
-bugs, not artefacts of our fork.
+The file was verified byte-identical to `upstream/5.5` (KDM-156), i.e. this is a genuine upstream
+bug, not an artefact of our fork.
 
----
-
-## 1. `NPCRestrain.ts`: unguarded `KDGetNPCBindingSlotForItem(...).sgroup`
-
-**Version:** 5.5 (`upstream/5.5`, verified byte-identical to our checkout)
-
-**Summary**
-
-`NPCRestrain.ts:310` and `:402` do
-
-```ts
-slot || KDGetNPCBindingSlotForItem(restraint, npcID).sgroup
-```
-
-but `KDGetNPCBindingSlotForItem` returns `null` when no binding row/subgroup on that NPC accepts the
-item (`KDGenRestraintUniform.ts:38`, `:48`). Clicking such an item in the bind menu throws
-
-```
-TypeError: Cannot read properties of null (reading 'sgroup')
-```
-
-**Reproduction**
-
-1. Open the bind menu on an NPC.
-2. Click a restraint that no binding row on that NPC accepts.
-3. The click throws instead of being ignored.
-
-**Why `?.` is the intended shape**
-
-The two sibling call sites in the same file are already guarded — `:877` uses `?.sgroup` and `:445`
-null-checks — and the very next line after each unguarded read is `if (slot_temp)`, which already
-handles a null. With the guard the click becomes the no-op it was evidently meant to be.
-
-**Suggested fix**
-
-```diff
--	slot || KDGetNPCBindingSlotForItem(restraint, npcID).sgroup
-+	slot || KDGetNPCBindingSlotForItem(restraint, npcID)?.sgroup
-```
-
-at both `:310` and `:402`.
+Report #1 (`NPCRestrain.ts`, unguarded `KDGetNPCBindingSlotForItem(...).sgroup`) was retired with its
+patch when upstream guarded both reads with `?.` (`NPCRestrain.ts:312`, `:401`, merged 2026-10-20);
+the numbering of the remaining reports is kept so existing links stay valid.
 
 ---
 

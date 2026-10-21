@@ -189,21 +189,6 @@ const UPSTREAM_DRAFTS = 'unfiled: tools/mp-server/UPSTREAM_ISSUES.md';
 
 const BUNDLE_PATCHES = [
 	{
-		id: 'npcrestrain-null-slot-sgroup',
-		// NPCRestrain.ts:310, :402 — KDGetNPCBindingSlotForItem returns null when no binding row
-		// accepts the item on that NPC (KDGenRestraintUniform.ts:38, :48). Siblings :877/:445 are
-		// already guarded, so `?.` is the intended shape, and the next line's `if (slot_temp)`
-		// already handles null: the click becomes the no-op it should have been.
-		find: 'KDGetNPCBindingSlotForItem(restraint, npcID).sgroup',
-		repl: 'KDGetNPCBindingSlotForItem(restraint, npcID)?.sgroup',
-		sites: 2,
-		repro: 'PvP: open the bind menu on the peer (an Enemy) and CLICK an item no binding row on ' +
-			'that NPC accepts → "Cannot read properties of null (reading \'sgroup\')".',
-		upstream: UPSTREAM_DRAFTS,
-		removeWhen: 'NPCRestrain.ts guards both reads with `?.` — observable here as this entry ' +
-			'matching 0 sites in out/main.js (audit verdict "delete-me").',
-	},
-	{
 		id: 'kdinventoryactions-sg-nocut',
 		// KDInventoryActions.ts:424 ("Cut".show) — KinkyDungeonStruggleGroups.find(...) is undefined
 		// when no struggle group matches the worn item's Group.

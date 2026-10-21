@@ -378,6 +378,9 @@ const GLOBAL_BLACKLIST = Object.freeze([
 	// these with whichever human's earlier value, the same clobber shape __kdWorldMuted and
 	// KDCustomDefeat/KDCustomDefeatEnemy were found by previously.
 	'geteligrest_lastTagsEnemy', 'geteligrest_lastExtraTags', 'KDUpdateEntityFlagCache',
+	// Same audit, after the 2026-10-20 upstream merge: persistent-NPC tombstones keyed by ENEMY id
+	// (KDPersistence.ts:450), undeleted mid-pass by KDGetPersistentNPC (:549) — criterion (a).
+	'KDDeletedIDs',
 	// Derived lookup caches over the world's ENTITIES — same category as KDPathCache above, and the
 	// same criterion (a) as KDGAMEDATA_WORLD_KEYS' entity-keyed entries: they describe world entities,
 	// not a player. They only became visible when the capture layer learned about Map, and they
@@ -473,6 +476,9 @@ const GLOBAL_BLACKLIST = Object.freeze([
 	// (boolean / number / object) so "absent from the bundle" cannot pass on a broken capture layer.
 	'KinkyDungeonUpdateLightGrid', 'KDRedrawFog', 'KDTileModes',
 	'lastFloaterRefresh', 'KDParticleid', 'KDCurrentModels', 'KDRefreshCharacter',
+	// Floater id counter (KinkyDungeonDraw.ts:2631) — only a draw-text cache key; harvested floaters
+	// are re-created client-side with the client's own ids. Flagged by the slot-swap write audit.
+	'KDFloaterID',
 	// --- client audio: neither player nor world ------------------------------
 	'KDMusicToast', 'KDMusicUpdateTime',
 	// --- already managed per-player by swap-session (do NOT double-manage) ---
