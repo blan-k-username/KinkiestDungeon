@@ -85,11 +85,11 @@ async function waitForNPCChar(page: Page, id: number): Promise<void> {
 	});
 }
 
-/** `AppearanceItemStringify` of the generated peer NPC's current Appearance. */
+/** The generated peer NPC's current look (`KDRenderClient.lookString`). */
 async function peerNPCAppearance(page: Page, id: number): Promise<string> {
 	return page.evaluate((id: number) => {
 		// @ts-ignore
-		return AppearanceItemStringify(KDNPCChar.get(id).Appearance);
+		return (window as any).KDRenderClient.lookString(KDNPCChar.get(id));
 	}, id);
 }
 

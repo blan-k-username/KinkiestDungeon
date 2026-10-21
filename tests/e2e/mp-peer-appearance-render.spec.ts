@@ -101,14 +101,12 @@ async function genNPC(page: any, id: number) {
 	}, id);
 }
 
-/** `AppearanceItemStringify` of the generated NPC's current Appearance, or null if none exists yet. */
+/** The generated NPC's current look (`KDRenderClient.lookString`), or null if none exists yet. */
 async function npcAppearance(page: any, id: number): Promise<string | null> {
 	return page.evaluate((id: number) => {
 		// @ts-ignore
 		const npc = KDNPCChar.get(id);
-		if (!npc) return null;
-		// @ts-ignore
-		return AppearanceItemStringify(npc.Appearance);
+		return npc ? (window as any).KDRenderClient.lookString(npc) : null;
 	}, id);
 }
 
@@ -163,8 +161,7 @@ test.describe('a co-op partner\'s avatar wears the partner\'s own look', () => {
 			(window as any).KDRenderClient.apply({ messages: { log: [] }, bundle: { v: 1, gameData: {}, globals: {} } });
 			// @ts-ignore
 			const npc = KDNPCChar.get(id);
-			// @ts-ignore
-			return npc ? AppearanceItemStringify(npc.Appearance) : null;
+			return npc ? (window as any).KDRenderClient.lookString(npc) : null;
 		}, id);
 		expect(after, 'the avatar now looks exactly like its owner declared, not like the random preset')
 			.toBe(built.sourceStringified);

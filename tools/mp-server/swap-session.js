@@ -3202,9 +3202,10 @@ class SwapSession {
 	/**
 	 * Put a peer's real bondage onto their avatar, as a LEVEL with no items.
 	 *
-	 * The avatar must not ACCUMULATE restraint items — its binding slots fill up and the stock
-	 * submenu (`KDGetNPCBindingSlotForItem(...).sgroup`, no null guard) crashes after a few ties. The
-	 * victim keeps the real ties on their own bundle, so the items are cleared every turn.
+	 * The avatar must not ACCUMULATE restraint items. The victim keeps the real ties on their own
+	 * bundle, so items on the avatar would be a second, stale copy of them; they are cleared every
+	 * turn. (This used to be a crash too — the stock submenu's `.sgroup` read had no null guard on a
+	 * full slot — until upstream guarded it, `NPCRestrain.ts:312, 401`.)
 	 *
 	 * …and the LEVEL is then mirrored back through the item-free channel, so `KDBoundEffects`
 	 * sees it. Without this the avatar reads as unbound and `KDBoundEffects` returns 0 at its

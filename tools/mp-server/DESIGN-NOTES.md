@@ -539,8 +539,8 @@ source:
   stock outfit flickers for one frame.
 
 The avatar's bondage stays item-free (`specialBoundLevel`, plus the per-snapshot `KDSetNPCRestraints`
-reset). The restraints you see on a partner are drawn models only, not items, so the tie-submenu crash
-cannot come back through this path. Pinned by `tests/e2e/mp-own-paper-doll.spec.ts` #3 (proven red with
+reset). The restraints you see on a partner are drawn models only, not items, so they never become a
+second, stale copy of the victim's real ties. Pinned by `tests/e2e/mp-own-paper-doll.spec.ts` #3 (proven red with
 the send disabled) and `tests/unit/mp-look-update.spec.ts`.
 
 ### Borrowing a KD screen

@@ -226,12 +226,31 @@
 	 * kept, and it wins its slot over the look's copy. Without the tag, a restraint from an earlier look
 	 * would be "a worn item slot" forever and outlive the partner getting free.
 	 */
+	/** Marks a worn model as one that came from a declared look (see the note above). */
+	var LOOK_TAG = '__kdFromLook';
+
+	/**
+	 * A character's look as KD serialises it (`AppearanceItemStringify`), minus `LOOK_TAG`. KD's
+	 * serialiser writes every field on an item, so the tag would otherwise read as part of the look:
+	 * a partner's avatar wearing exactly the declared look would compare unequal to it.
+	 */
+	function lookString(Character) {
+		var items = (Character && Character.Appearance) || [];
+		var copies = [];
+		for (var i = 0; i < items.length; i++) {
+			var c = {};
+			for (var k in items[i]) if (k !== LOOK_TAG) c[k] = items[i][k];
+			copies.push(c);
+		}
+		return AppearanceItemStringify(copies);
+	}
+
 	function mergeDeclaredLook(Character, declaredItems) {
 		var current = Character.Appearance || [];
 		var kept = [], keptGroups = {};
 		for (var j = 0; j < current.length; j++) {
 			var it = current[j], cm = it && it.Model, cg = cm && cm.Group;
-			if (it && !it.__kdFromLook && cm && (cm.Restraint || (cg && cg.indexOf('Item') === 0))) {
+			if (it && !it[LOOK_TAG] && cm && (cm.Restraint || (cg && cg.indexOf('Item') === 0))) {
 				kept.push(it);
 				if (cg) keptGroups[cg] = true;
 			}
@@ -257,7 +276,7 @@
 		var backup = DecompressB64(declaredWire);
 		var declaredItems = AppearanceItemParse(backup);
 		if (!Array.isArray(declaredItems)) return;
-		for (var i = 0; i < declaredItems.length; i++) if (declaredItems[i]) declaredItems[i].__kdFromLook = 1;
+		for (var i = 0; i < declaredItems.length; i++) if (declaredItems[i]) declaredItems[i][LOOK_TAG] = 1;
 		mergeDeclaredLook(Character, declaredItems);
 	}
 
@@ -897,6 +916,7 @@
 	}
 
 	var KDRenderClient = {
+		lookString: lookString,
 		/** Snapshot the current render globals (render-state v1). Mirrors the host. */
 		serialize: function () {
 			var M = KDMapData;
@@ -1032,10 +1052,11 @@
 			if (KDMapData && Array.isArray(KDMapData.Entities)) applyPeerAppearances(KDMapData.Entities);
 			// The "Tie Up" submenu runs LOCALLY on the attacker and writes the avatar's NPC
 				// restraints into KDGameData.NPCRestraints — which the snapshot does NOT reset (it only
-				// syncs KDMapData). Over several ties those local slots accumulate and the stock apply
-				// (KDGetNPCBindingSlotForItem(...).sgroup, no null guard) crashes on a full slot. Reset each
-				// peer avatar's LOCAL bondage every snapshot — the authoritative tie lives on the server and
-				// is reflected on the VICTIM's own client via s.restraints below.
+				// syncs KDMapData). Over several ties those local slots accumulate into a stale second copy
+				// of the victim's ties (and used to crash the stock apply on a full slot, until upstream
+				// null-guarded its `.sgroup` read, NPCRestrain.ts:312, 401). Reset each peer avatar's LOCAL
+				// bondage every snapshot — the authoritative tie lives on the server and is reflected on
+				// the VICTIM's own client via s.restraints below.
 				if (KDMapData && Array.isArray(KDMapData.Entities) && typeof KDSetNPCRestraints === 'function') {
 					for (var ai = 0; ai < KDMapData.Entities.length; ai++) {
 						var av = KDMapData.Entities[ai];
