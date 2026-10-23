@@ -165,6 +165,14 @@ Every *other* player is present in the world as a real KD entity — an avatar c
 and collision, vision and dialogue work through KD's normal code paths. When an enemy hits an
 avatar, the result is written back into that player's bundle.
 
+Companions belong to the player who recruited them. When two players are at war, each player and
+their companions form one team: the companions fight the other team and never hurt their own player,
+whether that player is in the slot or standing as an avatar, and that includes their spells. Each
+team gets its own KD faction (`MPWarTeam_<player>`) with no relation to `"Player"`, so KD's own
+hostility rules never turn a companion on either human. KD's bullet hit gates, which spare the player
+only from `"Player"`-friendly bullets, are wrapped to spare the owner too
+(`HeadlessHost.installCompanionFactionGuard`).
+
 ### 3. The browser is a thin client
 
 Each browser runs the stock game page, but `client/render-client.js` switches local simulation off:

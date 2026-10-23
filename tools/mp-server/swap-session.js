@@ -2231,7 +2231,7 @@ class SwapSession {
 			if (multi) {
 				this.world.setWorldMuted(!last);
 				if (last) {
-					const roster = order.map((cid) => ({ cid, avatarId: this.avatars.get(cid) }));
+					const roster = order.map((cid) => ({ cid, avatarId: this.avatars.get(cid), team: this._warFactionFor(cid) }));
 					const sticky = {};
 					for (const [eid, cid] of this._enemyTarget) {
 						if (this._joined.includes(cid)) sticky[eid] = cid;
@@ -3660,6 +3660,8 @@ class SwapSession {
 	 */
 	_assertHumanContext(id) {
 		this._pushPartyGate(id);
+		// One constant source per player, so the eval cache still serves it (see the doc comment above).
+		this.world.eval('globalThis.__kdSlotWarTeam = ' + JSON.stringify(this._warFactionFor(id)) + ';');
 		this.world.eval(this._anyPartnerFree(id)
 			? 'globalThis.__kdCoopPartnerFree = true;'
 			: 'globalThis.__kdCoopPartnerFree = false;');

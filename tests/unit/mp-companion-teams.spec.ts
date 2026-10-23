@@ -116,6 +116,28 @@ function placeAdjacentTo(s: any, nearCid: string, entityId: number) {
 	}
 }
 
+/**
+ * Record every hit a HUMAN takes, attributed: who was hit (the war team of the human in the slot at the
+ * moment of damage, `__kdSlotWarTeam`) and by whom (a bullet's `source`, else the enemy whose own turn
+ * is running -- KD deals an enemy's own attack from `KinkyDungeonEnemyLoop`, KinkyDungeonEnemies.ts:7499).
+ * Node-side sink: the slot swap captures and restores in-world state, not this array.
+ */
+function recordPlayerHits(s: any): Array<{ team: string, by: number | null, dw: number }> {
+	const hits: any[] = [];
+	s.world._context.__hitSink = (j: string) => hits.push(JSON.parse(j));
+	s.world.eval(`(function(){
+		var cur = null, loop = KinkyDungeonEnemyLoop, deal = KinkyDungeonDealDamage;
+		KinkyDungeonEnemyLoop = function(e){ var o = cur; cur = e; try { return loop.apply(this, arguments); } finally { cur = o; } };
+		KinkyDungeonDealDamage = function(d, b){
+			var w0 = KinkyDungeonStatWill, r = deal.apply(this, arguments);
+			var by = (b && b.bullet && b.bullet.source != null) ? b.bullet.source : (cur ? cur.id : null);
+			__hitSink(JSON.stringify({ team: globalThis.__kdSlotWarTeam, by: by, dw: KinkyDungeonStatWill - w0 }));
+			return r;
+		};
+	})()`);
+	return hits;
+}
+
 /** Park `mobileCid`'s avatar onto a free tile next to `anchorCid` -- the ordinary co-op case of two
  *  players standing together. */
 function standTogether(s: any, mobileCid: string, anchorCid: string) {
@@ -360,8 +382,15 @@ describe('co-op companions: separate teams by owner', () => {
 		s.submit('A', { kind: 'wait' });
 		s.submit('B', { kind: 'wait' });
 
-		const willMaxA = s.vitalsOf.get('A').willMax;
-		const willMaxB = s.vitalsOf.get('B').willMax;
+		const hits = recordPlayerHits(s);
+		// CONTROL: the recorder sees a hit and attributes it to nobody, on A's own team.
+		s.world.restorePlayer(s.bundles.get('A'));
+		s._assertHumanContext('A');
+		s.world.eval("KinkyDungeonDealDamage({ damage: 1, type: 'crush' }, undefined, true, true, true);");
+		expect(hits.splice(0), 'control: the hit recorder works').toEqual([expect.objectContaining({ team: s._warFactionFor('A'), by: null })]);
+		s.bundles.set('A', s.world.capturePlayer());
+
+		const ownerOf: Record<number, string> = { [aCompanion]: s._warFactionFor('A'), [bCompanion]: s._warFactionFor('B') };
 		let aCompanionHurtOpponent = false;
 		let bCompanionHurtOpponent = false;
 
@@ -377,18 +406,17 @@ describe('co-op companions: separate teams by owner', () => {
 			s.submit('A', { kind: 'wait' });
 			s.submit('B', { kind: 'wait' });
 
-			expect(s.vitalsOf.get('A').will,
-				`round ${round}: A's own companion must never hurt A, its own owner, even while war-armed`)
-				.toBe(willMaxA);
-			expect(s.vitalsOf.get('B').will,
-				`round ${round}: B's own companion must never hurt B, its own owner, even while war-armed`)
-				.toBe(willMaxB);
-
-			if (s.vitalsOf.get('B').will < willMaxB) bCompanionHurtOpponent = true; // (never true, see above)
+			// Attributed, not total Will: the OTHER team hurting a player is the liveness this test wants.
+			const roundHits = hits.splice(0).filter((h) => h.by != null && ownerOf[h.by]);
+			for (const h of roundHits) {
+				expect(h.team, `round ${round}: companion ${h.by} must never hurt its own owner, even while war-armed`)
+					.not.toBe(ownerOf[h.by]);
+				if (h.by === aCompanion) aCompanionHurtOpponent = true; // hurt B
+				if (h.by === bCompanion) bCompanionHurtOpponent = true; // hurt A
+			}
 			const aC = hpOf(s, aCompanion), bC = hpOf(s, bCompanion);
 			// Liveness in THIS same scene: each companion must still be able to reach the OTHER
-			// player's avatar/companion -- "attacks B" is proven by B's own real Will dropping below
-			// max for B's companion's own target (A), or by a companion's hp loss.
+			// team -- the other player (recorded above) or the other player's companion (hp loss).
 			if (!aC || aC.hp < aC.maxhp) bCompanionHurtOpponent = true; // B's side damaged A's companion
 			if (!bC || bC.hp < bC.maxhp) aCompanionHurtOpponent = true; // A's side damaged B's companion
 		}
@@ -399,6 +427,68 @@ describe('co-op companions: separate teams by owner', () => {
 		expect(bCompanionHurtOpponent,
 			"liveness: B's companion must still be ABLE to fight the other team while war-armed -- " +
 			'otherwise the owner-safety assertions above would be proving nothing').toBe(true);
+	}, BOOT_TIMEOUT);
+
+	it('war bullets: a companion\'s own spell never hits its owner, on the owner\'s turn or on the partner\'s, and still hits the other player', () => {
+		// KD's bullet gates spare the player only from a bullet whose faction is FAVORABLE to "Player"
+		// (KDBulletCanHitEntity / KDBulletAoECanHitEntity, KinkyDungeonFight.ts:3178-3221). A single-player
+		// companion's bullets carry "Player"; a war companion's carry its owner's war faction, which has
+		// no relation to "Player" at all. Asked at the deciding layer with a REAL cast bullet, so the
+		// answer does not depend on whether the companion happens to choose to cast in a given round.
+		const s: any = new SwapSession({ requiredPlayers: 2, seed: 'companion-war-bullets', pvp: true, enemyType: null });
+		s.join('A'); s.join('B');
+		const aCompanion = recruitCompanion(s, 'A', 'WitchEarth');
+		const bPos0 = s.posOf('B');
+		s.world.moveAvatar(s.avatars.get('A'), bPos0.x + 5, bPos0.y);
+		recruitCompanion(s, 'B', 'WitchFlame');
+		expect(s._isPvP('A', 'B'), 'setup: the session must actually be at war').toBe(true);
+		s.submit('A', { kind: 'wait' });
+		s.submit('B', { kind: 'wait' });
+
+		/** `holder` takes the slot; A's companion casts a real WitchBoulder; the bullet is put on `onCid`'s
+		 *  tile and KD's own gates are asked whether it hits whoever stands there (slot player or avatar). */
+		const gate = (holder: string, onCid: string) => {
+			s.world.restorePlayer(s.bundles.get(holder));
+			s._assertHumanContext(holder);
+			const avatarId = holder === onCid ? -1 : s.avatars.get(onCid);
+			// The companion casts from beside the target, never from the target's own tile.
+			placeAdjacentTo(s, onCid, aCompanion);
+			return s.world.eval(`(function(){
+				var c = KDMapData.Entities.find(function(en){ return en.id === ${aCompanion}; });
+				var target = ${avatarId} < 0 ? KinkyDungeonPlayerEntity
+					: KDMapData.Entities.find(function(en){ return en.id === ${avatarId}; });
+				var old = KDMapData.Bullets.slice();
+				KinkyDungeonCastSpell(target.x, target.y, KinkyDungeonFindSpell('WitchBoulder', true), c, undefined, undefined);
+				var made = KDMapData.Bullets.filter(function(x){ return old.indexOf(x) < 0; });
+				KDMapData.Bullets = old;
+				var b = made[0];
+				if (made.length !== 1 || b.bullet.source !== c.id) return { cast: false, made: made.length };
+				b.x = target.x; b.y = target.y;
+				var direct = !!KDBulletCanHitEntity(b, target);
+				var spell = b.bullet.spell;
+				// The AoE gate's own sparing clause only exists for noHitAlliedPlayer spells: ask it with one.
+				b.bullet.spell = Object.assign({}, spell, { noHitAlliedPlayer: true });
+				var aoe = !!KDBulletAoECanHitEntity(b, target);
+				b.bullet.spell = spell;
+				return { cast: true, faction: b.bullet.faction, direct: direct, aoe: aoe, after: b.bullet.faction };
+			})()`);
+		};
+
+		const ownTurn = gate('A', 'A');
+		expect(ownTurn, 'setup: A\'s companion really cast a war-faction bullet').toMatchObject({ cast: true, faction: 'MPWarTeam_A' });
+		expect(ownTurn.direct, 'A holds the slot: A\'s own companion\'s bolt must not hit A').toBe(false);
+		expect(ownTurn.aoe, 'A holds the slot: an ally-sparing AoE of A\'s own companion must not hit A').toBe(false);
+		expect(ownTurn.after, 'the gate leaves the bullet\'s own faction untouched').toBe('MPWarTeam_A');
+
+		const partnersTurn = gate('B', 'A');
+		expect(partnersTurn.cast, 'setup: cast on B\'s turn').toBe(true);
+		expect(partnersTurn.direct, 'B holds the slot: A\'s companion\'s bolt must not hit A\'s avatar').toBe(false);
+
+		// Liveness, same bullet shape: the other team IS hit, on either human's turn.
+		const onB = gate('B', 'B');
+		expect(onB.direct, 'B holds the slot: A\'s companion\'s bolt hits B').toBe(true);
+		expect(onB.aoe, 'B holds the slot: A\'s companion\'s AoE hits B').toBe(true);
+		expect(gate('A', 'B').direct, 'A holds the slot: A\'s companion\'s bolt hits B\'s avatar').toBe(true);
 	}, BOOT_TIMEOUT);
 
 	it('war monster-side: each team\'s companion keeps fighting (and being fought by) a real hostile monster', () => {

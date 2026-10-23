@@ -2858,6 +2858,7 @@ class HeadlessHost {
 			if (globalThis.__kdCompanionFactionGuardInstalled) return;
 			globalThis.__kdCompanionFactionGuardInstalled = true;
 			globalThis.__kdCompanionWarFaction = globalThis.__kdCompanionWarFaction || {};
+			globalThis.__kdSlotWarTeam = globalThis.__kdSlotWarTeam || null;   // set per hand-over, see below
 			var _upn = KDUpdatePersistentNPC;
 			KDUpdatePersistentNPC = function(id, force){
 				var r = _upn.apply(this, arguments);
@@ -2868,6 +2869,34 @@ class HeadlessHost {
 				}
 				return r;
 			};
+			// Bullet friendly fire. KD's two bullet hit gates (KDBulletCanHitEntity, KDBulletAoECanHitEntity;
+			// their only callers are KDCheckCollideableBullets and KinkyDungeonBulletsCheckCollision) spare the
+			// player only from a bullet whose faction is FAVORABLE to "Player". A war companion's bullets carry
+			// its owner's war faction, which has no relation to "Player" (see setEntityFaction), so they hit
+			// their own owner. For the human whose war team it is (globalThis.__kdSlotWarTeam, set per
+			// hand-over by SwapSession._assertHumanContext) the gate is asked exactly as single player asks it
+			// for a companion: with faction "Player". The same human standing as an AVATAR (the partner holds
+			// the slot; a hit there is resolved on the human, see KDBulletHitEnemy's split) is spared outright,
+			// as single player spares the player from a companion's enemySpell. friendlyfire spells and every
+			// other target are unchanged.
+			var asOwnTeam = function(prev){
+				return function(bullet, enemy){
+					var info = bullet && bullet.bullet;
+					if (!(enemy && info && info.faction)) return prev.apply(this, arguments);
+					if (!enemy.player) {
+						var ownAvatar = (globalThis.__kdSlotHumans || []).some(function(h){
+							return h.avatarId === enemy.id && h.team === info.faction;
+						});
+						return (ownAvatar && !(info.spell && info.spell.friendlyfire)) ? false : prev.apply(this, arguments);
+					}
+					if (info.faction !== globalThis.__kdSlotWarTeam) return prev.apply(this, arguments);
+					var own = info.faction;
+					info.faction = 'Player';
+					try { return prev.apply(this, arguments); } finally { info.faction = own; }
+				};
+			};
+			KDBulletCanHitEntity = asOwnTeam(KDBulletCanHitEntity);
+			KDBulletAoECanHitEntity = asOwnTeam(KDBulletAoECanHitEntity);
 		})()`);
 	}
 
@@ -2933,7 +2962,7 @@ class HeadlessHost {
 			globalThis.__kdSlotSwitch = false;     // arm the per-enemy slot switch for the next UpdateEnemies call(s)
 			globalThis.__kdSlotHost = null;        // clientId this apply belongs to (hand-back target)
 			globalThis.__kdSlotCurrent = null;     // clientId currently holding the slot
-			globalThis.__kdSlotHumans = [];        // [{cid, avatarId}], this round's roster
+			globalThis.__kdSlotHumans = [];        // [{cid, avatarId, team}], this round's roster (team: war faction)
 			globalThis.__kdSlotAvatarIds = [];      // avatar entity ids — never themselves assigned a target
 			globalThis.__kdStickyTarget = {};      // enemy id -> clientId, host-supplied persisted target
 			globalThis.__kdSlotChoiceLog = {};      // enemy id -> clientId, this call's decision (host reads back)

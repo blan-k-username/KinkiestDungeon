@@ -510,6 +510,7 @@ const SLOT_SWAP_GLOBALS = {
 	// also calling `_anyPartnerFree`/writing `__kdCoopPartnerFree` from inside `_slotSwapTo` itself —
 	// see `tests/unit/mp-coop-slot-swap-human-context.spec.ts` ("the partner-free fact").
 	__kdCoopPartnerFree:           entry('per-player', 'the "is my partner free" fact `kd-coop-capture.js` reads for the jail-vs-held decision — re-derived for whoever the mid-pass slot switch just brought in, not only the outer applying human'),
+	__kdSlotWarTeam:               entry('per-player', 'the war faction of the human in the slot, read by the bullet hit gates so a companion\'s own bullets spare its owner (HeadlessHost.installCompanionFactionGuard) — written by SwapSession._assertHumanContext on every hand-over, and carried with the bundle through the in-world swaps (KDBulletHitEnemy split, AoE replay) that do not go through it'),
 };
 
 const SLOT_SWAP_GAMEDATA_KEYS = {
