@@ -29,8 +29,44 @@ const { SwapSession } = require('../../tools/mp-server/swap-session');
 
 const BOOT_TIMEOUT = 240_000;
 
-/** Both players take a real turn; A walks so the world ticks and enemies make noise. */
+/**
+ * Park the Rat where NEITHER player can see it but A can hear it. KD only draws a noise ripple for an
+ * enemy the listener cannot see (`KDEnemyAddSound`, KinkyDungeonEnemies.ts:9788-9789); a Rat in plain
+ * sight is correctly silent on screen. Each player's grid is the one the server builds when that
+ * player takes the slot (`_assertHumanContext`).
+ */
+function parkRatOutOfSight(s: any) {
+	const unseenBy = (cid: string) => {
+		s.world.restorePlayer(s.bundles.get(cid));
+		s._assertHumanContext(cid);
+		return new Set<string>(s.world.eval(`(function(){
+			var out = [], w = KDMapData.GridWidth, h = KDMapData.GridHeight;
+			for (var y = 0; y < h; y++) for (var x = 0; x < w; x++)
+				if (!(KinkyDungeonVisionGet(x, y) > 0)) out.push(x + ',' + y);
+			return out;
+		})()`));
+	};
+	const a = unseenBy('A'), b = unseenBy('B');
+	const unseen = [...a].filter((k) => b.has(k));
+	const spot = s.world.eval(`(function(){
+		var rat = KDMapData.Entities.find(function(e){ return e.Enemy && e.Enemy.name === 'Rat'; });
+		var pa = ${JSON.stringify(s.posOf('A'))}, unseen = ${JSON.stringify(unseen)}, best = null;
+		for (var r = 2; r <= 6 && !best; r++) for (var dy = -r; dy <= r && !best; dy++) for (var dx = -r; dx <= r && !best; dx++) {
+			if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+			var x = pa.x + dx, y = pa.y + dy;
+			if (x < 0 || y < 0 || x >= KDMapData.GridWidth || y >= KDMapData.GridHeight) continue;
+			if (!KinkyDungeonMovableTilesEnemy.includes(KinkyDungeonMapGet(x, y)) || KinkyDungeonEntityAt(x, y)) continue;
+			if (unseen.indexOf(x + ',' + y) >= 0) best = { x: x, y: y };
+		}
+		return { id: rat && rat.id, spot: best };
+	})()`);
+	if (spot.id == null || !spot.spot) throw new Error('setup invalid: no Rat, or no tile out of sight near A — ' + JSON.stringify(spot));
+	s.world.moveAvatar(spot.id, spot.spot.x, spot.spot.y);
+}
+
+/** Both players take a real turn; A walks so the world ticks and the hidden Rat makes noise. */
 function walkTurn(s: any, dx: number, dy: number) {
+	parkRatOutOfSight(s);
 	s.submit('A', { kind: 'move', dx, dy });
 	s.submit('B', { kind: 'wait' });
 }

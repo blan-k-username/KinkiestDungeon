@@ -479,6 +479,11 @@ const GLOBAL_BLACKLIST = Object.freeze([
 	// Floater id counter (KinkyDungeonDraw.ts:2631) — only a draw-text cache key; harvested floaters
 	// are re-created client-side with the client's own ids. Flagged by the slot-swap write audit.
 	'KDFloaterID',
+	// Sparse light cache (KinkyDungeonVision.ts:77): KinkyDungeonMakeBrightnessMap reuses the PREVIOUS
+	// build's brightness from it (:209/:216). updateVision() empties it before every build, so it never
+	// carries anything between humans; capturing it per-player would only copy a grid-sized cache into
+	// every bundle. Flagged by the slot-swap write audit once the server started building vision.
+	'KDSparseLightCache',
 	// --- client audio: neither player nor world ------------------------------
 	'KDMusicToast', 'KDMusicUpdateTime',
 	// --- already managed per-player by swap-session (do NOT double-manage) ---
@@ -2319,6 +2324,67 @@ class HeadlessHost {
 			KDMapData.Entities.splice(i, 1);
 			KDUpdateEnemyCache = true;
 			return true;
+		})()`);
+	}
+
+	/**
+	 * Build the vision grid (`KDMapExtraData.VisionGrid`) for whoever holds the slot, so turn logic sees
+	 * what that player sees.
+	 *
+	 * Single player rebuilds it every draw frame after the view changes (`KinkyDungeonDraw.ts:1236` →
+	 * `KDUpdateVision`); this server never draws, so without this the grid stayed EMPTY through every
+	 * turn and every `KinkyDungeonVisionGet` read "unseen" — spawns and despawns, enemy AI, combat
+	 * messages and Senses training all decided against no sight at all.
+	 *
+	 * Called with no camera, `KDUpdateVision` builds the vision/brightness grids and skips every PIXI
+	 * draw (that block is gated on `CamX !== undefined`). It also writes things that are NOT the grid,
+	 * and each is put back so the grid is the only change:
+	 *   - `KDMapData.FogGrid` / `FogMemory`: the SHARED map's exploration memory, which clients adopt
+	 *     wholesale with the map — writing it would merge the two players' explored areas;
+	 *   - `KDGameData.visionAdjust` / `visionBlind` / `visionAdjustBlind`: dark adaptation, which the
+	 *     client computes (`KDVisionUpdate` is zeroed for the build so it does not advance either);
+	 *   - the message log: the build can say "KDVisionBlind";
+	 *   - `KinkyDungeonBlindLevelBase`: the build zeroes it ("consumed"); in single player it runs between
+	 *     turns, but here it also runs MID-turn (a hand-over), where zeroing would erase a blindness buff
+	 *     before `KinkyDungeonUpdateStats` reads it (`KinkyDungeonStats.ts:1827`);
+	 *   - TrueSight's mana: its `vision` handler (`KinkyDungeonEvents.ts:7242`) charges mana unless the
+	 *     `truesight` flag is already set, so the flag is set for the build — its see-through-walls
+	 *     still shapes the grid — and cleared again if it was not set before.
+	 * Constant eval source (no interpolation), for the eval compilation cache.
+	 * @returns {{ok: boolean, len: number, ms: number}}
+	 */
+	updateVision() {
+		return this.eval(`(function(){
+			if (typeof KDUpdateVision !== 'function' || !KDMapData || !KDMapExtraData) return { ok: false, len: 0, ms: 0 };
+			var t0 = Date.now();
+			// [object, key, had the key, value]; a key that was absent is deleted again, not left as undefined
+			var kept = [[KDMapData, 'FogGrid'], [KDMapData, 'FogMemory'],
+				[KDGameData, 'visionAdjust'], [KDGameData, 'visionBlind'], [KDGameData, 'visionAdjustBlind']]
+				.map(function(k){ var v = k[0][k[1]]; return [k[0], k[1], k[1] in k[0], Array.isArray(v) ? v.slice() : v]; });
+			var log = KinkyDungeonMessageLog.length, vu = KDVisionUpdate, blindBase = KinkyDungeonBlindLevelBase;
+			var hadTrueSight = KinkyDungeonFlags.has('truesight'), trueSight = KinkyDungeonFlags.get('truesight');
+			KDVisionUpdate = 0;
+			if (!hadTrueSight) KinkyDungeonFlags.set('truesight', 1);
+			// KD reuses the previous brightness grid whenever its light cache reports no change. The light
+			// cache travels with each player's bundle while the brightness grid is the map's, last built
+			// for whoever held the slot before; empty the cache so the grid is built for THIS player.
+			KDSparseLightCache = {};
+			try {
+				// The build reads KDGameData.NightVision before it refreshes it (KinkyDungeonVision.ts:326,
+				// then KinkyDungeonGetVisionRadius at :396, its only caller), so a first build runs on the
+				// previous value. Single player settles that over the frames it draws before any input;
+				// refresh it first so one build here is already settled (measured: 74 lit cells, then 61).
+				// Its outputs (NightVision, MaxVisionDist, MinVisionDist) are kept: client-owned keys the
+				// wire never carries, so no screen changes, and turn logic reads real values.
+				KinkyDungeonGetVisionRadius();
+				KDUpdateVision();
+			} finally {
+				kept.forEach(function(k){ if (k[2]) k[0][k[1]] = k[3]; else delete k[0][k[1]]; });
+				if (KinkyDungeonMessageLog.length > log) KinkyDungeonMessageLog.length = log;
+				KDVisionUpdate = vu; KinkyDungeonBlindLevelBase = blindBase;
+				if (hadTrueSight) KinkyDungeonFlags.set('truesight', trueSight); else KinkyDungeonFlags.delete('truesight');
+			}
+			return { ok: true, len: (KDMapExtraData.VisionGrid || []).length, ms: Date.now() - t0 };
 		})()`);
 	}
 

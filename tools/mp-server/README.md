@@ -165,6 +165,13 @@ Every *other* player is present in the world as a real KD entity — an avatar c
 and collision, vision and dialogue work through KD's normal code paths. When an enemy hits an
 avatar, the result is written back into that player's bundle.
 
+What the player in the slot can **see** is rebuilt each time a player takes the slot
+(`HeadlessHost.updateVision`). Single player rebuilds the vision grid on every frame it draws; the
+server draws nothing, so it runs KD's own build without a camera. Only the grid is kept, and the
+build's other writes (shared fog memory, dark adaptation) are rolled back. Turn logic that asks
+"can the player see this tile?" (spawns, enemy noticing, Senses training) therefore gets the answer
+for the player acting. Each browser still draws its own view.
+
 Companions belong to the player who recruited them. When two players are at war, each player and
 their companions form one team: the companions fight the other team and never hurt their own player,
 whether that player is in the slot or standing as an avatar, and that includes their spells. Each

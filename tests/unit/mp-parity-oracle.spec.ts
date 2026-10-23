@@ -112,6 +112,12 @@ describe('I3 — single-player parity oracle', () => {
 		// R8: the input sequence is DATA, so a later slice can fuzz it without touching the harness.
 		const INPUTS = Array.from({ length: 50 }, () => ({ kdType: 'tick', data: { delta: 1 } }));
 		for (const step of INPUTS) {
+			// Single player rebuilds the player's vision every frame before the next input
+			// (KinkyDungeonDraw.ts:1236), which refreshes KDGameData.NightVision (its only writer,
+			// KinkyDungeonGetVisionRadius). A reference with no frames would keep the 2.9 default forever.
+			// The server builds it at every hand-over; KD's own build vs the server's is pinned by
+			// mp-server-vision.spec.ts, so the reference reuses the server's build here.
+			ref.updateVision();
 			ref.applyInput(step.kdType, step.data);
 			sub.submit('A', { kdType: step.kdType, data: step.data });
 		}

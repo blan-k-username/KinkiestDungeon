@@ -3647,8 +3647,10 @@ class SwapSession {
 
 	/**
 	 * Re-assert the facts that are relative to the human in the player slot: who else is in the
-	 * party and where (`_pushPartyGate`, read by KD's own stair cancellation), and whether anybody
-	 * ELSE is still up (`__kdCoopPartnerFree`, the whole capture rule).
+	 * party and where (`_pushPartyGate`, read by KD's own stair cancellation), whether anybody
+	 * ELSE is still up (`__kdCoopPartnerFree`, the whole capture rule), and what this human can SEE
+	 * (`HeadlessHost.updateVision`: the vision grid every `KinkyDungeonVisionGet` in turn logic reads,
+	 * which single player rebuilds each frame and this server, having no frames, must build here).
 	 *
 	 * Must run every time a human ENTERS the slot, after `_restorePlayer` (a restore wipes the
 	 * registry the gate re-asserts): a player's own apply, a per-enemy slot switch, and the nested
@@ -3660,6 +3662,7 @@ class SwapSession {
 	 */
 	_assertHumanContext(id) {
 		this._pushPartyGate(id);
+		this.world.updateVision();
 		// One constant source per player, so the eval cache still serves it (see the doc comment above).
 		this.world.eval('globalThis.__kdSlotWarTeam = ' + JSON.stringify(this._warFactionFor(id)) + ';');
 		this.world.eval(this._anyPartnerFree(id)
