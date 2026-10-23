@@ -16,6 +16,7 @@
  * control below catches a wrapper that hid everyone's options, not just a peer's.
  */
 import { describe, it, expect } from 'vitest';
+import { spawnEntityDirect } from '../helpers/session-tiles';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { SwapSession } = require('../../tools/mp-server/swap-session');
 
@@ -46,22 +47,6 @@ function visibleOptionsOf(s: any, enemyId: number): string[] {
 		}
 		return out;
 	})()`);
-}
-
-/** Same primitive `mp-peer-avatar-interact-guard.spec.ts` uses to inject a real entity directly. */
-function spawnEntityDirect(s: any, x: number, y: number, type: string): { id: number, name: string } {
-	const out = s.world.eval(`(function(){
-		var Enemy = KinkyDungeonGetEnemyByName(${JSON.stringify(type)});
-		if (!Enemy) return null;
-		var e = { summoned: true, Enemy: Enemy, id: KinkyDungeonGetEnemyID(),
-			x: ${x | 0}, y: ${y | 0}, hp: Enemy.startinghp || Enemy.maxhp,
-			movePoints: 0, attackPoints: 0 };
-		e = KDAddNewEntity(e);
-		KDUpdateEnemyCache = true;
-		return { id: e.id, name: e.Enemy && e.Enemy.name };
-	})()`);
-	if (!out) throw new Error(`setup invalid: failed to spawn ${type} at (${x},${y})`);
-	return out;
 }
 
 /** A real recruited ally (`KDAddToParty`), the control — not a peer avatar, so nothing should hide. */

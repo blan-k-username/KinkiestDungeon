@@ -8,6 +8,9 @@
 /** Can a player step onto (x,y) right now — walkable terrain and nobody standing there? */
 export function isFree(s: any, x: number, y: number): boolean {
 	return !!s.world.eval(`(function(){
+		// Bounds first: KinkyDungeonMapGet indexes x + y*width with no check, so an off-map
+		// coordinate such as (-5,3) wraps onto a real tile and would read as free.
+		if (${x | 0} < 0 || ${y | 0} < 0 || ${x | 0} >= KDMapData.GridWidth || ${y | 0} >= KDMapData.GridHeight) return false;
 		var t = KinkyDungeonMapGet(${x | 0}, ${y | 0});
 		return !!(KinkyDungeonMovableTilesEnemy.includes(t) && !KinkyDungeonEntityAt(${x | 0}, ${y | 0}));
 	})()`);
@@ -66,5 +69,28 @@ export function tilesAtRange(s: any, id: string, min: number, max: number): Arra
 			if (d >= min && d <= max && isFree(s, p.x + dx, p.y + dy)) out.push({ x: p.x + dx, y: p.y + dy });
 		}
 	}
+	return out;
+}
+
+/**
+ * Drop a real entity at (x,y) via KD's own `KDAddNewEntity` (the primitive `HeadlessHost.ensureAvatar`
+ * uses to inject an avatar). `KinkyDungeonSummonEnemy` needs a reachable goToTarget, has none this early
+ * in a headless session, and silently summons NOTHING (measured: `KDMapData.Entities.length` unchanged).
+ * So this throws unless exactly one entity was added: a spec never runs against a stale "last entity".
+ */
+export function spawnEntityDirect(s: any, x: number, y: number, type: string): { id: number, name: string } {
+	const before = s.world.eval('KDMapData.Entities.length');
+	const out = s.world.eval(`(function(){
+		var Enemy = KinkyDungeonGetEnemyByName(${JSON.stringify(type)});
+		if (!Enemy) return null;
+		var e = { summoned: true, Enemy: Enemy, id: KinkyDungeonGetEnemyID(),
+			x: ${x | 0}, y: ${y | 0}, hp: Enemy.startinghp || Enemy.maxhp,
+			movePoints: 0, attackPoints: 0 };
+		e = KDAddNewEntity(e);
+		KDUpdateEnemyCache = true;
+		return { id: e.id, name: e.Enemy && e.Enemy.name };
+	})()`);
+	const after = s.world.eval('KDMapData.Entities.length');
+	if (!out || after !== before + 1) throw new Error(`setup invalid: failed to spawn ${type} at (${x},${y})`);
 	return out;
 }

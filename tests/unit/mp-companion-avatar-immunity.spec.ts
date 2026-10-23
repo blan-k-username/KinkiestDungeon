@@ -30,34 +30,10 @@
 import { describe, it, expect } from 'vitest';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { SwapSession } = require('../../tools/mp-server/swap-session');
-import { freeNeighbour } from '../helpers/session-tiles';
+import { freeNeighbour, spawnEntityDirect } from '../helpers/session-tiles';
 
 const BOOT_TIMEOUT = 240_000;
 const ROUNDS = 20;
-
-/**
- * Drop a real entity straight into the world via the engine's own `KDAddNewEntity` (the same
- * primitive `HeadlessHost.ensureAvatar` uses to inject an avatar) -- skipping
- * `KinkyDungeonSummonEnemy`'s goToTarget/pathfind requirement, which has no reachable target this
- * early in a headless session and silently summons NOTHING (measured: `KDMapData.Entities.length`
- * unchanged), so a caller that doesn't check would unknowingly operate on a stale "last entity".
- */
-function spawnEntityDirect(s: any, x: number, y: number, type: string): { id: number, name: string } {
-	const before = s.world.eval('KDMapData.Entities.length');
-	const out = s.world.eval(`(function(){
-		var Enemy = KinkyDungeonGetEnemyByName(${JSON.stringify(type)});
-		if (!Enemy) return null;
-		var e = { summoned: true, Enemy: Enemy, id: KinkyDungeonGetEnemyID(),
-			x: ${x | 0}, y: ${y | 0}, hp: Enemy.startinghp || Enemy.maxhp,
-			movePoints: 0, attackPoints: 0 };
-		e = KDAddNewEntity(e);
-		KDUpdateEnemyCache = true;
-		return { id: e.id, name: e.Enemy && e.Enemy.name };
-	})()`);
-	const after = s.world.eval('KDMapData.Entities.length');
-	if (!out || after !== before + 1) throw new Error(`setup invalid: failed to spawn ${type} at (${x},${y})`);
-	return out;
-}
 
 /** Recruit a real ally near `ownerCid` -- KD's own party mechanism (`KDAddToParty`), which stamps
  *  `faction = 'Player'` on the live entity, exactly what happens to a real recruited companion. */

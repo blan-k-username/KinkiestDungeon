@@ -22,7 +22,7 @@
  * stock KD does — proving the guard is scoped to peer avatars, not a blanket dialogue suppression.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
-import { freeNeighbour, placePlayerAt, contestedTarget } from '../helpers/session-tiles';
+import { freeNeighbour, placePlayerAt, contestedTarget, spawnEntityDirect } from '../helpers/session-tiles';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { SwapSession } = require('../../tools/mp-server/swap-session');
 
@@ -39,22 +39,6 @@ function stepToward(from: { x: number, y: number }, to: { x: number, y: number }
 }
 
 /** Same primitive `mp-companion-avatar-immunity.spec.ts` uses to inject a real entity directly. */
-function spawnEntityDirect(s: any, x: number, y: number, type: string): { id: number, name: string } {
-	const before = s.world.eval('KDMapData.Entities.length');
-	const out = s.world.eval(`(function(){
-		var Enemy = KinkyDungeonGetEnemyByName(${JSON.stringify(type)});
-		if (!Enemy) return null;
-		var e = { summoned: true, Enemy: Enemy, id: KinkyDungeonGetEnemyID(),
-			x: ${x | 0}, y: ${y | 0}, hp: Enemy.startinghp || Enemy.maxhp,
-			movePoints: 0, attackPoints: 0 };
-		e = KDAddNewEntity(e);
-		KDUpdateEnemyCache = true;
-		return { id: e.id, name: e.Enemy && e.Enemy.name };
-	})()`);
-	const after = s.world.eval('KDMapData.Entities.length');
-	if (!out || after !== before + 1) throw new Error(`setup invalid: failed to spawn ${type} at (${x},${y})`);
-	return out;
-}
 
 /**
  * A real `Player`-faction ally, same recipe `mp-companion-avatar-immunity.spec.ts` uses
